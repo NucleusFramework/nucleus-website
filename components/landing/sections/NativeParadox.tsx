@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { SectionHeading } from '@/components/landing/SectionHeading';
 import { escapeHtml, highlightKotlin, highlightBash } from '@/components/landing/CodeBlock';
+import { type Lang, npT, pick } from '@/lib/landing-i18n';
 
 interface NativeImpl {
   os: string;
@@ -14,7 +15,7 @@ interface NativeImpl {
 
 interface NativeExample {
   id: string;
-  name: string;
+  nameKey: 'exNotification' | 'exTray' | 'exHotkey' | 'exScheduler' | 'exUpdate' | 'exTaskbar';
   iconPath: string;
   nucleus: string;
   natives: NativeImpl[];
@@ -23,7 +24,7 @@ interface NativeExample {
 const NATIVE_EXAMPLES: NativeExample[] = [
   {
     id: 'notify',
-    name: 'Notification',
+    nameKey: 'exNotification',
     iconPath: 'M6 9a6 6 0 1112 0v3l1.5 3h-15L6 12V9zM10 18a2 2 0 004 0',
     nucleus: `import dev.nucleusframework.notification.notify
 import dev.nucleusframework.notification.NotificationAction
@@ -244,7 +245,7 @@ static void on_closed(NotifyNotification* n, gpointer data) {
   },
   {
     id: 'tray',
-    name: 'System tray',
+    nameKey: 'exTray',
     iconPath: 'M3 16h18M3 20h18M5 4h14a2 2 0 012 2v8H3V6a2 2 0 012-2z',
     nucleus: `import dev.nucleusframework.tray.Tray
 import androidx.compose.material.icons.Icons
@@ -499,7 +500,7 @@ g_dbus_connection_call_sync(bus,
   },
   {
     id: 'hotkey',
-    name: 'Global hotkey',
+    nameKey: 'exHotkey',
     iconPath: 'M5 8h14M5 12h14M5 16h14',
     nucleus: `import dev.nucleusframework.hotkey.registerGlobalHotkey
 import dev.nucleusframework.hotkey.Key
@@ -655,7 +656,7 @@ static void on_portal_signal(GDBusProxy* p, gchar* sender,
   },
   {
     id: 'scheduler',
-    name: 'Background tasks',
+    nameKey: 'exScheduler',
     iconPath: 'M12 6v6l4 2M12 22a10 10 0 110-20 10 10 0 010 20z',
     nucleus: `import dev.nucleusframework.scheduler.*
 import kotlin.time.Duration.Companion.hours
@@ -931,7 +932,7 @@ g_dbus_connection_call_sync(bus,
   },
   {
     id: 'update',
-    name: 'Auto-update',
+    nameKey: 'exUpdate',
     iconPath: 'M21 12a9 9 0 11-3-6.7M21 4v5h-5',
     nucleus: `import dev.nucleusframework.updater.NucleusUpdater
 import dev.nucleusframework.updater.UpdateResult
@@ -1163,7 +1164,7 @@ exit(0);
   },
   {
     id: 'taskbar',
-    name: 'Dock / taskbar',
+    nameKey: 'exTaskbar',
     iconPath: 'M3 7h18v10H3zM3 12h12',
     nucleus: `import dev.nucleusframework.taskbar.Taskbar
 
@@ -1342,25 +1343,30 @@ function CodeMini({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-export function NativeParadox() {
+interface NativeParadoxProps {
+  lang: Lang;
+}
+
+export function NativeParadox({ lang }: NativeParadoxProps) {
   const [exId, setExId] = useState<string>(NATIVE_EXAMPLES[0].id);
   const [osIdx, setOsIdx] = useState(0);
 
   const example = NATIVE_EXAMPLES.find((e) => e.id === exId)!;
   const nat = example.natives[osIdx];
 
-  // count source line totals across all 3 OSes for the dramatic ratio number
+  // Count source line totals across all 3 OSes for the dramatic ratio number
   const totalNativeLines = example.natives.reduce((acc, n) => acc + n.code.split('\n').length, 0);
   const nucleusLines = example.nucleus.split('\n').length;
   const ratio = Math.round(totalNativeLines / nucleusLines);
+  const linesWord = pick(npT.lines, lang);
 
   return (
     <section className="np" id="paradigm">
       <div className="section-inner">
         <SectionHeading
-          eyebrow="The Nucleus paradox"
-          title={<>Native APIs.<br/><span className="hero-grad">Easier than native.</span></>}
-          subtitle="Win32 ITaskbarList3. NSUserNotifications. freedesktop D-Bus. Carbon. ScreenCaptureKit. Every desktop API ever shipped is its own tiny ordeal — different language, different threading model, different conventions. Nucleus wraps every one in a Kotlin function that feels obvious. The result: a cross-platform abstraction simpler than the original, on every platform."
+          eyebrow={pick(npT.eyebrow, lang)}
+          title={pick(npT.title, lang)}
+          subtitle={pick(npT.subtitle, lang)}
         />
 
         {/* Example selector */}
@@ -1374,7 +1380,7 @@ export function NativeParadox() {
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
                 <path d={e.iconPath} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              {e.name}
+              {pick(npT[e.nameKey], lang)}
             </button>
           ))}
         </div>
@@ -1383,7 +1389,7 @@ export function NativeParadox() {
           {/* Left: native */}
           <div className="np-side np-side-native">
             <div className="np-side-head">
-              <div className="np-side-label np-label-old">Native API · {nat.os}</div>
+              <div className="np-side-label np-label-old">{pick(npT.nativeApi, lang)} · {nat.os}</div>
               <div className="np-os-tabs">
                 {example.natives.map((n, i) => (
                   <button
@@ -1400,7 +1406,7 @@ export function NativeParadox() {
             <div className="np-foot np-foot-native">
               <span className="np-foot-bytes">{nat.bytes}</span>
               <span className="np-foot-dot"/>
-              <span>Threading model: yours to figure out</span>
+              <span>{pick(npT.threadingNote, lang)}</span>
             </div>
           </div>
 
@@ -1408,7 +1414,7 @@ export function NativeParadox() {
           <div className="np-arrow" aria-hidden="true">
             <div className="np-arrow-ratio">
               <div className="np-arrow-num">{ratio}×</div>
-              <div className="np-arrow-num-k">fewer<br/>lines</div>
+              <div className="np-arrow-num-k">{pick(npT.fewerLines, lang)}</div>
             </div>
             <svg viewBox="0 0 24 24" width="36" height="36" fill="none" className="np-arrow-icon">
               <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1423,7 +1429,7 @@ export function NativeParadox() {
           <div className="np-side np-side-nucleus">
             <div className="np-side-head">
               <div className="np-side-label np-label-new">
-                <span className="np-label-dot"/> One Kotlin API · all platforms
+                <span className="np-label-dot"/> {pick(npT.oneApi, lang)}
               </div>
               <div className="np-os-tabs np-os-tabs-static">
                 <button className="np-os is-active">macOS</button>
@@ -1435,9 +1441,9 @@ export function NativeParadox() {
               <CodeMini code={example.nucleus} lang="kotlin"/>
             </div>
             <div className="np-foot np-foot-nucleus">
-              <span className="np-foot-bytes">{nucleusLines} lines</span>
+              <span className="np-foot-bytes">{nucleusLines} {linesWord}</span>
               <span className="np-foot-dot"/>
-              <span>Coroutines-friendly · type-safe · zero callbacks lost</span>
+              <span>{pick(npT.nucleusFootnote, lang)}</span>
             </div>
           </div>
         </div>
@@ -1449,8 +1455,8 @@ export function NativeParadox() {
             </svg>
           </div>
           <div className="np-callout-body">
-            <div className="np-callout-h">No abstraction tax</div>
-            <div className="np-callout-d">Nucleus doesn't lowest-common-denominator — every platform feature is exposed in full. Pressure-sensitive pen events, NSToolbar customization, JumpLists, Unity quicklists, badge colors, focus rings — all reachable. The Kotlin layer is a <em>better front door</em> to the native, not a wrapper that hides it.</div>
+            <div className="np-callout-h">{pick(npT.calloutH, lang)}</div>
+            <div className="np-callout-d">{pick(npT.calloutD, lang)}</div>
           </div>
         </div>
       </div>

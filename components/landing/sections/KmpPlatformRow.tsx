@@ -1,8 +1,9 @@
 import * as React from 'react';
+import { type Lang, kmpT, pick } from '@/lib/landing-i18n';
 
 interface PlatformRow {
-  k: string;
-  v: string;
+  k: keyof typeof kmpT;
+  v: keyof typeof kmpT;
   via?: boolean;
 }
 
@@ -24,12 +25,12 @@ const PLATFORMS: Platform[] = [
       </svg>
     ),
     rows: [
-      { k: 'OS APIs',      v: 'Native, built-in' },
-      { k: 'Native UI',    v: 'Material 3 widgets' },
-      { k: 'Input',        v: 'Touch · gestures' },
-      { k: 'Optimize',     v: 'R8 · ProGuard · AAB shrink' },
-      { k: 'Package',      v: '.aab via Gradle' },
-      { k: 'Distribute',   v: 'Google Play, in two clicks' },
+      { k: 'os_apis',    v: 'androidApis' },
+      { k: 'native_ui',  v: 'androidUi' },
+      { k: 'input',      v: 'androidInput' },
+      { k: 'optimize',   v: 'androidOpt' },
+      { k: 'package',    v: 'androidPkg' },
+      { k: 'distribute', v: 'androidDist' },
     ],
   },
   {
@@ -40,12 +41,12 @@ const PLATFORMS: Platform[] = [
       </svg>
     ),
     rows: [
-      { k: 'OS APIs',      v: 'Kotlin/Native ↔ UIKit' },
-      { k: 'Native UI',    v: 'SwiftUI interop' },
-      { k: 'Input',        v: 'Touch · Apple Pencil' },
-      { k: 'Optimize',     v: 'LLVM AOT · App Thinning' },
-      { k: 'Package',      v: '.ipa via Xcode' },
-      { k: 'Distribute',   v: 'App Store Connect' },
+      { k: 'os_apis',    v: 'iosApis' },
+      { k: 'native_ui',  v: 'iosUi' },
+      { k: 'input',      v: 'iosInput' },
+      { k: 'optimize',   v: 'iosOpt' },
+      { k: 'package',    v: 'iosPkg' },
+      { k: 'distribute', v: 'iosDist' },
     ],
   },
   {
@@ -58,12 +59,12 @@ const PLATFORMS: Platform[] = [
       </svg>
     ),
     rows: [
-      { k: 'Browser APIs', v: 'Kotlin/JS · Wasm' },
-      { k: 'Native UI',    v: 'HTML / DOM interop' },
-      { k: 'Input',        v: 'Mouse · touch · pointer' },
-      { k: 'Optimize',     v: 'Tree-shaking · code split' },
-      { k: 'Package',      v: 'Webpack bundle' },
-      { k: 'Distribute',   v: 'Push to any CDN' },
+      { k: 'browser_apis', v: 'webApis' },
+      { k: 'native_ui',    v: 'webUi' },
+      { k: 'input',        v: 'webInput' },
+      { k: 'optimize',     v: 'webOpt' },
+      { k: 'package',      v: 'webPkg' },
+      { k: 'distribute',   v: 'webDist' },
     ],
   },
   {
@@ -71,17 +72,21 @@ const PLATFORMS: Platform[] = [
     logo: '/assets/logo.png',
     isHero: true,
     rows: [
-      { k: 'OS APIs',      v: '30+ Kotlin modules · Native Access via Kotlin/Native', via: true },
-      { k: 'Native UI',    v: 'macOS · Fluent · Yaru in Compose + native overlay', via: true },
-      { k: 'Input',        v: 'Mouse · keyboard · multi-touch · pen · Wayland gestures', via: true },
-      { k: 'Optimize',     v: 'GraalVM closed-world · JIT + AOT cache · native-lib stripping', via: true },
-      { k: 'Package',      v: '16 formats, signed + notarized', via: true },
-      { k: 'Distribute',   v: 'MS Store · App Store · Snap · GitHub · auto-update', via: true },
+      { k: 'os_apis',    v: 'desktopApis',  via: true },
+      { k: 'native_ui',  v: 'desktopUi',    via: true },
+      { k: 'input',      v: 'desktopInput', via: true },
+      { k: 'optimize',   v: 'desktopOpt',   via: true },
+      { k: 'package',    v: 'desktopPkg',   via: true },
+      { k: 'distribute', v: 'desktopDist',  via: true },
     ],
   },
 ];
 
-export function KmpPlatformRow() {
+interface KmpPlatformRowProps {
+  lang: Lang;
+}
+
+export function KmpPlatformRow({ lang }: KmpPlatformRowProps) {
   return (
     <div className="kmp-row">
       {PLATFORMS.map((p) => (
@@ -96,10 +101,10 @@ export function KmpPlatformRow() {
           <div className="kmp-card-rows">
             {p.rows.map((r) => (
               <div key={r.k} className={`kmp-row-item ${r.via ? 'is-via' : ''}`}>
-                <span className="kmp-row-k">{r.k}</span>
+                <span className="kmp-row-k">{pick(kmpT[r.k] as { en: string; fr: string }, lang)}</span>
                 <span className="kmp-row-v">
-                  {r.via && <span className="kmp-via">via Nucleus</span>}
-                  {r.v}
+                  {r.via && <span className="kmp-via">{pick(kmpT.via, lang)}</span>}
+                  {pick(kmpT[r.v] as { en: string; fr: string }, lang)}
                 </span>
               </div>
             ))}

@@ -1,7 +1,13 @@
 import * as React from 'react';
 import Link from 'next/link';
+import { type Lang, footerT, pick } from '@/lib/landing-i18n';
 
-export function Footer() {
+interface FooterProps {
+  lang: Lang;
+}
+
+export function Footer({ lang }: FooterProps) {
+  const docsBase = lang === 'fr' ? '/fr/docs' : '/docs';
   return (
     <footer className="footer">
       <div className="footer-inner">
@@ -10,39 +16,39 @@ export function Footer() {
             <img src="/assets/logo.png" alt="" />
             <span>Nucleus</span>
           </div>
-          <p className="footer-tagline">The Kotlin framework for native desktop apps. Built on Compose, GraalVM and Tao.</p>
+          <p className="footer-tagline">{pick(footerT.tagline, lang)}</p>
         </div>
         <div className="footer-col">
-          <h4>Docs</h4>
-          <Link href="/docs/start/install">Getting started</Link>
-          <Link href="/docs/concepts/runtimes">Runtime APIs</Link>
-          <Link href="/docs/packaging">Packaging</Link>
-          <Link href="/docs/packaging/ci-cd">CI / CD</Link>
+          <h4>{pick(footerT.docs, lang)}</h4>
+          <Link href={`${docsBase}/start/install`}>{pick(footerT.gettingStarted, lang)}</Link>
+          <Link href={`${docsBase}/concepts/runtimes`}>{pick(footerT.runtimeApis, lang)}</Link>
+          <Link href={`${docsBase}/packaging`}>{pick(footerT.packaging, lang)}</Link>
+          <Link href={`${docsBase}/packaging/ci-cd`}>{pick(footerT.cicd, lang)}</Link>
         </div>
         <div className="footer-col">
-          <h4>Platform</h4>
+          <h4>{pick(footerT.platform, lang)}</h4>
           <a href="#">macOS</a>
           <a href="#">Windows</a>
           <a href="#">Linux</a>
           <a href="#">GraalVM</a>
         </div>
         <div className="footer-col">
-          <h4>Community</h4>
-          <a href="https://github.com/NucleusFramework/Nucleus" target="_blank" rel="noreferrer">GitHub</a>
-          <a href="#">Releases</a>
-          <a href="#">Roadmap</a>
-          <a href="#">Discord</a>
+          <h4>{pick(footerT.community, lang)}</h4>
+          <a href="https://github.com/NucleusFramework/Nucleus" target="_blank" rel="noreferrer">{pick(footerT.github, lang)}</a>
+          <a href="#">{pick(footerT.releases, lang)}</a>
+          <a href="#">{pick(footerT.roadmap, lang)}</a>
+          <a href="#">{pick(footerT.discord, lang)}</a>
         </div>
         <div className="footer-col">
-          <h4>Legal</h4>
-          <a href="#">License (MIT)</a>
-          <a href="#">Trademark</a>
-          <a href="#">Security</a>
+          <h4>{pick(footerT.legal, lang)}</h4>
+          <a href="#">{pick(footerT.license, lang)}</a>
+          <a href="#">{pick(footerT.trademark, lang)}</a>
+          <a href="#">{pick(footerT.security, lang)}</a>
         </div>
       </div>
       <div className="footer-bottom">
-        <span>© 2026 Nucleus Framework. MIT licensed.</span>
-        <span>v2.0.0 · Tao backend preview</span>
+        <span>{pick(footerT.copyright, lang)}</span>
+        <span>{pick(footerT.version, lang)}</span>
       </div>
     </footer>
   );

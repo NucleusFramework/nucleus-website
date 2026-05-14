@@ -10,6 +10,7 @@ import { Perf } from './sections/Perf';
 import { NativeParadox } from './sections/NativeParadox';
 import { InstallCTA } from './sections/InstallCTA';
 import { Footer } from './sections/Footer';
+import type { Lang } from '@/lib/landing-i18n';
 
 // Hardcoded tweak defaults (tweaks panel removed from production build)
 const TWEAK_DEFAULTS = {
@@ -20,7 +21,11 @@ const TWEAK_DEFAULTS = {
   showStarfield: true,
 } as const;
 
-export function LandingPage() {
+interface LandingPageProps {
+  lang?: Lang;
+}
+
+export function LandingPage({ lang = 'en' }: LandingPageProps) {
   // Apply tweaks live + cursor highlight on .feat-card (ported from index.html script)
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', TWEAK_DEFAULTS.accent);
@@ -46,14 +51,14 @@ export function LandingPage() {
 
   return (
     <div data-bg={TWEAK_DEFAULTS.background} data-density={TWEAK_DEFAULTS.density}>
-      <TopNav />
-      <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} />
-      <Pitch />
-      <Toolkits />
-      <Perf />
-      <NativeParadox />
-      <InstallCTA />
-      <Footer />
+      <TopNav lang={lang} />
+      <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} />
+      <Pitch lang={lang} />
+      <Toolkits lang={lang} />
+      <Perf lang={lang} />
+      <NativeParadox lang={lang} />
+      <InstallCTA lang={lang} />
+      <Footer lang={lang} />
     </div>
   );
 }

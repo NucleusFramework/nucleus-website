@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { type Lang, rmodeT, pick } from '@/lib/landing-i18n';
 
 function useInView(threshold = 0.25): [React.RefObject<HTMLDivElement | null>, boolean] {
   const ref = useRef<HTMLDivElement>(null);
@@ -35,6 +36,9 @@ interface RuntimeModeCardProps {
   throughputPct: number;
   throughputNote: string;
   bestFor: string[];
+  bestForLabel: string;
+  cpuThruLabel: string;
+  cppLabel: string;
   cliMod: string;
 }
 
@@ -62,7 +66,7 @@ function RuntimeStat({ label, value, fmt, unit, active }: Stat & { active: boole
   );
 }
 
-function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputLabel, throughputPct, throughputNote, bestFor, cliMod }: RuntimeModeCardProps) {
+function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputLabel, throughputPct, throughputNote, bestFor, bestForLabel, cpuThruLabel, cppLabel, cliMod }: RuntimeModeCardProps) {
   const [ref, inView] = useInView();
   return (
     <div ref={ref} className={`rmode rmode-${variant}`}>
@@ -83,7 +87,7 @@ function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputL
 
       <div className="rmode-thru">
         <div className="rmode-thru-head">
-          <span className="rmode-thru-label">CPU throughput</span>
+          <span className="rmode-thru-label">{cpuThruLabel}</span>
           <span className="rmode-thru-val">{throughputLabel}</span>
         </div>
         <div className="rmode-thru-track">
@@ -91,13 +95,13 @@ function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputL
             className="rmode-thru-fill"
             style={{ width: inView ? `${throughputPct}%` : '0%' }}
           />
-          <span className="rmode-thru-cpp" style={{ left: '96%' }} title="C++/Rust baseline">C++</span>
+          <span className="rmode-thru-cpp" style={{ left: '96%' }} title={cppLabel}>C++</span>
         </div>
         <div className="rmode-thru-note">{throughputNote}</div>
       </div>
 
       <div className="rmode-best">
-        <div className="rmode-best-label">Best for</div>
+        <div className="rmode-best-label">{bestForLabel}</div>
         <div className="rmode-best-chips">
           {bestFor.map((b) => <span key={b} className="rmode-best-chip">{b}</span>)}
         </div>
@@ -108,45 +112,72 @@ function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputL
   );
 }
 
-export function RuntimeModeCards() {
+interface RuntimeModeCardsProps {
+  lang: Lang;
+}
+
+export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
+  const cpuThruLabel = pick(rmodeT.cpuThroughput, lang);
+  const cppLabel = pick(rmodeT.cppBaseline, lang);
+  const bestForLabel = pick(rmodeT.bestFor, lang);
+  const coldStart = pick(rmodeT.nativeColdStart, lang);
+  const ram = pick(rmodeT.nativeRam, lang);
+  const binary = pick(rmodeT.nativeBinary, lang);
+
   return (
     <div className="rmode-grid">
 
       {/* ====== GraalVM Native Image ====== */}
       <RuntimeModeCard
         variant="native"
-        tag="Closed world"
-        name="GraalVM Native Image"
-        tagline="Instant cold start. Tiny footprint."
-        desc="Your whole app is AOT-compiled to a standalone binary. No JVM startup, no class loading — the process is alive in half a second. Smallest resident set on the market."
+        tag={pick(rmodeT.nativeTag, lang)}
+        name={pick(rmodeT.nativeName, lang)}
+        tagline={pick(rmodeT.nativeTagline, lang)}
+        desc={pick(rmodeT.nativeDesc, lang)}
         stats={[
-          { label: 'Cold start', value: 0.48, fmt: (n) => n.toFixed(2), unit: 's' },
-          { label: 'RAM idle',   value: 60,   fmt: (n) => Math.round(n), unit: 'MB' },
-          { label: 'Binary',     value: 38,   fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: coldStart, value: 0.48, fmt: (n) => n.toFixed(2), unit: 's' },
+          { label: ram,       value: 60,   fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: binary,    value: 38,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
-        throughputLabel="Very good · AOT compiled"
+        throughputLabel={pick(rmodeT.nativeThruLabel, lang)}
         throughputPct={82}
-        throughputNote="GraalVM PGO + Compose IR optimizations"
-        bestFor={['CLIs & small apps', 'Sandboxed targets', 'App Store / MSIX', 'Distribution-first']}
+        throughputNote={pick(rmodeT.nativeThruNote, lang)}
+        bestFor={[
+          pick(rmodeT.nativeBest1, lang),
+          pick(rmodeT.nativeBest2, lang),
+          pick(rmodeT.nativeBest3, lang),
+          pick(rmodeT.nativeBest4, lang),
+        ]}
+        bestForLabel={bestForLabel}
+        cpuThruLabel={cpuThruLabel}
+        cppLabel={cppLabel}
         cliMod="nucleus.graalvm-runtime"
       />
 
       {/* ====== JVM + AOT Cache ====== */}
       <RuntimeModeCard
         variant="aot"
-        tag="Open world"
-        name="JDK 25 + AOT Cache"
-        tagline="JIT-blazing throughput. Normal start."
-        desc="HotSpot's C2 JIT is the most mature compiler ever built. With JDK 25's AOT cache priming the class metadata, you skip the warm-up — and once your hot paths get profiled, throughput approaches what C++ and Rust deliver."
+        tag={pick(rmodeT.aotTag, lang)}
+        name={pick(rmodeT.aotName, lang)}
+        tagline={pick(rmodeT.aotTagline, lang)}
+        desc={pick(rmodeT.aotDesc, lang)}
         stats={[
-          { label: 'Cold start', value: 1.2,  fmt: (n) => n.toFixed(1), unit: 's' },
-          { label: 'RAM idle',   value: 180,  fmt: (n) => Math.round(n), unit: 'MB' },
-          { label: 'Binary',     value: 95,   fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: coldStart, value: 1.2,  fmt: (n) => n.toFixed(1), unit: 's' },
+          { label: ram,       value: 180,  fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: binary,    value: 95,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
-        throughputLabel="≈ C++ / Rust on hot paths"
+        throughputLabel={pick(rmodeT.aotThruLabel, lang)}
         throughputPct={96}
-        throughputNote="HotSpot C2 · escape analysis · vectorization"
-        bestFor={['Long-running apps', 'Data-heavy workloads', 'IDE-like tools', 'Reflection-heavy code']}
+        throughputNote={pick(rmodeT.aotThruNote, lang)}
+        bestFor={[
+          pick(rmodeT.aotBest1, lang),
+          pick(rmodeT.aotBest2, lang),
+          pick(rmodeT.aotBest3, lang),
+          pick(rmodeT.aotBest4, lang),
+        ]}
+        bestForLabel={bestForLabel}
+        cpuThruLabel={cpuThruLabel}
+        cppLabel={cppLabel}
         cliMod="nucleus.aot-runtime"
       />
     </div>
