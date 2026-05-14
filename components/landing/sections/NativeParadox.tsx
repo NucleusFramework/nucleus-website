@@ -1355,10 +1355,10 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
   const example = NATIVE_EXAMPLES.find((e) => e.id === exId)!;
   const nat = example.natives[osIdx];
 
-  // Count source line totals across all 3 OSes for the dramatic ratio number
-  const totalNativeLines = example.natives.reduce((acc, n) => acc + n.code.split('\n').length, 0);
+  // Line counts depend on the currently selected OS so the ratio is honest.
+  const nativeLines = nat.code.split('\n').length;
   const nucleusLines = example.nucleus.split('\n').length;
-  const ratio = Math.round(totalNativeLines / nucleusLines);
+  const ratio = Math.max(1, Math.round(nativeLines / nucleusLines));
   const linesWord = pick(npT.lines, lang);
 
   return (
@@ -1449,17 +1449,6 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
           </div>
         </div>
 
-        <div className="np-callout">
-          <div className="np-callout-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-              <path d="M9 12l2 2 4-4M12 3l9 4v6c0 5-4 8-9 9-5-1-9-4-9-9V7l9-4z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-          <div className="np-callout-body">
-            <div className="np-callout-h">{pick(npT.calloutH, lang)}</div>
-            <div className="np-callout-d">{pick(npT.calloutD, lang)}</div>
-          </div>
-        </div>
       </div>
     </section>
   );

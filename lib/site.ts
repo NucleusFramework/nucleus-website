@@ -26,3 +26,25 @@ export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 export const asset = (path: string): string =>
   `${BASE_PATH}${path.startsWith('/') ? path : `/${path}`}`;
+
+export async function fetchGitHubStars(): Promise<number | null> {
+  try {
+    const res = await fetch('https://api.github.com/repos/NucleusFramework/Nucleus', {
+      next: { revalidate: 3600 },
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { stargazers_count?: number };
+    return typeof data.stargazers_count === 'number' ? data.stargazers_count : null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatStarCount(n: number): string {
+  if (n >= 1000) {
+    const k = n / 1000;
+    return `${k.toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return n.toString();
+}

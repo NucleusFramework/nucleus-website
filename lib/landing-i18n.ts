@@ -162,10 +162,10 @@ export const kmpT = {
 // OneLanguageBar
 // =====================================================================
 export const oneLangT = {
-  themTag: { en: 'Tauri · Electron', fr: 'Tauri · Electron' } as Bi<string>,
+  themTag: { en: 'Tauri', fr: 'Tauri' } as Bi<string>,
   themCap: {
-    en: 'Four languages, three mindsets, an IPC bridge between every two of them.',
-    fr: 'Quatre langages, trois mentalités, un pont IPC entre chaque paire.',
+    en: 'JS frontend, Rust core, native FFI per platform — every boundary needs an IPC bridge.',
+    fr: 'UI JS, cœur Rust, FFI natif par plateforme — chaque frontière passe par un pont IPC.',
   } as Bi<string>,
   usTag: { en: 'Nucleus', fr: 'Nucleus' } as Bi<string>,
   usCap: {
@@ -190,8 +190,8 @@ export const toolkitsT = {
     ),
   } as Bi,
   subtitle: {
-    en: 'Nucleus ships first-party Compose implementations of every major desktop design language. The same Composable, restyled by the toolkit module of your choice — so a Mac user gets macOS, a Windows user gets Fluent, an Ubuntu user gets Yaru, and an IDE-like tool reaches for Jewel. No more Material paint job on Win32.',
-    fr: 'Nucleus livre des implémentations Compose maison pour chaque grand langage visuel desktop. Le même Composable, restylé par le module de toolkit de ton choix — un utilisateur Mac voit macOS, un utilisateur Windows voit Fluent, un utilisateur Ubuntu voit Yaru, et un outil de type IDE attrape Jewel. Fini le maquillage Material sur Win32.',
+    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, or IntelliJ Jewel. Each toolkit ships with a matching DecoratedWindow. macOS and Yaru are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
+    fr: 'Écris ton UI une fois en Compose, affiche-la dans le style desktop de ton choix — macOS, Windows 11 Fluent, Ubuntu Yaru ou IntelliJ Jewel. Chaque toolkit embarque un DecoratedWindow assorti. macOS et Yaru sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
   } as Bi<string>,
   isNew: { en: 'New · 2.0', fr: 'Nouveau · 2.0' } as Bi<string>,
   macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,

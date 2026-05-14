@@ -164,7 +164,7 @@ export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
         stats={[
           { label: coldStart, value: 1.2,  fmt: (n) => n.toFixed(1), unit: 's' },
           { label: ram,       value: 180,  fmt: (n) => Math.round(n), unit: 'MB' },
-          { label: binary,    value: 95,   fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: binary,    value: 55,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
         throughputLabel={pick(rmodeT.aotThruLabel, lang)}
         throughputPct={96}

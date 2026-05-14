@@ -8,7 +8,6 @@ import { Pitch } from './sections/Pitch';
 import { Toolkits } from './sections/Toolkits';
 import { Perf } from './sections/Perf';
 import { NativeParadox } from './sections/NativeParadox';
-import { InstallCTA } from './sections/InstallCTA';
 import { Footer } from './sections/Footer';
 import type { Lang } from '@/lib/landing-i18n';
 
@@ -23,9 +22,10 @@ const TWEAK_DEFAULTS = {
 
 interface LandingPageProps {
   lang?: Lang;
+  stars?: number | null;
 }
 
-export function LandingPage({ lang = 'en' }: LandingPageProps) {
+export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
   // Apply tweaks live + cursor highlight on .feat-card (ported from index.html script)
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', TWEAK_DEFAULTS.accent);
@@ -52,12 +52,11 @@ export function LandingPage({ lang = 'en' }: LandingPageProps) {
   return (
     <div className="landing-root" data-bg={TWEAK_DEFAULTS.background} data-density={TWEAK_DEFAULTS.density}>
       <TopNav lang={lang} />
-      <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} />
+      <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} stars={stars} />
       <Pitch lang={lang} />
       <Toolkits lang={lang} />
       <Perf lang={lang} />
       <NativeParadox lang={lang} />
-      <InstallCTA lang={lang} />
       <Footer lang={lang} />
     </div>
   );

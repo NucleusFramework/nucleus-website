@@ -262,12 +262,6 @@ export function Toolkits({ lang }: ToolkitsProps) {
           </ToolkitCard>
         </div>
 
-        <div className="tk-footnote">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          {pick(toolkitsT.footnote, lang)}
-        </div>
       </div>
     </section>
   );

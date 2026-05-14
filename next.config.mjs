@@ -10,6 +10,7 @@ const config = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  outputFileTracingRoot: process.cwd(),
   experimental: {
     optimizePackageImports: ['fumadocs-ui', 'fumadocs-core'],
   },
