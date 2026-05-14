@@ -2,7 +2,7 @@ import '../globals.css';
 import 'fumadocs-ui/style.css';
 import type { Metadata, Viewport } from 'next';
 import { RootProvider } from 'fumadocs-ui/provider';
-import { SITE, asset } from '@/lib/site';
+import { SITE, BASE_PATH, asset } from '@/lib/site';
 import { i18n } from '@/lib/i18n';
 
 export const metadata: Metadata = {
@@ -104,6 +104,12 @@ export default async function RootLayout({
               { name: 'English', locale: 'en' },
               { name: 'Français', locale: 'fr' },
             ],
+          }}
+          search={{
+            options: {
+              type: 'static',
+              api: `${BASE_PATH}/api/search`,
+            },
           }}
         >
           {children}
