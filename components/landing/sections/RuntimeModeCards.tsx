@@ -162,7 +162,7 @@ export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
         tagline={pick(rmodeT.aotTagline, lang)}
         desc={pick(rmodeT.aotDesc, lang)}
         stats={[
-          { label: coldStart, value: 1.2,  fmt: (n) => n.toFixed(1), unit: 's' },
+          { label: coldStart, value: 1.5,  fmt: (n) => n.toFixed(1), unit: 's' },
           { label: ram,       value: 180,  fmt: (n) => Math.round(n), unit: 'MB' },
           { label: binary,    value: 55,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
