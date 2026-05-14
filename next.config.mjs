@@ -10,11 +10,6 @@ const config = {
   experimental: {
     optimizePackageImports: ['fumadocs-ui', 'fumadocs-core'],
   },
-  async redirects() {
-    return [
-      { source: '/docs', destination: '/docs/getting-started', permanent: false },
-    ];
-  },
   async headers() {
     return [
       {

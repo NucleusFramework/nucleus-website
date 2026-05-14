@@ -24,7 +24,7 @@ export function Hero({ accent, atomSpeed }: HeroProps) {
           </p>
 
           <div className="hero-cta">
-            <a href="/docs/getting-started" className="btn btn-primary">
+            <a href="/docs/start/install" className="btn btn-primary">
               Get started
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>

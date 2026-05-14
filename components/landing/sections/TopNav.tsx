@@ -11,7 +11,7 @@ export function TopNav() {
           <span className="ver">v2.0</span>
         </Link>
         <div className="nav-links">
-          <Link href="/docs/getting-started">Docs</Link>
+          <Link href="/docs">Docs</Link>
           <a href="#toolkits">Toolkits</a>
           <a href="#paradigm">Native APIs</a>
           <a href="#install">Download</a>

@@ -14,10 +14,10 @@ export function Footer() {
         </div>
         <div className="footer-col">
           <h4>Docs</h4>
-          <Link href="/docs/getting-started">Getting started</Link>
-          <Link href="/docs/runtime">Runtime APIs</Link>
-          <Link href="/docs/getting-started#packaging">Packaging</Link>
-          <Link href="/docs/getting-started#ci">CI / CD</Link>
+          <Link href="/docs/start/install">Getting started</Link>
+          <Link href="/docs/concepts/runtimes">Runtime APIs</Link>
+          <Link href="/docs/packaging">Packaging</Link>
+          <Link href="/docs/packaging/ci-cd">CI / CD</Link>
         </div>
         <div className="footer-col">
           <h4>Platform</h4>

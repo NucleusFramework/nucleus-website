@@ -57,7 +57,7 @@ export function InstallCTA() {
 
         <div className="install-meta">
           <span>Detects your architecture · downloads · installs · launches.</span>
-          <a href="/docs/getting-started">Or read the install guide →</a>
+          <a href="/docs/start/install">Or read the install guide →</a>
         </div>
       </div>
     </section>

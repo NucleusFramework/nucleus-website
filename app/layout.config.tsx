@@ -10,7 +10,7 @@ export const baseOptions: BaseLayoutProps = {
     ),
   },
   links: [
-    { text: 'Docs', url: '/docs/getting-started' },
+    { text: 'Docs', url: '/docs' },
     { text: 'Roadmap', url: '/docs/roadmap' },
     { text: 'Changelog', url: '/docs/changelog' },
     { text: 'GitHub', url: 'https://github.com/NucleusFramework/Nucleus', external: true },
