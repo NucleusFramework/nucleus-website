@@ -1,10 +1,11 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { asset } from '@/lib/site';
 
 export const baseOptions: BaseLayoutProps = {
   nav: {
     title: (
       <>
-        <img src="/assets/logo.png" alt="" width={22} height={22} />
+        <img src={asset('/assets/logo.png')} alt="" width={22} height={22} />
         <span style={{ fontWeight: 700 }}>Nucleus</span>
       </>
     ),

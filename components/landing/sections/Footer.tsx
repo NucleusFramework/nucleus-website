@@ -1,6 +1,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { type Lang, footerT, pick } from '@/lib/landing-i18n';
+import { asset } from '@/lib/site';
 
 interface FooterProps {
   lang: Lang;
@@ -13,7 +14,7 @@ export function Footer({ lang }: FooterProps) {
       <div className="footer-inner">
         <div className="footer-brand">
           <div className="footer-brand-row">
-            <img src="/assets/logo.png" alt="" />
+            <img src={asset('/assets/logo.png')} alt="" />
             <span>Nucleus</span>
           </div>
           <p className="footer-tagline">{pick(footerT.tagline, lang)}</p>

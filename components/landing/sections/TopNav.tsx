@@ -1,19 +1,20 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { type Lang, navT, pick } from '@/lib/landing-i18n';
+import { asset } from '@/lib/site';
 
 interface TopNavProps {
   lang: Lang;
 }
 
 export function TopNav({ lang }: TopNavProps) {
-  const home = lang === 'fr' ? '/fr' : '/';
-  const docsHref = lang === 'fr' ? '/fr/docs' : '/docs';
+  const home = lang === 'fr' ? '/fr/' : '/en/';
+  const docsHref = lang === 'fr' ? '/fr/docs' : '/en/docs';
   return (
     <nav className="nav">
       <div className="nav-inner">
         <Link href={home} className="nav-brand">
-          <img src="/assets/logo.png" alt="" />
+          <img src={asset('/assets/logo.png')} alt="" />
           <span>Nucleus</span>
           <span className="ver">v2.0</span>
         </Link>
@@ -38,7 +39,7 @@ export function TopNav({ lang }: TopNavProps) {
             }}
           >
             <Link
-              href="/"
+              href="/en/"
               aria-label="English"
               style={{
                 padding: '4px 9px',
@@ -51,7 +52,7 @@ export function TopNav({ lang }: TopNavProps) {
               }}
             >EN</Link>
             <Link
-              href="/fr"
+              href="/fr/"
               aria-label="Français"
               style={{
                 padding: '4px 9px',

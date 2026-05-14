@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { asset } from '@/lib/site';
 
 const NUCLEUS_FEATURES = [
   {
@@ -56,7 +57,7 @@ export function ArchitectureStack() {
       <div className="stack-layer stack-layer-nucleus">
         <div className="stack-layer-glow" aria-hidden="true"/>
         <div className="stack-nucleus-head">
-          <img src="/assets/logo.png" alt="" className="stack-nucleus-logo"/>
+          <img src={asset('/assets/logo.png')} alt="" className="stack-nucleus-logo"/>
           <div>
             <div className="stack-layer-tag stack-layer-tag-accent">Native desktop layer</div>
             <div className="stack-nucleus-name">Nucleus 2.0</div>

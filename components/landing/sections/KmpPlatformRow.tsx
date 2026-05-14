@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { type Lang, kmpT, pick } from '@/lib/landing-i18n';
+import { asset } from '@/lib/site';
 
 interface PlatformRow {
   k: keyof typeof kmpT;
@@ -94,7 +95,7 @@ export function KmpPlatformRow({ lang }: KmpPlatformRowProps) {
           <div className="kmp-card-glow" aria-hidden="true"/>
           <div className="kmp-card-head">
             <div className="kmp-card-icon">
-              {p.logo ? <img src={p.logo} alt=""/> : p.icon}
+              {p.logo ? <img src={asset(p.logo)} alt=""/> : p.icon}
             </div>
             <div className="kmp-card-name">{p.name}</div>
           </div>

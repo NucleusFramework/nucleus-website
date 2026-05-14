@@ -2,7 +2,7 @@ import '../globals.css';
 import 'fumadocs-ui/style.css';
 import type { Metadata, Viewport } from 'next';
 import { RootProvider } from 'fumadocs-ui/provider';
-import { SITE } from '@/lib/site';
+import { SITE, asset } from '@/lib/site';
 import { i18n } from '@/lib/i18n';
 
 export const metadata: Metadata = {
@@ -44,8 +44,8 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  icons: { icon: '/assets/logo.png', apple: '/assets/logo.png' },
-  manifest: '/manifest.webmanifest',
+  icons: { icon: asset('/assets/logo.png'), apple: asset('/assets/logo.png') },
+  manifest: asset('/manifest.webmanifest'),
 };
 
 export const viewport: Viewport = {
