@@ -50,7 +50,7 @@ export function LandingPage({ lang = 'en' }: LandingPageProps) {
   }, []);
 
   return (
-    <div data-bg={TWEAK_DEFAULTS.background} data-density={TWEAK_DEFAULTS.density}>
+    <div className="landing-root" data-bg={TWEAK_DEFAULTS.background} data-density={TWEAK_DEFAULTS.density}>
       <TopNav lang={lang} />
       <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} />
       <Pitch lang={lang} />
