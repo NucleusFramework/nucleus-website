@@ -162,15 +162,15 @@ export const kmpT = {
 // OneLanguageBar
 // =====================================================================
 export const oneLangT = {
-  themTag: { en: 'Tauri', fr: 'Tauri' } as Bi<string>,
+  themTag: { en: 'Hybrid stack', fr: 'Stack hybride' } as Bi<string>,
   themCap: {
-    en: 'JS frontend, Rust core, native FFI per platform — every boundary needs an IPC bridge.',
-    fr: 'UI JS, cœur Rust, FFI natif par plateforme — chaque frontière passe par un pont IPC.',
+    en: 'Web UI in one language, native core in another, OS bindings per platform — every boundary becomes an IPC bridge, a serialization step, and a context switch in your head.',
+    fr: 'UI dans un langage, cœur natif dans un autre, bindings par OS — chaque frontière devient un pont IPC, une étape de sérialisation, et un changement de contexte dans ta tête.',
   } as Bi<string>,
-  usTag: { en: 'Nucleus', fr: 'Nucleus' } as Bi<string>,
+  usTag: { en: 'Nucleus + Compose', fr: 'Nucleus + Compose' } as Bi<string>,
   usCap: {
-    en: 'UI, business logic, OS calls, packaging — same language, same mindset, same call graph.',
-    fr: 'UI, logique métier, appels OS, packaging — même langage, même mentalité, même graphe d\'appel.',
+    en: 'Compose for UI, Kotlin for logic, OS calls and packaging — one language top to bottom, no IPC, one mindset, one call graph.',
+    fr: 'Compose pour l\'UI, Kotlin pour la logique, les appels OS et le packaging — un seul langage de bout en bout, pas d\'IPC, une seule mentalité, un seul graphe d\'appel.',
   } as Bi<string>,
 };
 

@@ -11,13 +11,9 @@ export function OneLanguageBar({ lang }: OneLanguageBarProps) {
       <div className="one-lang-side one-lang-them">
         <span className="one-lang-tag">{pick(oneLangT.themTag, lang)}</span>
         <div className="one-lang-langs">
-          <span className="one-lang-pill" data-lang="js">JavaScript</span>
-          <span className="one-lang-plus">+</span>
-          <span className="one-lang-pill" data-lang="rs">Rust</span>
-          <span className="one-lang-plus">+</span>
-          <span className="one-lang-pill" data-lang="sw">Swift</span>
-          <span className="one-lang-plus">+</span>
-          <span className="one-lang-pill" data-lang="kt">Kotlin</span>
+          <span className="one-lang-pill" data-lang="js">JS / TS / Dart</span>
+          <span className="one-lang-bridge">IPC</span>
+          <span className="one-lang-pill" data-lang="rs">Rust / C++ / Swift</span>
         </div>
         <div className="one-lang-cap">{pick(oneLangT.themCap, lang)}</div>
       </div>
