@@ -282,17 +282,17 @@ export const rmodeT = {
   // AOT card
   aotTag: { en: 'Open world', fr: 'Open world' } as Bi<string>,
   aotName: { en: 'JDK 25 + AOT Cache', fr: 'JDK 25 + cache AOT' } as Bi<string>,
-  aotTagline: { en: 'JIT-blazing throughput. Normal start.', fr: 'Débit JIT explosif. Démarrage normal.' } as Bi<string>,
+  aotTagline: { en: 'Peak JIT throughput. Plugins, agents, full reflection.', fr: 'Débit JIT au sommet. Plugins, agents, réflexion totale.' } as Bi<string>,
   aotDesc: {
-    en: "HotSpot's C2 JIT is the most mature compiler ever built. With JDK 25's AOT cache priming the class metadata, you skip the warm-up — and once your hot paths get profiled, throughput approaches what C++ and Rust deliver.",
-    fr: "Le JIT C2 de HotSpot est le compilateur le plus mûr jamais construit. Avec le cache AOT de JDK 25 qui amorce les métadonnées de classes, tu sautes le warm-up — et une fois tes chemins chauds profilés, le débit approche ce que C++ et Rust offrent.",
+    en: "HotSpot's C2 JIT is the most mature compiler ever built. JDK 25's AOT cache primes class metadata so you skip the warm-up — and you keep everything closed-world gives up: dynamic class loading, full reflection, JVM agents, scripting engines, live plugins and extensions.",
+    fr: "Le JIT C2 de HotSpot est le compilateur le plus mûr jamais construit. Le cache AOT de JDK 25 amorce les métadonnées de classes : tu sautes le warm-up — et tu gardes tout ce que le closed-world abandonne : chargement dynamique, réflexion totale, agents JVM, moteurs de scripting, plugins et extensions à chaud.",
   } as Bi<string>,
   aotThruLabel: { en: '≈ C++ / Rust on hot paths', fr: '≈ C++ / Rust sur les chemins chauds' } as Bi<string>,
   aotThruNote: { en: 'HotSpot C2 · escape analysis · vectorization', fr: 'HotSpot C2 · escape analysis · vectorisation' } as Bi<string>,
-  aotBest1: { en: 'Long-running apps', fr: 'Apps long-running' } as Bi<string>,
-  aotBest2: { en: 'Data-heavy workloads', fr: 'Charges de données lourdes' } as Bi<string>,
-  aotBest3: { en: 'IDE-like tools', fr: 'Outils de type IDE' } as Bi<string>,
-  aotBest4: { en: 'Reflection-heavy code', fr: 'Code à forte réflexion' } as Bi<string>,
+  aotBest1: { en: 'Plugin & extension hosts', fr: 'Hôtes de plugins / extensions' } as Bi<string>,
+  aotBest2: { en: 'IDE-like tools', fr: 'Outils de type IDE' } as Bi<string>,
+  aotBest3: { en: 'Long-running apps', fr: 'Apps long-running' } as Bi<string>,
+  aotBest4: { en: 'Scripting & DSL runtimes', fr: 'Runtimes scripting / DSL' } as Bi<string>,
 };
 
 // =====================================================================
@@ -350,6 +350,74 @@ export const npT = {
 // =====================================================================
 // Install CTA
 // =====================================================================
+// =====================================================================
+// Ship pipeline (CI/CD)
+// =====================================================================
+export const shipT = {
+  eyebrow: { en: 'From tag to release', fr: 'Du tag à la release' } as Bi<string>,
+  title: {
+    en: React.createElement(React.Fragment, null,
+      'Push a tag. Get ',
+      React.createElement('span', { className: 'hero-grad' }, 'signed installers.'),
+    ),
+    fr: React.createElement(React.Fragment, null,
+      'Pousse un tag. Récupère des ',
+      React.createElement('span', { className: 'hero-grad' }, 'installeurs signés.'),
+    ),
+  } as Bi,
+  subtitle: {
+    en: 'Nucleus ships reusable GitHub Actions that build, sign, notarize, bundle and publish for every desktop — without a copy-pasted YAML in sight. Six composite actions, one reference workflow, one tag push.',
+    fr: 'Nucleus livre des GitHub Actions réutilisables qui compilent, signent, notarisent, empaquettent et publient pour chaque desktop — sans YAML copié-collé. Six actions composites, un workflow de référence, un seul push de tag.',
+  } as Bi<string>,
+  // Pipeline stages
+  stageTrigger: { en: 'Trigger', fr: 'Déclenchement' } as Bi<string>,
+  stageTriggerLine: { en: 'git push tag v1.0.0', fr: 'git push tag v1.0.0' } as Bi<string>,
+  stageBuild: { en: 'Matrix build', fr: 'Build matriciel' } as Bi<string>,
+  stageBuildSub: { en: '6 parallel runners', fr: '6 runners en parallèle' } as Bi<string>,
+  stageSign: { en: 'Sign · bundle · notarize', fr: 'Signer · bundler · notariser' } as Bi<string>,
+  stageSignSub: { en: 'lipo universal · MSIX · staple', fr: 'lipo universal · MSIX · staple' } as Bi<string>,
+  stageRelease: { en: 'GitHub Release', fr: 'GitHub Release' } as Bi<string>,
+  stageReleaseSub: { en: 'installers + auto-update YAML', fr: 'installeurs + YAML auto-update' } as Bi<string>,
+  // Action cards
+  actionsLabel: { en: 'Six composite actions', fr: 'Six actions composites' } as Bi<string>,
+  a1Name: { en: 'setup-nucleus', fr: 'setup-nucleus' } as Bi<string>,
+  a1Desc: {
+    en: 'JBR 25 or Liberica NIK, Gradle cache, Node, Linux packaging tools — one step, every runner.',
+    fr: 'JBR 25 ou Liberica NIK, cache Gradle, Node, outils de packaging Linux — une étape, tout runner.',
+  } as Bi<string>,
+  a2Name: { en: 'setup-macos-signing', fr: 'setup-macos-signing' } as Bi<string>,
+  a2Desc: {
+    en: 'Temporary keychain, .p12 imported from secrets, identities exposed to downstream steps.',
+    fr: 'Trousseau temporaire, .p12 importé depuis les secrets, identités exposées aux étapes suivantes.',
+  } as Bi<string>,
+  a3Name: { en: 'build-macos-universal', fr: 'build-macos-universal' } as Bi<string>,
+  a3Desc: {
+    en: 'lipo merge arm64 + x64, inside-out re-sign, notarize via notarytool, staple — one DMG out.',
+    fr: 'Fusion lipo arm64 + x64, re-sign inside-out, notarisation via notarytool, staple — un DMG en sortie.',
+  } as Bi<string>,
+  a4Name: { en: 'build-windows-appxbundle', fr: 'build-windows-appxbundle' } as Bi<string>,
+  a4Desc: {
+    en: 'Merge amd64 + arm64 .appx into a .msixbundle, sign with SignTool — Microsoft Store ready.',
+    fr: 'Fusion amd64 + arm64 .appx en .msixbundle, signature SignTool — prêt pour le Microsoft Store.',
+  } as Bi<string>,
+  a5Name: { en: 'generate-update-yml', fr: 'generate-update-yml' } as Bi<string>,
+  a5Desc: {
+    en: 'SHA-512 every installer, emit latest-mac.yml / latest.yml / latest-linux.yml for the auto-updater.',
+    fr: 'SHA-512 de chaque installeur, génère latest-mac.yml / latest.yml / latest-linux.yml pour l\'auto-updater.',
+  } as Bi<string>,
+  a6Name: { en: 'publish-release', fr: 'publish-release' } as Bi<string>,
+  a6Desc: {
+    en: 'gh release create with the right assets, marks -alpha / -beta / -rc as pre-release automatically.',
+    fr: 'gh release create avec les bons assets, marque -alpha / -beta / -rc en pre-release automatiquement.',
+  } as Bi<string>,
+  // OS chips
+  osUbuntu: { en: 'Ubuntu', fr: 'Ubuntu' } as Bi<string>,
+  osWindows: { en: 'Windows', fr: 'Windows' } as Bi<string>,
+  osMacos: { en: 'macOS', fr: 'macOS' } as Bi<string>,
+  // CTA
+  ctaDocs: { en: 'Reference release workflow', fr: 'Workflow de release de référence' } as Bi<string>,
+};
+
 export const installT = {
   eyebrow: { en: 'Try the demo', fr: 'Essaie la démo' } as Bi<string>,
   title: {

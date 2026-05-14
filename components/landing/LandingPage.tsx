@@ -8,6 +8,7 @@ import { Pitch } from './sections/Pitch';
 import { Toolkits } from './sections/Toolkits';
 import { Perf } from './sections/Perf';
 import { NativeParadox } from './sections/NativeParadox';
+import { ShipPipeline } from './sections/ShipPipeline';
 import { Footer } from './sections/Footer';
 import type { Lang } from '@/lib/landing-i18n';
 
@@ -57,6 +58,7 @@ export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
       <Toolkits lang={lang} />
       <Perf lang={lang} />
       <NativeParadox lang={lang} />
+      <ShipPipeline lang={lang} />
       <Footer lang={lang} />
     </div>
   );
