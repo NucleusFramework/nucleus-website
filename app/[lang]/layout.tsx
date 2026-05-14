@@ -2,7 +2,8 @@ import '../globals.css';
 import 'fumadocs-ui/style.css';
 import type { Metadata, Viewport } from 'next';
 import { RootProvider } from 'fumadocs-ui/provider';
-import { SITE, BASE_PATH, asset } from '@/lib/site';
+import { SITE, asset } from '@/lib/site';
+import NucleusSearchDialog from '@/components/docs/SearchDialog';
 import { i18n } from '@/lib/i18n';
 
 export const metadata: Metadata = {
@@ -106,10 +107,7 @@ export default async function RootLayout({
             ],
           }}
           search={{
-            options: {
-              type: 'static',
-              api: `${BASE_PATH}/api/search`,
-            },
+            SearchDialog: NucleusSearchDialog,
           }}
         >
           {children}
