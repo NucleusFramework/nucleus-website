@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { SITE } from '@/lib/site';
 
+export const dynamic = 'force-static';
+export const revalidate = false;
+
 export function GET() {
   return NextResponse.json({
     name: SITE.name,
