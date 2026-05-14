@@ -1,0 +1,78 @@
+---
+title: Icônes FreeDesktop
+description: Constantes Kotlin typées pour la FreeDesktop Icon Naming Specification — utilisées par notification-linux, launcher-linux et toute UI Linux qui résout les icônes par thème.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les thèmes d'icônes Linux fonctionnent par nom : au lieu de livrer `info.png`, tu réfères `dialog-information` et le thème de l'utilisateur rend sa propre version. La spec FreeDesktop liste les noms canoniques. `freedesktop-icons` les expose en constantes Kotlin typées.
+
+## En bref
+- Hiérarchie scellée `FreedesktopIcon` qui reflète les catégories de la spec.
+- Noms custom, chemins de fichier, URIs `file://`, drapeaux ISO supportés.
+- Partagée par [`notification-linux`](/docs/os/notification-linux) et [`launcher-linux`](/docs/lifecycle/launcher-linux) — généralement tirée transitivement.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.freedesktop-icons:<version>")
+}
+```
+
+<Callout type="info" title="Transitif">
+Si tu dépends déjà de `notification-linux` ou `launcher-linux`, `freedesktop-icons` est inclus via `api()` — pas de déclaration séparée.
+</Callout>
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.freedesktop.icons.FreedesktopIcon
+
+val info = FreedesktopIcon.Status.DIALOG_INFORMATION
+val open = FreedesktopIcon.Action.DOCUMENT_OPEN
+val printer = FreedesktopIcon.Device.PRINTER
+
+val custom = FreedesktopIcon.Custom("my-app-icon")
+val path = FreedesktopIcon.Custom("/home/moi/icon.png")
+val uri = FreedesktopIcon.Custom("file:///home/moi/icon.png")
+
+val flag = FreedesktopIcon.flag("fr")
+```
+
+## Fonctionnement
+
+Chaque constante compile en son nom spec (par exemple `dialog-information`). Quand tu la passes à un module Linux — notifications, quicklists, tray — la valeur est sérialisée sur D-Bus ou écrite dans un fichier `.desktop` en clair. Le thème actif de l'OS la résout en image concrète au rendu, ton app suit donc le thème de l'utilisateur automatiquement.
+
+## Référence
+
+### Catégories
+
+`FreedesktopIcon` est une interface scellée avec ces sous-types (chacun reflétant une section de la spec) :
+
+| Catégorie | Exemples |
+| --- | --- |
+| `FreedesktopIcon.Action` | `DOCUMENT_OPEN`, `EDIT_COPY`, `MEDIA_PLAYBACK_START` |
+| `FreedesktopIcon.Status` | `DIALOG_INFORMATION`, `DIALOG_WARNING`, `BATTERY_LOW` |
+| `FreedesktopIcon.Device` | `PRINTER`, `CAMERA_PHOTO`, `INPUT_KEYBOARD` |
+| `FreedesktopIcon.Application` | `INTERNET_WEB_BROWSER`, `MULTIMEDIA_VOLUME_CONTROL` |
+| `FreedesktopIcon.MimeType` | `TEXT_PLAIN`, `APPLICATION_PDF`, `IMAGE_PNG` |
+| `FreedesktopIcon.Place` | `FOLDER`, `USER_HOME`, `NETWORK_SERVER` |
+| `FreedesktopIcon.Emblem` | `EMBLEM_IMPORTANT`, `EMBLEM_FAVORITE` |
+| `FreedesktopIcon.Custom(value)` | value class inline pour chaînes / chemins / URIs |
+
+### Drapeaux
+
+```kotlin
+FreedesktopIcon.flag("us")   // "flag-us"
+FreedesktopIcon.flag("jp")   // "flag-jp"
+```
+
+## Cas d'usage
+- **Icônes de tray** qui suivent le thème utilisateur sous Linux — combine avec [`composenativetray`](/docs/os/system-tray) via `FreedesktopIcon.Custom("my-app")` pour une icône symbolique par thème.
+- **Icônes de notification** — passe directement à `notification-linux`.
+- **Quicklists du launcher** — réutilise les mêmes constantes dans tes actions `.desktop`.
+
+## Notes
+- Tous les thèmes n'implémentent pas tous les noms. Reste sur le set canonique FreeDesktop pour le meilleur taux de réussite.
+- Sur les plateformes non-Linux, les constantes compilent (ce ne sont que des chaînes) mais n'ont aucun effet visible.

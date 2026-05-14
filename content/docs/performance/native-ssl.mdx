@@ -1,0 +1,124 @@
+---
+title: Native SSL — trust roots from the OS, not the JRE
+description: An X509TrustManager that merges the JVM defaults with the OS keychain / cert store, so corporate roots and MDM-installed CAs Just Work.
+---
+
+A JVM app shipped with a bundled JRE only trusts the cacerts baked into that JRE. Custom root CAs installed by an enterprise IT policy, an MDM, or an SSL-inspection proxy are invisible — every HTTPS handshake to those hosts fails. `native-ssl` reads trusted certificates directly from the OS store on all three platforms and merges them with the JVM defaults into a single `X509ExtendedTrustManager`.
+
+## TL;DR
+- One singleton: `NativeTrustManager`. Lazy, thread-safe.
+- macOS: Security framework via JNI — system anchors + user/admin domain with full trust-settings evaluation.
+- Windows: Crypt32 via JNI — `ROOT` and `CA` stores across user, machine, group policy, enterprise scopes.
+- Linux: pure-JVM — reads the PEM bundles `crypto/x509` reads.
+- HTTPS to corporate, MDM, or proxy-inspected hosts works without any manual trust store wiring.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-ssl:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.nativessl.NativeTrustManager
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.X509TrustManager
+
+val trustManager: X509TrustManager = NativeTrustManager.trustManager
+val sslContext: SSLContext = NativeTrustManager.sslContext
+val sslSocketFactory: SSLSocketFactory = NativeTrustManager.sslSocketFactory
+```
+
+Pass these to your HTTP client of choice. If that client is `java.net.http`, OkHttp, or Ktor, use the [Native HTTP](/docs/performance/native-http) adapters instead — they handle the wiring for you.
+
+## How it works
+
+### macOS
+
+Security framework via `libnucleus_ssl.dylib` (bundled in the JAR for `arm64` and `x86_64`). Two passes:
+
+1. **System anchors** — `SecTrustCopyAnchorCertificates()` returns every Apple-shipped root.
+2. **User & admin domains** — `SecTrustSettingsCopyCertificates()` enumerates everything with explicit trust settings. Each candidate is evaluated through logic mirroring [JetBrains jvm-native-trusted-roots](https://github.com/JetBrains/jvm-native-trusted-roots):
+   - User trust settings first, then admin.
+   - No trust settings → live evaluation via `SecTrustEvaluateWithError`.
+   - Empty trust settings array → trusted (per Apple docs).
+   - `kSecTrustSettingsResult` must be `TrustRoot`; the cert must be self-signed (DN equality **and** signature verified against its own key).
+   - `kSecTrustSettingsPolicy`, if present, must be `kSecPolicyAppleSSL`.
+   - Unknown constraint keys reject the certificate — better to fail closed than silently relax rules.
+
+### Windows
+
+Crypt32 via `nucleus_ssl.dll` (bundled for `x64` and `ARM64`). Scans five store locations across two store types:
+
+| Store type | Inclusion rule |
+|------------|----------------|
+| `ROOT` | Trusted root CAs — included unconditionally |
+| `CA` | Intermediate CAs — validated via `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_BASE)` with cache-only revocation |
+
+Locations: `CURRENT_USER`, `LOCAL_MACHINE`, `CURRENT_USER_GROUP_POLICY`, `LOCAL_MACHINE_GROUP_POLICY`, `LOCAL_MACHINE_ENTERPRISE`. Group Policy and Active Directory–distributed certs land in stores that `SunMSCAPI` does not reach.
+
+Deduplication is by SHA-1 thumbprint (`CERT_HASH_PROP_ID`), the standard Windows identity. If the JNI library fails to load, the module falls back to `SunMSCAPI`'s `Windows-ROOT`, `Windows-CA`, `Windows-MY` keystores.
+
+### Linux
+
+Pure-JVM — no shared library. Reads the same paths Go's `crypto/x509` does:
+
+| Path | Distribution |
+|------|--------------|
+| `/etc/ssl/certs/ca-certificates.crt` | Debian, Ubuntu, Gentoo |
+| `/etc/pki/tls/certs/ca-bundle.crt` | Fedora, RHEL 6 |
+| `/etc/ssl/ca-bundle.pem` | openSUSE |
+| `/etc/pki/tls/cacert.pem` | OpenELEC |
+| `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` | CentOS, RHEL 7 |
+| `/etc/ssl/cert.pem` | Alpine |
+| `/etc/ssl/certs/` *(dir)* | SLES10/SLES11 |
+| `/etc/pki/tls/certs/` *(dir)* | Fedora, RHEL |
+| `/system/etc/security/cacerts/` *(dir)* | Android |
+
+Deduplicated by DER content across all sources.
+
+## Reference
+
+| API | Description |
+|-----|-------------|
+| `NativeTrustManager.trustManager: X509ExtendedTrustManager` | Combined trust manager (JVM defaults + OS native) |
+| `NativeTrustManager.sslContext: SSLContext` | `TLS` context initialized with the trust manager |
+| `NativeTrustManager.sslSocketFactory: SSLSocketFactory` | Derived from `sslContext` |
+| `NativeTrustManager.isAvailable(): Boolean` | `false` only if the JNI bridge failed to load on macOS/Windows |
+| `interface NativeCertificateProvider` | SPI if you need to plug in a custom certificate source |
+
+## Use cases
+
+- **Enterprise networks** with internal root CAs deployed via Group Policy or MDM.
+- **SSL inspection proxies** (Zscaler, Netskope, Blue Coat, …) that re-sign every cert with a custom root.
+- **Self-hosted PKI** for staging environments where the user installed the dev root locally.
+- **Anything `keytool -import` was historically the answer to.**
+
+## Notes
+
+### ProGuard
+
+JNI bridge classes must be preserved on macOS and Windows. The Nucleus Gradle plugin adds the rules automatically; if you maintain ProGuard config manually:
+
+```proguard
+-keep class dev.nucleusframework.nativessl.mac.NativeSslBridge {
+    native <methods>;
+}
+-keep class dev.nucleusframework.nativessl.windows.WindowsSslBridge {
+    native <methods>;
+}
+```
+
+### Logging
+
+Debug logs are tagged `NativeCertificateProvider`, `NativeSslBridge`, `WindowsCertificateProvider`, `LinuxCertificateProvider`, etc. Off by default. Turn them on with:
+
+```kotlin
+import dev.nucleusframework.core.runtime.tools.allowNucleusRuntimeLogging
+
+allowNucleusRuntimeLogging = true
+```

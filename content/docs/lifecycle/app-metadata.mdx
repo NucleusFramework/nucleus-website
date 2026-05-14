@@ -1,0 +1,67 @@
+---
+title: App metadata at runtime
+description: Read your app's id, version, vendor and AUMID from the values you configured in the Gradle plugin.
+---
+
+Your About dialog wants `1.2.3`. Your crash reporter wants `com.example.myapp`. Your auto-updater wants the vendor. None of these should be hardcoded — and none of them should be re-read off the filesystem at runtime. `NucleusApp` exposes what the Gradle plugin injected at build time, with sensible fallbacks for `./gradlew run`.
+
+## TL;DR
+- Singleton `NucleusApp` exposes `appId`, `version`, `vendor`, `description`, `appName`, `aumid`, `startupTaskId`, `isConfigured`.
+- Injected by the Gradle plugin via system properties (during `run`) and a classpath resource (`nucleus/nucleus-app.properties`, in packaged builds).
+- All values are `String?` except `appId` (which falls back to the main class name) and `isConfigured`.
+- Several Nucleus modules read it implicitly — `SingleInstanceManager`, `taskbar-progress`, `autolaunch`, `updater-runtime`.
+
+## Install
+
+Comes with `core-runtime`.
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.core.runtime.NucleusApp
+
+@Composable
+fun AboutDialog() {
+    Column {
+        Text(NucleusApp.appName ?: NucleusApp.appId)
+        NucleusApp.version?.let { Text("Version $it") }
+        NucleusApp.vendor?.let { Text("by $it") }
+    }
+}
+
+if (NucleusApp.isConfigured) {
+    // Running as a packaged app
+    initAutoUpdater()
+}
+```
+
+## How it works
+
+The plugin gives `NucleusApp` two delivery channels:
+
+1. **System properties** during `./gradlew run`: `-Dnucleus.app.id=MyApp`, `-Dnucleus.app.version=...`, etc.
+2. **Classpath resource** in packaged builds: `nucleus/nucleus-app.properties` baked into the app jar.
+
+Resolution is first-non-null-wins: system property, then resource, then a legacy fallback for `appId` (main class name from `sun.java.command`, or `"NucleusApp"`).
+
+This is the seam that lets a one-liner in `build.gradle.kts` flow into every runtime module without you wiring it up by hand. The single-instance lock identifier, the AUMID Windows uses for badge counts, the `WM_CLASS` GraalVM sets on Linux, the update marker directory — all of them go through `NucleusApp` and pick up whatever you declared in the plugin.
+
+## Reference
+
+### `NucleusApp`
+
+| Property | Type | Source |
+|---|---|---|
+| `appId` | `String` | Plugin `packageName`. Falls back to main class or `"NucleusApp"`. |
+| `appName` | `String?` | Display name. |
+| `version` | `String?` | Plugin `packageVersion`. |
+| `vendor` | `String?` | Plugin `vendor`. |
+| `description` | `String?` | Plugin `description`. |
+| `aumid` | `String?` | Windows Application User Model ID. |
+| `startupTaskId` | `String?` | MSIX startup task id used by [`autolaunch`](/docs/lifecycle/auto-launch). |
+| `isConfigured` | `Boolean` | `true` when at least one source provided values. |
+
+## Notes
+
+- A common pattern: branch on `NucleusApp.isConfigured` to gate auto-update, telemetry, anything you don't want firing in dev.
+- See [`ExecutableRuntime`](/docs/lifecycle/executable-type) when you need to distinguish DMG vs Flatpak vs `./gradlew run` — that's a separate concern from metadata.

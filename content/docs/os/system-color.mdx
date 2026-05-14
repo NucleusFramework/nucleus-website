@@ -1,0 +1,63 @@
+---
+title: System accent colour
+description: Read the user's OS accent colour and high-contrast flag — reactive, native, ready to feed into a Compose color scheme.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The user picked a colour in their OS settings. Honour it. `system-color` exposes the system accent and the high-contrast flag as Compose-reactive state — no polling, no manual refresh.
+
+## TL;DR
+- `systemAccentColor(): Color?` — `null` when the platform does not support it.
+- `isSystemInHighContrast(): Boolean` — flips when the user toggles high contrast.
+- Native bridges: NSColor KVO on macOS, registry watch on Windows, GSettings on Linux.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-color:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.systemcolor.*
+import androidx.compose.material3.*
+
+@Composable
+fun App() {
+    val accent = systemAccentColor()
+    val highContrast = isSystemInHighContrast()
+
+    val scheme = when {
+        accent != null -> darkColorScheme(primary = accent)
+        else -> darkColorScheme()
+    }
+
+    MaterialTheme(colorScheme = scheme) {
+        // UI recomposes when accent or contrast changes.
+    }
+}
+```
+
+## How it works
+
+Each backend wires the OS's native change notification into a `StateFlow<Color?>`, which Compose reads. The composable returns `null` when the platform cannot supply a meaningful value — most notably on macOS when the user picks **Multicolor** in System Settings → Appearance, the documented signal for "use your own brand colour".
+
+<Callout type="info" title="macOS multicolor mode">
+When the user selects **Multicolor** for the accent color, every app is expected to use its own palette. `systemAccentColor()` returns `null` so you fall back to your brand colour cleanly.
+</Callout>
+
+## Reference
+
+```kotlin
+fun isSystemAccentColorSupported(): Boolean   // gate UI before composition
+@Composable fun systemAccentColor(): Color?    // reactive
+@Composable fun isSystemInHighContrast(): Boolean
+```
+
+## Notes
+- Pair with [`darkmode-detector`](/docs/os/dark-mode) to derive a complete OS-driven theme.
+- Use `isSystemAccentColorSupported()` outside Compose (e.g. in a settings screen) to disable an "Use system accent" toggle on unsupported platforms.

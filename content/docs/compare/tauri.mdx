@@ -1,0 +1,82 @@
+---
+title: Nucleus vs Tauri
+description: Same Tao foundation, different bindings — JS + Rust or Kotlin top to bottom.
+---
+
+Tauri and Nucleus rhyme: both use the OS-native WebView/renderer instead of bundling Chromium, both build on the same Rust [`tao`](https://github.com/tauri-apps/tao) windowing crate, both ship small binaries with fast cold start. The split: Tauri keeps a JS frontend talking to a Rust backend over IPC; Nucleus stays in one Kotlin process from UI down to the native windowing layer.
+
+## TL;DR
+- Shared foundation: both backends are powered by `tao`. Nucleus's [Tao backend](/docs/tao) embeds the same crate.
+- Languages: Tauri = JavaScript + Rust + IPC. Nucleus = Kotlin, end-to-end.
+- Renderer: Tauri uses the OS WebView (WebView2, WKWebView, WebKitGTK). Nucleus uses Compose + Skia GPU.
+- Binary size winner: Tauri (5–20 MB). Native UI winner: Nucleus (one toolkit per OS, decorated windows, multi-touch, pen).
+
+## How they stack up
+
+| | **Nucleus** | Tauri |
+|--|------------|-------|
+| Languages | Kotlin | JS + Rust |
+| UI tech | Compose UI + Skia GPU | OS WebView |
+| Windowing | Tao (via JNI) | Tao (native Rust) |
+| Process model | Single process | Webview process + main, IPC |
+| OS APIs | 30+ Kotlin modules in-process | Rust `command`s called from JS |
+| Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | &lt; 1 s |
+| RAM idle | 60–150 MB | 50–80 MB |
+| Binary size | 38 MB (GraalVM) · ~120 MB (JVM) | 5–20 MB |
+| Multi-touch / pen | Yes — `TaoTouchEvent`, pressure, tilt | Limited — WebView pointer events |
+| Native chrome | Compose-rendered Liquid Glass / Fluent / Yaru / Jewel | OS chrome |
+| Packaging | 16 formats | 5 (DMG, MSI, NSIS, DEB, AppImage) |
+
+## Same Tao, different bindings
+
+Tauri's windowing crate `tao` is a fork of `winit` extended for desktop needs — menus, system tray, native popups, drag-and-drop. Nucleus vendors `tao` inside the `decorated-window-tao` module, binds it through JNI, and gives Kotlin access to:
+
+- `taoApplication { … }` — replaces Compose Desktop's AWT-based `application { }`.
+- `DecoratedWindow(…)` rendered without an AWT frame — true native Wayland on Linux, full multi-touch, pen pressure and tilt, native popups, drag-and-drop with diagnostics.
+- `NativeView` for embedding SwiftUI, WebView2, or GTK widgets inline in Compose.
+
+Tauri uses `tao` to render an OS WebView and route JS calls back through Rust. Nucleus uses `tao` to render Compose UI with Skia, no WebView in the loop.
+
+## The language axis
+
+Tauri's appeal is partly its language story: write Rust where you want safety and speed, JS where you want UI velocity. The cost is the same as Electron's — two mindsets, a serialization boundary, a frontend team and a backend team.
+
+Nucleus is a Kotlin monoculture. UI components, the same `ViewModel` you ship on Android, the OS calls, the packaging DSL — same language, same call graph. For teams already in the Kotlin world, that's a simpler day.
+
+## The renderer axis
+
+Tauri renders through the OS WebView: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux. Pro: tiny binaries, hardware acceleration the OS already tunes. Con: per-OS rendering quirks, no escape from CSS for native widgets, animation smoothness pegged to the WebView's compositor.
+
+Nucleus renders Compose UI to Skia directly via Skiko. Same renderer everywhere — Metal on macOS, OpenGL/Direct3D elsewhere. Compose animations run at GPU rates, pen and trackpad gestures arrive as typed events, the [Tao backend](/docs/tao) brings native Wayland support on Linux.
+
+## Native UI
+
+Tauri's native chrome is whatever the OS WebView happens to render. Custom title bars require CSS hacks that approximate native feel.
+
+Nucleus ships four [toolkit](/docs/window/toolkits) themes for decorated windows — Liquid Glass (macOS 26+), Fluent (Windows), Yaru (Ubuntu), Jewel (IntelliJ Platform) — each rendered in Compose, each backed by real native title-bar geometry, each themable from your design system on top.
+
+## Where Tauri wins
+
+- **Binary size.** 5–20 MB beats Nucleus's 38 MB (GraalVM) or 120 MB (JVM+AOT) on every metric.
+- **Web-app teams.** If your team is already JS-first and you want to keep a familiar frontend with Rust speed on the backend, Tauri is the natural home.
+- **Rust crate ecosystem.** Tauri taps into Rust's library ecosystem on the backend; Nucleus taps into JVM's. Different shapes; pick the one your team's already comfortable in.
+
+## Where Nucleus pulls ahead
+
+- One language end-to-end. UI, business logic, OS calls, packaging — all Kotlin.
+- Real native UI — Compose Skia rendering with native window decoration toolkits per OS, no WebView.
+- Multi-touch, pen pressure and tilt, native Wayland on Linux — first-class via the Tao backend.
+- The full JVM library ecosystem in-process. Lucene, DuckDB, ONNX Runtime, Apache Tika — all `implementation` away.
+- 16 packaging formats vs 5 — see [packaging comparison](/docs/compare/packaging).
+
+## When to pick Tauri
+
+You want the smallest possible binary, you're comfortable splitting your team across JS and Rust, your UI is web-shaped and the WebView is fine.
+
+## When to pick Nucleus
+
+You want one language end-to-end, native rendering, multi-touch / pen / Wayland support, and the JVM library ecosystem in-process. You're already shipping Kotlin to Android, iOS, or the web and want desktop to feel the same.
+
+## Notes
+
+The Tao backend is what makes the rhyme literal. If you're coming from Tauri and miss the multi-touch / drag-and-drop semantics, those work identically here — see [Tao](/docs/tao) for the API surface.

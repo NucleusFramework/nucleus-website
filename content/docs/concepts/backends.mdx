@@ -1,0 +1,85 @@
+---
+title: Backends
+description: Two window backends behind the same DecoratedWindow — AWT (legacy, JBR) or Tao (the new 2.0 default, Rust-native windowing).
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every Nucleus window is a Compose `@Composable`. What drives it underneath — pumping the OS event loop, owning the window handle, putting Skia's GPU surface on screen — is the **backend**. 2.0 ships two.
+
+## TL;DR
+- **AWT** (default before 2.0): JetBrains Runtime or stock OpenJDK. Mature, battle-tested, AWT-bound.
+- **Tao** (new in 2.0, opt-in default): no AWT. Rust-native windowing, Wayland-native, multi-touch, pen, ~60 MB RAM on a GraalVM Hello World.
+- **Same `DecoratedWindow` API.** Switch with one constructor parameter.
+
+## AWT — `decorated-window-jbr` & `decorated-window-jni`
+
+The AWT path drives Compose through `ComposeWindow` / `ComposeDialog`. Two flavours:
+
+- **`decorated-window-jbr`** — uses JetBrains Runtime's custom-decorations API on Windows/Linux, and a small Cocoa bridge for macOS NSWindow tweaks. The default when you ship JBR.
+- **`decorated-window-jni`** — the same `DecoratedWindow` API for users who can't ship JBR. Per-OS JNI bridges talk to DWM, X11/Wayland CSD shims, and NSWindow directly.
+
+Both depend on `decorated-window-awt`, which contains the shared Compose code (`TitleBar`, hit-testing, control buttons, drag handler).
+
+When to keep AWT:
+- You need the full AWT integration surface (file dialogs, system clipboard helpers, swing interop).
+- You're shipping JBR for the polished window controls and want the path of least resistance.
+- You target a stack the JNI bridges already cover and don't need Wayland-native or multi-touch.
+
+## Tao — `decorated-window-tao`
+
+Tao is the Rust windowing layer underpinning Tauri 2. Nucleus 2.0 makes it the default for new projects — bringing modern desktop primitives that JBR can't reach.
+
+What Tao unlocks:
+
+- **Native Wayland.** First-class Wayland support — no XWayland fallback, fractional scaling, gestures.
+- **Multi-touch & gestures.** Pinch, swipe, rotate — every Compose pointer event carries pressure, tilt and source.
+- **Pen & stylus.** Pressure-sensitive input on every OS — Wacom, Surface Pen, Apple Pencil sidecar.
+- **Per-monitor HiDPI.** Mixed-DPI setups handled transparently. Drag a window between displays, it adapts.
+- **`NativeView`.** Embed SwiftUI, WebView2 or GTK widgets inside Compose, in the same window.
+- **~60 MB RAM** on a GraalVM Hello World — Tao replaces AWT, not just decorations, so the JVM never loads the AWT toolkit.
+
+The trade: it's the new path. APIs are stable but evolving; some AWT-specific features (e.g. AWT-only file dialogs) require alternatives — see the [Tao section](/docs/tao) for the full surface.
+
+## Picking the backend
+
+```kotlin
+import dev.nucleusframework.nucleusapplication.NucleusBackend
+import dev.nucleusframework.nucleusapplication.nucleusApplication
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        // your Compose UI
+    }
+}
+```
+
+`NucleusBackend` has three values:
+
+- `Auto` — pick Tao if `decorated-window-tao` is on the classpath, otherwise AWT. Default.
+- `Tao` — force the Tao backend.
+- `Awt` — force the AWT backend (JBR or JNI, depending on what's resolved).
+
+The `DecoratedWindow` Composable is the same across backends. Inside it, `nucleusWindow.unsafe.taoWindow` / `nucleusWindow.unsafe.awtWindow` are the escape hatches for backend-specific calls.
+
+<Callout type="info" title="Hot Reload + Tao on macOS">
+When `decorated-window-tao` is on the classpath, the Gradle plugin automatically injects `-XstartOnFirstThread` into Hot Reload's `JavaExec` tasks on macOS — Tao runs the OS event loop on the process main thread.
+</Callout>
+
+## Side-by-side
+
+| | AWT (JBR / JNI) | Tao |
+|---|---|---|
+| Event loop owner | JVM (AWT EventQueue) | Rust (Tao) |
+| RAM (Hello World, GraalVM) | ~110 MB | ~60 MB |
+| Wayland | XWayland fallback | Native |
+| Multi-touch | Limited | Full pointer events with pressure, tilt, source |
+| Pen / stylus | Limited | Full pressure-sensitive |
+| Native view embedding | — | `NativeView` (SwiftUI, WebView2, GTK) |
+| Ecosystem | AWT-bound libraries | Compose-only |
+
+## Where to go next
+
+- [Tao deep dive](/docs/tao) — the full backend surface, gestures, pen, Wayland, `NativeView`.
+- [Decorated Window](/docs/window) — what you actually compose on top.
+- [Migrating from JBR to Tao](/docs/tao/migration-from-jbr) — checklist for existing apps.

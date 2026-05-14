@@ -1,0 +1,203 @@
+---
+title: Troubleshooting
+description: Les pièges qui mordent une fois, puis une autre — symptôme, cause, fix.
+---
+
+La plupart des pipelines Nucleus marchent du premier coup. Les cas en dessous sont les incidents récurrents : notarisation, identité Microsoft Store, CA d'entreprise, réflexion GraalVM, Wayland-sur-NVIDIA. Chaque entrée suit le même format.
+
+## Notarisation macOS : "The signature does not include a secure timestamp"
+
+**Symptôme.** `xcrun notarytool submit` retourne `Invalid` avec un détail de status mentionnant un timestamp manquant ou invalide.
+
+**Cause.** La signature s'est faite sans `--timestamp`, ou ta machine n'a pas pu joindre le serveur de timestamp d'Apple.
+
+**Fix.** Nucleus signe avec `--options runtime --timestamp` par défaut. Si tu as écrit un step `codesign` custom (ex. pour des binaires universels fusionnés avec `lipo` hors de l'action `build-macos-universal`), ajoute `--timestamp` et re-signe. Vérifie avec `xcrun codesign -dv --verbose=4 <Your.app>` et cherche `Timestamp=…`.
+
+## Notarisation macOS : "The signature does not include a hardened runtime"
+
+**Symptôme.** `Status: Invalid`, log mentionnant hardened runtime.
+
+**Cause.** Step `codesign` custom sans `--options runtime`.
+
+**Fix.** Ajoute `--options runtime` à chaque invocation `codesign`. Le pipeline Nucleus par défaut le fait — seuls les scripts CI custom trébuchent ici.
+
+## Microsoft Store : "MinVersion &lt;= 10.0.17134.0"
+
+**Symptôme.** Partner Center rejette l'upload :
+
+> Package acceptance validation error: bundle is not valid. You can't upload msix/msixbundle/msixupload packages that target Windows with a MinVersion &lt;= 10.0.17134.0.
+
+**Cause.** Pas de `minVersion` explicite dans `appx { }`. Le défaut tombe sur `10.0.14316.0`, en dessous du plancher Store.
+
+**Fix.**
+
+```kotlin
+appx {
+    minVersion = "10.0.17763.0"        // Windows 10 1809
+    maxVersionTested = "10.0.22621.0"  // Windows 11 22H2
+}
+```
+
+## Microsoft Store rejette publisher / identité
+
+**Symptôme.** La validation upload échoue avec un mismatch d'identité.
+
+**Cause.** `identityName`, `publisher` ou `publisherDisplayName` ne matchent pas la réservation Partner Center.
+
+**Fix.** Recopie les valeurs exactes depuis Partner Center → Product identity. `publisher` est le `CN=<GUID>` émis par le Store, pas le CN de ton certificat local. Voir [cibles Windows](/docs/packaging/windows#appx-msix).
+
+## SSLHandshakeException sur un réseau d'entreprise
+
+**Symptôme.** Les appels HTTPS depuis l'app échouent avec `SSLHandshakeException: PKIX path building failed`.
+
+**Cause.** Un proxy d'entreprise / passerelle VPN MITM le TLS avec une CA racine privée que le trust store JDK ne connaît pas.
+
+**Fix.** Deux options, complémentaires :
+
+1. **Build time** — livre la CA dans le `cacerts` du JDK embarqué :
+
+   ```kotlin
+   nativeDistributions {
+       trustedCertificates.from(files("certs/corp-ca.pem"))
+   }
+   ```
+
+   Voir [certificats de confiance](/docs/packaging/trusted-certificates).
+
+2. **Runtime** — utilise le trust store OS via `native-ssl` :
+
+   ```kotlin
+   implementation("dev.nucleusframework:nucleus.native-ssl:2.0.0")
+   implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
+   ```
+
+   Injecte `NativeHttpClient.create()` dans ton client HTTP (marche avec `java.net.http`, OkHttp, Ktor).
+
+## Auto-update échoue : "no matching file" sur macOS
+
+**Symptôme.** `UpdateResult.Failed(NoMatchingFileException)` sur macOS après un check.
+
+**Cause.** La release ne contient qu'un `.dmg`. L'auto-update macOS utilise le ZIP.
+
+**Fix.** Ajoute `TargetFormat.Zip` à côté de `TargetFormat.Dmg`. Les deux dans la même release ; `latest-mac.yml` référence les deux. Voir le callout dans [auto-update](/docs/packaging/auto-update).
+
+## GraalVM Native Image : ClassNotFound / NoSuchMethod au runtime
+
+**Symptôme.** L'app marche en JVM mais crash sous `native-image` avec des erreurs de réflexion ou méthodes manquantes.
+
+**Cause.** GraalVM est closed-world. Réflexion, ressources, proxies dynamiques doivent être enregistrés à l'avance.
+
+**Fix.** Le plugin Nucleus livre des Reachability Metadata GraalVM pour lui-même plus FileKit et d'autres libs courantes (voir [métadonnées automatiques](/docs/performance/graalvm/automatic-metadata)). Pour ton propre code :
+
+1. Lance avec `-agentlib:native-image-agent=config-output-dir=...` sur un workload représentatif.
+2. Commit le `reachability-metadata.json` généré à côté de `META-INF/native-image/...`.
+
+Pour les libs non supportées, voir [configuration GraalVM](/docs/performance/graalvm/configuration).
+
+## AppImage : cold start de 60 secondes
+
+**Symptôme.** L'app s'ouvre vite en dev mais prend une pleine minute packagée en AppImage.
+
+**Cause.** `compressionLevel = CompressionLevel.Maximum`. AppImage utilise squashfs ; la compression max déclenche du décodage FUSE à chaque lancement.
+
+**Fix.** Utilise `CompressionLevel.Normal` (défaut) en prod. `Maximum`, c'est de l'archivage.
+
+## Packaging DEB / RPM échoue : "Please specify project homepage"
+
+**Symptôme.** `packageDeb` ou `packageGraalvmDeb` échoue immédiatement.
+
+**Cause.** Contrairement à jpackage, electron-builder exige `homepage` pour DEB.
+
+**Fix.**
+
+```kotlin
+nativeDistributions {
+    homepage = "https://myapp.example.com"
+}
+```
+
+## Wayland sur NVIDIA : fenêtre noire, rendu cassé
+
+**Symptôme.** L'UI Compose rend incorrectement sous Wayland sur driver NVIDIA.
+
+**Cause.** L'historique GBM / EGLstream de NVIDIA avec Wayland est compliqué ; Compose Desktop sur AWT/JBR se bat avec.
+
+**Fix.** Passe au [backend Tao](/docs/tao) — `decorated-window-tao` rend via des surfaces Skia natives sur Wayland sans passer par AWT. Si tu dois rester sur AWT, exporte `WLR_NO_HARDWARE_CURSORS=1` ou tourne sous XWayland.
+
+## `Unresolved reference 'JewelDecoratedWindow'` après migration 2.0
+
+**Symptôme.** L'import est correct, l'IDE voit la fonction, mais la compilation échoue.
+
+**Cause.** En 2.0 le composable est une extension sur `NucleusApplicationScope`. Un wrapper composable écrit en 1.x ne propage pas le receiver.
+
+**Fix.** Rends ton wrapper extension aussi :
+
+```kotlin
+fun NucleusApplicationScope.MyOnboardingWindow(...) {
+    JewelDecoratedWindow(...) { /* contenu */ }
+}
+```
+
+Voir [migrer depuis 1.x → Étape 4](/docs/migrate/from-1.x#étape-4--remplace-window---par-decoratedwindow--).
+
+## `NoClassDefFoundError: DecoratedDialogKt` sur Tao
+
+**Symptôme.** Le dialogue crash sur Tao mais marche sur AWT.
+
+**Cause.** Tu appelles le `JewelDecoratedDialog` AWT-only (sans receiver) sous `NucleusBackend.Tao`.
+
+**Fix.** Bascule le composable hôte en extension sur `NucleusApplicationScope` pour que l'appel se résolve vers `NucleusApplicationScope.JewelDecoratedDialog`, qui dispatche par backend.
+
+## `Dependency resolution is looking for a library compatible with JVM runtime version 11`
+
+**Symptôme.** Gradle échoue sur l'artefact Jewel.
+
+**Cause.** Toolchain pas bumpée à 25.
+
+**Fix.**
+
+```kotlin
+kotlin { jvmToolchain(25) }
+```
+
+Voir [migrer depuis 1.x → Prérequis](/docs/migrate/from-1.x#prérequis).
+
+## La tâche de packaging Flatpak skippe silencieusement
+
+**Symptôme.** `packageFlatpak` rapporte "skipped" sans erreur.
+
+**Cause.** `flatpak-builder` ou le runtime `org.freedesktop.Platform//23.08` manque sur l'hôte de build.
+
+**Fix.**
+
+```bash
+sudo apt-get install -y flatpak flatpak-builder
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install -y flathub org.freedesktop.Platform//23.08
+flatpak install -y flathub org.freedesktop.Sdk//23.08
+```
+
+En CI, utilise `setup-nucleus` avec `flatpak: 'true'`.
+
+## Packaging Snap échoue avec `snapcraft: command not found`
+
+**Symptôme.** `packageSnap` échoue avant de produire quoi que ce soit.
+
+**Cause.** `snapd` / `snapcraft` manquent sur l'hôte de build.
+
+**Fix.**
+
+```bash
+sudo apt-get install -y snapd
+sudo snap install snapcraft --classic
+```
+
+Ou en CI, `setup-nucleus` avec `snap: 'true'`.
+
+## Besoin de plus ?
+
+Si tu tapes quelque chose qui n'est pas listé ici, regarde :
+
+- [Cluster packaging](/docs/packaging) pour les spécifiques par OS.
+- [Cluster performance](/docs/performance) pour les détails GraalVM et AOT.
+- Les [guides de migration](/docs/migrate/from-1.x) pour les erreurs de namespace/scope après upgrade.

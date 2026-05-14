@@ -1,0 +1,140 @@
+---
+title: Construire pour Windows
+description: NSIS, MSI, MSIX/AppX, Portable — sideload ou Microsoft Store.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les utilisateurs Windows reçoivent cinq installateurs depuis un seul DSL : NSIS (l'expérience installateur Windows classique), NSIS Web (stub téléchargeur), MSI pour le déploiement entreprise, MSIX/AppX pour le Microsoft Store et le sideload moderne, et un mode Portable qui n'a besoin d'aucun installateur.
+
+## TL;DR
+- `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable` — un ou les cinq.
+- AppX utilise le packaging MSIX ; avec le mode développeur activé, tu peux build et sideload en local.
+- Signature via certificat `.pfx` ou Azure Artifact Signing.
+- Bundle MSIX (amd64 + arm64) produit par l'action CI `build-windows-appxbundle`.
+
+## Installation
+Livré avec le plugin Gradle.
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Nsis,
+                TargetFormat.Msi,
+                TargetFormat.AppX,
+                TargetFormat.Portable,
+            )
+
+            windows {
+                iconFile.set(project.file("icons/app.ico"))
+                upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+                perUserInstall = true
+                menuGroup = "My Company"
+
+                signing {
+                    enabled = true
+                    certificateFile.set(file("certs/certificate.pfx"))
+                    certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+                    algorithm = SigningAlgorithm.Sha256
+                    timestampServer = "http://timestamp.digicert.com"
+                }
+            }
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+### NSIS — l'installateur du quotidien
+La plupart des apps desktop livrent du NSIS. Nucleus expose toute la surface NSIS d'electron-builder : one-click vs assisté, per-user vs per-machine, sélecteur de langue, bitmaps header/sidebar personnalisés, dialogue de licence, et un échappatoire `script` / `includeScript` pour des sources NSIS entièrement custom.
+
+```kotlin
+windows {
+    nsis {
+        oneClick = false
+        allowElevation = true
+        perMachine = true
+        allowToChangeInstallationDirectory = true
+        createDesktopShortcut = true
+        runAfterFinish = true
+
+        multiLanguageInstaller = true
+        installerLanguages = listOf("en_US", "fr_FR", "de_DE", "ja_JP")
+
+        installerHeader.set(project.file("packaging/header.bmp"))
+        installerSidebar.set(project.file("packaging/sidebar.bmp"))
+        license.set(project.file("LICENSE"))
+    }
+}
+```
+
+### MSI pour l'entreprise
+La cible MSI s'active avec `TargetFormat.Msi`. Fixe `upgradeUuid` à une valeur stable pour que Windows associe correctement les versions successives. Sans UUID stable, chaque nouvelle version ressemble à un produit séparé.
+
+### AppX / MSIX
+Les cibles AppX produisent un `.appx` (ou un `.msixbundle` via CI). Le Desktop Bridge tourne avec `runFullTrust` — donc **pas** sandboxé au sens Windows — mais déverrouille le Microsoft Store, les mises à jour modernes et la désinstallation propre.
+
+```kotlin
+windows {
+    appx {
+        // Identité sideload — n'importe quel CN qui matche ton cert de signature
+        identityName = "MyCompany.MyApp"
+        publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
+        publisherDisplayName = "My Company"
+        applicationId = "MyApp"
+
+        languages = listOf("en-US", "fr-FR")
+        backgroundColor = "#001F3F"
+        storeLogo.set(project.file("packaging/appx/StoreLogo.png"))
+        square44x44Logo.set(project.file("packaging/appx/Square44x44Logo.png"))
+        square150x150Logo.set(project.file("packaging/appx/Square150x150Logo.png"))
+        wide310x150Logo.set(project.file("packaging/appx/Wide310x150Logo.png"))
+
+        // Le Store exige MinVersion > 10.0.17134.0
+        minVersion = "10.0.17763.0"
+        maxVersionTested = "10.0.22621.0"
+    }
+}
+```
+
+<Callout type="warn" title="Mode développeur requis pour les builds AppX locaux">
+Les builds AppX locaux nécessitent le **mode développeur** Windows (Paramètres → Système → Pour les développeurs). Les runners Windows hébergés par GitHub l'ont déjà activé.
+</Callout>
+
+<Callout type="warn" title="Identité Microsoft Store">
+Pour soumettre au Microsoft Store, `identityName`, `publisher` et `publisherDisplayName` doivent correspondre aux valeurs que Partner Center a assignées à ta réservation — le Store rejette les écarts à l'upload. `publisher` est le `CN=<GUID>` délivré par Partner Center, pas le CN de ton certificat de signature local.
+</Callout>
+
+### Mode portable
+`TargetFormat.Portable` produit un exécutable unique qui se déploie dans un répertoire temporaire au lancement. Pas d'UI d'installation, pas d'admin, pas de registre — pratique pour la clé USB.
+
+### Associations de fichiers et deep links
+Déclarées au niveau top et propagées vers chaque format Windows :
+
+```kotlin
+nativeDistributions {
+    protocol("MyApp", "myapp")  // deep links myapp://…
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+    )
+}
+```
+
+Pour les overrides spécifiques Windows (icône de fichier custom), utilise la surcharge `windows.fileAssociation(...)`.
+
+## Référence
+
+Le bloc `windows { }` expose : `iconFile`, `packageName`, `console`, `dirChooser`, `perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion`, `exePackageVersion`, plus les sous-blocs `nsis { }`, `appx { }`, `signing { }`. Référence complète : [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- L'installateur MSI est construit par le wrapper WiX d'electron-builder ; pour de la personnalisation entreprise sérieuse (dialogues custom, registre au-delà des chemins d'installation), passe par NSIS.
+- `latest.yml` (métadonnées d'update Windows) est généré pour NSIS, MSI et Portable. AppX est géré par le Store, donc pas de YML.
+- `WindowsJumpListManager.setProcessAppId()` est appelé automatiquement par `nucleusApplication` sur Windows — le regroupement taskbar et les notifications AUMID-aware fonctionnent out of the box.

@@ -1,0 +1,77 @@
+---
+title: Architecture
+description: The four layers under your main() — Nucleus, Compose Multiplatform, Kotlin Multiplatform, and the JDK/GraalVM runtime — and how they pull their weight.
+---
+
+A Nucleus app is a stack of four well-understood layers. Each one does one job, and each one is replaceable from the layer above it.
+
+## TL;DR
+- **Your app** sits on Compose UI, view-models and pure Kotlin business logic.
+- **Nucleus 2.0** is the native desktop layer — 30+ runtime modules plus the Gradle plugin.
+- **Compose Multiplatform** is the GPU-accelerated UI runtime (Skia, reactive state, hot reload).
+- **Kotlin Multiplatform** lets you share modules with Android, iOS and web.
+- The whole thing runs on **JDK 17+, JBR or GraalVM Native Image** — pick the runtime you need.
+
+## The layers
+
+### Top — your application
+
+Compose UI, view-models, your business logic. Pure Kotlin. If you want to share with Android and iOS, this is the layer you put under a KMP `commonMain` source set.
+
+```kotlin
+// Pure Kotlin — works on every platform Compose targets.
+class CounterViewModel {
+    var count by mutableStateOf(0)
+        private set
+    fun increment() { count++ }
+}
+```
+
+### Native desktop layer — Nucleus 2.0
+
+30+ runtime modules, grouped by intent:
+
+- **OS integration** — Decorated Window (Tao backend), notifications, system tray, dock & launcher menus, dark-mode detector, global hotkeys, media control, system colour.
+- **Performance** — GraalVM Native Image, AOT cache (JDK 25+), energy manager, native HTTP / SSL.
+- **Distribution** — 16 packaging formats, code signing + notarization, auto-update, deep links, auto-launch, reusable CI actions.
+
+All optional. All Kotlin. Pulled in à la carte via Gradle dependencies — see [Modules](/docs/concepts/modules).
+
+The Gradle plugin (`dev.nucleusframework`) is the build-time half of this layer. It picks formats, wires GraalVM, injects reachability metadata, generates `nucleus-app.properties` so `core-runtime.NucleusApp` knows your app's identity, and orchestrates signing.
+
+### Foundation — Compose Multiplatform
+
+GPU-accelerated, type-safe, reactive UI. Not a port of mobile Compose with a stretched layout — a first-class desktop renderer on Skia, with hot reload, Compose Resources, and a unified pointer / keyboard event model.
+
+Nucleus does not replace Compose. It plugs into it: every `DecoratedWindow` is a Compose `@Composable`, every Nucleus module that touches UI (`isSystemInDarkMode()`, `systemAccentColor()`, `NativeMenuBar`, …) is a Composable too.
+
+### Foundation — Kotlin Multiplatform
+
+Shared modules, coroutines, `StateFlow`, `kotlinx.serialization`, Ktor. The same KMP stack you already use for Android and iOS. Nucleus runtime modules are JVM-only, but the layers above them stay multiplatform.
+
+### Runtime — JDK 17+, JetBrains Runtime, or GraalVM Native Image
+
+Three boots:
+
+- **OpenJDK 17+** — broadest compatibility. Works with the [JNI-backed decorated window](/docs/concepts/backends) on stock JDKs.
+- **JetBrains Runtime (JBR)** — same shape as OpenJDK with extra custom-decoration APIs. The default for the AWT-based `DecoratedWindow`.
+- **GraalVM Native Image** — closed-world AOT compile. Self-contained binary, ~50 ms cold start, no JRE bundled.
+
+The DSL switch is one line — see [Runtimes](/docs/concepts/runtimes).
+
+## How a frame happens
+
+When the user clicks a button:
+
+1. The OS (or the [Tao](/docs/tao) Rust layer) emits an event.
+2. The backend module ([`decorated-window-tao`](/docs/concepts/backends) or one of the AWT variants) translates it to a Compose `PointerEvent`.
+3. Compose recomposes, asks Skia to draw the affected layers, and hands the GPU surface back to the backend.
+4. The backend swaps buffers via the OS compositor (Wayland, DWM, Quartz).
+
+Your code stays in Kotlin the whole way down.
+
+## Where to go next
+
+- [Runtimes](/docs/concepts/runtimes) — picking GraalVM Native Image vs JVM + AOT cache.
+- [Backends](/docs/concepts/backends) — AWT vs Tao under your `DecoratedWindow`.
+- [Modules](/docs/concepts/modules) — how the 30+ runtime modules compose.

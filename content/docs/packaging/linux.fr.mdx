@@ -1,0 +1,144 @@
+---
+title: Construire pour Linux
+description: DEB, RPM, AppImage, Snap, Flatpak — un build, toutes les distros.
+---
+
+Linux est la cible desktop la plus fragmentée. Gestionnaires de paquets différents, sandboxes différents, conventions différentes par distro. Nucleus produit chaque format depuis le même bloc `linux { … }` — y compris les deux formats store (Snap, Flatpak) qui apportent leur propre sandbox.
+
+## TL;DR
+- `Deb`, `Rpm`, `AppImage` pour la distribution traditionnelle.
+- `Snap`, `Flatpak` pour les canaux store (Snapcraft, Flathub), chacun avec son modèle de sandbox.
+- Les entrées `MimeType` du `.desktop` généré sont dérivées automatiquement de `protocol(...)` et `fileAssociation(...)`.
+- `homepage` est **obligatoire** pour DEB / RPM (contrainte d'electron-builder).
+
+## Installation
+Livré avec le plugin Gradle.
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Deb,
+                TargetFormat.Rpm,
+                TargetFormat.AppImage,
+                TargetFormat.Snap,
+                TargetFormat.Flatpak,
+            )
+            homepage = "https://myapp.example.com" // requis pour DEB / RPM
+
+            linux {
+                iconFile.set(project.file("icons/app.png"))
+                shortcut = true
+                packageName = "myapp"
+                appCategory = "Utility"
+                menuGroup = "Development"
+
+                debMaintainer = "Your Name <dev@example.com>"
+                debDepends = listOf("libfuse2", "libgtk-3-0", "libasound2")
+
+                rpmLicenseType = "MIT"
+                rpmRequires = listOf("gtk3", "libX11", "alsa-lib")
+            }
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+### DEB et RPM — le duo classique
+`packageDeb` invoque `dpkg-deb` ; `packageRpm` invoque `rpmbuild` (hôte Linux requis). Le plugin génère une entrée `.desktop` propre avec les bonnes lignes `Categories=`, `MimeType=`, `StartupWMClass=` et `Exec=`. Fixe `startupWMClass` explicitement si la classe principale de ton app Compose ne correspond pas à ce que voit le window manager.
+
+```kotlin
+linux {
+    startupWMClass = "com-example-MyApp"
+}
+```
+
+### AppImage
+Un exécutable portable unique qui tourne sur la plupart des distros sans installation. Le niveau de compression domine le coût de démarrage :
+
+| Niveau | Démarrage | À utiliser |
+|--------|-----------|------------|
+| `Store` | Le plus rapide | Tests |
+| `Normal` (défaut) | Bon | **Production** |
+| `Maximum` | 60s+ | Non |
+
+```kotlin
+linux {
+    appImage {
+        category = AppImageCategory.Utility
+        genericName = "My Application"
+        synopsis = "Une description courte"
+        desktopEntries = mapOf("Keywords" to "editor;text;")
+    }
+}
+```
+
+AppImage a besoin de `libfuse2` sur l'hôte : `sudo apt-get install -y libfuse2`.
+
+### Snap
+Pour le [Snap Store](https://snapcraft.io/). Les `plugs` par défaut couvrent l'intégration desktop, l'audio, le réseau, OpenGL. Override `confinement` si ton app a besoin d'accès filesystem au-delà de `home` :
+
+```kotlin
+linux {
+    snap {
+        confinement = SnapConfinement.Strict
+        grade = SnapGrade.Stable
+        base = "core22"
+        plugs = listOf(
+            SnapPlug.Desktop, SnapPlug.Home, SnapPlug.Wayland,
+            SnapPlug.Network, SnapPlug.AudioPlayback,
+        )
+        compression = SnapCompression.Xz
+    }
+}
+```
+
+L'hôte de build a besoin de `snapd` et `snapcraft --classic`.
+
+### Flatpak
+Sandboxé par défaut — déclare les permissions via `finishArgs` :
+
+```kotlin
+linux {
+    flatpak {
+        runtime = "org.freedesktop.Platform"
+        runtimeVersion = "23.08"
+        sdk = "org.freedesktop.Sdk"
+
+        finishArgs = listOf(
+            "--share=ipc",
+            "--socket=wayland",
+            "--socket=pulseaudio",
+            "--device=dri",
+            "--filesystem=home",
+            "--share=network",
+        )
+    }
+}
+```
+
+Flatpak déclenche le [pipeline sandboxé](/docs/packaging/sandboxing) — les libs natives sont pré-extraites et les args JVM redirigés. Si `flatpak-builder` ou le runtime n'est pas installé, la tâche est ignorée proprement.
+
+### Deep links et MIME sur Linux
+Les `protocol(...)` et `fileAssociation(...)` top-level sont fusionnés automatiquement dans le `.desktop` en tant qu'entrées `MimeType=` :
+
+```ini
+MimeType=x-scheme-handler/myapp;application/x-myapp;
+```
+
+Aucun override `desktopEntries` manuel nécessaire.
+
+## Référence
+
+`linux { }` expose : `iconFile`, `shortcut`, `packageName`, `packageVersion`, `startupWMClass`, `appRelease`, `appCategory`, `debMaintainer`, `menuGroup`, `rpmLicenseType`, `debPackageVersion`, `rpmPackageVersion`, `debDepends`, `rpmRequires`. Sous-blocs : `appImage { }`, `snap { }`, `flatpak { }`. Référence complète : [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- Le HiDPI sur Linux est détecté et appliqué via le [module `linux-hidpi`](/docs/performance/linux-hidpi). Requis pour un rendu net en scaling fractionnaire sous Wayland.
+- Snap et Flatpak ignorent les chemins d'installation `.desktop` classiques — ils déposent leurs propres fichiers desktop dans l'environnement utilisateur.
+- `appRelease` incrémente le numéro de release du paquet (le chiffre après le `-` dans les versions DEB/RPM). Bump-le quand tu rééditeras sans changer `packageVersion`.

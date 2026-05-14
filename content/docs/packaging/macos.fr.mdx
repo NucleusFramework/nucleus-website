@@ -1,0 +1,128 @@
+---
+title: Construire pour macOS
+description: DMG, PKG (Mac App Store), binaires universels, notarisation, Liquid Glass.
+---
+
+macOS exige plus d'un installateur que n'importe quel autre OS : signature, notarisation, App Sandbox pour le Store, icônes en couches, hardened runtime, et désormais Liquid Glass au SDK 26. Nucleus pilote tout ça depuis le bloc `macOS { … }`.
+
+## TL;DR
+- Deux formats : `Dmg` (distribution directe) et `Pkg` (Mac App Store, sandboxé).
+- Liquid Glass est activé par défaut — le `LC_BUILD_VERSION` du launcher Mach-O est patché au SDK 26 via `vtool`.
+- Binaires universels via l'action CI `build-macos-universal` — `lipo` fusionne arm64 et x64 puis re-signe de l'intérieur vers l'extérieur.
+- `entitlementsFile`, `provisioningProfile` et hooks `infoPlist` sont des citoyens de première classe du DSL.
+
+## Installation
+Livré avec le plugin Gradle.
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Zip)
+
+            macOS {
+                bundleID = "com.example.myapp"
+                dockName = "MyApp"
+                appCategory = "public.app-category.utilities"
+                minimumSystemVersion = "12.0"
+
+                iconFile.set(project.file("icons/app.icns"))
+                layeredIconDir.set(project.file("icons/MyApp.icon")) // macOS 26+
+
+                signing {
+                    sign.set(true)
+                    identity.set("Developer ID Application: My Company (TEAMID)")
+                }
+                notarization {
+                    appleID.set("dev@example.com")
+                    password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+                    teamID.set("TEAMID")
+                }
+            }
+        }
+    }
+}
+```
+
+`./gradlew packageDmg` lance la notarisation automatiquement quand un bloc `notarization { }` est configuré.
+
+## Comment ça marche
+
+### DMG et PKG, deux pipelines
+`Dmg` utilise le flux `createDistributable` standard — non-sandboxé, signé avec **Developer ID Application**, notarisé via `xcrun notarytool`, staplé sur place. `Pkg` est toujours traité comme une cible Mac App Store : un `.app` sandboxé séparé est construit, signé avec **3rd Party Mac Developer Application**, provisioning profile intégré, puis le `.pkg` final produit via `productbuild` + **3rd Party Mac Developer Installer**. Aucun flag `appStore` — Nucleus le déduit.
+
+### Liquid Glass sans JDK compilé avec Xcode 26
+macOS 26 active Liquid Glass uniquement quand le `LC_BUILD_VERSION` du binaire indique SDK 26.0. Le plugin Nucleus patche cet en-tête sur le launcher Mach-O via `vtool` avant la signature, donc n'importe quel JDK fonctionne — tu n'as pas besoin d'un JDK compilé avec Xcode 26. La tâche `nucleusPatchMacJvm` cache une copie patchée du JVM dans `build/nucleus/patched-jvm/` pour que la tâche `run` garde le support debugger complet.
+
+```kotlin
+macOS {
+    macOsSdkVersion = "26.0"  // défaut ; passe null pour désactiver
+}
+```
+
+Les builds GraalVM native-image récupèrent la version du SDK depuis le linker système — sélectionne `Xcode 26` sur le runner CI à la place.
+
+### Apparence du DMG
+Le bloc `dmg { … }` expose la taille de fenêtre, la position des icônes, l'image de fond, et la flèche de glisser vers `/Applications` :
+
+```kotlin
+macOS {
+    dmg {
+        title = "\${productName} \${version}"
+        iconSize = 128
+        window { x = 400; y = 100; width = 540; height = 380 }
+        background.set(project.file("packaging/dmg-bg.png"))
+
+        content(x = 130, y = 220, type = DmgContentType.File, name = "MyApp.app")
+        content(x = 410, y = 220, type = DmgContentType.Link, path = "/Applications")
+    }
+}
+```
+
+### Sandbox Mac App Store
+PKG déclenche le [pipeline sandboxé](/docs/packaging/sandboxing) : libs natives extraites dans `Contents/Frameworks/`, args JVM redirigés vers ce chemin, chaque `.dylib` signé individuellement, entitlements App Sandbox appliquées.
+
+```kotlin
+macOS {
+    entitlementsFile.set(project.file("packaging/sandbox-entitlements.plist"))
+    runtimeEntitlementsFile.set(project.file("packaging/sandbox-runtime-entitlements.plist"))
+    provisioningProfile.set(project.file("packaging/MyApp.provisionprofile"))
+    runtimeProvisioningProfile.set(project.file("packaging/MyApp_Runtime.provisionprofile"))
+}
+```
+
+### Binaires universels
+Deux passes : build `arm64` et `x86_64` séparément, fusion avec `lipo`, puis re-signature inside-out (dylibs → executables → runtime → app bundle). L'action composite `build-macos-universal` le fait en CI — voir [CI/CD](/docs/packaging/ci-cd).
+
+### `infoPlist` et launch agents
+Ajoute du XML brut à `Info.plist` et déclare des launch agents :
+
+```kotlin
+macOS {
+    infoPlist {
+        extraKeysRawXml = """
+            <key>NSMicrophoneUsageDescription</key>
+            <string>Requis pour les notes vocales.</string>
+        """.trimIndent()
+    }
+    launchAgents {
+        agent("com.example.myapp.indexer") {
+            bundleProgram = "Contents/MacOS/indexer"
+            arguments = listOf("--background")
+            startInterval = 3600
+        }
+    }
+}
+```
+
+## Référence
+
+Le bloc `macOS { }` expose : `iconFile`, `layeredIconDir`, `bundleID`, `dockName`, `setDockNameSameAsPackageName`, `appCategory`, `minimumSystemVersion`, `installationPath` (défaut `/Applications`), `packageName`, `packageVersion`, `packageBuildVersion`, `dmgPackageVersion`, `pkgPackageVersion`, `entitlementsFile`, `runtimeEntitlementsFile`, `provisioningProfile`, `runtimeProvisioningProfile`, `macOsSdkVersion`, plus les sous-blocs `signing { }`, `notarization { }`, `dmg { }`, `launchAgents { }`, `infoPlist { }`. Référence complète dans la [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- Les icônes en couches nécessitent Xcode Command Line Tools 26+ (`actool`) et n'ont d'effet que sur les hôtes macOS. L'absence d'outil émet un warning et fait fallback sur le `.icns` classique.
+- La notarisation supporte trois modes d'authentification (Apple ID + mot de passe app-specific, profil keychain `notarytool`, clé API App Store Connect). Choisis-en un — en configurer plusieurs est rejeté à la validation. Voir [signature de code](/docs/packaging/code-signing).
+- `installationPath` ne s'applique qu'au PKG et à la cible de la flèche drag-to-Applications du DMG.

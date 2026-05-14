@@ -1,0 +1,105 @@
+---
+title: DSL menu du tray
+description: Construis le menu contextuel du tray comme un DSL Kotlin réactif à Compose — items, cases à cocher, sous-menus, séparateurs, contenu conditionnel.
+---
+
+Le menu du tray est un DSL Kotlin dans la lambda de `Tray()`. Il participe à la recomposition Compose : modifie un `mutableStateOf` et labels, cases, icônes, branches entières apparaissent ou disparaissent — nativement.
+
+## En bref
+- `Item`, `CheckableItem`, `SubMenu`, `Divider`.
+- Chaque type d'item accepte une icône (`ImageVector`, `Painter`, `DrawableResource` ou `@Composable`).
+- Les branches `if (…)` sont first-class — le menu, c'est du code.
+
+## Items
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Ouvrir les réglages") { openSettings() }
+    Item(label = "Désactivé", isEnabled = false) {}
+    Item(label = "Exporter", icon = Icons.Default.Upload) { export() }
+}
+```
+
+## Cases à cocher
+
+Style de coche natif par plateforme :
+
+```kotlin
+var notifications by remember { mutableStateOf(true) }
+var darkMode by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    CheckableItem(label = "Notifications", checked = notifications) {
+        notifications = it
+    }
+    CheckableItem(label = "Mode sombre", icon = Icons.Default.DarkMode, checked = darkMode) {
+        darkMode = it
+    }
+}
+```
+
+## Sous-menus
+
+Imbrication illimitée :
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    SubMenu(label = "Outils", icon = Icons.Default.Build) {
+        Item(label = "Terminal") { openTerminal() }
+        Item(label = "Explorateur") { openFiles() }
+        SubMenu(label = "Plus") {
+            Item(label = "Calculatrice") { openCalc() }
+        }
+    }
+}
+```
+
+## Séparateurs
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Afficher la fenêtre") { show() }
+    Divider()
+    Item(label = "Réglages") { settings() }
+    Item(label = "À propos") { about() }
+    Divider()
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+## Menus réactifs
+
+Items conditionnels, labels dynamiques — code comme un arbre Compose normal :
+
+```kotlin
+var isConnected by remember { mutableStateOf(false) }
+var showAdvanced by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Wifi, tooltip = "Réseau") {
+    Item(label = if (isConnected) "Déconnecter" else "Connecter") {
+        isConnected = !isConnected
+    }
+
+    CheckableItem(label = "Options avancées", checked = showAdvanced) {
+        showAdvanced = it
+    }
+
+    if (showAdvanced) {
+        Divider()
+        SubMenu(label = "Avancé") {
+            Item(label = "Réglages DNS") {}
+            Item(label = "Proxy") {}
+        }
+    }
+
+    Divider()
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+Le menu natif se reconstruit tout seul quand l'état change. Pas d'appel `refresh()`, pas de diff à gérer.
+
+## Voir aussi
+
+- [System tray](/docs/os/system-tray) — types d'icônes, action primaire, icônes par plateforme.
+- [Tray apps](/docs/os/tray-app) — quand tu veux une popup à la place du menu (ou en plus).

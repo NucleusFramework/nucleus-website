@@ -1,0 +1,113 @@
+---
+title: Energy manager
+description: Efficacité énergétique process/thread + keep-awake — des apps desktop respectueuses de la batterie.
+---
+
+Deux usages opposés, un seul module. Quand la fenêtre est minimisée, déprioritise le process pour que l'OS l'envoie sur les E-cores, throttle son I/O, et arrête de planifier ses timers — l'app reste vivante mais le ventilo ne s'emballe pas. Quand l'utilisateur fait une présentation, empêche l'écran de s'éteindre. `energy-manager` expose les deux, cross-platform.
+
+## TL;DR
+- Mode efficacité (full ou light, process ou thread) : dis à l'OS que ton app peut prendre la deuxième place.
+- Screen-awake (caffeine) : empêche écran et veille système pour la durée d'une tâche.
+- Helpers suspend — `EnergyManager.withEfficiencyMode { }` et `withLightEfficiencyMode { }` pour un usage scopé dans des coroutines.
+- Cross-platform : Windows EcoQoS + `IDLE_PRIORITY_CLASS`, macOS `PRIO_DARWIN_BG` + QoS Tier 5, Linux `nice`/`ioprio`/`timerslack` + DBus inhibit.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.energy-manager:<version>")
+}
+```
+
+## Quickstart
+
+### Throttle à la perte de focus / au minimize
+
+```kotlin
+import dev.nucleusframework.energymanager.EnergyManager
+
+LaunchedEffect(state.isMinimized, isWindowFocused) {
+    when {
+        state.isMinimized -> {
+            EnergyManager.disableLightEfficiencyMode()
+            EnergyManager.enableEfficiencyMode()       // full — CPU + I/O throttlés
+        }
+        !isWindowFocused -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.enableLightEfficiencyMode()  // CPU seul — I/O normal
+        }
+        else -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.disableLightEfficiencyMode()
+        }
+    }
+}
+```
+
+### Bloc coroutine à priorité réduite
+
+```kotlin
+val result = EnergyManager.withEfficiencyMode {
+    computeHeavyReport()
+}
+
+EnergyManager.withLightEfficiencyMode {
+    syncDataFromServer()
+    writeToDatabase()
+}
+```
+
+### Garder l'écran allumé
+
+```kotlin
+EnergyManager.keepScreenAwake()
+// ... tâche longue / présentation
+EnergyManager.releaseScreenAwake()
+```
+
+## Comment ça marche
+
+### Deux niveaux d'efficacité
+
+| | Light | Full |
+|---|---|---|
+| Quand | Fenêtre sans focus — app utile en background | Fenêtre minimisée — économie maximale |
+| CPU | Déprioritisé via hints QoS | Plus basse priorité (idle class) |
+| I/O | Normal | Throttlé |
+| Réseau | Normal | Throttlé (macOS) |
+| Réversibilité | Instantanée | Instantanée |
+
+Couple-les à l'état de la fenêtre : light à la perte de focus, full au minimize. Le travail de fond qui a besoin du réseau (sync, downloads) reste à vitesse utilisable en light ; quand la fenêtre est minimisée il n'y a plus rien à rendre, donc full est OK.
+
+### Mécanique par OS
+
+| OS | Full | Light | Screen-awake |
+|---|---|---|---|
+| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (feuille verte dans Task Manager 22H2+) | EcoQoS uniquement | `SetThreadExecutionState(ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` |
+| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (E-cores, throttling I/O + réseau sur Apple Silicon) | `task_policy_set` Tier 5 — CPU déprio, I/O intact | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` |
+| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` | GNOME SessionManager DBus / logind `Inhibit("idle")` / X11 `XScreenSaverSuspend` (composite, dlopen runtime) |
+
+Le mode thread-level est par thread sur Linux (mêmes primitives), `pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` sur macOS, `SetThreadInformation`/`THREAD_PRIORITY_IDLE` sur Windows. Il confine un seul thread à la voie lente sans affecter le reste du process — idéal pour une coroutine lourde à côté d'une UI réactive.
+
+## Référence
+
+### `EnergyManager`
+
+| Méthode | |
+|---|---|
+| `isAvailable(): Boolean` | Bridge natif chargé. |
+| `enableEfficiencyMode()` / `disableEfficiencyMode()` | Mode process full. |
+| `enableLightEfficiencyMode()` / `disableLightEfficiencyMode()` | Mode process light. |
+| `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Par-thread ; n'affecte que l'appelant. |
+| `withEfficiencyMode { }` (suspend) | Bloc sur un thread dédié à priorité thread ; thread libéré au retour. |
+| `withLightEfficiencyMode { }` (suspend) | QoS light process-level pour la durée du bloc ; pas de thread pinning. |
+| `keepScreenAwake()` / `releaseScreenAwake()` | Inhibit style caffeine. |
+| `isScreenAwakeActive(): Boolean` | |
+
+Chaque `enable/disable` renvoie un `Result` avec `success`, `errorCode`, `message`.
+
+## Notes
+
+- Linux : `libdbus-1`, `libX11`, `libXss` sont chargées par `dlopen()` au runtime — les manquantes dégradent gracieusement (une connexion DBus privée évite de marcher sur le bus accessibility de la JVM).
+- Windows 10 1709+ : EcoQoS ne s'applique que sur batterie ("LowQoS") ; Windows 11+ le respecte aussi sur secteur.
+- Pour des tâches longues qui doivent aussi réveiller la machine, couple `keepScreenAwake()` avec le [scheduler](/docs/lifecycle/scheduler) au point d'entrée.

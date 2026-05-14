@@ -1,0 +1,102 @@
+---
+title: Cross-platform notifications
+description: Send a notification on macOS, Windows, and Linux from a single Kotlin DSL — title, message, image, action buttons, lifecycle callbacks.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Every desktop platform ships a different notification stack — UserNotifications on macOS, WinRT toasts on Windows, FreeDesktop D-Bus on Linux. `notification-common` collapses the intersection into one Kotlin DSL so the 80% case is a single dependency.
+
+## TL;DR
+- One DSL: `notification { … }.send()`.
+- Title, body, large image, small icon, up to five action buttons, lifecycle callbacks.
+- Routes to `notification-macos`, `notification-windows`, or `notification-linux` at runtime.
+- Drop down to the per-OS module when you want progress bars, scheduling, categories.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-common:<version>")
+}
+```
+
+This pulls in all three platform modules transitively; only the matching one is loaded at runtime.
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.notification.common.*
+
+NotificationManager.initialize()
+
+val n = notification {
+    title = "Download complete"
+    message = "report.pdf has been saved"
+    button("Open") { openFile() }
+    button("Show in folder") { showInFolder() }
+}
+
+n.send()
+```
+
+## How it works
+
+`NotificationManager` resolves the active platform at startup and delegates to the matching native bridge. The DSL captures the lowest common denominator: text, an image, up to five buttons, and lifecycle events (`onShown`, `onDismissed`, `onAction`). Anything richer — schedules, categories, hero images, progress bars — stays in the per-OS module.
+
+You can mix the two: send most notifications through the common API, and reach for `WindowsNotificationCenter` or `NotificationCenter` (macOS) when a specific notification needs the long tail.
+
+<Tabs items={["macOS", "Windows", "Linux"]}>
+<Tab value="macOS">
+
+Routes to [`notification-macos`](/docs/os/notification-macos). Requires user authorisation and a bundled, signed app (`./gradlew runDistributable`).
+
+</Tab>
+<Tab value="Windows">
+
+Routes to [`notification-windows`](/docs/os/notification-windows). The AUMID is derived from `NucleusApp.appId` for unpackaged apps; MSIX apps use their package identity.
+
+</Tab>
+<Tab value="Linux">
+
+Routes to [`notification-linux`](/docs/os/notification-linux) and uses `org.freedesktop.Notifications` over D-Bus. Works on GNOME, KDE, Cinnamon, anything that ships a notification daemon.
+
+</Tab>
+</Tabs>
+
+## Reference
+
+### Build a notification
+
+```kotlin
+val n = notification {
+    title = "New message from Alice"
+    message = "Have you seen the latest build?"
+    button("Reply") { /* … */ }
+    button("Mute") { /* … */ }
+    onShown { id -> log.info("shown: $id") }
+    onDismissed { reason -> log.info("dismissed: $reason") }
+}
+```
+
+### Send
+
+```kotlin
+when (val result = n.send()) {
+    is NotificationResult.Shown -> /* delivered */
+    is NotificationResult.Failed -> log.warn(result.toString())
+}
+```
+
+### Capability check
+
+```kotlin
+if (!NotificationManager.isAvailable()) {
+    // The current OS / sandbox does not allow notifications.
+}
+```
+
+## Notes
+- For richer per-OS APIs see [macOS](/docs/os/notification-macos), [Windows](/docs/os/notification-windows), [Linux](/docs/os/notification-linux).
+- macOS will silently drop notifications from un-bundled apps — always run the packaged binary during integration testing.

@@ -1,0 +1,94 @@
+---
+title: Pen & stylus input
+description: Pressure, tilt and source on Wacom tablets, Surface Pen and Apple Pencil sidecar — same Compose API on every OS.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Drawing apps need more than (x, y). The Tao backend forwards pressure, tilt and pointer source — Wacom, Surface Pen, Apple Pencil over Sidecar — into Compose pointer events. Same API on every OS.
+
+## TL;DR
+- `PointerInputChange.type == PointerType.Stylus` identifies pen input.
+- `PointerInputChange.pressure` is normalised to `[0f, 1f]`.
+- Tilt and rotation arrive via `PointerInputChange.orientation` when the device supports it.
+- Wacom (USB/Bluetooth), Microsoft Surface Pen and Apple Pencil via macOS Sidecar all surface through the same event stream.
+- `PointerType.Eraser` reports the eraser end of supported pens.
+
+## Install
+
+Bundled with `decorated-window-tao`.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun InkSurface() {
+    val strokes = remember { mutableStateListOf<Triple<Offset, Offset, Float>>() }
+    var last: Offset? by remember { mutableStateOf(null) }
+
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val c = event.changes.first()
+                        if (c.type != PointerType.Stylus) { last = null; continue }
+                        val start = last ?: c.position
+                        strokes += Triple(start, c.position, c.pressure)
+                        last = if (c.pressed) c.position else null
+                        c.consume()
+                    }
+                }
+            }
+    ) {
+        strokes.forEach { (a, b, p) ->
+            drawLine(Color.Black, a, b, strokeWidth = (1f + p * 6f))
+        }
+    }
+}
+```
+
+## How it works
+
+Tao taps each OS's native pen API: `NSEvent.pressure` and `tangentialPressure` on macOS, `WM_POINTER` with `POINTER_PEN_INFO` on Windows, and the `wp_tablet_v2` Wayland protocol on Linux. The Rust JNI bridge normalises pressure to `[0f, 1f]`, sets `PointerType.Stylus` (or `PointerType.Eraser`) on the change, and dispatches through Compose's input pipeline.
+
+Tilt and orientation come through `PointerInputChange.orientation` when the device exposes them. Wacom Intuos and Surface Pro pens report both; entry-level tablets often report pressure only.
+
+Apple Pencil reaches Compose two ways: when the host is a macOS Mac with Sidecar, pen events arrive from the iPad as `PointerType.Stylus` with pressure. When the host is iOS proper, you'd run on a different Compose target — Tao is desktop-only.
+
+## Reference
+
+### Stylus-aware event reading
+
+```kotlin
+val change = event.changes.first()
+val source: PointerType = change.type          // Stylus | Eraser | Touch | Mouse
+val pressure: Float = change.pressure          // 0f if unsupported
+val tilt = change.orientation                  // optional, device-dependent
+```
+
+### Supported devices (verified)
+
+| Device                          | Pressure | Tilt | Notes                              |
+|---------------------------------|----------|------|------------------------------------|
+| Wacom Intuos / Cintiq           | Yes      | Yes  | USB and Bluetooth.                 |
+| Microsoft Surface Pen           | Yes      | Yes  | Windows Ink; surface-style hover.  |
+| Apple Pencil via Sidecar (macOS)| Yes      | Yes  | Mac must be a Sidecar host.        |
+| XP-Pen / Huion (driver-mode)    | Yes      | Varies | Depends on vendor driver.        |
+
+<Callout type="warn">
+Linux pen support requires Wayland and a compositor that implements `wp_tablet_v2` (GNOME 45+, KDE Plasma 5.27+). On X11, pen events arrive as plain mouse moves — no pressure. See [Wayland](/docs/tao/wayland).
+</Callout>

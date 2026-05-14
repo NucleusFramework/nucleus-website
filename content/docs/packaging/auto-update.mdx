@@ -1,0 +1,139 @@
+---
+title: Auto-update
+description: Check, download, verify, install — without a third-party service.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Auto-update is one of the few things Electron got right and the JVM ecosystem largely skipped. Nucleus closes that gap with a build-time half (`latest-*.yml` metadata generated alongside installers) and a runtime half (`updater-runtime`) — wire-compatible with electron-builder's update format, so any tooling that already speaks it works.
+
+## TL;DR
+- Build-time: `latest-mac.yml`, `latest.yml`, `latest-linux.yml` produced next to installers.
+- Runtime: `NucleusUpdater` checks, downloads with progress, verifies SHA-512, installs and relaunches.
+- Providers: GitHub Releases, S3 (via publish config), or any generic HTTP host.
+- Three channels (`latest`, `beta`, `alpha`) detected from the version tag.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.updater-runtime:2.0.0")
+    // Optional but recommended on enterprise networks:
+    implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.updater.NucleusUpdater
+import dev.nucleusframework.updater.UpdateResult
+import dev.nucleusframework.updater.provider.GitHubProvider
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+}
+
+when (val result = updater.checkForUpdates()) {
+    is UpdateResult.UpdateAvailable -> {
+        updater.downloadUpdate(result.info).collect { progress ->
+            println("\${progress.percent.toInt()}%")
+        }
+        // installAndRestart launches the installer, exits, relaunches
+        updater.installAndRestart(downloadedFile)
+    }
+    UpdateResult.NoUpdate -> println("Up to date")
+    is UpdateResult.Failed -> println("Error: \${result.reason}")
+}
+```
+
+## How it works
+
+### What can auto-update
+| Platform | Updatable | Store-managed (no updater needed) |
+|----------|-----------|-----------------------------------|
+| macOS | DMG, ZIP | PKG |
+| Windows | NSIS, NSIS Web, MSI | AppX/MSIX |
+| Linux | DEB, RPM, AppImage | Snap, Flatpak |
+
+<Callout type="warn" title="macOS needs ZIP alongside DMG">
+The updater replaces the `.app` silently using the ZIP. DMG is for the first install. Add `TargetFormat.Zip` next to `TargetFormat.Dmg` — both go in the same release; `latest-mac.yml` references both.
+</Callout>
+
+### YAML metadata
+The plugin writes one YAML file per platform listing every installer with its SHA-512 and size. Multi-arch / multi-platform releases need a single YAML per platform that lists every architecture — CI merges them in the release job. Example `latest-mac.yml`:
+
+```yaml
+version: 1.2.3
+files:
+  - url: MyApp-1.2.3-macos-arm64.dmg
+    sha512: VkJl1gDqcBHYbYhMb0HRI...
+    size: 102400000
+  - url: MyApp-1.2.3-macos-arm64.zip
+    sha512: qJ8a5gFDCwv0R2rW6lM3k...
+    size: 98000000
+releaseDate: '2026-03-01T12:00:00.000Z'
+```
+
+### Channels
+The version tag drives the channel: `v1.0.0` → `latest`, `v1.0.0-beta.1` → `beta`, `v1.0.0-alpha.1` → `alpha`. Each gets its own `*-mac.yml` / `*.yml` / `*-linux.yml`. Users on `beta` see both `latest` and `beta`; users on `alpha` see all three.
+
+### Hosting
+Three options, configured in `nativeDistributions.publish { }` (see [publishing](/docs/packaging/publishing)):
+
+- **GitHub Releases** — simplest, the [release workflow](/docs/packaging/ci-cd#release) handles it end-to-end.
+- **S3** — set credentials via env vars, the plugin uploads alongside YML.
+- **Generic HTTP** — upload yourself to any static host; the updater fetches `<baseUrl>/latest-*.yml`.
+
+The `publish { … }` block only generates electron-builder config — it doesn't upload by itself. CI does the upload.
+
+### Runtime API
+`NucleusUpdater` exposes:
+
+- `suspend fun checkForUpdates(): UpdateResult` — returns `UpdateAvailable(info)`, `NoUpdate`, or `Failed(reason)`.
+- `fun downloadUpdate(info): Flow<DownloadProgress>` — emits progress; final emission has `file != null`.
+- `fun installAndRestart(file)` — launch installer, exit current process, relaunch after install.
+- `fun installAndQuit(file)` — silent install, no relaunch. Update applies next manual launch.
+- `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?` — post-update detection (previous version, new version, level).
+
+`UpdateLevel` tells you how big the jump is: `Major`, `Minor`, `Patch`, or `PreRelease`. Branch your UI: force a dialog for major bumps, silently install patches.
+
+### Installer commands per format
+| OS | Format | Command |
+|----|--------|---------|
+| Linux | DEB | `sudo dpkg -i <file>` |
+| Linux | RPM | `sudo rpm -U <file>` |
+| Linux | AppImage | Replace in place |
+| macOS | DMG/ZIP | `open <file>` / extract |
+| Windows | NSIS/EXE | `<file> /S` |
+| Windows | MSI | `msiexec /i <file> /passive` |
+
+### Enterprise networks
+If your users sit behind a corporate proxy with a private root CA, the default `java.net.http.HttpClient` will fail TLS handshakes. Inject a `NativeHttpClient` that reads the OS trust store:
+
+```kotlin
+import dev.nucleusframework.nativehttp.NativeHttpClient
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    httpClient = NativeHttpClient.create()
+}
+```
+
+See [`native-ssl`](/docs/performance/native-ssl) for the trust-manager details.
+
+### Post-update marker
+After `installAndRestart` or `installAndQuit`, the updater writes a marker file in the platform app data dir (resolved from `NucleusApp.appId`). On the next launch, `wasJustUpdated()` returns true and `consumeUpdateEvent()` yields an `UpdateEvent(previousVersion, newVersion, level)` you can use for a "What's new" banner.
+
+## Reference
+
+- `NucleusUpdater { … }` builder fields: `currentVersion`, `channel`, `provider`, `httpClient`, `allowDowngrade`, `allowPrerelease`, `executableType`, custom HTTP headers.
+- Providers: `GitHubProvider(owner, repo, token? = null)`, `GenericProvider(baseUrl)`.
+- Result types: `UpdateResult.UpdateAvailable(info)`, `UpdateResult.NoUpdate`, `UpdateResult.Failed(reason)`.
+- Exceptions: `NetworkException`, `ChecksumException`, `NoMatchingFileException`, `ParseException`.
+
+## Notes
+
+- SHA-512 checksums are verified after download; failed verification deletes the file and surfaces an error.
+- GitHub tokens are sent via `Authorization` header — never in URL params.
+- For Mac App Store, Microsoft Store, Snapcraft, Flathub: the store handles updates. Skip `updater-runtime` entirely.

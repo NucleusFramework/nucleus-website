@@ -1,0 +1,143 @@
+---
+title: Publication
+description: Diffuse sur GitHub Releases, S3 ou n'importe quel host HTTP — et sur les grands stores desktop.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Une fois tes installateurs signés, il faut un endroit où les poser et un public à atteindre. Nucleus branche trois backends de publication dans le même DSL Gradle — GitHub Releases, S3, HTTP générique — et les métadonnées produites alimentent l'[auto-updater](/docs/packaging/auto-update). Pour les canaux store, cette page rassemble ce qu'attend chacun : Mac App Store, Microsoft Store, Snapcraft, Flathub.
+
+## TL;DR
+- `publish { github / s3 / generic }` configure l'hébergement des installateurs + YAML d'update.
+- `PublishMode.Auto` publie depuis la CI, skip en local — défaut sain.
+- Trois canaux de release (`Latest`, `Beta`, `Alpha`) et trois types (`Release`, `Draft`, `Prerelease`).
+- Soumissions store : chaque écosystème a son portail (Partner Center, App Store Connect, Snapcraft.io, PR Flathub).
+
+## Installation
+Livré avec le plugin Gradle.
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            publish {
+                publishMode = PublishMode.Auto
+
+                github {
+                    enabled = true
+                    owner = "myorg"
+                    repo = "myapp"
+                    token = System.getenv("GITHUB_TOKEN")
+                    channel = ReleaseChannel.Latest
+                    releaseType = ReleaseType.Release
+                }
+            }
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+### GitHub Releases (recommandé)
+Une release ressemble à ça, avec les YAML d'auto-update à côté :
+
+```
+v1.0.0 (Release)
+├── MyApp-1.0.0-macos-arm64.dmg
+├── MyApp-1.0.0-macos-universal.dmg
+├── MyApp-1.0.0-windows-amd64.exe
+├── MyApp-1.0.0-windows.msixbundle
+├── MyApp-1.0.0-linux-amd64.deb
+├── MyApp-1.0.0-linux-amd64.AppImage
+├── latest-mac.yml
+├── latest.yml
+└── latest-linux.yml
+```
+
+Le `GITHUB_TOKEN` a besoin de `contents: write` — sur GitHub Actions, mets `permissions: contents: write` sur le job.
+
+### S3
+Pour de la distribution auto-hébergée avec un bucket adossé à un CDN :
+
+```kotlin
+publish {
+    s3 {
+        enabled = true
+        bucket = "my-updates-bucket"
+        region = "us-east-1"
+        path = "releases/myapp"
+        acl = "public-read"
+    }
+}
+```
+
+Définis `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` dans l'environnement.
+
+### HTTP générique
+N'importe quel host statique (Nginx, Caddy, Cloudflare R2, S3 public). Le plugin génère les métadonnées YAML configurées pour une URL de base ; tu upload toi-même.
+
+```kotlin
+publish {
+    generic {
+        enabled = true
+        url = "https://updates.example.com/releases/"
+        channel = ReleaseChannel.Latest
+        useMultipleRangeRequest = true
+    }
+}
+```
+
+### Canaux et types
+| Canal | YAML | Pattern de tag |
+|-------|------|----------------|
+| `ReleaseChannel.Latest` | `latest-*.yml` | `v1.0.0` |
+| `ReleaseChannel.Beta` | `beta-*.yml` | `v1.0.0-beta.1` |
+| `ReleaseChannel.Alpha` | `alpha-*.yml` | `v1.0.0-alpha.1` |
+
+| Type | Comportement |
+|------|--------------|
+| `ReleaseType.Release` | Public sur la page releases |
+| `ReleaseType.Draft` | Masqué jusqu'à publication manuelle |
+| `ReleaseType.Prerelease` | Marqué pre-release |
+
+### Modes de publication
+- `PublishMode.Never` — build seulement.
+- `PublishMode.Auto` — publie en CI, skip en local.
+- `PublishMode.Always` — publie toujours.
+
+<Callout type="info" title="`publish { }` ne génère que de la config">
+Le bloc écrit les paramètres publisher d'electron-builder. L'upload réel est fait par le workflow CI (`gh release create` pour GitHub, `aws s3 cp` pour S3, ta propre copie pour générique). La [CI de release](/docs/packaging/ci-cd#release) câble le chemin standard.
+</Callout>
+
+### Soumissions store
+
+**Mac App Store** — soumets le PKG via Transporter ou `xcrun altool`. Les provisioning profiles ([sandboxing](/docs/packaging/sandboxing)) et la catégorie App Store (`appCategory`) sont cuits au build. Apple review ; pas de notarisation pour les builds App Store.
+
+**Microsoft Store** — upload le `.msixbundle` sur [Partner Center](https://partner.microsoft.com/). L'identité doit matcher la réservation (`identityName`, `publisher = CN=<GUID>`, `publisherDisplayName`) — voir [cibles Windows](/docs/packaging/windows#appx-msix). `MinVersion` doit être > `10.0.17134.0`.
+
+**Snapcraft** — `snapcraft upload` depuis la CI. Le Snap Store accepte les confinements `strict` et `classic` ; `classic` exige une approbation. Voir `linux.snap { grade = SnapGrade.Stable }`.
+
+**Flathub** — soumets une PR de manifest au [repo Flathub](https://github.com/flathub/flathub). Le bloc `flatpak` de ton build produit déjà le bon bundle `.flatpak` ; Flathub build à partir des sources via ton manifest.
+
+**GitHub Releases / téléchargement direct** — le défaut. Combine avec l'[auto-update](/docs/packaging/auto-update) pour les apps auto-distribuées.
+
+## Référence
+
+- `publish { publishMode = … }`
+- `publish.github { enabled, owner, repo, token, channel, releaseType }`
+- `publish.s3 { enabled, bucket, region, path, acl }`
+- `publish.generic { enabled, url, channel, useMultipleRangeRequest }`
+- `enum class PublishMode { Never, Auto, Always }`
+- `enum class ReleaseChannel { Latest, Beta, Alpha }`
+- `enum class ReleaseType { Release, Draft, Prerelease }`
+
+Référence complète : [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- Astuce : encode les certs de signature en base64, stocke-les en secrets CI, décode au build. Voir [signature de code](/docs/packaging/code-signing) pour les playbooks macOS et Windows.
+- Le provider générique supporte `useMultipleRangeRequest` pour des downloads différentiels — utile uniquement si ton serveur HTTP honore les requêtes `Range`.
+- Pour les pré-releases 2.x, la convention est de cut des tags depuis la branche `nucleus-2.0` avec les patterns `v2.x.y-alpha-*`, `-beta-*` ou `-rc-*`. La CI valide que le tag pointe sur un commit de cette branche.

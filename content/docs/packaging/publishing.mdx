@@ -1,0 +1,143 @@
+---
+title: Publishing
+description: Ship to GitHub Releases, S3, or any HTTP host — and to every major desktop store.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Once your installers are signed, you need somewhere to put them and an audience to reach. Nucleus wires three publishing backends into the same Gradle DSL — GitHub Releases, S3, and generic HTTP — and the resulting metadata feeds the [auto-updater](/docs/packaging/auto-update). For store channels, this page collects what each store wants: Mac App Store, Microsoft Store, Snapcraft, Flathub.
+
+## TL;DR
+- `publish { github / s3 / generic }` configures hosting for installers + update YAML.
+- `PublishMode.Auto` publishes from CI, skips locally — sane default.
+- Three release channels (`Latest`, `Beta`, `Alpha`) and three release types (`Release`, `Draft`, `Prerelease`).
+- Store submissions: each ecosystem has its own portal (Partner Center, App Store Connect, Snapcraft.io, Flathub PRs).
+
+## Install
+Comes with the Gradle plugin.
+
+## Quickstart
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            publish {
+                publishMode = PublishMode.Auto
+
+                github {
+                    enabled = true
+                    owner = "myorg"
+                    repo = "myapp"
+                    token = System.getenv("GITHUB_TOKEN")
+                    channel = ReleaseChannel.Latest
+                    releaseType = ReleaseType.Release
+                }
+            }
+        }
+    }
+}
+```
+
+## How it works
+
+### GitHub Releases (recommended)
+A release ends up looking like this, with auto-update YAMLs alongside the installers:
+
+```
+v1.0.0 (Release)
+├── MyApp-1.0.0-macos-arm64.dmg
+├── MyApp-1.0.0-macos-universal.dmg
+├── MyApp-1.0.0-windows-amd64.exe
+├── MyApp-1.0.0-windows.msixbundle
+├── MyApp-1.0.0-linux-amd64.deb
+├── MyApp-1.0.0-linux-amd64.AppImage
+├── latest-mac.yml
+├── latest.yml
+└── latest-linux.yml
+```
+
+The `GITHUB_TOKEN` needs `contents: write` — in GitHub Actions, set `permissions: contents: write` on the job.
+
+### S3
+For self-hosted distribution with a CDN-backed bucket:
+
+```kotlin
+publish {
+    s3 {
+        enabled = true
+        bucket = "my-updates-bucket"
+        region = "us-east-1"
+        path = "releases/myapp"
+        acl = "public-read"
+    }
+}
+```
+
+Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` in the environment.
+
+### Generic HTTP
+Any static host (Nginx, Caddy, Cloudflare R2, S3 with public access). The plugin generates YAML metadata configured for a base URL; you upload yourself.
+
+```kotlin
+publish {
+    generic {
+        enabled = true
+        url = "https://updates.example.com/releases/"
+        channel = ReleaseChannel.Latest
+        useMultipleRangeRequest = true
+    }
+}
+```
+
+### Channels and types
+| Channel | YAML | Tag pattern |
+|---------|------|-------------|
+| `ReleaseChannel.Latest` | `latest-*.yml` | `v1.0.0` |
+| `ReleaseChannel.Beta` | `beta-*.yml` | `v1.0.0-beta.1` |
+| `ReleaseChannel.Alpha` | `alpha-*.yml` | `v1.0.0-alpha.1` |
+
+| Type | Behavior |
+|------|----------|
+| `ReleaseType.Release` | Public on the releases page |
+| `ReleaseType.Draft` | Hidden until manually published |
+| `ReleaseType.Prerelease` | Marked pre-release |
+
+### Publish modes
+- `PublishMode.Never` — build only.
+- `PublishMode.Auto` — publish if on CI, skip locally.
+- `PublishMode.Always` — always publish.
+
+<Callout type="info" title="`publish { }` only generates config">
+The block writes electron-builder publisher settings. The actual upload is performed by the CI workflow (`gh release create` for GitHub, `aws s3 cp` for S3, your own copy for generic). The [release CI](/docs/packaging/ci-cd#release) wires the standard path.
+</Callout>
+
+### Store submissions
+
+**Mac App Store** — submit the PKG via Transporter or `xcrun altool`. Provisioning profiles ([sandboxing](/docs/packaging/sandboxing)) and the App Store category (`appCategory`) are baked in at build time. Apple reviews; no notarization is needed for App Store builds.
+
+**Microsoft Store** — upload the `.msixbundle` to [Partner Center](https://partner.microsoft.com/). Identity must match the reservation (`identityName`, `publisher = CN=<GUID>`, `publisherDisplayName`) — see [Windows targets](/docs/packaging/windows#appx-msix). `MinVersion` must be > `10.0.17134.0`.
+
+**Snapcraft** — `snapcraft upload` from CI. The Snap Store accepts `strict` and `classic` confinement; `classic` requires approval. See `linux.snap { grade = SnapGrade.Stable }`.
+
+**Flathub** — submit a manifest PR to the [Flathub repo](https://github.com/flathub/flathub). Your build's `flatpak` block already produces the right `.flatpak` bundle; Flathub builds from source via your manifest.
+
+**GitHub Releases / direct download** — the default. Pair with [auto-update](/docs/packaging/auto-update) for self-distributed apps.
+
+## Reference
+
+- `publish { publishMode = … }`
+- `publish.github { enabled, owner, repo, token, channel, releaseType }`
+- `publish.s3 { enabled, bucket, region, path, acl }`
+- `publish.generic { enabled, url, channel, useMultipleRangeRequest }`
+- `enum class PublishMode { Never, Auto, Always }`
+- `enum class ReleaseChannel { Latest, Beta, Alpha }`
+- `enum class ReleaseType { Release, Draft, Prerelease }`
+
+Full reference: [Gradle DSL reference](/docs/reference/gradle-dsl).
+
+## Notes
+
+- Tip: base64-encode signing certs and store them as CI secrets, decode at build time. See [code signing](/docs/packaging/code-signing) for the macOS and Windows playbooks.
+- The generic provider supports `useMultipleRangeRequest` for differential downloads — only useful if your HTTP server honors `Range` requests.
+- For 2.x prereleases, the convention is to cut tags from the `nucleus-2.0` branch with `v2.x.y-alpha-*`, `-beta-*`, or `-rc-*` patterns. CI validates the tag points to a commit on that branch.

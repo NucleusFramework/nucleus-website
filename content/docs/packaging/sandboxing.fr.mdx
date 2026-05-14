@@ -1,0 +1,141 @@
+---
+title: Sandboxing
+description: Un build à double pipeline qui satisfait App Sandbox, Flatpak et MSIX en une seule invocation Gradle.
+---
+
+Trois formats store nécessitent un build sandboxé : PKG (macOS App Sandbox), Flatpak (Linux), et dans une moindre mesure AppX (Windows MSIX, full-trust mais avec contraintes de packaging). Les apps sandboxées ne peuvent ni extraire des libs natives au runtime ni charger dynamiquement du code arbitraire. Nucleus détecte la présence de formats store et lance un pipeline parallèle qui pré-extrait les libs JNI, redirige les args JVM, signe chaque binaire natif et applique les bonnes entitlements — sans rien faire de plus.
+
+## TL;DR
+- Les formats store déclenchent un second pipeline en parallèle — même invocation `packageDistributionForCurrentOS`.
+- Les libs JNI sont extraites des JARs dans `Contents/Frameworks/` (macOS) ou `resources/` (Win/Linux) et signées.
+- Les args JVM sont injectés pour que `java.library.path` pointe sur le répertoire d'extraction signé.
+- Des entitlements par défaut sont livrées pour les builds sandboxés et non-sandboxés ; override via `entitlementsFile`.
+
+## Installation
+Livré avec le plugin Gradle — auto-activé quand un format store est dans `targetFormats`.
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                // Direct — pipeline non-sandboxé
+                TargetFormat.Dmg,
+                TargetFormat.Nsis,
+                TargetFormat.Deb,
+                // Store — pipeline sandboxé
+                TargetFormat.Pkg,
+                TargetFormat.AppX,
+                TargetFormat.Flatpak,
+            )
+        }
+    }
+}
+```
+
+`./gradlew packageDistributionForCurrentOS` lance les deux pipelines de façon transparente.
+
+## Comment ça marche
+
+| Format | OS | Modèle de sandbox |
+|--------|----|-------------------|
+| PKG | macOS | [App Sandbox](https://developer.apple.com/documentation/security/app-sandbox) |
+| AppX | Windows | MSIX (full trust — pas sandboxé, mais contraint en packaging) |
+| Flatpak | Linux | [Flatpak sandbox](https://docs.flatpak.org/en/latest/sandbox-permissions.html) |
+
+Quand au moins un format store est configuré, Nucleus enregistre des tâches Gradle supplémentaires :
+
+1. **`extractNativeLibsForSandboxing`** — scanne les JARs pour `.dylib`, `.jnilib`, `.so`, `.dll` et les extrait. macOS : dans `Contents/Frameworks/`. Win/Linux : dans `resources/`.
+2. **`stripNativeLibsFromJars`** — réécrit les JARs sans les entrées natives, évite la duplication.
+3. **`prepareSandboxedAppResources`** — fusionne tes `appResources` avec les libs extraites.
+4. **Injection d'args JVM** — redirige `java.library.path`, `jna.library.path`, `jna.boot.library.path` vers le répertoire signé. JNA reçoit aussi `nounpack=true`, `nosys=true`.
+5. **Signature `.dylib` (macOS)** — chaque binaire natif dans `Contents/Frameworks/` est `codesign`-é individuellement.
+6. **Rewiring Skiko et `icudtl.dat`** — ajustés pour pointer sur le même répertoire Frameworks/resources.
+
+Le pipeline original continue de tourner pour les formats non-store — DMG, NSIS, DEB sont construits sans changement.
+
+### Entitlements App Sandbox macOS
+Les valeurs par défaut sont livrées avec le plugin :
+
+**Non-sandboxé** (DMG, ZIP) :
+```xml
+<key>com.apple.security.cs.allow-jit</key>                       <true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>
+<key>com.apple.security.cs.disable-library-validation</key>       <true/>
+```
+
+**Sandboxé** (PKG) :
+```xml
+<key>com.apple.security.app-sandbox</key>                        <true/>
+<key>com.apple.security.cs.allow-jit</key>                       <true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>
+<key>com.apple.security.cs.disable-library-validation</key>       <true/>
+<key>com.apple.security.network.client</key>                     <true/>
+<key>com.apple.security.files.user-selected.read-write</key>     <true/>
+```
+
+Les **runtime entitlements** (appliquées aux binaires JVM livrés) sont plus strictes : pas de réseau, pas d'accès fichier — seul le code app déclare des capacités. Override par build :
+
+```kotlin
+macOS {
+    entitlementsFile.set(project.file("packaging/entitlements.plist"))
+    runtimeEntitlementsFile.set(project.file("packaging/runtime-entitlements.plist"))
+}
+```
+
+### Provisioning profiles Mac App Store
+La soumission PKG exige des provisioning profiles intégrés sous `Contents/embedded.provisionprofile` :
+
+```kotlin
+macOS {
+    provisioningProfile.set(project.file("packaging/MyApp.provisionprofile"))
+    runtimeProvisioningProfile.set(project.file("packaging/MyApp_Runtime.provisionprofile"))
+}
+```
+
+### Cache AOT + sandbox
+Quand on génère un cache AOT pour un build sandboxé, Nucleus retire temporairement la signature de `jspawnhelper` pendant le training (macOS tue les processus forkés sandboxés), puis la réapplique avec les runtime entitlements avant le packaging. Automatique — pas de config.
+
+### Sandbox Flatpak
+Les permissions vivent dans `finishArgs` :
+
+```kotlin
+linux {
+    flatpak {
+        finishArgs = listOf(
+            "--share=ipc",
+            "--socket=wayland",
+            "--socket=pulseaudio",
+            "--device=dri",
+            "--filesystem=home",
+            "--share=network",
+        )
+    }
+}
+```
+
+Voir [cibles Linux](/docs/packaging/linux#flatpak) pour le reste.
+
+### Windows AppX
+AppX tourne en full trust (`runFullTrust`) — même accès système qu'une app Win32 classique — mais les contraintes de packaging MSIX (pas d'extraction de DLL dans temp) s'appliquent quand même, d'où sa présence dans le pipeline sandboxé.
+
+## Référence
+
+Tâches (enregistrées uniquement si un format store est demandé) :
+
+| Tâche | But |
+|-------|-----|
+| `extractNativeLibsForSandboxing` | Sortir `.dylib`/`.so`/`.dll` des JARs |
+| `stripNativeLibsFromJars` | Réécrire les JARs sans libs natives |
+| `prepareSandboxedAppResources` | Fusionner appResources + libs extraites |
+| `createSandboxedDistributable` | Construire l'app-image avec args JVM sandbox |
+| `generateSandboxedAotCache` | Training AOT à l'intérieur du sandbox |
+| `package<Pkg\|AppX\|Flatpak>` | Packaging final à partir de l'image sandboxée |
+
+## Notes
+
+- `appStore` est déprécié — PKG est toujours traité comme App Store. Le plugin applique automatiquement les certs 3rd Party Mac Developer et les entitlements sandbox.
+- CI : un seul `./gradlew packageReleaseDistributionForCurrentOS` construit les deux pipelines. Les artefacts sandboxés atterrissent dans des sous-répertoires `<format>-sandboxed/`.
+- Voir [signature de code](/docs/packaging/code-signing) pour l'ordre inside-out appliqué aux binaires universels macOS (qui se combine avec le chemin sandbox).

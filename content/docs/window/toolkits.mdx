@@ -1,0 +1,121 @@
+---
+title: Four native looks
+description: Match every desktop, by design. One DecoratedWindow Composable, four toolkits — macOS Liquid Glass, Fluent, Yaru, Jewel.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+Nucleus ships first-party Compose implementations of every major desktop design language. The same `DecoratedWindow` Composable, restyled by the toolkit module of your choice — so a Mac user gets macOS, a Windows user gets Fluent, an Ubuntu user gets Yaru, and an IDE-like tool reaches for Jewel. No more Material paint job on Win32.
+
+## TL;DR
+- Same `DecoratedWindow` everywhere — toolkits only change the visual style.
+- Pick one per OS, or mix freely: every toolkit works on every platform.
+- Swap toolkits by changing the Gradle dependency, not your UI code.
+- Material 2 and Material 3 fallbacks are always available.
+
+## The four toolkits
+
+| Toolkit  | Native to       | Module                                | Status         |
+|----------|-----------------|---------------------------------------|----------------|
+| macOS 26 | macOS Tahoe     | `decorated-window-macos26` `[FACT-CHECK: artifact id]` | New in 2.0     |
+| Fluent   | Windows 11      | `decorated-window-fluent` `[FACT-CHECK: artifact id]`  | New in 2.0     |
+| Yaru     | Ubuntu / GNOME  | `decorated-window-yaru` `[FACT-CHECK: artifact id]`    | New in 2.0     |
+| Jewel    | Cross-platform  | `decorated-window-jewel`              | Stable         |
+| Material 2 | Fallback      | `decorated-window-material2`          | Stable         |
+| Material 3 | Fallback      | `decorated-window-material3`          | Stable         |
+
+`[FACT-CHECK: artifact id]` — the macOS, Fluent and Yaru toolkit packs are announced for 2.0; the exact published artifact ids depend on the final release. Jewel, Material 2 and Material 3 are shipping today.
+
+## Pick your toolkit
+
+<Tabs items={['Jewel', 'Material 3', 'Material 2']}>
+<Tab value="Jewel">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-jewel:<version>")
+}
+```
+
+```kotlin
+nucleusApplication {
+    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
+        JewelTitleBar { state -> /* … */ }
+        MyContent()
+    }
+}
+```
+
+</Tab>
+<Tab value="Material 3">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
+}
+```
+
+```kotlin
+nucleusApplication {
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "App") {
+        MaterialTitleBar { state -> /* … */ }
+        MyContent()
+    }
+}
+```
+
+</Tab>
+<Tab value="Material 2">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
+}
+```
+
+```kotlin
+nucleusApplication {
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "App") {
+        MaterialTitleBar { state -> /* … */ }
+        MyContent()
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Coverage matrix
+
+| Feature              | macOS 26   | Fluent     | Yaru       | Jewel      | Material 3 |
+|----------------------|------------|------------|------------|------------|------------|
+| Native look on host OS | macOS    | Windows    | Ubuntu     | Any (IDE)  | Any        |
+| Translucency / effects | Liquid Glass | Mica / Acrylic | LibAdwaita | Theme-aware | Surface tones |
+| Title bar buttons    | Traffic lights | Min/Max/Close | GNOME headerbar | IntelliJ | Material |
+| Dark mode follow OS  | Yes        | Yes        | Yes        | Yes        | Yes        |
+| Backend              | Tao + AWT  | Tao + AWT  | Tao + AWT  | Tao + AWT  | Tao + AWT  |
+
+## How it works
+
+Every toolkit module wraps the same `DecoratedWindow` from `nucleus-application` and substitutes its own `TitleBarStyle` and `DecoratedWindowStyle`. The Composables in your screens don't change — only the wrapper at the top of your tree does. That's why mixing toolkits is cheap: ship a Fluent build on macOS for screenshots, ship Liquid Glass for users, with the same code.
+
+The styles live in `decorated-window-core` as plain data (`TitleBarColors`, `TitleBarMetrics`, `DecoratedWindowMetrics`). Each toolkit module exposes a `remember*Style()` Composable that derives them from its source-of-truth theme (Jewel's `JewelTheme`, Material's `MaterialTheme`, etc).
+
+<Callout type="info">
+The toolkits style the window chrome. The widgets inside (buttons, lists, text fields) are whatever you choose — Material 3, Jewel, or your own design system. Mix and match.
+</Callout>
+
+## Next
+
+- [macOS 26 Liquid Glass](/docs/window/toolkit-macos)
+- [Fluent for Windows 11](/docs/window/toolkit-fluent)
+- [Yaru for Ubuntu / GNOME](/docs/window/toolkit-yaru)
+- [Jewel for tooling](/docs/window/toolkit-jewel)
+- [Material 2 / 3 fallback](/docs/window/toolkit-material)

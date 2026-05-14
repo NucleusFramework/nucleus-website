@@ -1,0 +1,113 @@
+---
+title: Notifications on Linux
+description: FreeDesktop notifications over D-Bus — urgency, hints, sounds, action callbacks, with quirks documented per server.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Linux notifications go through the `org.freedesktop.Notifications` D-Bus service — every modern desktop (GNOME, KDE, Cinnamon, Xfce, Pantheon) implements it, with its own quirks. `notification-linux` is a complete Kotlin mapping of the spec on top of GLib/GIO.
+
+## TL;DR
+- Pure D-Bus via `libgio-2.0` — no JNA, no Java D-Bus libraries.
+- Full spec coverage: urgency, hints, action buttons, image data, sounds, transient/resident flags.
+- Per-server detection via `getServerInformation()`.
+- Action callbacks delivered through `LinuxNotificationListener`.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-linux:<version>")
+}
+```
+
+Pulls in [`freedesktop-icons`](/docs/os/freedesktop-icons) transitively for typesafe icon names.
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.notification.linux.*
+import dev.nucleusframework.freedesktop.icons.FreedesktopIcon
+
+val id = LinuxNotificationCenter.send(
+    Notification(
+        appName = "My App",
+        summary = "Build finished",
+        body = "artifact-2.0.0.zip is ready",
+        appIcon = FreedesktopIcon.Status.DIALOG_INFORMATION,
+        hints = NotificationHints(urgency = Urgency.NORMAL),
+        actions = listOf(NotificationAction("open", "Open")),
+    ),
+)
+```
+
+## How it works
+
+`LinuxNotificationCenter` opens one D-Bus session connection at startup and reuses it. Every notification call hits `org.freedesktop.Notifications.Notify` and returns the server-assigned id. Action invocations and close events come back through D-Bus signals; you wire a `LinuxNotificationListener` to receive them.
+
+The spec is consistent; servers are not. The matrix below covers the cases worth knowing:
+
+<Callout type="info" title="Per-server quirks">
+- **GNOME Shell**: ignores `appIcon` when the app has a focused window. Always set `hints.imagePath` for reliable iconography.
+- **KDE Plasma**: respects every hint, including `transient`, `resident`, `category`, `image-data`.
+- **Notify-send / dunst**: minimal renderer, no action buttons in some configurations.
+- **Snap / Flatpak sandboxes**: the daemon mediates; some hints (sound paths) may be filtered.
+
+Call `LinuxNotificationCenter.getServerInformation()` at startup to log the detected server and capabilities for support tickets.
+</Callout>
+
+## Reference
+
+### Urgency
+
+```kotlin
+hints = NotificationHints(urgency = Urgency.CRITICAL)
+```
+
+`LOW`, `NORMAL`, `CRITICAL`. Critical notifications typically bypass do-not-disturb and persist until dismissed.
+
+### Action buttons
+
+```kotlin
+val n = Notification(
+    appName = "My App",
+    summary = "New message",
+    actions = listOf(
+        NotificationAction("reply", "Reply"),
+        NotificationAction("archive", "Archive"),
+    ),
+)
+
+LinuxNotificationCenter.setListener(object : LinuxNotificationListener {
+    override fun onAction(id: Long, actionKey: String) { /* … */ }
+    override fun onClosed(id: Long, reason: CloseReason) { /* … */ }
+})
+```
+
+### Inline image data
+
+```kotlin
+hints = NotificationHints(
+    imageData = ImageData.fromArgb(width, height, bytes),
+)
+```
+
+Useful when you do not have a file path on disk — e.g. a generated avatar.
+
+### Sounds
+
+```kotlin
+hints = NotificationHints(
+    soundName = NotificationSound.Notification.DIALOG_INFORMATION,
+)
+```
+
+### Closing programmatically
+
+```kotlin
+LinuxNotificationCenter.close(id)
+```
+
+## Notes
+- Run inside `Xvfb` / a headless CI: the call will return without raising, but no daemon will display it.
+- If notifications work in your dev environment but vanish under Flatpak, check the `org.freedesktop.Notifications` portal permission in your `.flatpak-manifest`.

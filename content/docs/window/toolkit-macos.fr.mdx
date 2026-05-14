@@ -1,0 +1,94 @@
+---
+title: macOS 26 — Liquid Glass
+description: Des fenêtres Compose qui se sentent natives sur macOS Tahoe — traffic lights, vibrancy et le nouveau matériau Liquid Glass.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+macOS 26 ("Tahoe") introduit Liquid Glass — une translucidité sensible à la profondeur qui lit le fond d'écran derrière ta fenêtre. Le toolkit macOS de Nucleus livre un style `DecoratedWindow` qui l'active, plus le bon placement des traffic lights, la vibrancy sidebar et le traitement large-corner-radius.
+
+## TL;DR
+- Livre un `TitleBarStyle` et un `DecoratedWindowStyle` calibrés pour macOS Tahoe.
+- Active Liquid Glass via `MacOSStyle.Liquid` du backend Tao.
+- Les traffic lights sont à gauche, dans l'insertion standard.
+- `Modifier.macOSLargeCornerRadius()` arrondit le contenu sous la barre de titre.
+- Repli sur le chrome NSWindow standard sur macOS antérieur.
+
+## Install
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-macos26:<version>") [FACT-CHECK: artifact id]
+}
+```
+
+`[FACT-CHECK: artifact id]` — le pack de style macOS 26 dédié est annoncé pour Nucleus 2.0. En attendant que son artifact soit publié, accède au Liquid Glass via le backend Tao directement (`MacOSStyle.Liquid`), et style la barre de titre avec `decorated-window-core`.
+
+Le matériau Liquid Glass exige que le binaire lanceur annonce macOS SDK 26 dans ses load commands. Le plugin Gradle s'en charge via `macOsSdkVersion = "26.0"` dans les settings macOS — les headers Mach-O du lanceur sont patchés par vtool au packaging.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.*
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.core.*
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color.Transparent,        // laisser passer Liquid Glass
+            inactiveBackground = Color.Transparent,
+            content = Color(0xFFE6E6E6),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 38.dp),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = true, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(
+            onCloseRequest = ::exitApplication,
+            title = "Liquid Glass",
+        ) {
+            TitleBar(modifier = Modifier.macOSLargeCornerRadius()) { _ ->
+                Text("Liquid Glass", Modifier.align(Alignment.CenterHorizontally))
+            }
+            Box(Modifier.fillMaxSize()) { /* contenu */ }
+        }
+    }
+}
+```
+
+Pour forcer Liquid Glass sur la fenêtre Tao directement, pose le style sur le handle natif :
+
+```kotlin
+val taoWindow = nucleusWindow.unsafe.taoWindow ?: return@DecoratedWindow
+LaunchedEffect(Unit) {
+    taoWindow.setMacOSStyle(MacOSStyle.Liquid)
+}
+```
+
+## Comment ça marche
+
+Liquid Glass est un matériau Cocoa que l'OS applique à la content view quand le lanceur annonce SDK 26. Le backend Tao expose ce toggle comme `MacOSStyle.Liquid` ; le module macOS branche le toggle et le style de barre de titre correspondant dans le même `DecoratedWindow` que tu utilises déjà.
+
+Pour le slot de barre de titre, pose `TitleBarColors.background = Color.Transparent` pour laisser passer le matériau. `Modifier.macOSLargeCornerRadius()` aligne la géométrie des coins arrondis sur celle des NSWindows par défaut. Les traffic lights — fermer, minimiser, fullscreen — sont dessinés par AppKit ; tu n'as rien à rendre.
+
+## Reference
+
+- `MacOSStyle.Default` — style NSWindow standard.
+- `MacOSStyle.Liquid` — Liquid Glass macOS 26.
+- `MacOSStyle.HudWindow` — panneau translucide façon HUD.
+- `Modifier.macOSLargeCornerRadius(enabled: Boolean = true)` — coins arrondis du contenu.
+- `Modifier.newFullscreenControls()` — relayoute la barre de titre en fullscreen.
+
+<Callout type="warn">
+Liquid Glass exige macOS Tahoe (macOS 26) au runtime **et** un lanceur annonçant SDK 26. Le plugin Gradle pose `macOsSdkVersion = "26.0"` par défaut. Sur les macOS antérieurs, `MacOSStyle.Liquid` retombe sur le chrome standard.
+</Callout>

@@ -1,0 +1,81 @@
+---
+title: Détecteur de mode sombre
+description: Un composable isSystemInDarkMode() réactif plus une API à base de Flow — le thème système en état live, pas une lecture unique.
+---
+
+`isSystemInDarkTheme()` de Compose Desktop ne lit le thème de l'OS qu'une fois. Tu actives le mode sombre dans les Réglages Système et ton UI reste figée tant que tu n'as pas redémarré. `darkmode-detector` le remplace par un listener réactif qui déclenche une recomposition à l'instant où le thème bascule.
+
+## En bref
+- `@Composable isSystemInDarkMode()` — drop-in, réactif.
+- `IDarkModeDetector.isDark: StateFlow<Boolean>` — coroutine-friendly.
+- macOS via Cocoa KVO, Windows via watch registry, Linux via `xdg-desktop-portal`.
+- Pas de polling, pas d'AWT, pas de JNA.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import androidx.compose.material3.MaterialTheme
+
+@Composable
+fun App() {
+    val isDark = isSystemInDarkMode()
+    MaterialTheme(colorScheme = if (isDark) darkColorScheme() else lightColorScheme()) {
+        // Ton UI recompose quand le thème OS change.
+    }
+}
+```
+
+## Fonctionnement
+
+Chaque plateforme se branche sur le mécanisme de notification de l'OS :
+
+- **macOS** : Cocoa KVO sur `NSApp.effectiveAppearance`. Le pont se réveille sur la queue de notifications AppKit et republish dans un `StateFlow` sur un dispatcher Nucleus.
+- **Windows** : watch registry sur `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`.
+- **Linux** : portail `org.freedesktop.appearance` (color-scheme), repli GSettings.
+
+`isSystemInDarkMode()` branche ce flow sur un `State` Compose, n'importe quel reader recompose au changement.
+
+## Référence
+
+### Composable
+
+```kotlin
+val isDark: Boolean = isSystemInDarkMode()
+```
+
+### Impératif / coroutines
+
+```kotlin
+val detector = getPlatformDarkModeDetector()
+detector.start()
+
+scope.launch {
+    detector.isDark.collect { isDark ->
+        println("mode sombre : $isDark")
+    }
+}
+
+// plus tard
+detector.stop()
+```
+
+### Tests / fallback
+
+```kotlin
+val detector: IDarkModeDetector = NoopDarkModeDetector
+```
+
+Utilise `NoopDarkModeDetector` en tests ou quand tu ne veux pas du détecteur live.
+
+## Notes
+- La première lecture est synchrone ; les changements suivants passent par le `StateFlow` et déclenchent recomposition.
+- Sous Linux, vérifie que le portail est disponible (il l'est sur tous les desktops modernes). En CI headless, le détecteur retombe sur "light".

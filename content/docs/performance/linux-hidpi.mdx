@@ -1,0 +1,109 @@
+---
+title: Linux HiDPI — native scale detection for AWT/JBR
+description: Stock OpenJDK doesn't detect the Linux display scale factor. linux-hidpi reads GSettings, GDK_SCALE, and Xft.dpi via JNI and applies the right ui-scale before AWT initialises.
+---
+
+Standard OpenJDK on Linux ignores the native display scale factor — on a HiDPI screen your Compose Desktop window renders at 1x, tiny and blurry. JetBrains Runtime handles this internally; everywhere else you have to do it yourself. `linux-hidpi` mirrors JBR's `systemScale.c` detection logic in a JNI bridge so any JVM — including GraalVM native image — gets correct DPI.
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## TL;DR
+- Detects the Linux scale factor from GSettings, `GDK_SCALE`, `GDK_DPI_SCALE`, `Xft.dpi`, or `J2D_UISCALE`.
+- Apply via `sun.java2d.uiScale` **before** AWT initialises.
+- Already wired in when you depend on [`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap) — `GraalVmInitializer.initialize()` calls it for you.
+- Tao backend has its own HiDPI path — see [`/docs/tao/hidpi`](/docs/tao/hidpi).
+
+<Callout type="info" title="JBR users: you don't need this">
+If your app runs on JetBrains Runtime (the default for `nucleus-application`'s AWT path), JBR handles per-monitor scaling natively. `linux-hidpi` is only for stock OpenJDK and GraalVM Native Image, where JBR is not an option.
+</Callout>
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.linux-hidpi:<version>")
+}
+```
+
+You can skip this dependency when you already depend on `graalvm-runtime` — it pulls `linux-hidpi` transitively and `GraalVmInitializer.initialize()` invokes it.
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.hidpi.getLinuxNativeScaleFactor
+import androidx.compose.ui.window.application
+
+fun main() {
+    if (System.getProperty("sun.java2d.uiScale") == null) {
+        val scale = getLinuxNativeScaleFactor()
+        if (scale > 0.0) {
+            System.setProperty("sun.java2d.uiScale", scale.toString())
+        }
+    }
+
+    application {
+        // your Compose Desktop app
+    }
+}
+```
+
+The function is a no-op (returns `0.0`) on non-Linux platforms — leave the call in place, it costs nothing on macOS/Windows.
+
+Or, if you don't mind a one-liner with no system-property check:
+
+```kotlin
+import dev.nucleusframework.hidpi.applyLinuxHiDpiScale
+
+fun main() {
+    applyLinuxHiDpiScale()
+    application { /* ... */ }
+}
+```
+
+## How it works
+
+`getLinuxNativeScaleFactor()` walks five detection sources in priority order:
+
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 | `J2D_UISCALE` | Explicit JVM override (env var) |
+| 2 | GSettings | GNOME `org.gnome.desktop.interface` → `scaling-factor` (via libgio) |
+| 3 | `GDK_SCALE` | GTK / GNOME session integer scale |
+| 4 | `GDK_DPI_SCALE` | GTK fractional DPI multiplier |
+| 5 | `Xft.dpi` | X Resource Manager (KDE, legacy GNOME, …) |
+
+The native side uses `dlopen` to load libgio and libX11 at runtime — there are no hard link-time dependencies beyond libc, so the binary still runs on minimal containers. If the JNI library fails to load entirely (musl-only Alpine without glibc, or a sandbox without `/proc`), the function falls back to pure-Java parsing of `J2D_UISCALE`, `GDK_SCALE`, and `GDK_DPI_SCALE`.
+
+Per-monitor scaling on Linux is a moving target — Wayland compositors do it differently from X11, and AWT does not propagate the per-monitor value through `GraphicsConfiguration`. For a true per-monitor experience on Linux, ship the [Tao backend](/docs/tao/hidpi) instead — it talks to the compositor directly.
+
+## Native binaries
+
+Shipped pre-built inside the JAR:
+
+- Linux x64: `libnucleus_linux_hidpi_jni.so`
+- Linux aarch64: `libnucleus_linux_hidpi_jni.so`
+
+Extracted automatically by `NativeLibraryLoader` from `core-runtime` on first use.
+
+## Reference
+
+| API | Description |
+|-----|-------------|
+| `fun getLinuxNativeScaleFactor(): Double` | Resolved scale (e.g. `1.0`, `1.25`, `2.0`). `0.0` if detection failed or non-Linux. |
+| `fun applyLinuxHiDpiScale()` | Sets `sun.java2d.uiScale` if unset and the detected scale is `> 0`. |
+
+## Fractional DPI workarounds
+
+GNOME's fractional scaling (`125%`, `150%`) exposes itself as `GDK_DPI_SCALE`. AWT doesn't speak fractional natively — it rounds to the nearest integer. If your text looks blurry on a 125% display, switch to the Tao backend or set the env var `GDK_SCALE=2` and `GDK_DPI_SCALE=0.75` to force a 1.5x integer-scale rendering pipeline.
+
+## Notes
+
+### ProGuard
+
+```proguard
+-keep class dev.nucleusframework.hidpi.HiDpiLinuxBridge {
+    native <methods>;
+}
+```
+
+The Nucleus Gradle plugin adds this automatically.

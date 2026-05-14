@@ -1,0 +1,126 @@
+---
+title: Material 2 & Material 3
+description: The cross-platform fallback toolkit — your DecoratedWindow themed from any Material color scheme.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+When you want a single visual identity across Mac, Windows and Linux — or you already ship a Material design system on Android — Material is the right toolkit. Nucleus publishes both Material 2 and Material 3 style adapters that wrap `DecoratedWindow`.
+
+## TL;DR
+- `decorated-window-material2` — Compose `androidx.compose.material` (Material 2).
+- `decorated-window-material3` — Compose `androidx.compose.material3` (Material 3).
+- The window chrome derives from your `MaterialTheme` colors automatically.
+- Works on every backend; pair with Tao for the smallest footprint.
+- Use when you want consistency over native fidelity.
+
+## Install
+
+<Tabs items={['Material 3', 'Material 2']}>
+<Tab value="Material 3">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
+    implementation(compose.material3)
+}
+```
+
+</Tab>
+<Tab value="Material 2">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
+    implementation(compose.material)
+}
+```
+
+</Tab>
+</Tabs>
+
+## Quickstart — Material 3
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.material3.*
+
+fun main() = nucleusApplication {
+    val colorScheme = if (isSystemInDarkMode()) darkColorScheme() else lightColorScheme()
+
+    MaterialTheme(colorScheme = colorScheme) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 3") {
+            MaterialTitleBar { _ -> Text("Material 3") }
+            Surface(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+## Quickstart — Material 2
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.material2.*
+
+fun main() = nucleusApplication {
+    MaterialTheme(colors = if (isSystemInDarkMode()) darkColors() else lightColors()) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 2") {
+            MaterialTitleBar { _ -> Text("Material 2") }
+            Surface(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+## How it works
+
+Both modules expose a `MaterialDecoratedWindow` Composable that internally derives a `TitleBarStyle` and `DecoratedWindowStyle` from the current `MaterialTheme`. The title bar background, content tint and caption-button colours track your `ColorScheme` (M3) or `Colors` (M2). When the user switches to dark mode, the window chrome follows.
+
+For finer control, both modules expose `remember*Style` helpers:
+
+```kotlin
+val windowStyle = rememberMaterialWindowStyle(colorScheme)      // M3
+val titleBarStyle = rememberMaterialTitleBarStyle(colorScheme)  // M3
+```
+
+Pass them into the underlying `NucleusDecoratedWindowTheme` if you need to mix Material chrome with non-Material content.
+
+## When to choose Material
+
+- You share Compose UI between Android and desktop.
+- You want a single coherent identity, not platform-native chrome.
+- You don't ship to enterprise users who expect Win11 Fluent fidelity.
+
+For native fidelity per OS, prefer [Fluent](/docs/window/toolkit-fluent), [macOS](/docs/window/toolkit-macos) or [Yaru](/docs/window/toolkit-yaru). For developer tools, prefer [Jewel](/docs/window/toolkit-jewel).
+
+## Reference
+
+### Material 3
+
+- `NucleusApplicationScope.MaterialDecoratedWindow(...)` and `MaterialDecoratedDialog(...)`
+- `DecoratedWindowScope.MaterialTitleBar(...)` / `DecoratedDialogScope.MaterialDialogTitleBar(...)`
+- `rememberMaterialWindowStyle(colorScheme: ColorScheme): DecoratedWindowStyle`
+- `rememberMaterialTitleBarStyle(colorScheme: ColorScheme): TitleBarStyle`
+
+### Material 2
+
+- `MaterialDecoratedWindow(...)` / `MaterialDecoratedDialog(...)`
+- `MaterialTitleBar(...)` / `MaterialDialogTitleBar(...)`
+
+<Callout type="info">
+Material adapters work on every backend. Combine with `decorated-window-tao` for the no-AWT runtime, or `-jbr` / `-jni` if you have Swing dependencies.
+</Callout>

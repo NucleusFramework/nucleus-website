@@ -1,0 +1,140 @@
+---
+title: Building for Windows
+description: NSIS, MSI, MSIX/AppX, Portable — sideload or hit the Microsoft Store.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Windows users get five installers from one DSL: NSIS (the classic Windows installer experience), NSIS Web (downloader stub), MSI for enterprise deployment, MSIX/AppX for the Microsoft Store and modern sideloading, and a Portable mode that needs no installer at all.
+
+## TL;DR
+- `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable` — pick one or all five.
+- AppX uses MSIX packaging; with Developer Mode enabled, you can build and sideload locally.
+- Code signing via `.pfx` certificate or Azure Artifact Signing.
+- MSIX bundle (amd64 + arm64) produced by the `build-windows-appxbundle` CI action.
+
+## Install
+Comes with the Gradle plugin.
+
+## Quickstart
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Nsis,
+                TargetFormat.Msi,
+                TargetFormat.AppX,
+                TargetFormat.Portable,
+            )
+
+            windows {
+                iconFile.set(project.file("icons/app.ico"))
+                upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+                perUserInstall = true
+                menuGroup = "My Company"
+
+                signing {
+                    enabled = true
+                    certificateFile.set(file("certs/certificate.pfx"))
+                    certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+                    algorithm = SigningAlgorithm.Sha256
+                    timestampServer = "http://timestamp.digicert.com"
+                }
+            }
+        }
+    }
+}
+```
+
+## How it works
+
+### NSIS — the everyday installer
+Most desktop apps ship NSIS. Nucleus exposes the full electron-builder NSIS surface: one-click vs assisted, per-user vs per-machine, language picker, custom header/sidebar bitmaps, license dialog, and a `script` / `includeScript` escape hatch for full custom NSIS sources.
+
+```kotlin
+windows {
+    nsis {
+        oneClick = false
+        allowElevation = true
+        perMachine = true
+        allowToChangeInstallationDirectory = true
+        createDesktopShortcut = true
+        runAfterFinish = true
+
+        multiLanguageInstaller = true
+        installerLanguages = listOf("en_US", "fr_FR", "de_DE", "ja_JP")
+
+        installerHeader.set(project.file("packaging/header.bmp"))
+        installerSidebar.set(project.file("packaging/sidebar.bmp"))
+        license.set(project.file("LICENSE"))
+    }
+}
+```
+
+### MSI for enterprise
+The MSI target is enabled by `TargetFormat.Msi`. Pin `upgradeUuid` to a fixed value so Windows correctly matches successor versions during upgrade. Without a stable UUID, every new build looks like a separate product.
+
+### AppX / MSIX
+AppX targets produce an `.appx` (or `.msixbundle` via CI). The Desktop Bridge runs with `runFullTrust` — so **not** sandboxed in the Windows sense — but they unlock the Microsoft Store, modern updaters, and clean uninstall.
+
+```kotlin
+windows {
+    appx {
+        // Sideload identity — any CN that matches your signing cert
+        identityName = "MyCompany.MyApp"
+        publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
+        publisherDisplayName = "My Company"
+        applicationId = "MyApp"
+
+        languages = listOf("en-US", "fr-FR")
+        backgroundColor = "#001F3F"
+        storeLogo.set(project.file("packaging/appx/StoreLogo.png"))
+        square44x44Logo.set(project.file("packaging/appx/Square44x44Logo.png"))
+        square150x150Logo.set(project.file("packaging/appx/Square150x150Logo.png"))
+        wide310x150Logo.set(project.file("packaging/appx/Wide310x150Logo.png"))
+
+        // Store requires MinVersion > 10.0.17134.0
+        minVersion = "10.0.17763.0"
+        maxVersionTested = "10.0.22621.0"
+    }
+}
+```
+
+<Callout type="warn" title="Developer Mode required for local AppX builds">
+Local AppX builds need Windows **Developer Mode** enabled (Settings → System → For developers). GitHub-hosted Windows runners already have it on.
+</Callout>
+
+<Callout type="warn" title="Microsoft Store identity">
+For Microsoft Store submissions, `identityName`, `publisher`, and `publisherDisplayName` must match the values Partner Center assigned to your reservation — the Store rejects mismatches at upload time. `publisher` is the `CN=<GUID>` issued by Partner Center, not your local signing certificate's CN.
+</Callout>
+
+### Portable mode
+`TargetFormat.Portable` produces a single executable that unpacks to a temp directory at launch. No installer UI, no admin, no registry — useful for thumb-drive distribution.
+
+### File associations and deep links
+Declared at the top level and propagated into every Windows format:
+
+```kotlin
+nativeDistributions {
+    protocol("MyApp", "myapp")  // myapp://… deep links
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+    )
+}
+```
+
+For Windows-specific overrides (custom file icon) use the `windows.fileAssociation(...)` overload.
+
+## Reference
+
+The `windows { }` block exposes: `iconFile`, `packageName`, `console`, `dirChooser`, `perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion`, `exePackageVersion`, plus sub-blocks `nsis { }`, `appx { }`, `signing { }`. Full per-property reference: [Gradle DSL reference](/docs/reference/gradle-dsl).
+
+## Notes
+
+- The MSI installer is built by electron-builder's WiX wrapper; for serious enterprise MSI customization (custom dialogs, registry tweaks beyond installation paths), use NSIS instead.
+- `latest.yml` (Windows update metadata) is generated for NSIS, MSI, and Portable. AppX is store-managed so it has no auto-update YML.
+- `WindowsJumpListManager.setProcessAppId()` is called automatically by `nucleusApplication` on Windows — taskbar grouping and AUMID-aware notifications work out of the box.

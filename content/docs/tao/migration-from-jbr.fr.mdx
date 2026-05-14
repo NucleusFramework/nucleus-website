@@ -1,0 +1,102 @@
+---
+title: Migrer de JBR vers Tao
+description: Ce qui change quand tu bascules de JetBrains Runtime à Tao — comportement, perf, et quand garder JBR.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+Si tu es sur Nucleus 1.x avec `decorated-window-jbr` (ou `decorated-window-jni`), le passage à Tao c'est un swap de dépendance plus un flag de backend. L'API `DecoratedWindow` est identique — ce sont les octets en dessous qui changent.
+
+## TL;DR
+- Remplace `decorated-window-jbr` (ou `-jni`) par `decorated-window-tao` et passe `backend = NucleusBackend.Tao`.
+- Plus d'AWT — fini `ComposeWindow`, fini l'EDT Swing. `nucleusWindow.unsafe.taoWindow` remplace `unsafe.awtWindow`.
+- La mémoire résidente passe de ~120 Mo à ~60 Mo sur un Hello World ; cold start divisé par deux sur GraalVM.
+- À retester : drag-and-drop, deep links, dialogs fichier, overlays natifs.
+- Garde JBR quand ton app tire des widgets Swing ou des composants AWT tiers.
+
+## Bascule la dépendance
+
+<Tabs items={['Avant (JBR)', 'Après (Tao)']}>
+<Tab value="Avant (JBR)">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-jbr:<version>")
+}
+```
+
+```kotlin
+nucleusApplication {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "App") {
+        TitleBar { state -> /* … */ }
+        MyContent()
+    }
+}
+```
+
+</Tab>
+<Tab value="Après (Tao)">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+```kotlin
+nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "App") {
+        TitleBar { state -> /* … */ }
+        MyContent()
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Si tu gardes les deux backends au classpath, `NucleusBackend.Auto` prend Tao quand il est dispo.
+
+## Différences de comportement
+
+| Aspect                        | JBR / JNI                            | Tao                                       |
+|-------------------------------|--------------------------------------|-------------------------------------------|
+| Fenêtre sous-jacente          | `ComposeWindow` (extends `JFrame`)   | `TaoWindow` (handle Rust)                 |
+| Dispatch d'événements         | EDT AWT                              | Event loop Tao sur main thread            |
+| `unsafe.awtWindow`            | Non-null                             | Null (utilise `unsafe.taoWindow`)         |
+| Dialogs natifs                | Via AWT/Swing                        | Via module [`file-dialog`](/docs/ecosystem/file-dialog) |
+| Drag-and-drop                 | AWT TransferHandler                  | `TaoDragAndDropPayload`                   |
+| Deep links                    | Apple Event handler AWT / AppKit     | `TaoDeepLinkBridge.setSink`               |
+| Wayland                       | XWayland                             | Natif                                     |
+| `-XstartOnFirstThread`        | Non requis                           | Requis sur macOS (plugin gère)            |
+| Mémoire résidente (Hello)     | ~120 Mo                              | ~60 Mo                                    |
+| GraalVM native-image          | Partiel                              | Complet                                   |
+
+## À retester
+
+- **Drag-and-drop** : réécris les handlers contre `TaoDragAndDropPayload`.
+- **Deep links** : passe par `nucleusApplication.onDeepLink { uri -> … }` — le pont change, l'API non.
+- **Pickers fichier** : remplace les `JFileChooser` directs par le module cross-backend.
+- **Overlays natifs (SwiftUI/WebView2/GTK)** : possibles via `NativeView`. Bon moment pour porter d'anciens `Canvas` AWT.
+- **Placement de fenêtre sur Linux** : les compositeurs Wayland peuvent ignorer les positions absolues. Voir [Wayland](/docs/tao/wayland).
+- **Flows multi-fenêtres** : toujours un seul `nucleusApplication { }`, plusieurs `DecoratedWindow`. Chacun obtient un `NucleusWindow`.
+
+## Impact perf
+
+- Cold start -40% sur JVM, -60% sur GraalVM native-image (pas d'init AWT).
+- Mémoire résidente divisée par deux sur une app baseline.
+- Frame timing plus stable sur Linux Wayland (pas de blit XWayland).
+- Trade-off : le renderer Tao est plus jeune que la voie AWT. Attends-toi à découvrir une plus petite surface d'edge cases.
+
+## Quand garder JBR
+
+- Tu livres un module Swing legacy.
+- Tu embarques un `Canvas` AWT (vidéo par exemple) pas encore porté à `NativeView`.
+- Tu utilises une lib qui exige `ComposeWindow` directement.
+
+<Callout type="info">
+Tu peux livrer les deux — Nucleus 2.0 publie `decorated-window-jbr`, `decorated-window-jni` et `decorated-window-tao` en parallèle. Utilise `NucleusBackend.Awt` ou `NucleusBackend.Tao` pour figer le choix par build, ou `Auto` pour détecter.
+</Callout>

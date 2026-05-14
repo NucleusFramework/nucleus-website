@@ -1,0 +1,108 @@
+---
+title: Modules
+description: 30+ runtime modules, à la carte. Pull what you need, leave the rest out — your binary stays small.
+---
+
+Nucleus is a framework, not a monolith. The umbrella entry point (`nucleus-application`) brings the runtime essentials; every other capability is a separately versioned module you opt into from Gradle.
+
+## TL;DR
+- One umbrella: `nucleus-application` (pulls `core-runtime`, `aot-runtime`, `graalvm-runtime`).
+- One backend module per app: `decorated-window-tao` or `decorated-window-jbr` / `decorated-window-jni`.
+- Optional toolkit style: `decorated-window-{jewel, material2, material3}` to restyle the window.
+- 25+ leaf modules for OS integration, performance, distribution. Add as you need them.
+
+## The umbrella
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")
+}
+```
+
+This pulls in:
+- `core-runtime` — platform detection, native-library loading, deep-link handler, single-instance lock, app metadata.
+- `aot-runtime` — AOT cache mode detection.
+- `graalvm-runtime` — SVM substitutions and the initialiser called from `nucleusApplication { … }`.
+
+Everything else is opt-in.
+
+## Window stack
+
+| Module | Role |
+|---|---|
+| `decorated-window-core` | Shared Compose styling, themes, icon sets. Always pulled by the others. |
+| `decorated-window-tao` | Rust-native backend ([Tao](/docs/concepts/backends)). Default for new projects. |
+| `decorated-window-jbr` | AWT backend on JetBrains Runtime. |
+| `decorated-window-jni` | AWT backend on stock OpenJDK (per-OS JNI bridges). |
+| `decorated-window-awt` | Shared AWT-side Compose code. Transitive from `-jbr` / `-jni`. |
+| `decorated-window-jewel` | Style adapter — IntelliJ Platform look. |
+| `decorated-window-material2` | Style adapter — Material 2. |
+| `decorated-window-material3` | Style adapter — Material 3. |
+
+Pick exactly one backend (`-tao`, `-jbr` or `-jni`). Pick zero or one toolkit style.
+
+## OS integration (à la carte)
+
+| Capability | Module |
+|---|---|
+| Notifications (cross-platform DSL) | `notification-common` |
+| Notifications (macOS) | `notification-macos` |
+| Notifications (Windows Toast) | `notification-windows` |
+| Notifications (Linux DBus) | `notification-linux` |
+| Dock menu (macOS) | `launcher-macos` |
+| Jump lists, taskbar buttons (Windows) | `launcher-windows` |
+| Unity quicklist (Linux) | `launcher-linux` |
+| Native menu bar (macOS) | `menu-macos` |
+| Taskbar progress | `taskbar-progress`, `taskbar-progress-tao` |
+| Dark-mode detector | `darkmode-detector` |
+| System accent colour | `system-color` |
+| Global hotkeys | `global-hotkey` |
+| Media controls (Now Playing / SMTC / MPRIS) | `media-control` |
+| System info (CPU, RAM, GPU, batteries) | `system-info` |
+| Energy / efficiency mode | `energy-manager` |
+| Auto-launch at login | `autolaunch` |
+| Scheduler (cron / periodic / boot) | `scheduler` |
+| macOS service management | `service-management-macos` |
+| Linux HiDPI scale detection | `linux-hidpi` |
+| SF Symbols catalogue | `sf-symbols` |
+| FreeDesktop icon names | `freedesktop-icons` |
+
+## Performance & networking
+
+| Capability | Module |
+|---|---|
+| Native trust manager (OS keychain CAs) | `native-ssl` |
+| `java.net.http.HttpClient` with native trust | `native-http` |
+| OkHttp with native trust | `native-http-okhttp` |
+| Ktor with native trust | `native-http-ktor` |
+| Auto-update | `updater-runtime` |
+
+## How to add a module
+
+```kotlin
+val nucleusVersion = "2.0.0"
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:$nucleusVersion")
+
+    // Add the capabilities you need
+    implementation("dev.nucleusframework:nucleus.notification-common:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.global-hotkey:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.system-info:$nucleusVersion")
+}
+```
+
+Pin all `nucleus.*` artifacts to the same version. They release together.
+
+## How modules compose
+
+Every module depends on `core-runtime`. A few depend on each other (`notification-common` orchestrates the per-OS notification modules; `taskbar-progress-tao` depends on `nucleus-application` to add extension functions on `NucleusWindow`). The Gradle plugin injects `nucleus-app.properties` into the classpath at build time, so any module can read your app's identity through `NucleusApp.appId`, `NucleusApp.version`, `NucleusApp.aumid`, etc., without you wiring it.
+
+When the GraalVM build runs, every module's reachability metadata is bundled in automatically — no reflection-config to maintain by hand.
+
+## Where to go next
+
+- [Architecture](/docs/concepts/architecture) — how the layers fit together.
+- [OS integration](/docs/os) — concrete recipes per capability.
+- [Reference: Gradle DSL](/docs/reference/gradle-dsl) — full coordinates and version table.

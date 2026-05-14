@@ -1,0 +1,139 @@
+---
+title: Media controls
+description: Publish "Now Playing" metadata and receive playback events from the OS HUD — macOS MPNowPlayingInfoCenter, Windows SMTC, Linux MPRIS — through one Kotlin API.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Every modern OS exposes a system-level media HUD — Control Center on macOS, the volume overlay on Windows 11, GNOME / KDE indicators on Linux. Show up there with your track metadata and respond to play / pause / next / prev events using a single Kotlin module.
+
+## TL;DR
+- Linux: [MPRIS D-Bus spec](https://specifications.freedesktop.org/mpris-spec/latest/) — integrates with GNOME Shell, KDE Plasma, `playerctl`.
+- macOS: `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`. Integrates with Control Center, the Now Playing widget, media keys.
+- Windows: `SystemMediaTransportControls`. Integrates with the Windows 10/11 media overlay, SoundBar, lock screen, hardware media keys.
+- One callback for incoming events, one setter for outgoing metadata and state.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.media-control:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.media.control.*
+
+if (MediaControlService.isAvailable()) {
+    MediaControlService.configure()
+
+    MediaControlService.attach { event ->
+        when (event) {
+            MediaControlEvent.Play     -> player.play()
+            MediaControlEvent.Pause    -> player.pause()
+            MediaControlEvent.Next     -> player.skipToNext()
+            MediaControlEvent.Previous -> player.skipToPrevious()
+            is MediaControlEvent.Seek  -> player.seekTo(event.toUs)
+            else -> {}
+        }
+    }
+
+    MediaControlService.setMetadata(
+        MediaMetadata(
+            title = "Strobe",
+            artist = "deadmau5",
+            album = "For Lack of a Better Name",
+            artUri = "https://example.com/cover.png",
+            durationUs = 10 * 60 * 1_000_000L,
+        ),
+    )
+
+    MediaControlService.setPlaybackState(
+        MediaPlaybackState(status = MediaPlaybackStatus.Playing, positionUs = 0, rate = 1.0),
+    )
+}
+```
+
+## How it works
+
+`MediaControlService` is a singleton wrapping a per-OS native bridge:
+
+- **Linux** uses GLib/GIO (`libgio-2.0`) to publish an `org.mpris.MediaPlayer2.Player` D-Bus object.
+- **macOS** drives `MediaPlayer.framework` via an Objective-C JNI bridge.
+- **Windows** drives `SystemMediaTransportControls` via C++/WRL.
+
+You configure once at startup, then push metadata and playback state as your player evolves. Incoming events arrive on the bridge thread — bounce to your audio thread or main loop yourself.
+
+<Callout type="info" title="Capability per platform">
+The events the OS can send back differ:
+
+- **Linux (MPRIS)** can emit every `MediaControlEvent` variant.
+- **macOS** emits only `Play`, `Pause`, `Toggle`, `Next`, `Previous`, `Stop`, `SetPosition`.
+- **Windows (SMTC)** emits `Play`, `Pause`, `Next`, `Previous`, `Stop`, `SetPosition`, plus relative `SeekBy` (±10 s fast-forward / rewind).
+- `SetVolume`, `OpenUri`, `Raise`, `Quit` are Linux-only.
+- `setVolume(...)` is a no-op on macOS and Windows — system volume is owned separately from the media controls.
+</Callout>
+
+## Reference
+
+### Metadata
+
+```kotlin
+MediaControlService.setMetadata(
+    MediaMetadata(
+        title = "Track",
+        artist = "Artist",
+        album = "Album",
+        artUri = "file:///tmp/cover.png",
+        durationUs = 3 * 60 * 1_000_000L,
+    ),
+)
+```
+
+### Playback state
+
+```kotlin
+MediaControlService.setPlaybackState(
+    MediaPlaybackState(
+        status = MediaPlaybackStatus.Playing,
+        positionUs = currentPositionUs,
+        rate = 1.0,
+    ),
+)
+```
+
+Push state updates whenever you start, pause, or seek — the HUD's seek bar mirrors `positionUs` and `rate`.
+
+### Event listener
+
+```kotlin
+MediaControlService.attach { event -> /* handle */ }
+MediaControlService.detach()
+```
+
+### Per-platform integration tabs
+
+<Tabs items={["macOS", "Windows", "Linux"]}>
+<Tab value="macOS">
+
+Set the Info.plist `LSApplicationCategoryType` to `public.app-category.music` (or media) so the Now Playing widget treats the app correctly. Hardware media keys deliver Play/Pause/Next/Prev when the app is the active "now playing" client.
+
+</Tab>
+<Tab value="Windows">
+
+Toast / Action Center integration is automatic. The system picks the most recent SMTC publisher as the "now playing" source.
+
+</Tab>
+<Tab value="Linux">
+
+Set `appId` correctly via `NucleusApp.appId` — MPRIS exposes the bus name as `org.mpris.MediaPlayer2.<appId>`. `playerctl` and indicators discover the player by enumerating this prefix.
+
+</Tab>
+</Tabs>
+
+## Notes
+- Always call `MediaControlService.isAvailable()` before `configure()` — on Linux without a session D-Bus, the service degrades silently.
+- Update `setPlaybackState` at least once per second while playing; otherwise the HUD's progress bar drifts.

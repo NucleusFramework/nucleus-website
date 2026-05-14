@@ -1,0 +1,103 @@
+---
+title: Nucleus vs Compose Multiplatform vanilla
+description: Ce que Nucleus ajoute quand tu gardes le plugin de packaging par défaut de JetBrains.
+---
+
+Nucleus est un sur-ensemble du plugin desktop `org.jetbrains.compose` — même forme de DSL, mêmes tâches Gradle, mais avec un catalogue de formats plus large, une vraie histoire de packaging pour les canaux store, et des bibliothèques runtime que le plugin officiel ne livre pas. Si tu as déjà un projet Compose Multiplatform desktop, la migration est un [drop-in](/docs/migrate/from-jb-compose).
+
+## TL;DR
+- Même forme de DSL ; Nucleus étend, ne remplace pas.
+- 16 formats vs 6 — NSIS, AppX, Portable, AppImage, Snap, Flatpak, ZIP/TAR/7Z.
+- Auto-update intégrée, trust manager SSL natif OS, pipeline sandbox store, packaging GraalVM Native Image, wiring cache AOT.
+- Décorations natives (backend Tao), 30+ modules OS — rien de tout ça dans CMP par défaut.
+
+## Ce qui ne change pas
+
+| | Nucleus | CMP par défaut |
+|--|---------|----------------|
+| Runtime Compose UI | Idem | Idem |
+| Rendu Skia | Idem | Idem |
+| Forme du plugin Gradle | `nucleus { application { … } }` reflète `compose.desktop.application { … }` | — |
+| Hot reload | Out of the box | Out of the box |
+| Dépendance `compose.desktop.currentOs` | Utilisée | Utilisée |
+
+Migrer préserve `mainClass`, `nativeDistributions { … }`, `buildTypes`, `modules`, et chaque tâche Gradle existante.
+
+## Ce que Nucleus ajoute
+
+### Catalogue de formats
+| Format | CMP par défaut | Nucleus |
+|--------|:--------------:|:-------:|
+| DMG, PKG, MSI, EXE (jpackage), DEB, RPM | O | O |
+| NSIS | — | O |
+| MSIX / AppX | — | O |
+| Portable | — | O |
+| AppImage | — | O |
+| Snap | — | O |
+| Flatpak | — | O |
+| ZIP, TAR, 7Z | — | O |
+
+Seize contre six. Le plugin utilise jpackage pour construire l'app-image, puis la confie au mode `--prepackaged` d'electron-builder pour tout le reste.
+
+### Pipeline store
+PKG, AppX, Flatpak déclenchent un [pipeline sandboxé](/docs/packaging/sandboxing) parallèle qui pré-extrait les libs JNI, signe chaque `.dylib`, injecte des args JVM sandbox-aware et applique les bonnes entitlements. Le plugin CMP par défaut ignore tout ça.
+
+### Auto-update
+`updater-runtime` livre des métadonnées `latest-*.yml` et un client Kotlin compatible avec le format d'update d'electron-builder. Voir [auto-update](/docs/packaging/auto-update).
+
+### GraalVM Native Image
+Le plugin peut compiler ton app Compose Desktop en GraalVM Native Image et empaqueter le binaire en DMG, NSIS ou DEB. Cold start ~0,5 s, RAM ~60 MB. Le plugin CMP par défaut ne connaît pas Native Image.
+
+### Cache AOT
+Le cache AOT JDK 25+ est câblé via le même flag `enableAotCache = true`, avec les modes training + runtime détectés via `nucleus.aot.mode`. Voir [cache AOT](/docs/performance/aot-cache).
+
+### Signature de code
+Nucleus étend la signature à Windows (PFX ou Azure Artifact Signing) et ajoute le pipeline de signature inside-out macOS pour les binaires universels via l'action CI `build-macos-universal`.
+
+### Deep links et associations de fichiers
+Cross-platform : `protocol("MyApp", "myapp")` et `fileAssociation(...)` se propagent vers NSIS, MSI, AppX, fichiers `.desktop` DEB/RPM, et `Info.plist` macOS. Le plugin CMP par défaut exige une config par OS.
+
+### Bibliothèques runtime
+Aucune de celles-ci n'est livrée avec CMP vanilla :
+
+- `core-runtime` — `NucleusApp`, `DeepLinkHandler`, `SingleInstanceManager`, `ExecutableRuntime`.
+- `nucleus-application` — point d'entrée parapluie `nucleusApplication { }`, single-instance automatique, livraison deep-link, init GraalVM.
+- Fenêtres décorées — Liquid Glass / Fluent / Yaru / Jewel, JBR ou JDK stock ou Tao.
+- Toolkits OS — notifications, system tray, hotkeys globaux, contrôles média, progression taskbar, energy manager, system info, scheduler, autolaunch, SSL natif, HTTP natif, etc.
+
+## Ce qui reste inchangé
+
+- `mainClass`, `jvmArgs`, `modules()` / `includeAllModules`.
+- `buildTypes` / ProGuard.
+- Dépendance `compose.desktop.currentOs`.
+- Tâches Gradle existantes (`run`, `packageDmg`, `packageDeb`, …).
+- Compose Hot Reload — Nucleus auto-propage `nucleus.application.mainClass` vers `compose.desktop.application.mainClass` pour que `hotRun` et `hotSnapshotMain` marchent sans config supplémentaire.
+
+## Différence importante : `homepage` requis pour DEB
+
+Contrairement à jpackage, electron-builder exige `homepage` pour DEB. Définis-le sur `nativeDistributions` :
+
+```kotlin
+nativeDistributions {
+    homepage = "https://myapp.example.com"
+}
+```
+
+Sinon `packageDeb` (et `packageGraalvmDeb`) échoue avec `Please specify project homepage`.
+
+## Quand rester sur CMP vanilla
+
+- Tu n'as besoin que de DMG/MSI/DEB et tu es content de jpackage comme back end.
+- Tu n'as pas besoin d'auto-update, GraalVM, distribution store, décorations natives.
+- Ta pipeline de build a déjà des scripts de signature/upload custom que tu ne veux pas déplacer.
+
+## Quand passer à Nucleus
+
+- Tu veux du packaging store-ready (PKG Mac App Store, MSIX Microsoft Store, Snapcraft, Flathub).
+- Tu veux de l'auto-update ou du GraalVM Native Image.
+- Tu veux des décorations natives avec le multi-touch, le stylet, le Wayland natif du backend Tao.
+- Tu veux les 30+ modules d'intégration OS sans les recoder.
+
+## Migration
+
+Voir [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose) pour le pas-à-pas.

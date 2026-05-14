@@ -1,0 +1,290 @@
+---
+title: Configuration
+description: The full nucleus { } DSL — application metadata, native distributions, GraalVM, deep links, file associations, code signing and AOT cache.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+All Nucleus build configuration lives inside `nucleus { … }` in your `build.gradle.kts`. The DSL extends JetBrains' `compose.desktop.application` with GraalVM native image, store-grade formats, AOT cache, deep-link protocols and trusted CA injection.
+
+## TL;DR
+- `nucleus.application { … }` for JVM apps; `nucleus.nativeApplication { … }` for Kotlin/Native (macOS only).
+- `nativeDistributions { targetFormats(…) }` selects packaging formats (16 supported).
+- `graalvm { isEnabled.set(true) }` flips to GraalVM Native Image.
+- `enableAotCache = true` enables the JDK 25 AOT cache for the JVM path.
+
+## Skeleton
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    jvmArgs("-Xmx512m")
+
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+
+        modules("java.sql", "java.net.http")
+        enableAotCache = false
+        cleanupNativeLibs = true
+
+        protocol("MyApp", "myapp")
+        fileAssociation(
+            mimeType = "application/x-myapp",
+            extension = "myapp",
+            description = "MyApp Document",
+        )
+
+        macOS { /* … */ }
+        windows { /* … */ }
+        linux { /* … */ }
+    }
+
+    graalvm {
+        isEnabled.set(false) // flip to true to ship a native image
+    }
+}
+```
+
+## Three common scenarios
+
+<Tabs items={["Single JVM binary", "GraalVM Native Image", "JDK + AOT cache"]}>
+<Tab value="Single JVM binary">
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+        cleanupNativeLibs = true
+    }
+}
+```
+
+Ships a bundled JRE alongside your app. Boots in ~1.5 s; smallest config surface.
+
+</Tab>
+<Tab value="GraalVM Native Image">
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)
+    }
+    graalvm {
+        isEnabled.set(true)
+        javaLanguageVersion.set(25)
+        imageName.set("myapp")
+        march.set("native")
+        buildArgs.add("-O2")
+    }
+}
+```
+
+Compiles to a self-contained binary (~38 MB, ~50 ms cold start). Reflection metadata for every Nucleus module is injected automatically.
+
+</Tab>
+<Tab value="JDK + AOT cache">
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+        enableAotCache = true
+    }
+}
+```
+
+Requires JDK 25+. Generates an AOT cache during build; the shipped JVM boots in ~1 s with classes & profiles pre-warmed.
+
+</Tab>
+</Tabs>
+
+## `application { … }` reference
+
+| Property | Type | Description |
+|---|---|---|
+| `mainClass` | `String?` | Entry-point class (FQCN of the file containing `fun main`). |
+| `mainJar` | `RegularFileProperty` | Override the main JAR; rarely needed. |
+| `javaHome` | `String` | JDK used for packaging the JVM image. |
+| `args` | `MutableList<String>` | App arguments at launch. |
+| `jvmArgs` | `MutableList<String>` | JVM flags baked into the launcher. |
+| `nativeDistributions { … }` | block | Packaging configuration. |
+| `buildTypes { release { proguard { … } } }` | block | ProGuard rules for release builds. |
+| `graalvm { … }` | block | GraalVM native-image configuration. |
+| `disableDefaultConfiguration()` | fn | Opt out of the auto-discovered source set. |
+| `from(SourceSet \| KotlinTarget)` | fn | Pick a source set or KMP target explicitly. |
+
+## `nativeDistributions { … }` — packaging
+
+| Property / call | Description |
+|---|---|
+| `targetFormats(...)` | Pick formats: `Dmg, Pkg, Nsis, Exe, Msi, AppX, Portable, Deb, Rpm, AppImage, Snap, Flatpak, Zip, Tar, SevenZ`. |
+| `packageName`, `packageVersion`, `description`, `vendor`, `copyright`, `homepage`, `licenseFile` | App metadata. `homepage` is required for Linux DEB. |
+| `modules(...)`, `includeAllModules` | JDK modules to include. Default: `java.base, java.desktop, java.logging, java.net.http, jdk.accessibility, jdk.crypto.ec`. |
+| `cleanupNativeLibs` | Strip non-target native libs from dependency JARs. |
+| `enableAotCache` | JDK 25+ AOT cache pre-warming. |
+| `splashImage` | Path (relative to app resources) to a splash PNG. |
+| `compressionLevel` | `Store`, `Normal`, `Maximum`. (Avoid `Maximum` with AppImage — squashfs cold-start cost.) |
+| `artifactName` | Template, default `${name}-${version}-${os}-${arch}.${ext}`. |
+| `trustedCertificates.from(...)` | Extra CA bundles imported into the bundled JDK `cacerts`. |
+| `protocol(name, vararg schemes)` | Register a custom URL protocol (deep link). |
+| `fileAssociation(mimeType, extension, description, linuxIconFile?, windowsIconFile?, macOSIconFile?)` | Register a file type. Call multiple times for multiple associations. |
+| `publish { … }` | GitHub Releases / S3 / generic HTTP publishing config. |
+| `macOS { … }`, `windows { … }`, `linux { … }` | Per-OS overrides. |
+
+### Per-OS blocks (highlights)
+
+```kotlin
+nativeDistributions {
+    macOS {
+        bundleID = "com.example.myapp"
+        dockName = "MyApp"
+        appCategory = "public.app-category.productivity"
+        minimumSystemVersion = "12.0"
+        iconFile.set(project.file("icons/app.icns"))
+
+        infoPlist {
+            extraKeysRawXml = """
+                <key>NSCameraUsageDescription</key>
+                <string>MyApp needs the camera for QR scanning.</string>
+            """.trimIndent()
+        }
+
+        signing {
+            sign.set(true)
+            identity.set("Developer ID Application: My Company (TEAMID)")
+        }
+        notarization {
+            appleID.set(System.getenv("APPLE_ID"))
+            password.set(System.getenv("APPLE_APP_PASSWORD"))
+            teamID.set("TEAMID")
+        }
+
+        // macOS 26 Liquid Glass: vtool patches launcher Mach-O headers
+        macOsSdkVersion = "26.0"
+    }
+    windows {
+        packageName = "MyApp"
+        upgradeUuid = "00000000-0000-0000-0000-000000000000"
+        menu = true
+        perUserInstall = true
+        iconFile.set(project.file("icons/app.ico"))
+        signing {
+            // Authenticode signing config
+        }
+    }
+    linux {
+        packageName = "myapp"
+        appCategory = "Utility"
+        menuGroup = "Utility"
+        debMaintainer = "ops@example.com"
+        iconFile.set(project.file("icons/app.png"))
+        rpmLicenseType = "MIT"
+    }
+}
+```
+
+## Deep links
+
+```kotlin
+nativeDistributions {
+    protocol("MyApp", "myapp")
+}
+```
+
+Wires `CFBundleURLTypes` (macOS), registry entries (Windows), and `MimeType=x-scheme-handler/myapp` (Linux `.desktop`). Receive the URI at runtime through `NucleusApplicationScope.onDeepLink { uri -> … }` — see [Deep links](/docs/lifecycle/deep-links).
+
+## File associations
+
+```kotlin
+nativeDistributions {
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+        linuxIconFile = project.file("icons/file.png"),
+        windowsIconFile = project.file("icons/file.ico"),
+        macOSIconFile = project.file("icons/file.icns"),
+    )
+}
+```
+
+Call multiple times for multiple associations.
+
+## Trusted CA certificates
+
+```kotlin
+nativeDistributions {
+    trustedCertificates.from(files("certs/company-proxy-ca.pem"))
+}
+```
+
+PEM or DER. Imported into the bundled JDK's `cacerts` at build time — useful for corporate proxies. For runtime trust against the OS keychain instead, use [`native-ssl`](/docs/performance/native-ssl).
+
+## GraalVM Native Image
+
+| Property | Default | Description |
+|---|---|---|
+| `isEnabled` | `false` | Master switch. |
+| `javaLanguageVersion` | `25` | GraalVM JDK to use. |
+| `jvmVendor` | (auto) | Override toolchain vendor. |
+| `imageName` | (auto) | Output binary name. |
+| `march` | `"native"` | Target CPU arch. |
+| `buildArgs` | `[]` | Extra `native-image` flags. |
+| `nativeImageConfigBaseDir` | (build dir) | Where to drop reflection / resource configs. |
+| `metadataRepository.enabled` | `true` | Use the Oracle GraalVM Reachability Metadata Repo. |
+| `metadataRepository.version` | `0.10.6` | Repo version. |
+| `metadataRepository.excludedModules` | `[]` | Skip metadata for specific modules. |
+| `macOS.minimumSystemVersion` | `"12.0"` | min macOS target. |
+| `macOS.macOsSdkVersion` | `"26.0"` | macOS SDK linked into the launcher. |
+
+See [GraalVM](/docs/performance/graalvm) for the deep dive.
+
+## AOT cache (JVM path)
+
+```kotlin
+nativeDistributions {
+    enableAotCache = true
+}
+```
+
+Requires JDK 25+. The plugin runs a training pass that boots your app to first frame, snapshots the JVM's class state, and ships the cache alongside the launcher. At runtime, startup drops to roughly 1 s. See [AOT cache](/docs/performance/aot-cache).
+
+## ProGuard
+
+```kotlin
+buildTypes {
+    release {
+        proguard {
+            isEnabled = true
+            optimize = true
+            obfuscate.set(false)
+            joinOutputJars.set(true)
+            configurationFiles.from(project.file("proguard-rules.pro"))
+        }
+    }
+}
+```
+
+Release tasks are suffixed `Release` (e.g. `packageReleaseDmg`).
+
+<Callout type="warn" title="AppImage + Maximum compression">
+Using `CompressionLevel.Maximum` with AppImage causes very slow startup (60s+) due to squashfs/FUSE decompression. Use `Normal` or `Store` for AppImage targets.
+</Callout>
+
+## Next
+
+- [Packaging](/docs/packaging) — per-format details, code signing, store publishing.
+- [GraalVM](/docs/performance/graalvm) — reachability metadata, build args, CI.
+- [Configuration reference](/docs/reference/gradle-dsl) — every property, every type.

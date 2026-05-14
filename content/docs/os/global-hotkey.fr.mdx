@@ -1,0 +1,99 @@
+---
+title: Raccourcis globaux
+description: Enregistre des raccourcis clavier au niveau OS qui se déclenchent même quand ton app n'a pas le focus — lecteurs média, captures d'écran, outils d'accessibilité.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Un raccourci global, c'est une combinaison de touches que l'OS route vers ton app peu importe la fenêtre au focus. Captures d'écran, lecteurs audio, règles à l'écran — tous en ont besoin. `global-hotkey` l'expose comme une API Kotlin unique sur macOS, Windows et Linux.
+
+## En bref
+- Enregistre des combinaisons touche + modificateurs ou des touches médias dédiées.
+- Un callback par binding, retour d'un handle pour désenregistrer.
+- Ponts natifs par OS — pas d'AWT, pas de polling d'événements.
+- Sur macOS, l'utilisateur doit accorder Input Monitoring / Accessibilité pour certains bindings.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.global-hotkey:<version>")
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.globalhotkey.GlobalHotKeyManager
+import dev.nucleusframework.globalhotkey.HotKeyModifier
+import java.awt.event.KeyEvent
+
+GlobalHotKeyManager.initialize()
+
+val handle = GlobalHotKeyManager.register(
+    modifiers = setOf(HotKeyModifier.CTRL, HotKeyModifier.SHIFT),
+    keyCode = KeyEvent.VK_F12,
+) { _ ->
+    println("Raccourci pressé")
+}
+
+// plus tard
+GlobalHotKeyManager.unregister(handle)
+GlobalHotKeyManager.shutdown()
+```
+
+## Fonctionnement
+
+`GlobalHotKeyManager` ouvre un event tap OS à `initialize()` (CGEventTap sur macOS, RegisterHotKey sur Windows, keygrabber X11 / Wayland sur Linux). Chaque appel `register(...)` rend un handle `Long`. Les listeners tournent sur un dispatcher dédié — marshal vers ton thread UI selon besoin.
+
+Utilise `DisposableEffect` pour borner un raccourci à la durée de vie d'un Composable :
+
+```kotlin
+DisposableEffect(Unit) {
+    GlobalHotKeyManager.initialize()
+    val handle = GlobalHotKeyManager.register(
+        modifiers = setOf(HotKeyModifier.META),
+        keyCode = KeyEvent.VK_K,
+    ) { showQuickSwitcher() }
+
+    onDispose {
+        GlobalHotKeyManager.unregister(handle)
+    }
+}
+```
+
+## Référence
+
+### Modificateurs
+
+`HotKeyModifier.CTRL`, `ALT`, `SHIFT`, `META`. Sur macOS, `META` = Command ; sur Linux / Windows, la touche Win / Super.
+
+### Touches médias
+
+```kotlin
+GlobalHotKeyManager.register(MediaKey.Play) { player.togglePlayPause() }
+GlobalHotKeyManager.register(MediaKey.Next) { player.skipNext() }
+```
+
+`MediaKey` couvre Play, Pause, Next, Prev, VolumeUp, VolumeDown, Mute.
+
+### Disponibilité
+
+```kotlin
+if (!GlobalHotKeyManager.isAvailable) {
+    // Pas de support OS (rare ; en général un compositor Linux qui interdit les grabs).
+}
+```
+
+### Détection de conflit
+
+`register(...)` rend `0L` si le système refuse le binding (déjà grabbé par une autre app ou le DE). Vérifie toujours le retour.
+
+## Notes
+
+<Callout type="warn" title="Permissions macOS">
+Au premier enregistrement sur macOS, l'utilisateur est invité à accorder **Input Monitoring** (et parfois **Accessibilité**) à ton app dans Réglages Système → Confidentialité et sécurité. Tant qu'il refuse, les callbacks ne se déclenchent pas. Affiche un message explicite et lie `x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent`.
+</Callout>
+
+- Les compositors Wayland Linux interdisent en général les grabs globaux pour les apps quelconques. La bibliothèque retombe sur le portail `org.freedesktop.portal.GlobalShortcuts` quand il est disponible ; sinon, le binding peut juste ne rien faire.
+- Appelle `shutdown()` à la sortie pour libérer l'event tap proprement.

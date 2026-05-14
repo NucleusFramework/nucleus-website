@@ -1,0 +1,81 @@
+---
+title: Dark mode detector
+description: A reactive isSystemInDarkMode() composable plus a Flow-backed API — the system theme as live state, not a one-shot read.
+---
+
+Compose Desktop's `isSystemInDarkTheme()` reads the OS theme exactly once. Toggle dark mode in System Settings and your UI freezes in the previous palette until you restart. `darkmode-detector` replaces it with a reactive listener that triggers recomposition the instant the system theme flips.
+
+## TL;DR
+- `@Composable isSystemInDarkMode()` — drop-in replacement, reactive.
+- `IDarkModeDetector.isDark: StateFlow<Boolean>` — coroutine-friendly.
+- macOS via Cocoa KVO, Windows via registry watch, Linux via `xdg-desktop-portal`.
+- No polling, no AWT, no JNA.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import androidx.compose.material3.MaterialTheme
+
+@Composable
+fun App() {
+    val isDark = isSystemInDarkMode()
+    MaterialTheme(colorScheme = if (isDark) darkColorScheme() else lightColorScheme()) {
+        // Your UI recomposes when the OS theme changes.
+    }
+}
+```
+
+## How it works
+
+Each platform plugs into the OS's own change-notification mechanism:
+
+- **macOS**: Cocoa KVO on `NSApp.effectiveAppearance`. The bridge wakes on the AppKit notification queue and republishes to a `StateFlow` on a Nucleus dispatcher.
+- **Windows**: registry watch on `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`.
+- **Linux**: `org.freedesktop.appearance` portal (color-scheme), with a fallback to GSettings.
+
+`isSystemInDarkMode()` wires that flow into a Compose `State`, so any reader recomposes on change.
+
+## Reference
+
+### Composable
+
+```kotlin
+val isDark: Boolean = isSystemInDarkMode()
+```
+
+### Imperative / coroutines
+
+```kotlin
+val detector = getPlatformDarkModeDetector()
+detector.start()
+
+scope.launch {
+    detector.isDark.collect { isDark ->
+        println("dark mode: $isDark")
+    }
+}
+
+// later
+detector.stop()
+```
+
+### Testing / fallbacks
+
+```kotlin
+val detector: IDarkModeDetector = NoopDarkModeDetector
+```
+
+Use `NoopDarkModeDetector` in tests or on platforms where the live detector is not desired.
+
+## Notes
+- The very first read is synchronous; subsequent changes come through the `StateFlow` and trigger Compose recomposition.
+- On Linux, ensure the portal is available (it is on every modern desktop). Headless / CI environments fall back to "light".

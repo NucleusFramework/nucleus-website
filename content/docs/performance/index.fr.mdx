@@ -1,0 +1,63 @@
+---
+title: Choisis ton compromis. Gagne dans tous les cas.
+description: Deux runtimes depuis le même code Kotlin — un binaire natif GraalVM ou une image JDK 25 + AOT cache. Même DSL, un seul interrupteur.
+---
+
+La plupart des frameworks desktop imposent un compromis : démarrage instantané au prix des performances, ou performances maximales au prix d'un démarrage lent. Nucleus livre le même code Kotlin sous forme d'image native GraalVM — pour un cold start instantané et une empreinte mémoire minuscule — ou sur une JVM moderne avec AOT cache, où le JIT HotSpot s'approche du débit de C++ et Rust sur les chemins chauds. Même source. Même build. Deux runtimes.
+
+## TL;DR
+- **GraalVM Native Image** — cold start de 0.48 s, 60 MB de RAM au repos, binaire autonome de 38 MB. Monde fermé, compilé AOT. Aucun JRE à embarquer.
+- **JDK 25 + AOT cache** — cold start de 1.2 s, 180 MB de RAM au repos, 95 MB distribués. Monde ouvert, le JIT C2 d'HotSpot atteint ~96% du débit C++/Rust sur les chemins chauds.
+- Un seul DSL Gradle pilote les deux. Tu changes un flag, tu livres un autre artefact.
+- Les métadonnées de réflexion, JNI et ressources sont injectées automatiquement pour chaque module Nucleus — tu n'écris jamais de `reflect-config.json` à la main.
+
+## Les deux runtimes côte à côte
+
+|                         | GraalVM Native Image          | JDK 25 + AOT cache           |
+|-------------------------|-------------------------------|------------------------------|
+| Cold start              | **0.48 s**                    | 1.2 s                        |
+| RAM au repos            | **60 MB**                     | 180 MB                       |
+| Binaire / distribution  | **38 MB** autonome            | 95 MB (JRE + AOT cache)      |
+| Débit CPU maximal       | ~82% (AOT, pas d'escalade JIT) | **~96%** (HotSpot C2, vectorisation) |
+| Monde                   | Fermé                         | Ouvert                       |
+| Réflexion / agents      | Métadonnées statiques uniquement | Tout est permis           |
+| Module                  | `nucleus.graalvm-runtime`     | `nucleus.aot-runtime`        |
+
+## Même DSL, un interrupteur
+
+```kotlin
+// build.gradle.kts
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    // Choisis GraalVM…
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+    }
+
+    // …ou choisis JDK 25 + AOT cache.
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+Les deux peuvent cohabiter dans le même projet. Bascule par build type, par entrée de matrice CI, ou livre les deux et laisse l'utilisateur choisir.
+
+## Arbre de décision
+
+- **Utilitaire en arrière-plan, app de barre de menu, outil desktop type CLI, cible sandboxée (App Store / MSIX) ?** → GraalVM Native Image. Démarrage instantané, installateur le plus petit, pas de surprise Java pour l'utilisateur.
+- **Outil long-running type IDE, traitement de données lourd, hôte de plugins, code dynamique (moteurs de script, ByteBuddy, classloaders custom) ?** → JDK 25 + AOT cache. Le JIT mature d'HotSpot paye dès que les chemins chauds chauffent ; l'AOT cache efface la taxe de warmup.
+- **Les deux ?** Livre les deux. Certaines équipes livrent GraalVM pour l'App Store et JDK + AOT cache pour le téléchargement direct.
+
+Voir [`/docs/concepts/runtimes`](/docs/concepts/runtimes) pour la vue d'architecture.
+
+## Ce que tu obtiens en aval
+
+- [GraalVM Native Image](/docs/performance/graalvm) — le DSL Gradle complet, les métadonnées automatiques, les tâches Gradle, le câblage CI.
+- [AOT cache](/docs/performance/aot-cache) — Project Leyden de JDK 25, branché à Gradle en une ligne.
+- [Accès natif](/docs/performance/native-access) — comment Nucleus résout les métadonnées GraalVM (réflexion / ressources / JNI) pour que tu n'écrives pas de JSON.
+- [HTTP natif](/docs/performance/native-http) — `HttpClient`, OkHttp, Ktor pré-câblés avec le trust store de l'OS.
+- [SSL natif](/docs/performance/native-ssl) — le keychain de l'OS comme source d'ancres de confiance.
+- [HiDPI Linux](/docs/performance/linux-hidpi) — corrige le bug d'UI minuscule et floue sous image native.

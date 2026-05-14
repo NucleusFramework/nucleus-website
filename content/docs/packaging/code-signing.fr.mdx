@@ -1,0 +1,143 @@
+---
+title: Signature de code
+description: Signer et notariser sur macOS, signer avec PFX ou Azure Artifact Signing sur Windows.
+---
+
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+Les apps desktop non signées meurent à la porte sur macOS et Windows : Gatekeeper les refuse, SmartScreen avertit l'utilisateur, le Microsoft Store rejette l'upload. Nucleus branche signature et notarisation dans le même DSL Gradle que le packaging — un bloc par OS.
+
+## TL;DR
+- macOS : Developer ID Application + notarisation `notarytool`, trois modes d'auth.
+- Windows : certificat `.pfx` ou Azure Artifact Signing (cloud).
+- Linux : la signature GPG des repos DEB/RPM sort du périmètre ; tu signes avec les outils de ta distro.
+- CI ready — actions composites pour le setup keychain et la signature depuis secrets.
+
+## Installation
+Livré avec le plugin Gradle.
+
+## Démarrage rapide
+
+<Tabs items={['macOS', 'Windows']}>
+<Tab value="macOS">
+
+```kotlin
+macOS {
+    signing {
+        sign.set(true)
+        identity.set("Developer ID Application: My Company (TEAMID)")
+    }
+    notarization {
+        appleID.set("dev@example.com")
+        password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+        teamID.set("TEAMID")
+    }
+}
+```
+
+</Tab>
+<Tab value="Windows">
+
+```kotlin
+windows {
+    signing {
+        enabled = true
+        certificateFile.set(file("certs/certificate.pfx"))
+        certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+        algorithm = SigningAlgorithm.Sha256
+        timestampServer = "http://timestamp.digicert.com"
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Comment ça marche
+
+### macOS — Developer ID + notarisation
+Les formats de distribution directe (DMG, ZIP) sont signés avec **Developer ID Application** puis soumis à Apple pour notarisation. Les builds Mac App Store (PKG) suivent un autre chemin : **3rd Party Mac Developer Application** + provisioning profiles, pas de notarisation — Apple review via Transporter.
+
+La notarisation supporte trois modes d'auth mutuellement exclusifs :
+
+1. **Apple ID + mot de passe app-specific** (simple, dev-friendly) :
+
+   ```kotlin
+   notarization {
+       appleID.set("dev@example.com")
+       password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+       teamID.set("TEAMID")
+   }
+   ```
+
+2. **Profil keychain `notarytool`** — stocke les credentials une fois avec `xcrun notarytool store-credentials AC_PASSWORD …`, puis :
+
+   ```kotlin
+   notarization {
+       keychainProfile.set("AC_PASSWORD")
+   }
+   ```
+
+3. **Clé API App Store Connect** — recommandé en CI :
+
+   ```kotlin
+   notarization {
+       apiKey.set("/path/to/AuthKey_ABC123.p8")
+       apiKeyId.set("ABC123")
+       apiIssuer.set("12345678-90ab-cdef-1234-567890abcdef")
+   }
+   ```
+
+Configurer plusieurs modes dans le même build est rejeté à la validation. Choisis-en un.
+
+### macOS — signature inside-out pour les binaires universels
+`lipo` invalide toutes les signatures, donc les builds universels re-signent après la fusion dans un ordre strict inside-out : `.dylib` et `.jnilib` avec runtime entitlements, exécutables principaux avec app entitlements, puis le runtime bundle, puis le `.app` lui-même. Tous les `codesign` utilisent `--options runtime --timestamp`. L'action CI `build-macos-universal` gère ça — voir [CI/CD](/docs/packaging/ci-cd).
+
+### Windows — certificat PFX
+Le chemin classique : un fichier `.pfx` ou `.p12`, éventuellement protégé par mot de passe, avec un serveur de timestamping. L'algorithme par défaut est SHA-256 :
+
+```kotlin
+windows {
+    signing {
+        enabled = true
+        certificateFile.set(file(System.getenv("WIN_CSC_LINK") ?: "certs/certificate.pfx"))
+        certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+        timestampServer = "http://timestamp.digicert.com"
+    }
+}
+```
+
+Serveurs de timestamping courants : DigiCert (`http://timestamp.digicert.com`), Sectigo (`http://timestamp.sectigo.com`), GlobalSign (`http://timestamp.globalsign.com`).
+
+### Windows — Azure Artifact Signing
+Pour signer via HSM cloud sans fichier de certificat local :
+
+```kotlin
+windows {
+    signing {
+        enabled = true
+        publisherName = "My Publisher"
+        azureTenantId = System.getenv("AZURE_TENANT_ID")
+        azureEndpoint = "https://eastus.codesigning.azure.net"
+        azureCertificateProfileName = "my-profile"
+        azureCodeSigningAccountName = "my-account"
+    }
+}
+```
+
+### Gestion des secrets en CI
+Ne commit jamais de certificats. Sur GitHub Actions, encode le PFX en base64 et décode-le au build. Pour macOS, l'action composite `setup-macos-signing` crée un keychain temporaire et importe les certificats depuis les secrets — voir [CI/CD](/docs/packaging/ci-cd).
+
+## Référence
+
+- `macOS.signing { }` — `sign`, `identity`, `keychain`, `prefix`
+- `macOS.notarization { }` — `appleID`+`password`+`teamID`, ou `keychainProfile`(+`keychainPath`), ou `apiKey`+`apiKeyId`+`apiIssuer`
+- `windows.signing { }` — `enabled`, `certificateFile`, `certificatePassword`, `certificateSha1`, `certificateSubjectName`, `algorithm`, `timestampServer`, plus champs Azure
+
+Référence complète dans la [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- **Entitlements pour le hardened runtime.** Entitlements minimales JVM : `com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`, `com.apple.security.cs.allow-dyld-environment-variables`. Voir [sandboxing](/docs/packaging/sandboxing) pour les entitlements du PKG sandboxé.
+- **Propriétés Gradle équivalentes.** Chaque champ de notarisation a une propriété Gradle `compose.desktop.mac.notarization.<name>` — utile quand tu préfères passer les secrets via `-P` plutôt qu'en variables d'env.
+- **Rotation du `.pfx`.** Mets à jour le certificat au moins 30 jours avant expiration — un binaire signé mais expiré échoue SmartScreen jusqu'à une nouvelle signature timestampée.

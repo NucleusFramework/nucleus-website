@@ -1,0 +1,75 @@
+---
+title: Fluent — Mica & Acrylic
+description: A Windows 11 look for your Compose windows — Mica, Acrylic, the right caption buttons, snap layouts.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Fluent is Windows 11's design language: Mica desktop tinting, Acrylic in flyouts, rounded corners and the right caption button layout. The Nucleus Fluent toolkit ships a `DecoratedWindow` style that lands the look without forcing you to call Win32.
+
+## TL;DR
+- Mica desktop material on Windows 11, falls back to a solid colour on older versions.
+- Acrylic surfaces for flyouts / sidebars.
+- Caption buttons on the right; snap layouts on hover (handled by the OS).
+- Built on top of the Tao backend for native title-bar transparency.
+
+## Install
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-fluent:<version>") [FACT-CHECK: artifact id]
+}
+```
+
+`[FACT-CHECK: artifact id]` — the Fluent toolkit pack is announced for Nucleus 2.0. Until its artifact ships, target the same look manually by combining the Tao backend with a custom `TitleBarStyle` and the Windows icons in `decorated-window-core`.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.*
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.core.*
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val dark = isSystemInDarkMode()
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color.Transparent,        // let Mica show
+            inactiveBackground = Color.Transparent,
+            content = if (dark) Color(0xFFE6E6E6) else Color(0xFF1F1F1F),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 32.dp),
+        icons = windowsTitleBarIcons(isDark = dark),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = dark, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Fluent") {
+            TitleBar { _ -> /* search box, breadcrumbs, … */ }
+            Box(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+## How it works
+
+Fluent's depth effects (Mica / Acrylic) are window-level materials exposed by DWM (`DwmSetWindowAttribute` with `DWMWA_SYSTEMBACKDROP_TYPE`). The Tao backend toggles them on the native HWND; the Fluent style module wires them to the same `DecoratedWindow` the rest of your code talks to.
+
+Caption-button icons come from `windowsTitleBarIcons(isDark)` in `decorated-window-core` — the same icon set the JBR backend uses, so screenshots stay consistent across backends. Snap layouts (the popover on hover above the maximize button) are an OS concern: when you decorate the window properly, Windows handles it on its own.
+
+## Reference
+
+- `windowsTitleBarIcons(isDark: Boolean): WindowsTitleBarIconSet` — caption button icons.
+- `WindowsControlButtonIcons` — `.Maximize`, `.Restore`, `.Minimize`, `.Close` painters.
+- `Modifier.windowDragHandler(window)` — make a custom region act as the drag handle (use for tab strips).
+
+<Callout type="info">
+Mica is a Windows 11 feature. On Windows 10 you get the solid-colour fallback. Acrylic still works as an overlay but draws on top, not below.
+</Callout>

@@ -1,0 +1,59 @@
+---
+title: Comment ai-je été lancée ?
+description: Détecte au runtime si l'app tourne en DMG, MSIX, Flatpak, AppImage, ./gradlew run, etc.
+---
+
+Le même code Kotlin peut être livré en DMG, MSIX, Flatpak, Snap, AppImage, installeur `.exe`, ou simplement `./gradlew run` dans ton IDE. Chacune de ces formes change des règles dures — où tu peux écrire, quel canal d'update utiliser, à quoi ressemble le chemin d'install. `ExecutableRuntime` permet de brancher sur ça sans deviner.
+
+## TL;DR
+- `ExecutableRuntime.type(): ExecutableType` renvoie le format de packaging. Le plugin Nucleus pose la system property `nucleus.executable.type` au packaging.
+- Helpers : `isAppX()`, `isFlatpak()`, `isDmg()`, `isAppImage()`, `isJar()` (alias dev mode), etc.
+- Sert à gater l'auto-update, les chemins fichiers, les stratégies store vs direct, le code sandbox-aware.
+
+## Installation
+
+Fourni avec `core-runtime`. Le module `aot-runtime` réexporte les mêmes types si tu ne veux que la détection AOT.
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.core.runtime.ExecutableRuntime
+import dev.nucleusframework.core.runtime.ExecutableType
+
+when (ExecutableRuntime.type()) {
+    ExecutableType.AppX     -> showMicrosoftStoreUpdate()
+    ExecutableType.Snap     -> showSnapStoreUpdate()
+    ExecutableType.Flatpak  -> showFlathubUpdate()
+    ExecutableType.Pkg      -> showMacAppStoreUpdate()
+    else                    -> NucleusUpdater { /* ... */ }.checkForUpdates()
+}
+
+if (ExecutableRuntime.isAppX()) {
+    // Sandboxé : écris dans le state du package, pas dans HOME
+}
+```
+
+## Comment ça marche
+
+Le plugin Gradle écrit `-Dnucleus.executable.type=<kind>` dans le `.cfg` du launcher au packaging. La même property est baked-in pour les builds native-image. `ExecutableRuntime.type()` ne fait que la lire — donc c'est exactement aussi fiable que ton pipeline de packaging (et complètement découplé d'heuristiques fichier type "est-ce que `/snap/` est dans mon path").
+
+En `./gradlew run`, aucune property n'est posée, donc le runtime renvoie `Jar` — sers-t'en comme signal dev mode. Conséquence : les features qui ont besoin d'une détection fiable (comme [`AutoLaunch.wasStartedAtLogin()`](/docs/lifecycle/auto-launch)) court-circuitent en dev pour éviter les faux positifs.
+
+## Référence
+
+### `ExecutableRuntime`
+
+| Méthode | Renvoie | Notes |
+|---|---|---|
+| `type()` | `ExecutableType` | Lit `nucleus.executable.type`. |
+| `isAppX()`, `isFlatpak()`, `isSnap()`, `isAppImage()`, `isDmg()`, `isPkg()`, `isExe()`, `isMsi()`, `isDeb()`, `isRpm()`, `isJar()` | `Boolean` | Un par variante. |
+
+### `ExecutableType`
+
+`Jar, AppImage, Dmg, Pkg, Exe, Msi, AppX, Deb, Rpm, Flatpak, Snap` et compagnie.
+
+## Notes
+
+- La variante `Jar` couvre `./gradlew run` et tout exécutable non packagé — pratique comme signal dev.
+- Pour la version, utilise [`NucleusApp.version`](/docs/lifecycle/app-metadata) — `ExecutableRuntime` ne connaît que la forme.
+- Le mode AOT (training vs runtime) vit dans un module voisin — `AotRuntime.mode()`.

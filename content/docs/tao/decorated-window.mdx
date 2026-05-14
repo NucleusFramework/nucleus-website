@@ -1,0 +1,133 @@
+---
+title: DecoratedWindow on Tao
+description: Open a Compose Desktop window through Tao — custom title bar, drag regions, native resize, no AWT.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`DecoratedWindow` is the same Composable across every backend. On Tao it opens a native OS window, mounts a Skiko surface and gives you a `TitleBar` slot you can fill with arbitrary Compose content — including draggable regions and per-OS button layouts.
+
+## TL;DR
+- One Composable, three OSes — title bar inset, traffic lights and snap zones handled per platform.
+- `useNativeTitleBar = false` (default) gives you the custom Compose title bar slot.
+- `useNativeTitleBar = true` keeps the OS-drawn frame and chrome.
+- Drag regions are declared with the standard `Modifier.windowDragHandler` / hit-test exclusions.
+- Resize, minimise, maximise and full-screen are wired into `WindowState`.
+
+## Install
+
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework")
+}
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.*
+import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.core.*
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color(0xFF1A1D24),
+            inactiveBackground = Color(0xFF15181D),
+            content = Color(0xFFE6E6E6),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 36.dp),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = true, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(
+            onCloseRequest = ::exitApplication,
+            state = rememberWindowState(size = DpSize(1024.dp, 720.dp)),
+            title = "Tao Demo",
+            minimumSize = DpSize(640.dp, 480.dp),
+        ) {
+            TitleBar(modifier = Modifier.macOSLargeCornerRadius()) { state ->
+                Text("Tao Demo", Modifier.align(Alignment.CenterHorizontally))
+            }
+            Box(Modifier.fillMaxSize()) { /* app content */ }
+        }
+    }
+}
+```
+
+## How it works
+
+`nucleusApplication { }` resolves the backend and exposes `DecoratedWindow` on `NucleusApplicationScope`. On Tao, that overload delegates to `dev.nucleusframework.window.tao.ApplicationScope.DecoratedWindow`, which opens a `TaoWindow` and mounts a `ComposeScene` against the native surface.
+
+Inside the content lambda you get a `NucleusDecoratedWindowScope`. From there:
+
+- `nucleusWindow` returns the backend-agnostic `NucleusWindow` handle (focus state, minimise / maximise / fullscreen flows, icon, minimum size).
+- `nucleusWindow.unsafe.taoWindow` is the raw `TaoWindow` if you need it.
+- `TitleBar { state -> … }` declares the title bar slot. Pass a `Modifier.macOSLargeCornerRadius()` to opt into the rounded-corner look on macOS 11+.
+
+Title bar styling is shared with the AWT backends — `TitleBarStyle`, `TitleBarColors`, `TitleBarMetrics` and `NucleusDecoratedWindowTheme` all live in `decorated-window-core`. So the same theme works whether you swap the dependency to `-tao`, `-jbr` or `-jni`.
+
+## Reference
+
+### `DecoratedWindow` parameters
+
+| Parameter            | Type                                  | Notes                                                  |
+|----------------------|---------------------------------------|--------------------------------------------------------|
+| `onCloseRequest`     | `() -> Unit`                          | Fired by the OS close affordance.                      |
+| `state`              | `WindowState`                         | Position, size, placement.                             |
+| `visible`            | `Boolean`                             | Default `true`.                                        |
+| `title`              | `String`                              | OS-level window title.                                 |
+| `icon`               | `Painter?`                            | Taskbar / dock icon.                                   |
+| `resizable`          | `Boolean`                             | Default `true`.                                        |
+| `enabled` / `focusable` / `alwaysOnTop` | `Boolean`               | Standard window flags.                                 |
+| `minimumSize`        | `DpSize?`                             | Enforced after the first layout pass.                  |
+| `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Bubble to the OS or swallow.                           |
+| `content`            | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot + your UI.   |
+
+### Scope members
+
+```kotlin
+interface NucleusDecoratedWindowScope : DecoratedWindowScope {
+    val nucleusWindow: NucleusWindow
+}
+
+interface NucleusWindow {
+    val isFocused: Boolean
+    val focusFlow: StateFlow<Boolean>
+    fun setMaximized(value: Boolean)
+    fun setFullscreen(value: Boolean)
+    fun setMinimumSize(size: DpSize?)
+    fun setIcon(painter: Painter?)
+    fun close()
+    val unsafe: NucleusWindowUnsafe   // .taoWindow, .taoHandle
+}
+```
+
+### Useful modifiers
+
+- `Modifier.macOSLargeCornerRadius()` — opt into macOS 11+ rounded corners.
+- `Modifier.newFullscreenControls()` — relayout title bar buttons for fullscreen.
+- `Modifier.windowDragHandler(window)` — make a region act as a drag handle.
+
+<Callout type="tip">
+The Tao backend exposes a Tao-specific `TitleBar` overload too — same name, but takes the `TaoDecoratedWindowScope`. The `nucleusApplication` entry point resolves the right one for you. If you call `taoApplication { }` directly you'll get the Tao overload.
+</Callout>
+
+## Notes
+
+- macOS requires `-XstartOnFirstThread` — the Nucleus Gradle plugin handles it.
+- Native title bar mode (`useNativeTitleBar = true`) skips the Compose slot and hands chrome back to the OS. Use it for tools where users expect 100% native frames.
+- For multi-window apps, call `DecoratedWindow` multiple times from the same `nucleusApplication` block. Each window gets its own `NucleusWindow`. See [DecoratedWindow overview](/docs/window).

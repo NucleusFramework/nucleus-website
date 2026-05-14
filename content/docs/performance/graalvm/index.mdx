@@ -1,0 +1,77 @@
+---
+title: GraalVM Native Image — instant cold start, tiny binary
+description: ~50 ms to first frame, 60 MB RAM idle, 38 MB self-contained binary. Closed-world AOT, but reflection metadata is resolved automatically for every Nucleus module.
+---
+
+GraalVM Native Image AOT-compiles your entire Compose Desktop app into a standalone binary. No JVM startup, no class loading — the process is alive in half a second and the smallest resident set on the market. The tradeoff is the closed-world assumption: no dynamic class loading, no agents, every reflective call declared up front. Nucleus does that declaration work for you.
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## TL;DR
+- **Cold start: ~0.48 s. RAM idle: 60 MB. Binary: 38 MB.** Self-contained, no JRE.
+- Reflection / JNI / resource metadata for every Nucleus module is auto-injected — no `reflect-config.json` to write.
+- Required toolchain: **BellSoft Liberica NIK 25 (full distribution)**, not Oracle GraalVM or NIK Lite.
+- Same `nucleus { … }` DSL as JVM builds — just flip `graalvm.isEnabled = true`.
+
+## When to pick GraalVM Native Image
+
+- Background services, menu-bar apps, system-tray tools — anything that sits idle but must stay responsive.
+- Instant-launch expectations — utilities, launchers, CLI-flavored desktop tools.
+- Distribution-first concerns — App Store / MSIX / Snap, smallest installer, no Java surprise for the user.
+- Tight memory budgets — sandboxed environments, low-spec hardware.
+
+## What you give up
+
+GraalVM is not a free lunch:
+
+- **No JIT** — peak CPU throughput sits around 82% of HotSpot C2 on hot paths (the landing chart). For sustained heavy computation, [AOT cache](/docs/performance/aot-cache) wins.
+- **Closed world** — no `Class.forName` driven by runtime values, no dynamic classloaders, no scripting engines, no annotation-processing frameworks at runtime, no runtime bytecode generation. If your dep list includes Spring, Lucene, Groovy, JNA-heavy libs, ByteBuddy mocks: ship AOT cache instead.
+- **Per-platform builds** — native image must be compiled on each target OS. CI matrix is the answer.
+
+For most idiomatic Kotlin libs — ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose, SLF4J — Nucleus handles it transparently.
+
+## Requirements
+
+### BellSoft Liberica NIK 25 (full)
+
+GraalVM native-image compilation **requires [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/)** in the **full** distribution. The Gradle plugin auto-downloads it via the Java Toolchain when you set `jvmVendor = JvmVendorSpec.BELLSOFT`.
+
+<Callout type="error" title="Other distributions will fail">
+Oracle GraalVM, GraalVM CE, and Liberica NIK Lite all lack the AWT/Swing native-image support desktop apps need. Use the full Liberica NIK distribution.
+</Callout>
+
+### Platform toolchains
+
+| Platform | Required |
+|----------|----------|
+| **macOS** | Xcode Command Line Tools (Xcode 26 for macOS 26 appearance) |
+| **Windows** | MSVC (Visual Studio Build Tools) — `ilammy/msvc-dev-cmd` in CI |
+| **Linux** | GCC, `patchelf`, `xvfb` (for headless compilation) |
+
+## How Nucleus arranges native-image
+
+Three modules cooperate:
+
+- **`nucleus.graalvm-runtime`** — the runtime support library. SVM `@TargetClass` substitutions for AWT bits that don't work as-is under native-image (Win32 font manager, Fontconfig, X11 toolkit WMClass). Auto-resource registration. The `GraalVmInitializer` you call from `main()`.
+- **The Nucleus Gradle plugin** — five-layer metadata pipeline (curated per-library files, Oracle Reachability repo, platform-specific entries, static bytecode analysis, generic baseline), plus the `packageGraalvmNative` task graph.
+- **`nucleus.nucleus-application`** — wires the initializer for you and provides the same `DecoratedWindow` / `NucleusWindow` surface as the JVM path. Same source code, two outputs.
+
+```kotlin
+// Same source as a JVM app. The plugin generates the right artifact.
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+        javaLanguageVersion = 25
+        jvmVendor = JvmVendorSpec.BELLSOFT
+    }
+}
+```
+
+## Next steps
+
+- [Configuration](/docs/performance/graalvm/configuration) — full Gradle DSL, recommended build args.
+- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — how reflection / resources / JNI are resolved for you.
+- [Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — the `graalvm-runtime` module, font fixes, resource patterns.
+- [Tasks & CI](/docs/performance/graalvm/tasks-ci) — Gradle tasks, output locations, GitHub Actions matrix.

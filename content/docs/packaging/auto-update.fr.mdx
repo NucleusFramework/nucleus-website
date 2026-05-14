@@ -1,0 +1,139 @@
+---
+title: Auto-update
+description: Check, télécharge, vérifie, installe — sans service tiers.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+L'auto-update est l'une des rares choses qu'Electron a réussi et que l'écosystème JVM a largement ignoré. Nucleus comble le trou avec une moitié build-time (métadonnées `latest-*.yml` générées à côté des installateurs) et une moitié runtime (`updater-runtime`) — wire-compatible avec le format d'update d'electron-builder, donc tout outil qui le parle déjà fonctionne.
+
+## TL;DR
+- Build-time : `latest-mac.yml`, `latest.yml`, `latest-linux.yml` produits à côté des installateurs.
+- Runtime : `NucleusUpdater` check, télécharge avec progression, vérifie SHA-512, installe et relance.
+- Providers : GitHub Releases, S3 (via config publish), ou n'importe quel host HTTP générique.
+- Trois canaux (`latest`, `beta`, `alpha`) détectés depuis le tag de version.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.updater-runtime:2.0.0")
+    // Optionnel mais recommandé sur réseaux d'entreprise :
+    implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.updater.NucleusUpdater
+import dev.nucleusframework.updater.UpdateResult
+import dev.nucleusframework.updater.provider.GitHubProvider
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+}
+
+when (val result = updater.checkForUpdates()) {
+    is UpdateResult.UpdateAvailable -> {
+        updater.downloadUpdate(result.info).collect { progress ->
+            println("\${progress.percent.toInt()}%")
+        }
+        // installAndRestart lance l'installateur, sort, relance
+        updater.installAndRestart(downloadedFile)
+    }
+    UpdateResult.NoUpdate -> println("À jour")
+    is UpdateResult.Failed -> println("Erreur : \${result.reason}")
+}
+```
+
+## Comment ça marche
+
+### Ce qui peut s'auto-mettre à jour
+| Plateforme | Updatable | Géré par le store (pas besoin d'updater) |
+|------------|-----------|------------------------------------------|
+| macOS | DMG, ZIP | PKG |
+| Windows | NSIS, NSIS Web, MSI | AppX/MSIX |
+| Linux | DEB, RPM, AppImage | Snap, Flatpak |
+
+<Callout type="warn" title="macOS a besoin du ZIP en plus du DMG">
+L'updater remplace le `.app` silencieusement via le ZIP. Le DMG sert à l'installation initiale. Ajoute `TargetFormat.Zip` à côté de `TargetFormat.Dmg` — les deux vont dans le même release ; `latest-mac.yml` référence les deux.
+</Callout>
+
+### Métadonnées YAML
+Le plugin écrit un fichier YAML par plateforme listant chaque installateur avec son SHA-512 et sa taille. Les releases multi-arch / multi-plateforme exigent un seul YAML par plateforme listant toutes les architectures — la CI les fusionne dans le job de release. Exemple `latest-mac.yml` :
+
+```yaml
+version: 1.2.3
+files:
+  - url: MyApp-1.2.3-macos-arm64.dmg
+    sha512: VkJl1gDqcBHYbYhMb0HRI...
+    size: 102400000
+  - url: MyApp-1.2.3-macos-arm64.zip
+    sha512: qJ8a5gFDCwv0R2rW6lM3k...
+    size: 98000000
+releaseDate: '2026-03-01T12:00:00.000Z'
+```
+
+### Canaux
+Le tag de version pilote le canal : `v1.0.0` → `latest`, `v1.0.0-beta.1` → `beta`, `v1.0.0-alpha.1` → `alpha`. Chacun a son `*-mac.yml` / `*.yml` / `*-linux.yml`. Les utilisateurs sur `beta` voient `latest` + `beta` ; sur `alpha`, ils voient les trois.
+
+### Hébergement
+Trois options, configurées dans `nativeDistributions.publish { }` (voir [publication](/docs/packaging/publishing)) :
+
+- **GitHub Releases** — le plus simple, le [workflow de release](/docs/packaging/ci-cd#release) gère tout.
+- **S3** — credentials via env vars, le plugin upload à côté des YML.
+- **HTTP générique** — upload toi-même sur n'importe quel host statique ; l'updater fetch `<baseUrl>/latest-*.yml`.
+
+Le bloc `publish { … }` ne fait que générer la config electron-builder — il n'upload pas tout seul. La CI s'en charge.
+
+### API runtime
+`NucleusUpdater` expose :
+
+- `suspend fun checkForUpdates(): UpdateResult` — retourne `UpdateAvailable(info)`, `NoUpdate` ou `Failed(reason)`.
+- `fun downloadUpdate(info): Flow<DownloadProgress>` — émet la progression ; l'émission finale a `file != null`.
+- `fun installAndRestart(file)` — lance l'installateur, sort, relance après installation.
+- `fun installAndQuit(file)` — installation silencieuse, pas de relance. La mise à jour s'applique au prochain lancement manuel.
+- `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?` — détection post-update (version précédente, nouvelle, niveau).
+
+`UpdateLevel` indique l'ampleur du saut : `Major`, `Minor`, `Patch`, `PreRelease`. Branche ton UI : dialogue forcé pour les majeures, installation silencieuse pour les patches.
+
+### Commandes d'installation par format
+| OS | Format | Commande |
+|----|--------|----------|
+| Linux | DEB | `sudo dpkg -i <file>` |
+| Linux | RPM | `sudo rpm -U <file>` |
+| Linux | AppImage | Remplacement sur place |
+| macOS | DMG/ZIP | `open <file>` / extraction |
+| Windows | NSIS/EXE | `<file> /S` |
+| Windows | MSI | `msiexec /i <file> /passive` |
+
+### Réseaux d'entreprise
+Si tes utilisateurs sont derrière un proxy corporate avec une CA racine privée, le `java.net.http.HttpClient` par défaut échoue au TLS handshake. Injecte un `NativeHttpClient` qui lit le trust store de l'OS :
+
+```kotlin
+import dev.nucleusframework.nativehttp.NativeHttpClient
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    httpClient = NativeHttpClient.create()
+}
+```
+
+Voir [`native-ssl`](/docs/performance/native-ssl) pour les détails du trust manager.
+
+### Marqueur post-update
+Après `installAndRestart` ou `installAndQuit`, l'updater écrit un fichier marqueur dans le répertoire app data de la plateforme (résolu depuis `NucleusApp.appId`). Au lancement suivant, `wasJustUpdated()` retourne true et `consumeUpdateEvent()` livre un `UpdateEvent(previousVersion, newVersion, level)` utilisable pour une bannière "Quoi de neuf".
+
+## Référence
+
+- Champs du builder `NucleusUpdater { … }` : `currentVersion`, `channel`, `provider`, `httpClient`, `allowDowngrade`, `allowPrerelease`, `executableType`, en-têtes HTTP custom.
+- Providers : `GitHubProvider(owner, repo, token? = null)`, `GenericProvider(baseUrl)`.
+- Types de résultat : `UpdateResult.UpdateAvailable(info)`, `UpdateResult.NoUpdate`, `UpdateResult.Failed(reason)`.
+- Exceptions : `NetworkException`, `ChecksumException`, `NoMatchingFileException`, `ParseException`.
+
+## Notes
+
+- Les SHA-512 sont vérifiés après téléchargement ; un échec supprime le fichier et remonte une erreur.
+- Les tokens GitHub passent par l'en-tête `Authorization` — jamais dans les URL params.
+- Pour Mac App Store, Microsoft Store, Snapcraft, Flathub : le store gère les mises à jour. Skippe `updater-runtime` entièrement.

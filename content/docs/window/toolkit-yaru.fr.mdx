@@ -1,0 +1,82 @@
+---
+title: Yaru — GTK / LibAdwaita
+description: Des fenêtres natives pour Ubuntu et GNOME — header bars, layout de boutons configuré par l'utilisateur, couleurs LibAdwaita.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les applis GNOME n'ont pas de barre de titre — elles ont une header bar. Les boutons se placent là où l'utilisateur l'a demandé via GSettings. Yaru est le thème GNOME d'Ubuntu ; le toolkit Yaru de Nucleus te donne un `DecoratedWindow` qui respecte ça.
+
+## TL;DR
+- Layout de header bar qui lit `org.gnome.desktop.wm.preferences.button-layout`.
+- Couleurs d'accent LibAdwaita, variantes claire / sombre.
+- Rend les bonnes icônes close / minimise / maximise depuis `decorated-window-core`.
+- Construit sur Tao pour le support Wayland natif.
+
+## Install
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-yaru:<version>") [FACT-CHECK: artifact id]
+}
+```
+
+`[FACT-CHECK: artifact id]` — le pack Yaru est annoncé pour Nucleus 2.0. En attendant, construis le look avec les icônes Linux et les helpers de layout de `decorated-window-core`.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.*
+import dev.nucleusframework.application.*
+import dev.nucleusframework.window.core.*
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val dark = isSystemInDarkMode()
+    val layout = rememberLinuxButtonLayout()           // lit GSettings
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = if (dark) Color(0xFF2D2D2D) else Color(0xFFF5F5F4),
+            inactiveBackground = if (dark) Color(0xFF222222) else Color(0xFFEDEDEC),
+            content = if (dark) Color.White else Color(0xFF1A1A1A),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 46.dp),
+        icons = linuxTitleBarIcons(),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = dark, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Yaru") {
+            TitleBar { _ ->
+                // Tes widgets de header bar ici. Nucleus place close/min/max
+                // selon `layout`.
+            }
+            Box(Modifier.fillMaxSize()) { /* contenu */ }
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+`rememberLinuxButtonLayout()` lit le layout préféré dans GSettings (`button-layout` vaut par défaut `appmenu:close` sur GNOME, `close,minimize,maximize:` sur Ubuntu). Le style Yaru place les boutons en conséquence et laisse le reste de la header bar — titre, fil d'Ariane, recherche — à ton Composable.
+
+`linuxTitleBarIcons()` renvoie les bonnes icônes symboliques pour le thème actif. Le jeu fourni suit la palette symbolique GNOME pour composer avec la couleur d'accent système.
+
+Sur Wayland, le backend Tao négocie les décorations côté client via `xdg-decoration`. Sur X11, Nucleus dessine la header bar lui-même. Le rendu reste identique.
+
+## Reference
+
+- `rememberLinuxButtonLayout(): LinuxButtonLayout` — layout GSettings actuel.
+- `LinuxTitleBarButton.{Close, Minimize, Maximize}` — identifiants des boutons.
+- `linuxTitleBarIcons(...): LinuxTitleBarIconSet` — icônes symboliques.
+- `GnomeControlButtonsIcons` — extension `val` pour les painters `.Maximize` / `.Close` / `.Minimize`.
+
+<Callout type="info">
+Pour les tray icons, notifications et progress Unity sur la même app, voir [intégration Linux](/docs/os) et [taskbar progress](/docs/lifecycle/taskbar-progress).
+</Callout>

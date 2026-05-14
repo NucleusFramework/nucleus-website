@@ -1,0 +1,167 @@
+---
+title: DecoratedWindow
+description: Un seul Composable pour toute fenêtre desktop — slot de barre de titre, chrome OS, drag, multi-fenêtres — agnostique au backend.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`DecoratedWindow` est la porte entre ton UI Compose et le window manager de l'OS. Il dessine un cadre natif, expose un slot `TitleBar` que tu remplis librement en Compose, et te donne un handle `NucleusWindow` identique que tu tournes sur Tao, JBR ou JNI en dessous.
+
+## TL;DR
+- Appelle `DecoratedWindow` à l'intérieur de `nucleusApplication { }` — c'est toute la surface.
+- Le slot `TitleBar { state -> … }` est un Composable complet. Boutons, search, segmented controls — tout est permis.
+- `nucleusWindow` est ton handle agnostique : focus, minimise / maximise / fullscreen, icône, close.
+- Pour le multi-fenêtres, appelle `DecoratedWindow` plusieurs fois. Chaque appel obtient son `NucleusWindow`.
+- Pour changer de style visuel, ajoute un module de toolkit — même Composable, autre look. Voir [Toolkits](/docs/window/toolkits).
+
+## Install
+
+`nucleus-application` plus un module backend. Tao pour le nouveau code :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.*
+import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.*
+
+fun main() = nucleusApplication {
+    val state = rememberWindowState(size = DpSize(1100.dp, 720.dp))
+
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        state = state,
+        title = "Sample",
+        minimumSize = DpSize(640.dp, 480.dp),
+    ) {
+        TitleBar { _ ->
+            Text("My App", Modifier.padding(8.dp))
+        }
+        Box(Modifier.fillMaxSize()) { /* contenu */ }
+    }
+}
+```
+
+## Comment ça marche
+
+`nucleusApplication { }` est l'entrée parapluie. Il détecte le backend actif (Tao si `decorated-window-tao` est au classpath, AWT sinon), amorce les intégrations plateforme (init GraalVM, single-instance lock, deep links), et expose un `NucleusApplicationScope` qui contient `DecoratedWindow` et `DecoratedDialog`.
+
+Dans le lambda de contenu tu obtiens un `NucleusDecoratedWindowScope`. Il porte un `NucleusWindow` — un handle agnostique pour le cycle de vie de la fenêtre. La plupart des apps ne touchent jamais le `ComposeWindow` / `TaoWindow` brut ; elles lisent `isFocused`, observent `focusFlow`, appellent `setMaximized` / `setMinimumSize`. Pour descendre au handle natif, `nucleusWindow.unsafe.awtWindow` ou `nucleusWindow.unsafe.taoWindow` est l'échappatoire.
+
+Le style visuel — hauteur de barre de titre, couleurs, icônes des boutons — vit dans `TitleBarStyle` / `DecoratedWindowStyle` de `decorated-window-core`. Enveloppe ton app dans `NucleusDecoratedWindowTheme` pour l'appliquer. Ajouter un des modules de toolkit (`-jewel`, `-material2`, `-material3`, et les packs macOS / Fluent / Yaru à venir) te donne un thème prêt à l'emploi.
+
+## Apps multi-fenêtres
+
+Ouvre plusieurs fenêtres en appelant `DecoratedWindow` plus d'une fois. Chaque appel gère son state et son close.
+
+```kotlin
+fun main() = nucleusApplication {
+    var showInspector by remember { mutableStateOf(false) }
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Main") {
+        TitleBar { _ -> /* … */ }
+        Button(onClick = { showInspector = true }) { Text("Open inspector") }
+    }
+
+    if (showInspector) {
+        DecoratedWindow(
+            onCloseRequest = { showInspector = false },
+            title = "Inspector",
+        ) {
+            TitleBar { _ -> Text("Inspector") }
+            InspectorContent()
+        }
+    }
+}
+```
+
+## Reference
+
+### `DecoratedWindow`
+
+```kotlin
+@Composable
+fun NucleusApplicationScope.DecoratedWindow(
+    onCloseRequest: () -> Unit,
+    state: WindowState = rememberWindowState(),
+    visible: Boolean = true,
+    title: String = "",
+    icon: Painter? = null,
+    resizable: Boolean = true,
+    enabled: Boolean = true,
+    focusable: Boolean = true,
+    alwaysOnTop: Boolean = false,
+    minimumSize: DpSize? = null,
+    onPreviewKeyEvent: (KeyEvent) -> Boolean = { false },
+    onKeyEvent: (KeyEvent) -> Boolean = { false },
+    content: @Composable NucleusDecoratedWindowScope.() -> Unit,
+)
+```
+
+### `NucleusWindow`
+
+```kotlin
+interface NucleusWindow {
+    val isFocused: Boolean
+    val isMinimized: Boolean
+    val isMaximized: Boolean
+    val isFullscreen: Boolean
+
+    val focusFlow: StateFlow<Boolean>
+    val minimizedFlow: StateFlow<Boolean>
+    val maximizedFlow: StateFlow<Boolean>
+    val fullscreenFlow: StateFlow<Boolean>
+
+    fun show()
+    fun hide()
+    fun toFront()
+    fun requestFocus()
+    fun setMinimized(value: Boolean)
+    fun setMaximized(value: Boolean)
+    fun setFullscreen(value: Boolean)
+    fun setAlwaysOnTop(value: Boolean)
+    fun setMinimumSize(size: DpSize?)
+    fun setIcon(painter: Painter?)
+    fun close()
+
+    val unsafe: NucleusWindowUnsafe
+}
+```
+
+### `NucleusWindowUnsafe`
+
+```kotlin
+interface NucleusWindowUnsafe {
+    val awtWindow: ComposeWindow?   // null sur Tao
+    val awtDialog: ComposeDialog?
+    val taoWindow: TaoWindow?       // null sur AWT
+    val taoHandle: Long?
+}
+```
+
+### Composition locals
+
+- `LocalNucleusWindow` — le `NucleusWindow` courant.
+- `LocalNucleusBackend` — `Awt` ou `Tao`.
+- `LocalTitleBarStyle`, `LocalDecoratedWindowStyle`, `LocalIsDarkTheme`, `LocalContentColor`.
+
+<Callout type="tip">
+Besoin d'une dialog ? `DecoratedDialog` est le miroir de `DecoratedWindow` avec `DialogTitleBar`. Pratique pour les panneaux modaux ou détachés.
+</Callout>
+
+## Notes
+
+- `nucleusApplication` prend un single-instance lock par défaut. Passe `enableSingleInstance = false` pour autoriser plusieurs processus.
+- Les deep links arrivent sur `onDeepLink { uri -> … }` dans le scope.
+- Pour le tour des quatre looks natifs, voir [Toolkits](/docs/window/toolkits).

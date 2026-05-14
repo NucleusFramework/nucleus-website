@@ -1,0 +1,128 @@
+---
+title: Notifications on macOS
+description: Full Kotlin mapping of Apple's UserNotifications framework — categories, attachments, text input, schedules, interruption levels.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+When you need more than "title + body" — scheduled reminders, text-reply actions, time-sensitive alerts, custom sounds — drop down to `notification-macos`. It exposes the entire `UNUserNotificationCenter` surface in Kotlin.
+
+## TL;DR
+- Backed by Apple's `UserNotifications.framework` via a JNI bridge.
+- Request authorisation, register categories with action buttons (including text input), attach images/video.
+- Triggers: immediate, time interval, calendar.
+- Interruption levels: passive, active, timeSensitive, critical.
+
+<Callout type="warn" title="Bundled app required">
+macOS will only deliver notifications from a signed, bundle-identified app. Run `./gradlew runDistributable` or `./gradlew runGraalvmNative` during development — plain `./gradlew run` produces an un-bundled JVM process that the system silently ignores.
+</Callout>
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-macos:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.notification.*
+
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, _ ->
+    if (!granted) return@requestAuthorization
+
+    NotificationCenter.send(
+        NotificationRequest(
+            identifier = "greeting",
+            content = NotificationContent(
+                title = "Hello",
+                body = "Welcome to Nucleus",
+                sound = NotificationSound.Default,
+                interruptionLevel = InterruptionLevel.TimeSensitive,
+            ),
+            trigger = NotificationTrigger.TimeInterval(interval = 5.0),
+        ),
+    )
+}
+```
+
+## How it works
+
+Every API is a thin, typed wrapper over the matching Objective-C call. `NotificationCenter` lives in process and forwards `UNUserNotificationCenterDelegate` callbacks to the `NotificationCenterDelegate` you register. Authorisation, categories, and pending notifications are all queryable — no opaque side state.
+
+Categories let you register reusable sets of action buttons (and text-input actions) ahead of time, then reference them per notification. The system stores the category set; you only ship the identifier inside each `NotificationRequest`.
+
+## Reference
+
+### Authorisation
+
+```kotlin
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, error -> /* … */ }
+```
+
+### Categories with action buttons
+
+```kotlin
+val category = NotificationCategory(
+    identifier = "MESSAGE",
+    actions = listOf(
+        TextInputNotificationAction(
+            identifier = "REPLY",
+            title = "Reply",
+            textInputButtonTitle = "Send",
+            textInputPlaceholder = "Type a reply…",
+        ),
+    ),
+    options = setOf(CategoryOption.CUSTOM_DISMISS_ACTION),
+)
+NotificationCenter.setNotificationCategories(setOf(category))
+```
+
+### Attachments
+
+```kotlin
+val request = NotificationRequest(
+    identifier = "screenshot",
+    content = NotificationContent(
+        title = "Screenshot saved",
+        body = "Click to preview",
+        attachments = listOf(NotificationAttachment(identifier = "img", url = file.toURI())),
+    ),
+    trigger = NotificationTrigger.Immediate,
+)
+```
+
+### Triggers
+
+| Trigger | Use case |
+| --- | --- |
+| `NotificationTrigger.Immediate` | fire now |
+| `NotificationTrigger.TimeInterval(interval, repeats)` | delay or recurring |
+| `NotificationTrigger.Calendar(dateComponents, repeats)` | "every Monday at 9 am" |
+
+### Delegate
+
+Implement `NotificationCenterDelegate` to react to taps, action selections, and text input responses:
+
+```kotlin
+NotificationCenter.setDelegate(object : NotificationCenterDelegate {
+    override fun didReceive(response: NotificationResponse) { /* … */ }
+    override fun willPresent(notification: DeliveredNotification): Set<PresentationOption> =
+        setOf(PresentationOption.BANNER, PresentationOption.SOUND)
+})
+```
+
+### Inspecting state
+
+`getDeliveredNotifications`, `getPendingNotifications`, `removeDelivered`, `removePending` give you full control over what's currently on screen and what's queued.
+
+## Notes
+- Sandboxed apps need the notifications entitlement set in the Nucleus Gradle DSL `entitlementsFile`.
+- Set `interruptionLevel = InterruptionLevel.Critical` and request the matching authorisation option for alerts that must bypass Focus modes.
+- A bundle identifier mismatch is the most common cause of silent failure — verify `NucleusApp.appId` matches the bundle id in the packaged `.app`.

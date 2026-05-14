@@ -1,0 +1,63 @@
+---
+title: Pick your tradeoff. Win either way.
+description: Two runtimes from the same Kotlin source — a GraalVM native binary or a JDK 25 + AOT cache image. Same DSL, one switch.
+---
+
+Most desktop frameworks force a tradeoff: instant boot at the price of peak performance, or peak performance at the price of a slow start. Nucleus ships the same Kotlin code as a GraalVM native image — for instant cold start and a tiny resident set — or on a modern JDK with AOT cache, where HotSpot's JIT delivers throughput approaching C++ and Rust on hot paths. Same source. Same build. Two runtimes.
+
+## TL;DR
+- **GraalVM Native Image** — 0.48 s cold start, 60 MB RAM idle, 38 MB self-contained binary. Closed-world, AOT-compiled. No JRE to bundle.
+- **JDK 25 + AOT cache** — 1.2 s cold start, 180 MB RAM idle, 95 MB distribution. Open-world, HotSpot C2 JIT reaches ~96% of C++/Rust throughput on hot paths.
+- One Gradle DSL drives both. Flip a flag, ship a different artifact.
+- Reflection, JNI, and resource metadata are auto-injected for every Nucleus module — you never write `reflect-config.json` by hand.
+
+## The two runtimes, side by side
+
+|                         | GraalVM Native Image          | JDK 25 + AOT cache           |
+|-------------------------|-------------------------------|------------------------------|
+| Cold start              | **0.48 s**                    | 1.2 s                        |
+| RAM idle                | **60 MB**                     | 180 MB                       |
+| Binary / distribution   | **38 MB** self-contained      | 95 MB (JRE + AOT cache)      |
+| Peak CPU throughput     | ~82% (AOT, no JIT escalation) | **~96%** (HotSpot C2, vectorization) |
+| World                   | Closed                        | Open                         |
+| Reflection / agents     | Static metadata only          | Anything goes                |
+| Module                  | `nucleus.graalvm-runtime`     | `nucleus.aot-runtime`        |
+
+## Same DSL, one switch
+
+```kotlin
+// build.gradle.kts
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    // Pick GraalVM…
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+    }
+
+    // …or pick JDK 25 + AOT cache.
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+Both can coexist in the same project. Toggle per build type, per CI matrix entry, or ship both and let the user choose.
+
+## Decision tree
+
+- **Background utility, menu-bar app, CLI-flavored desktop tool, sandboxed target (App Store / MSIX)?** → GraalVM Native Image. Instant boot, smallest installer, no Java surprise for the user.
+- **Long-running IDE-like tool, data-heavy workload, plugin host, anything dynamic (scripting engines, ByteBuddy, custom classloaders)?** → JDK 25 + AOT cache. HotSpot's mature JIT pays off the moment hot paths warm up; the AOT cache erases the warmup tax.
+- **Both?** Ship both. Some teams ship GraalVM for the App Store, JDK + AOT cache for the direct download.
+
+See [`/docs/concepts/runtimes`](/docs/concepts/runtimes) for the architectural picture.
+
+## What you get downstream
+
+- [GraalVM Native Image](/docs/performance/graalvm) — the full Gradle DSL, automatic metadata, Gradle tasks, CI wiring.
+- [AOT cache](/docs/performance/aot-cache) — JDK 25's Project Leyden, hooked up to Gradle in one line.
+- [Native access](/docs/performance/native-access) — how Nucleus resolves GraalVM reflection / resource / JNI metadata so you don't write JSON.
+- [Native HTTP](/docs/performance/native-http) — `HttpClient`, OkHttp, Ktor pre-wired with the OS trust store.
+- [Native SSL](/docs/performance/native-ssl) — the OS keychain as your trust anchor source.
+- [Linux HiDPI](/docs/performance/linux-hidpi) — fix the tiny-blurry-UI bug under native image.

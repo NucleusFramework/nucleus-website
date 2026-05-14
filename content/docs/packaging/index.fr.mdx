@@ -1,0 +1,82 @@
+---
+title: Un DSL, seize installateurs
+description: Chaque format d'installateur que tes utilisateurs attendent, déclaré une fois dans Gradle.
+---
+
+La plupart des outils de packaging JVM plafonnent à quatre ou cinq formats — jpackage, Compose Multiplatform, install4j. Nucleus expose seize formats distribuables depuis un seul bloc `nucleus { … }`. Tu choisis ceux qu'il te faut ; la matrice de build s'occupe du reste.
+
+## TL;DR
+- 16 formats couvrant chaque canal desktop sérieux — App Store, Microsoft Store, Snapcraft, Flathub, GitHub Releases, URL ad-hoc.
+- Un seul DSL Gradle, un seul workflow CI. Pas de CMake, pas de mainteneur par plateforme.
+- Les builds store passent automatiquement par un pipeline sandboxé (PKG, AppX, Flatpak).
+- Signature de code, notarisation, bundle de CA et auto-update s'enchaînent dans le même DSL.
+
+## Installation
+Le DSL de packaging fait partie du plugin Gradle — pas de dépendance séparée.
+
+```kotlin
+plugins {
+    id("dev.nucleusframework") version "2.0.0"
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+nucleus {
+    application {
+        mainClass = "com.example.MainKt"
+
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Dmg, TargetFormat.Pkg,
+                TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
+                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage,
+                TargetFormat.Snap, TargetFormat.Flatpak,
+                TargetFormat.Zip,
+            )
+            packageName = "MyApp"
+            packageVersion = "1.0.0"
+        }
+    }
+}
+```
+
+Puis :
+
+```bash
+./gradlew packageDistributionForCurrentOS
+```
+
+Chaque format demandé pour l'OS hôte atterrit dans `build/compose/binaries/`.
+
+## Matrice de couverture
+
+| OS | Distribution directe | Store | Archives universelles |
+|----|----------------------|-------|------------------------|
+| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7Z |
+| Windows | NSIS, MSI, Portable | MSIX / AppX (Microsoft Store) | ZIP, TAR, 7Z |
+| Linux | DEB, RPM, AppImage | Snap, Flatpak | ZIP, TAR, 7Z |
+
+Seize au total : `Dmg`, `Pkg`, `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable`, `Deb`, `Rpm`, `AppImage`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZip`, plus l'intermédiaire `RawAppImage`. Passe-les à `targetFormats(...)`.
+
+## Comment ça marche
+
+Sous le capot, Nucleus appelle jpackage pour produire un `app-image` natif, puis confie cette image au mode `--prepackaged` d'electron-builder pour piloter chaque installateur. Cette architecture hybride garde la configuration du runtime JVM de jpackage tout en récupérant le catalogue d'electron-builder — NSIS, MSIX, Snap, Flatpak, AppImage — formats que jpackage ne supporte pas.
+
+Quand tu mélanges des formats directs avec des formats store, Nucleus divise en deux pipelines parallèles : un `createDistributable` classique pour DMG/NSIS/DEB et un `createSandboxedDistributable` pour PKG/AppX/Flatpak qui extrait les libs natives à l'avance, injecte les arguments JVM sandbox-aware et applique les bonnes entitlements. Voir [sandboxing](/docs/packaging/sandboxing).
+
+Les réglages par OS vivent sous `nativeDistributions.macOS { … }`, `windows { … }` et `linux { … }` — voir les pages dédiées.
+
+## Référence
+
+- macOS — DMG, PKG, binaires universels, Liquid Glass, icônes en couches → [construire pour macOS](/docs/packaging/macos)
+- Windows — NSIS, MSI, MSIX/AppX, Portable → [construire pour Windows](/docs/packaging/windows)
+- Linux — DEB, RPM, AppImage, Snap, Flatpak → [construire pour Linux](/docs/packaging/linux)
+- [Signature de code](/docs/packaging/code-signing) · [Certificats de confiance](/docs/packaging/trusted-certificates) · [Sandboxing](/docs/packaging/sandboxing)
+- [Auto-update](/docs/packaging/auto-update) · [Publication](/docs/packaging/publishing) · [CI/CD](/docs/packaging/ci-cd)
+- DSL complet : [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+La liste complète des `targetFormats` fait foi : `dev.nucleusframework.desktop.application.dsl.TargetFormat`. Les formats non supportés par l'OS hôte sont silencieusement ignorés à l'exécution de `packageDistributionForCurrentOS` — pratique en CI matricielle où le même workflow tourne sur macOS, Windows et Linux.

@@ -1,0 +1,142 @@
+---
+title: Tray-anchored apps
+description: A Compose popup window anchored to the tray icon — Bartender / iStat-style menu bar apps, in Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`TrayApp` turns a tray icon into a full Compose window that pops up beside it — the menu bar app pattern made famous by Bartender, iStat Menus, Hidden Bar. Click the icon, a window slides in. Click away, it slides out.
+
+<Callout type="warn" title="Experimental">
+`TrayApp` is in alpha. The API may move. Opt in with `@OptIn(ExperimentalTrayAppApi::class)`.
+</Callout>
+
+## TL;DR
+- The entire popup is a Compose canvas — anything you can render, you can anchor.
+- Visibility, size, dismiss mode controllable via `TrayAppState`.
+- Can be combined with a right-click context menu.
+- Smooth enter/exit animations with platform defaults.
+
+## Install
+
+`TrayApp` ships with [`composenativetray`](/docs/os/system-tray) — no extra dependency.
+
+## Quickstart
+
+```kotlin
+@OptIn(ExperimentalTrayAppApi::class)
+fun main() = application {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Quick dashboard",
+        windowSize = DpSize(300.dp, 400.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Dashboard", style = MaterialTheme.typography.h6)
+            Spacer(Modifier.height(8.dp))
+            Text("CPU: 42%")
+            Text("RAM: 8.2 GB")
+        }
+    }
+}
+```
+
+## How it works
+
+`TrayApp` is a tray icon plus a transparent, undecorated, always-on-top Compose window. The library tracks the tray icon's screen position and parks the window next to it with the right offset for each OS. Click-outside-to-dismiss is wired into the OS focus loss event, so the popup feels native on every desktop.
+
+## State management
+
+```kotlin
+@OptIn(ExperimentalTrayAppApi::class)
+fun main() = application {
+    val state = rememberTrayAppState(
+        initialWindowSize = DpSize(350.dp, 500.dp),
+        initiallyVisible = false,
+        initialDismissMode = TrayWindowDismissMode.AUTO,
+    )
+
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+        state = state,
+    ) {
+        Column {
+            Text("Dashboard")
+            Button(onClick = { state.hide() }) { Text("Close") }
+            Button(onClick = { state.setWindowSize(500.dp, 600.dp) }) { Text("Resize") }
+        }
+    }
+}
+```
+
+### `TrayAppState`
+
+| API | Description |
+| --- | --- |
+| `isVisible: StateFlow<Boolean>` | current visibility |
+| `show() / hide() / toggle()` | imperative control |
+| `setWindowSize(size)` | resize on the fly |
+| `setDismissMode(mode)` | `AUTO` (click outside closes) or `MANUAL` |
+| `onVisibilityChanged(cb)` | observe transitions |
+
+## With a context menu
+
+Left-click opens the popup, right-click opens a classic menu:
+
+```kotlin
+@OptIn(ExperimentalTrayAppApi::class)
+fun main() = application {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+        menu = {
+            Item(label = "Settings") { openSettings() }
+            Divider()
+            Item(label = "Quit") { exitProcess(0) }
+        },
+    ) {
+        Text("Popup content")
+    }
+}
+```
+
+## Window options
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `windowSize` | `DpSize(300.dp, 200.dp)` | initial size |
+| `visibleOnStart` | `false` | show immediately |
+| `enterTransition` / `exitTransition` | platform default | animations |
+| `transparent` | `true` | transparent background |
+| `undecorated` | `true` | no chrome |
+| `resizable` | `false` | user resize |
+| `horizontalOffset` / `verticalOffset` | 0 / platform default | nudge against the tray anchor |
+
+## Tray-only lifecycle (macOS)
+
+A tray app usually does not want a Dock icon. On macOS, configure `LSUIElement = true` in your app's Info.plist — the Nucleus Gradle plugin exposes `macOS.infoPlist.extraKeysRawXml` for this:
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            macOS {
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>LSUIElement</key>
+                        <true/>
+                    """.trimIndent()
+                }
+            }
+        }
+    }
+}
+```
+
+The app will run with no Dock entry and no menu bar — just the tray icon.
+
+## See also
+
+- [System tray](/docs/os/system-tray) and [Tray menu DSL](/docs/os/tray-menu-dsl).
+- [Single instance](/docs/lifecycle/single-instance) — useful so that re-launching from a `.app` re-shows the popup instead of starting a second process.

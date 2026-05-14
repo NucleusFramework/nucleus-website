@@ -1,0 +1,118 @@
+---
+title: Barre de menus macOS
+description: Construis la barre de menus macOS native de manière déclarative depuis Compose — SF Symbols, raccourcis clavier, badges, sous-menus, cases, boutons radio.
+---
+
+La barre de menus macOS (la bande en haut de l'écran, pas dans ta fenêtre) est la signature de l'OS. `menu-macos` te laisse la construire comme ton UI — un arbre Compose, des items pilotés par état, SF Symbols, raccourcis natifs, badges, sous-menus.
+
+## En bref
+- Le composable `NativeMenuBar { … }` installe et démonte un vrai `NSMenu`.
+- Items avec SF Symbols, system images, raccourcis clavier, badges, cases, groupes radio.
+- Réactif : modifie l'état, le menu natif s'adapte en place.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.menu-macos:<version>")
+}
+```
+
+Tire `core-runtime` et les constantes [`sf-symbols`](https://developer.apple.com/sf-symbols/) transitivement.
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.menu.macos.*
+import dev.nucleusframework.sfsymbols.*
+
+@Composable
+fun App() {
+    NativeMenuBar {
+        menu("Fichier") {
+            item(
+                "Nouveau",
+                shortcut = NativeKeyShortcut("n"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.DOCUMENT_BADGE_PLUS),
+            ) { newDocument() }
+
+            item(
+                "Ouvrir…",
+                shortcut = NativeKeyShortcut("o"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.FOLDER),
+            ) { open() }
+
+            separator()
+
+            item(
+                "Quitter",
+                shortcut = NativeKeyShortcut("q"),
+            ) { exitProcess(0) }
+        }
+
+        menu("Aide", role = MenuRole.Help) {
+            item("Documentation") { openDocs() }
+        }
+    }
+    // … contenu de la fenêtre
+}
+```
+
+## Fonctionnement
+
+`NativeMenuBar` capture le `NSApp.mainMenu` actif à la première composition, puis installe un nouveau `NSMenu` construit depuis ton DSL. Quand il quitte la composition, l'ancien menu est restauré. L'arbre du menu participe à la recomposition Compose : change un label, l'item natif suit ; bascule le `state` d'un item, la coche s'anime.
+
+## Référence
+
+### Menus et items
+
+```kotlin
+NativeMenuBar {
+    menu("Édition") {
+        item("Annuler", shortcut = NativeKeyShortcut("z")) { undo() }
+        item("Refaire", shortcut = NativeKeyShortcut("z", shift = true)) { redo() }
+        separator()
+        submenu("Rechercher") {
+            item("Rechercher…", shortcut = NativeKeyShortcut("f")) { find() }
+            item("Suivant", shortcut = NativeKeyShortcut("g")) { findNext() }
+        }
+    }
+}
+```
+
+### SF Symbols
+
+```kotlin
+icon = NsMenuItemImage.SystemSymbol(SFSymbolGeneral.GEAR)
+```
+
+Le module `sf-symbols` expose chaque catégorie — `SFSymbolGeneral`, `SFSymbolPower`, `SFSymbolHealth`, etc. — en constantes typées pour ne pas se tromper de nom.
+
+### Items à cocher / radio
+
+```kotlin
+var darkMode by remember { mutableStateOf(false) }
+
+NativeMenuBar {
+    menu("Affichage") {
+        item(
+            "Mode sombre",
+            state = if (darkMode) NsMenuItemState.On else NsMenuItemState.Off,
+        ) { darkMode = !darkMode }
+    }
+}
+```
+
+### Badges
+
+```kotlin
+item("Boîte de réception", badge = NsMenuItemBadge.Counter(unreadCount)) { openInbox() }
+```
+
+### Rôles
+
+`MenuRole.Window` et `MenuRole.Help` taguent les menus qu'AppKit reconnaît (liste des fenêtres, recherche Spotlight dans Aide). Les menus normaux sont en `MenuRole.None`.
+
+## Notes
+- Le composable installe le menu tant qu'il est monté — héberge-le à la racine de ton application, pas dans un scope de fenêtre, pour que le menu survive aux changements de fenêtre.
+- Utilise `NativeKeyShortcut("a", command = true, shift = true, …)` pour un contrôle complet des modificateurs.

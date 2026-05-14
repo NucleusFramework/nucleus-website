@@ -1,0 +1,329 @@
+---
+title: Migrating from Nucleus 1.x to 2.0
+description: "A mostly-mechanical port: rename the namespace, drop ~30 lines of bootstrap into nucleusApplication."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus 2.0 consolidates the framework around a single entry point — `nucleusApplication` — and renames the project namespace to `dev.nucleusframework`. The migration is mostly mechanical: search/replace the namespace, then move your `application { }` block into `nucleusApplication(args) { }`. The DSL that emerges removes around 30 lines of bootstrap boilerplate from a typical `main()`.
+
+## TL;DR
+- Plugin id: `io.github.kdroidfilter.nucleus` → `dev.nucleusframework`.
+- Maven group: `io.github.kdroidfilter` → `dev.nucleusframework`.
+- Kotlin package root: `io.github.kdroidfilter.nucleus.*` → `dev.nucleusframework.*`.
+- Entry point: `application { }` → `nucleusApplication(args) { }`.
+- `Window(…)` → `DecoratedWindow(…)` (or `MaterialDecoratedWindow`, `JewelDecoratedWindow`).
+- GraalVM init, single-instance, AOT timer, AutoLaunch wiring, AUMID — all automatic now.
+
+## Prerequisites
+
+### JDK toolchain
+2.0 artifacts target JDK 17 (`nucleus-application`) and JDK 25 (the Jewel stack via `decorated-window-jewel`). Bump every Kotlin module that depends on Nucleus:
+
+```kotlin
+kotlin { jvmToolchain(25) }
+```
+
+Symptom if you skip this: `Dependency resolution is looking for a library compatible with JVM runtime version 11, but 'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible with JVM runtime version 25 or newer.`
+
+### IntelliJ snapshots repository
+2.0 pulls Jewel `0.37.0-262.4852.74`, which only lives in the IntelliJ snapshots repo. Add it to `settings.gradle.kts`:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://www.jetbrains.com/intellij-repository/releases")
+        maven("https://www.jetbrains.com/intellij-repository/snapshots") // new
+    }
+}
+```
+
+If you declare Jewel directly, bump it to the same coordinate Nucleus brings in transitively:
+
+```toml
+intellijIcons = "262.4852.74"
+jewel        = "0.37.0-262.4852.74"
+```
+
+## At a glance
+
+| Area | 1.x | 2.0 |
+|---|---|---|
+| Plugin ID | `io.github.kdroidfilter.nucleus` | `dev.nucleusframework` |
+| Maven group | `io.github.kdroidfilter` | `dev.nucleusframework` |
+| Kotlin package root | `io.github.kdroidfilter.nucleus.*` | `dev.nucleusframework.*` |
+| Entry point | `application { }` | `nucleusApplication(args) { }` |
+| Window | `Window(...)` | `DecoratedWindow(...)` |
+| GraalVM bootstrap | Manual `GraalVmInitializer.initialize()` | Automatic |
+| Single instance | Manual `SingleInstanceManager.isSingleInstance(...)` | Automatic |
+| Restore-on-second-launch | Manual `LaunchedEffect` + `toFront()` | Automatic |
+| AOT training timer | Manual `Thread` + `exitProcess` | `aotTraining(duration = ...)` |
+| AutoLaunch cache prime | Manual | Automatic |
+| Windows AUMID | Manual | Automatic |
+
+## Step 1 — Plugin ID & Maven coordinates
+
+```diff
+ plugins {
+-    id("io.github.kdroidfilter.nucleus") version "1.3.0"
++    id("dev.nucleusframework") version "2.0.0"
+ }
+```
+
+```diff
+ dependencies {
+-    implementation("io.github.kdroidfilter:nucleus.core-runtime:1.3.0")
+-    implementation("io.github.kdroidfilter:nucleus.nucleus-application:1.3.0")
++    implementation("dev.nucleusframework:nucleus.core-runtime:2.0.0")
++    implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")
+ }
+```
+
+```diff
+-import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
++import dev.nucleusframework.desktop.application.dsl.TargetFormat
+```
+
+## Step 2 — Rename all Kotlin imports
+
+Project-wide find & replace:
+
+```
+io.github.kdroidfilter.nucleus  →  dev.nucleusframework
+```
+
+No class renames — only the package prefix changes.
+
+## Step 3 — Switch to `nucleusApplication`
+
+In 1.x you wrapped Compose Desktop's `application { }` in Nucleus init helpers. In 2.0 `nucleusApplication` does the bootstrap in the right order and exposes a unified `NucleusApplicationScope`.
+
+### Before — `main()` in 1.x
+
+```kotlin
+fun main(args: Array<String>) {
+    GraalVmInitializer.initialize()
+    AutoLaunch.wasStartedAtLogin(args)
+    if (Platform.Current == Platform.Windows) {
+        WindowsJumpListManager.setProcessAppId()
+    }
+
+    if (AotRuntime.isTraining()) {
+        Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
+            .apply { isDaemon = false }.start()
+    }
+
+    application {
+        val isFirstInstance = remember {
+            SingleInstanceManager.isSingleInstance(
+                onRestoreFileCreated = { DeepLinkHandler.writeUriTo(this) },
+                onRestoreRequest = { /* hand-rolled restore state */ },
+            )
+        }
+        if (!isFirstInstance) { exitApplication(); return@application }
+
+        DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
+
+        Window(onCloseRequest = ::exitApplication, title = "My App") { App() }
+    }
+}
+```
+
+### After — `main()` in 2.0
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.application.aotTraining
+import kotlin.time.Duration.Companion.seconds
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    aotTraining(duration = 45.seconds)
+
+    onDeepLink { uri -> handleDeepLink(uri) }
+
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        App()
+    }
+}
+```
+
+### Early-exits run before `nucleusApplication`
+
+`nucleusApplication` runs the full bootstrap (GraalVM init, single-instance lock, Compose loop). For invocation modes that should bypass all of that — desktop scheduler re-launch, boot receiver — keep them above:
+
+```kotlin
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args, registry = MyTaskRegistry.registry)
+        exitProcess(0)
+    }
+
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+Putting these checks inside the scope would acquire the single-instance lock first — exactly what you don't want.
+
+What `nucleusApplication` now handles, in order:
+
+1. `GraalVmInitializer.initialize()` — fonts, charsets, HiDPI, `java.home`.
+2. AOT training timer (when `-Dnucleus.aot.mode=training` and you call `aotTraining(…)`).
+3. Single-instance lock. A second instance relays its CLI deep link to the primary and exits with code 0.
+4. Platform priming: `AutoLaunch.wasStartedAtLogin(args)` cache warmed; on Windows `WindowsJumpListManager.setProcessAppId()` called before any window. Both reflective — only fire if the modules are on the classpath.
+5. Backend resolution (`NucleusBackend.Auto` picks AWT or Tao).
+6. The Compose application loop.
+
+## Step 4 — Replace `Window { }` with `DecoratedWindow { }`
+
+Three flavours, pick the one that matches your design system:
+
+| Composable | Module |
+|---|---|
+| `DecoratedWindow(…)` | `nucleus.decorated-window-core` |
+| `MaterialDecoratedWindow(…)` | `nucleus.decorated-window-material3` |
+| `JewelDecoratedWindow(…)` | `nucleus.decorated-window-jewel` |
+
+All three expose `nucleusWindow` inside their content — a backend-agnostic handle for `show()`, `toFront()`, `setMinimized()`, etc.
+
+### These are extension functions now
+
+This is the most common breakage. In 1.x, `JewelDecoratedWindow` was a plain `@Composable`. In 2.0 it's an extension on `NucleusApplicationScope`:
+
+```kotlin
+fun NucleusApplicationScope.JewelDecoratedWindow(
+    onCloseRequest: () -> Unit, ...,
+    content: @Composable NucleusDecoratedWindowScope.() -> Unit,
+)
+```
+
+Any wrapper composable you wrote in 1.x must become an extension on the same scope:
+
+```diff
+ @Composable
+-fun MyOnboardingWindow(vmFactory: ViewModelFactory) {
++fun NucleusApplicationScope.MyOnboardingWindow(vmFactory: ViewModelFactory) {
+     JewelDecoratedWindow(onCloseRequest = {}, title = "...") { /* ... */ }
+ }
+```
+
+The call site (inside `nucleusApplication { … }`) doesn't change — the receiver is implicit.
+
+### Dialogs follow the same rule
+
+| Receiver | Backend support |
+|---|---|
+| `JewelDecoratedDialog(…)` (no receiver) | AWT only. Crashes on Tao with `NoClassDefFoundError`. |
+| `NucleusApplicationScope.JewelDecoratedDialog(…)` | Backend-agnostic. Dispatches to AWT or Tao. |
+
+Use the scoped variant for anything composed inside `nucleusApplication { … }`.
+
+### CompositionLocals propagate across the Tao scene
+
+The Tao backend opens a fresh `ComposeScene` per window/dialog. As of 2.0 the full parent `CompositionLocalContext` is bridged automatically. You no longer need to wrap content twice:
+
+```kotlin
+// Before — needed on Tao
+IntUiTheme(theme, styling) {
+    JewelDecoratedWindow(...) {
+        IntUiTheme(theme, styling) { /* duplicate */ }
+    }
+}
+
+// After — single wrap is enough on every backend
+IntUiTheme(theme, styling) {
+    JewelDecoratedWindow(...) { /* content */ }
+}
+```
+
+## Step 5 — Single instance is automatic
+
+Delete the 1.x manual block:
+
+```diff
+-val isFirstInstance = remember {
+-    SingleInstanceManager.isSingleInstance(...)
+-}
+-if (!isFirstInstance) { exitApplication(); return@application }
+```
+
+Primary instance restores its `DecoratedWindow` (`show()` + `setMinimized(false)` + `toFront()` + `requestFocus()`) whenever a second launch happens. Secondary instance's CLI deep link is delivered to the primary via `onDeepLink { }`, then exits with code 0.
+
+Opt out for editor-style apps:
+
+```kotlin
+nucleusApplication(args, enableSingleInstance = false) { /* ... */ }
+```
+
+## Step 6 — AOT training uses `aotTraining { }`
+
+```diff
+-if (AotRuntime.isTraining()) {
+-    Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
+-        .apply { isDaemon = false }.start()
+-}
+
+ nucleusApplication(args) {
++    aotTraining(duration = 45.seconds)
++
++    if (isAotTraining) {
++        preloadNavigationScreens()
++        preloadFontsAndImages()
++    }
+ }
+```
+
+`aotTraining` is a no-op outside training mode. The scope also exposes `aotMode`, `isAotTraining`, `isAotRuntime`. See [AOT cache](/docs/performance/aot-cache).
+
+## Step 7 — Deep links use `onDeepLink { }`
+
+```diff
+-DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
++onDeepLink { uri -> handleDeepLink(uri) }
+```
+
+URIs delivered before the handler is registered are buffered and replayed. `DeepLinkHandler` is still public for low-level work.
+
+## Step 8 — Drop explicit `GraalVmInitializer.initialize()`
+
+```diff
+-GraalVmInitializer.initialize()
+-application { /* ... */ }
++nucleusApplication(args) { /* ... */ }
+```
+
+It runs as the very first bootstrap step now.
+
+## Final result
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    remember {
+        AutoLaunch.wasStartedAtLogin(args)
+        if (Platform.Current == Platform.Windows) {
+            WindowsJumpListManager.setProcessAppId()
+        }
+        true
+    }
+
+    aotTraining(duration = 45.seconds)
+    onDeepLink { uri -> handleDeepLink(uri) }
+
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        App()
+    }
+}
+```
+
+No ordered init list. No `SingleInstanceManager` plumbing. No restore counter and `LaunchedEffect` to bring the window back.
+
+## Troubleshooting
+
+- **Imports won't resolve after rename.** Search for `io.github.kdroidfilter.nucleus` — anything left is stale. Replace with `dev.nucleusframework`.
+- **`nucleusApplication` unresolved.** Add `implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")`.
+- **Window doesn't restore on second launch with plain `Window`.** That behavior lives in `DecoratedWindow`. Switch to a `DecoratedWindow` variant.
+- **`Unresolved reference 'JewelDecoratedWindow'`.** The composable became a scope extension. Propagate the receiver — see [Step 4](#step-4--replace-window--with-decoratedwindow-).
+- **`NoClassDefFoundError: …DecoratedDialogKt` on Tao.** You're calling the AWT-only dialog. Use `NucleusApplicationScope.JewelDecoratedDialog`.
+- **`Could not find org.jetbrains.jewel:jewel-foundation:0.37.…`** — Missing IntelliJ snapshots repo. See [Prerequisites](#prerequisites).
+- **`Dependency resolution is looking for a library compatible with JVM runtime version 11`** — Bump toolchain to 25.

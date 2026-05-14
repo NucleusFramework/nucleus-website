@@ -1,0 +1,77 @@
+---
+title: Packaging — Nucleus vs the rest
+description: 16 formats, four stores, auto-update, signing, AOT cache — what JVM packaging looks like in 2026.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+JVM packaging has been a long graveyard of half-solutions: jpackage covers six formats but ships nothing else, install4j is excellent and proprietary, Conveyor is the strongest competitor but skips DMG and PKG. Nucleus pushes the format count to sixteen and ships everything you need around them — auto-update, signing, sandboxing, CI actions, GraalVM native-image packaging — in one Apache-licensed plugin.
+
+## TL;DR
+- 16 distributable formats vs Conveyor's 6, install4j's 7, jpackage's 6, CMP's 6.
+- The only JVM tool combining packaging + auto-update + AOT cache + GraalVM Native Image + store pipelines + native OS SSL + CI actions in one Gradle plugin.
+- Tradeoffs: needs per-OS CI runners (no cross-compilation), Gradle-only, younger than Conveyor or install4j.
+
+## Format coverage
+
+| Tool | DMG | PKG | NSIS | MSI | MSIX/AppX | Portable | DEB | RPM | AppImage | Snap | Flatpak | Archives | Total |
+|------|:---:|:---:|:----:|:---:|:---------:|:--------:|:---:|:---:|:--------:|:----:|:-------:|:--------:|:-----:|
+| **Nucleus** | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | ZIP, TAR, 7Z | **16** |
+| Conveyor | — | — | — | — | Y | — | Y | — | — | — | — | ZIP, TAR + custom EXE | 6 |
+| install4j | Y | — | — | Y | — | — | Y | Y | — | — | — | TAR, shell | 7 |
+| jpackage | Y | Y | — | Y | — | — | Y | Y | — | — | — | — | 6 |
+| jDeploy | — | — | — | — | — | — | Y | — | — | — | — | EXE, TAR | 4 |
+| Compose MP | Y | Y | — | Y | — | — | Y | Y | — | — | — | — | 6 |
+| JavaPackager | Y | Y | — | Y | — | — | Y | Y | Y | — | — | ZIP | 8 |
+
+Why the gap? Nucleus uses jpackage to build the app-image, then hands it to electron-builder's `--prepackaged` mode for every installer flavor — including the ones jpackage doesn't support (NSIS, MSIX, Snap, Flatpak, AppImage). The hybrid is unique in the JVM ecosystem.
+
+## Feature breakdown
+
+### Auto-update
+| Tool | Runtime lib | Channels | Verification |
+|------|-------------|----------|--------------|
+| **Nucleus** | `NucleusUpdater` | 3 (latest/beta/alpha) | SHA-512 |
+| Conveyor | OS-native (Sparkle 2 / MSIX / apt) | Yes | Yes |
+| install4j | Updater API | Yes | Yes |
+| jDeploy | Built-in | No | No |
+| jpackage / Compose MP | None | — | — |
+
+Conveyor is the only competitor with delta updates (~31 KB on macOS via Sparkle 2). Nucleus does full-file downloads but ships a richer runtime API (progress flow, channel switching, post-update detection, restart-on-update).
+
+### Code signing & notarization
+All major tools cover macOS signing and notarization. Windows signing varies:
+
+- **Nucleus** — `.pfx` + Azure Artifact Signing.
+- **Conveyor** — broadest signing surface (Azure Key Vault, AWS KMS, SSL.com eSigner, DigiCert ONE, Google Cloud KMS, SafeNet/YubiKey HSMs).
+- **install4j** — `.pfx` only.
+- **jpackage** — macOS only.
+
+### CI/CD integration
+- **Nucleus** — six composite GitHub Actions: `setup-nucleus`, `setup-macos-signing`, `build-macos-universal`, `build-windows-appxbundle`, `generate-update-yml`, `publish-release`.
+- **Conveyor** — examples only; single-machine builds.
+- **install4j** — CLI only.
+- **jpackage / Compose MP** — none.
+
+### GraalVM native-image packaging
+Nucleus is the first JVM packaging tool with end-to-end Native Image packaging — DMG, NSIS, DEB for the resulting binary. Cold start ~0.5 s, RAM ~60 MB, binary ~38 MB. See [performance / GraalVM](/docs/performance/graalvm). Other tools route Native Image binaries through generic packaging pipelines that don't know about the JDK-less output.
+
+### Store distribution
+Nucleus, Conveyor, and Compose MP can each produce store-acceptable artifacts. Nucleus is unique in shipping all four store formats from one DSL: PKG (Mac App Store), AppX/MSIX (Microsoft Store), Snap (Snap Store), Flatpak (Flathub).
+
+## Tradeoffs
+
+| Where Nucleus is strong | Where competitors win |
+|-------------------------|----------------------|
+| Most formats. Auto-update + signing + CI bundled. GraalVM Native Image first-class. Apache 2 / MIT. | Conveyor: delta updates, broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: zero new dependency. |
+
+## When to pick what
+
+- Shipping a small CLI or single-window app, want delta updates and cloud HSM signing — try **Conveyor**.
+- Big-budget enterprise installer with custom dialogs, paid support — **install4j**.
+- "Just give me a DMG/MSI/DEB from jpackage" — **vanilla CMP** or **jpackage** directly.
+- One Kotlin codebase, every format, every store, auto-update, AOT, GraalVM — **Nucleus**.
+
+## Notes
+
+The full source-cited breakdown lived under v1's `comparison/packaging.mdx`. Numbers and conclusions there were generated with Claude Code research with explicit source links; the gist is reproduced above. `[FACT-CHECK NEEDED]` if any competitor has shipped a major release since.

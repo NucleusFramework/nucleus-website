@@ -1,0 +1,93 @@
+---
+title: Stylet (pen)
+description: Pression, inclinaison et source sur tablettes Wacom, Surface Pen et Apple Pencil via Sidecar — la même API Compose sur tous les OS.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les apps de dessin ont besoin de plus que (x, y). Le backend Tao relaie pression, inclinaison et source — Wacom, Surface Pen, Apple Pencil via Sidecar — dans les pointer events Compose. Même API sur chaque OS.
+
+## TL;DR
+- `PointerInputChange.type == PointerType.Stylus` identifie l'entrée stylet.
+- `PointerInputChange.pressure` est normalisée à `[0f, 1f]`.
+- Inclinaison et rotation arrivent via `PointerInputChange.orientation` quand l'appareil le supporte.
+- Wacom (USB/Bluetooth), Microsoft Surface Pen et Apple Pencil via Sidecar passent par le même flux.
+- `PointerType.Eraser` rapporte l'extrémité gomme des stylets compatibles.
+
+## Install
+
+Inclus avec `decorated-window-tao`.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun InkSurface() {
+    val strokes = remember { mutableStateListOf<Triple<Offset, Offset, Float>>() }
+    var last: Offset? by remember { mutableStateOf(null) }
+
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val c = event.changes.first()
+                        if (c.type != PointerType.Stylus) { last = null; continue }
+                        val start = last ?: c.position
+                        strokes += Triple(start, c.position, c.pressure)
+                        last = if (c.pressed) c.position else null
+                        c.consume()
+                    }
+                }
+            }
+    ) {
+        strokes.forEach { (a, b, p) ->
+            drawLine(Color.Black, a, b, strokeWidth = (1f + p * 6f))
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+Tao branche les APIs stylet natives : `NSEvent.pressure` et `tangentialPressure` sur macOS, `WM_POINTER` avec `POINTER_PEN_INFO` sur Windows, le protocole Wayland `wp_tablet_v2` sur Linux. Le pont JNI Rust normalise la pression à `[0f, 1f]`, pose `PointerType.Stylus` (ou `PointerType.Eraser`) sur le change et dispatch via le pipeline d'input Compose.
+
+L'inclinaison et l'orientation arrivent dans `PointerInputChange.orientation` quand l'appareil les expose. Les Wacom Intuos et Surface Pro reportent les deux ; les tablettes d'entrée de gamme ne reportent souvent que la pression.
+
+Apple Pencil rejoint Compose de deux façons : si le host est un Mac avec Sidecar, les événements arrivent depuis l'iPad en `PointerType.Stylus` avec pression. Sur iOS, tu serais sur une autre cible Compose — Tao est uniquement desktop.
+
+## Reference
+
+### Lecture d'événements pour stylet
+
+```kotlin
+val change = event.changes.first()
+val source: PointerType = change.type          // Stylus | Eraser | Touch | Mouse
+val pressure: Float = change.pressure          // 0f si non supporté
+val tilt = change.orientation                  // optionnel
+```
+
+### Appareils supportés (vérifié)
+
+| Appareil                          | Pression | Tilt | Notes                              |
+|-----------------------------------|----------|------|------------------------------------|
+| Wacom Intuos / Cintiq             | Oui      | Oui  | USB et Bluetooth.                  |
+| Microsoft Surface Pen             | Oui      | Oui  | Windows Ink ; hover façon stylet.  |
+| Apple Pencil via Sidecar (macOS)  | Oui      | Oui  | Le Mac doit être hôte Sidecar.     |
+| XP-Pen / Huion (driver vendeur)   | Oui      | Variable | Dépend du driver.              |
+
+<Callout type="warn">
+Le support stylet sous Linux exige Wayland et un compositeur qui implémente `wp_tablet_v2` (GNOME 45+, KDE Plasma 5.27+). Sur X11, les événements stylet arrivent comme de simples déplacements souris — pas de pression. Voir [Wayland](/docs/tao/wayland).
+</Callout>

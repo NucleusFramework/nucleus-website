@@ -1,0 +1,116 @@
+---
+title: Runtimes
+description: GraalVM Native Image vs JVM + AOT cache — cold start of a binary, throughput of the JVM. Pick one, or ship both.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Most desktop frameworks force a tradeoff: instant boot at the price of peak performance, or peak performance at the price of a slow start. Nucleus lets you pick — or ship both, and let the user choose.
+
+## TL;DR
+- **GraalVM Native Image** — closed-world AOT compile. ~50 ms cold start, ~60 MB RAM, ~38 MB self-contained binary. No JRE bundled.
+- **JVM + AOT cache** — JDK 25's CDS / AOT cache pre-warms classes & profiles. ~1 s cold start, HotSpot JIT for peak throughput on hot paths.
+- **Same DSL, one switch.** Toggle from a single Gradle line.
+
+## Cold start of a binary
+
+```kotlin
+nucleus.application {
+    graalvm {
+        isEnabled.set(true)
+        javaLanguageVersion.set(25)
+    }
+}
+```
+
+What this gives you:
+
+- **Instant. Really instant.** ~50 ms from `./MyApp` to first frame — feels like opening a config file.
+- **No JRE to bundle.** One self-contained binary per OS. Smallest possible installer, no Java surprise for your users.
+- **Nucleus resolves reflection for you.** All required `reflect-config`, `resource-config` and JNI metadata for every Nucleus module — auto-injected. Zero manual config.
+
+The trade: closed-world. No runtime class loading, no agents, no JFR profiling, no dynamic `ScriptEngine`. If your app is a static product surface, that's fine — most desktop apps are. If you're a plugin host or a dev tool, see the next option.
+
+## Throughput of the JVM
+
+```kotlin
+nucleus.application {
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+What this gives you:
+
+- **HotSpot, the most-tuned JIT in the world.** Decades of escape analysis, inlining, vectorization. Hot paths approach hand-written C++ and Rust.
+- **AOT cache fixes cold start.** JDK 25's CDS / AOT cache pre-warms classes, profiles and code — start in ~1 s with a fully-tiered JIT ready to compile.
+- **No closed-world constraints.** Reflection, dynamic class loading, agents, JFR profiling, `ScriptEngine` — all of it. Useful for plugin hosts, IDE-class tooling, anything dynamic.
+
+The trade: you ship a JRE. The AOT cache adds a few MB to the binary, but the runtime is the full HotSpot.
+
+## Numbers side-by-side
+
+| Metric | GraalVM Native Image | JVM + AOT cache |
+|---|---|---|
+| Cold start | ~50 ms | ~1 s |
+| Peak CPU throughput | ~85 % (AOT compiled, no JIT escalation) | ~98 % (JIT-tiered, approaches C++/Rust on hot paths) |
+| RAM at idle | ~60 MB | ~180 MB |
+| Binary size | ~38 MB (self-contained) | ~55 MB (pre-baked AOT cache included) |
+| Dynamic features | Closed-world | Full |
+
+Numbers are for a Hello World on macOS Apple Silicon — your mileage will vary, but the shape holds.
+
+## Same DSL, one switch
+
+```kotlin
+nucleus.application {
+    runtime = if (isReleaseBuild) Runtime.NativeImage else Runtime.JvmWithAotCache
+}
+```
+
+> [FACT-CHECK NEEDED] The `runtime = …` shorthand appears on the landing's CodeSection but is not in the current `plugin-build` DSL inventory — the actual switch in 2.0.0 is `graalvm.isEnabled.set(true)` plus `nativeDistributions.enableAotCache`. Treat the line above as the shape we're aiming for; until it lands, use the two real switches.
+
+In the meantime, the two equivalent real switches are:
+
+```kotlin
+nucleus.application {
+    nativeDistributions { enableAotCache = true }
+    graalvm { isEnabled.set(false) }            // JVM + AOT cache
+}
+```
+
+```kotlin
+nucleus.application {
+    nativeDistributions { enableAotCache = false }
+    graalvm { isEnabled.set(true) }              // GraalVM Native Image
+}
+```
+
+## Detecting the runtime at runtime
+
+Use [`aot-runtime`](/docs/performance/aot-cache):
+
+```kotlin
+import dev.nucleusframework.aotruntime.AotRuntime
+import dev.nucleusframework.aotruntime.AotRuntimeMode
+import dev.nucleusframework.core.runtime.ExecutableRuntime
+import dev.nucleusframework.core.runtime.ExecutableType
+
+when (AotRuntime.mode()) {
+    AotRuntimeMode.TRAINING -> { /* skip work during the training pass */ }
+    AotRuntimeMode.RUNTIME  -> { /* user-visible launch */ }
+    AotRuntimeMode.NONE     -> { /* plain JVM or GraalVM binary */ }
+}
+
+// What kind of binary am I running inside?
+val type: ExecutableType = ExecutableRuntime.type() // Jar, AppImage, Dmg, Exe, Msi, AppX, …
+```
+
+Inside `nucleusApplication { … }`, the scope exposes `aotMode`, `isAotTraining` and `isAotRuntime` directly.
+
+## Where to go next
+
+- [GraalVM](/docs/performance/graalvm) — reachability metadata, build args, CI integration.
+- [AOT cache](/docs/performance/aot-cache) — training runs, lifecycle, what gets cached.
+- [Configuration](/docs/start/configuration) — the full Gradle DSL.

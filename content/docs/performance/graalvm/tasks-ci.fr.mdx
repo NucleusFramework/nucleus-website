@@ -1,0 +1,166 @@
+---
+title: Tâches & CI
+description: Tâches Gradle ajoutées par le plugin Nucleus, emplacements de sortie, et une matrice GitHub Actions qui cache le build native-image.
+---
+
+Le plugin Gradle Nucleus ajoute un petit graphe de tâches pour GraalVM, plus des tâches de packaging par format (`packageGraalvmDeb`, `…Dmg`, `…Nsis`). La plupart sont câblées en dépendance de `packageGraalvmNative` et tu ne les invoques jamais directement. Cette page est la référence.
+
+## Tâches Gradle
+
+| Tâche | Description |
+|-------|-------------|
+| `packageGraalvmNative` | Compile et package l'app comme un binaire natif. La tâche principale. |
+| `runGraalvmNative` | Build et lance le binaire natif directement. |
+| `runWithNativeAgent` | Lance l'app avec l'agent de tracing GraalVM pour collecter la metadata de réflexion. |
+| `analyzeGraalvmStaticMetadata` | Scanne le bytecode compilé pour les patterns réflexion / JNI / ressources. *Auto.* |
+| `filterGraalvmLibraryMetadata` | Filtre la metadata L1 par lib selon le classpath runtime réel. *Auto.* |
+| `resolveGraalvmReachabilityMetadata` | Résout le Reachability Metadata Repository d'Oracle pour les deps du classpath. *Auto.* |
+| `generateGraalvmPlatformMetadata` | Génère la metadata spécifique plateforme pour l'OS courant. *Auto.* |
+| `cleanupGraalvmMetadata` | Retire les entrées manuelles de `reachability-metadata.json` que la metadata auto couvre maintenant. |
+| `packageGraalvmDeb` | Package l'image native comme installateur `.deb` (Linux). |
+| `packageGraalvmDmg` | Package l'image native comme installateur `.dmg` (macOS). |
+| `packageGraalvmNsis` | Package l'image native comme installateur NSIS `.exe` (Windows). |
+
+Les tâches "Auto" tournent en dépendance de `packageGraalvmNative`. Les tâches de packaging (`packageGraalvm<Format>`) demandent Node.js — elles utilisent electron-builder en interne.
+
+## Commandes courantes
+
+```bash
+# Binaire brut, déclenche toutes les tâches auto-metadata
+./gradlew packageGraalvmNative
+
+# Build et lance le binaire
+./gradlew runGraalvmNative
+
+# Installateurs plateforme
+./gradlew packageGraalvmDeb     # Linux
+./gradlew packageGraalvmDmg     # macOS
+./gradlew packageGraalvmNsis    # Windows
+
+# Filet de sécurité final avant release
+./gradlew runWithNativeAgent
+
+# Retire la metadata manuelle redondante
+./gradlew cleanupGraalvmMetadata
+
+# Build pour des CPU plus vieux
+./gradlew packageGraalvmNative -PnativeMarch=compatibility
+```
+
+## Emplacements de sortie
+
+```
+<project>/build/compose/tmp/<project>/graalvm/output/
+```
+
+| Plateforme | Sortie |
+|------------|--------|
+| **macOS** | `output/MyApp.app/` — bundle `.app` complet, `Info.plist`, icônes, dylibs signés |
+| **Windows** | `output/my-app.exe` + DLLs compagnons (`awt.dll`, `fontmanager.dll`, …) |
+| **Linux** | `output/my-app` + fichiers `.so` compagnons (`libawt.so`, `libfontmanager.so`, …) |
+
+Les installateurs par format atterrissent dans :
+
+```
+<project>/build/compose/binaries/<buildType>/graalvm-<format>/
+```
+
+## CI/CD — GitHub Actions
+
+L'image native doit être compilée **sur chaque OS cible**. Utilise `setup-nucleus` avec `graalvm: 'true'` :
+
+```yaml
+name: GraalVM release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-natives:
+    uses: ./.github/workflows/build-natives.yaml
+
+  graalvm:
+    needs: build-natives
+    name: GraalVM - ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x64,    os: ubuntu-latest }
+          - { name: macOS ARM64,  os: macos-latest  }
+          - { name: Windows x64,  os: windows-latest }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Télécharge ici les libs natives JNI pré-buildées par le job build-natives.
+
+      - name: Setup Nucleus (GraalVM)
+        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
+        with:
+          graalvm: 'true'
+          setup-gradle: 'true'
+          setup-node: 'true'   # requis pour packageGraalvm<Format>
+
+      - name: Build GraalVM native package
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   ./gradlew :myapp:packageGraalvmDeb  -PnativeMarch=compatibility --no-daemon ;;
+            macOS)   ./gradlew :myapp:packageGraalvmDmg  -PnativeMarch=compatibility --no-daemon ;;
+            Windows) ./gradlew :myapp:packageGraalvmNsis -PnativeMarch=compatibility --no-daemon ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graalvm-${{ runner.os }}
+          path: myapp/build/compose/binaries/**/graalvm-*/**
+```
+
+`setup-nucleus` provisionne Liberica NIK 25, la toolchain plateforme (Xcode CLT / MSVC / GCC + patchelf + xvfb) et amorce le cache de build Gradle. C'est l'action unique qui remplace une douzaine d'étapes de setup ad-hoc. Voir [CI/CD](/docs/packaging/ci-cd) pour le workflow de release complet avec publication sur GitHub Releases.
+
+### Cacher le build native-image
+
+La compilation native-image est l'étape longue (5–15 minutes par plateforme). Utilise le cache Gradle standard via `setup-nucleus`, plus une clé de cache par OS pour le répertoire `.gradle/caches/<version>/native-image` :
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: ~/.gradle/caches/nucleus/native-image
+    key: nucleus-ni-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle.properties') }}
+    restore-keys: |
+      nucleus-ni-${{ runner.os }}-
+```
+
+Ça cache la metadata de reachability résolue, la sortie d'analyse, et le download du metadata repository.
+
+## Debugging
+
+### Réflexion manquante au runtime
+
+Lance le binaire natif depuis un terminal — les échecs de réflexion produisent des messages clairs comme `Class not found` ou `No such field`. Pour corriger :
+
+1. `./gradlew runWithNativeAgent`, parcours le chemin de code défaillant, laisse l'agent capturer l'entrée manquante.
+2. La sortie de l'agent est dédupliquée — seules les entrées vraiment nouvelles sont ajoutées.
+3. Rebuild avec `./gradlew packageGraalvmNative`.
+
+### `packageGraalvmDeb` échoue sous electron-builder
+
+La propriété `homepage` est requise dans `nativeDistributions` pour le packaging DEB — electron-builder refuse sans. Voir [Configuration > Metadata de package](/docs/start/configuration).
+
+## Bonnes pratiques
+
+- **Teste sur chaque plateforme tôt.** Chaque OS a sa propre empreinte de réflexion. N'attends pas la semaine de release.
+- **Lance l'agent une fois avant chaque release.** Pas cher, trouve souvent rien — et c'est l'assurance que tu veux.
+- **Référence [`jewel-sample`](https://github.com/NucleusFramework/Nucleus/tree/main/jewel-sample)** pour le setup native-image de production le plus complexe qu'on livre.
+
+## Pour aller plus loin
+
+- [Documentation GraalVM Native Image](https://www.graalvm.org/latest/reference-manual/native-image/)
+- [BellSoft Liberica NIK](https://bell-sw.com/liberica-native-image-kit/)
+- [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
+- [App exemple Nucleus](https://github.com/NucleusFramework/Nucleus/tree/main/example)
+- [Sample Nucleus Jewel](https://github.com/NucleusFramework/Nucleus/tree/main/jewel-sample) — setup avancé lourd en réflexion

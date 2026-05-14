@@ -1,0 +1,58 @@
+---
+title: Native file dialogs
+description: FileKit — native open / save / folder pickers that look right on every OS.
+---
+
+Compose Multiplatform doesn't ship file dialogs. Nucleus deliberately doesn't either — the community already shipped the right answer.
+
+## TL;DR
+- Use [**FileKit**](https://github.com/vinceglb/FileKit) by [@vinceglb](https://github.com/vinceglb).
+- Native pickers: `NSOpenPanel`/`NSSavePanel` on macOS, `IFileOpenDialog`/`IFileSaveDialog` on Windows, xdg-desktop-portal on Linux.
+- Nucleus ships preloaded GraalVM reachability metadata for FileKit — Native Image just works.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("io.github.vinceglb:filekit-compose:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+val launcher = rememberFilePickerLauncher(
+    type = PickerType.File(extensions = listOf("png", "jpg")),
+    title = "Pick an image",
+) { file ->
+    // file: PlatformFile?
+}
+
+Button(onClick = { launcher.launch() }) {
+    Text("Pick image")
+}
+```
+
+## How it works
+
+FileKit drives the real native dialog on each OS:
+
+- **macOS** — `NSOpenPanel` / `NSSavePanel` via Cocoa.
+- **Windows** — `IFileOpenDialog` / `IFileSaveDialog` via JNA COM.
+- **Linux** — xdg-desktop-portal `FileChooser`, with GTK / zenity fallbacks.
+
+File type filters with descriptions, single-file / multi-file / folder / save modes, a Compose-friendly API (`rememberFilePickerLauncher`), and a cross-platform `PlatformFile` abstraction with read/write/metadata helpers.
+
+## GraalVM native image — zero config
+
+The Nucleus Gradle plugin ships **preloaded reachability metadata for FileKit** as part of its [library metadata bundle](/docs/performance/graalvm/automatic-metadata). The metadata is conditionally included only when `io.github.vinceglb.filekit` is on your runtime classpath, and covers:
+
+- macOS Foundation proxy + callback types (`FoundationLibrary`, `ID`, runnable callbacks).
+- Windows JNA COM bindings (`FileDialog`, `FileOpenDialog`, `FileSaveDialog`, `ShellItem`, `Shell32`, `COMDLG_FILTERSPEC`, `PROPERTYKEY`, …).
+- XDG desktop-portal D-Bus proxy (`FileChooserDbusInterface`) for Linux.
+
+If you package with the Nucleus plugin and target `native-image`, FileKit works out of the box — no manual `reachability-metadata.json`, no tracing-agent run required.
+
+## Why Nucleus doesn't ship this
+
+FileKit already covers the full surface natively, has active maintenance, and integrates cleanly with Compose state. Reimplementing it inside Nucleus would duplicate effort with no benefit.

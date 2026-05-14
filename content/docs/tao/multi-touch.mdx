@@ -1,0 +1,97 @@
+---
+title: Multi-touch & gestures
+description: Pinch, swipe and rotate, with pressure and tilt flowing through Compose pointer events.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Touchpads and touchscreens speak a richer language than mouse clicks. The Tao backend forwards the OS-level gesture stream into Compose's pointer events so pinches, rotations and trackpad swipes reach your UI without a separate API.
+
+## TL;DR
+- Compose `PointerEvent`s carry source, pressure and tilt on every OS.
+- `TaoTrackpadGesture` exposes pinch / rotate / smart-magnify phases.
+- `TaoTrackpadPhase` reports the gesture lifecycle (`Began`, `Changed`, `Ended`, `Cancelled`).
+- Multi-finger swipes arrive as scroll events with sub-pixel precision.
+- Works on macOS trackpads, Windows precision touchpads and Wayland (`pointer-gestures-unstable-v1`).
+
+## Install
+
+Bundled with `decorated-window-tao`. No extra dependency.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.window.tao.*
+
+@Composable
+fun ZoomCanvas() {
+    var scale by remember { mutableStateOf(1f) }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.first()
+                        // pressure: 0f when not supported, [0..1] otherwise
+                        val pressure = change.pressure
+                        // source: Mouse, Touch, Stylus, …
+                        val source = change.type
+                        // … react to source / pressure …
+                    }
+                }
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoom, _ ->
+                    scale *= zoom
+                }
+            }
+    )
+}
+```
+
+## How it works
+
+On every OS, Tao subscribes to the high-resolution gesture stream the platform exposes — `NSEvent` magnify/rotate on macOS, `WM_POINTER` on Windows, `zwp_pointer_gestures_v1` on Wayland. Those events feed Skiko's input dispatcher and surface through standard Compose pointer APIs: `PointerType`, `PointerInputChange.pressure`, `PointerInputChange.position`.
+
+For raw gesture phases (e.g. distinguishing a pinch from a two-finger scroll on macOS), the backend also exposes `TaoTrackpadGesture` constants alongside `TaoTrackpadPhase`. You can hook into them through `LocalTaoWindow.current?.addTrackpadListener { gesture, phase, delta -> … }` when you need backend-specific behaviour. For most app code, the Compose `detectTransformGestures` / `detectDragGestures` modifiers are enough.
+
+## Reference
+
+### Pointer info on every change
+
+```kotlin
+PointerInputChange.type        // PointerType.Mouse | Touch | Stylus | Eraser
+PointerInputChange.pressure    // Float, 0f when unsupported
+PointerInputChange.position    // Sub-pixel Offset
+PointerInputChange.scrollDelta // Scroll wheel + trackpad scroll
+```
+
+### Tao gesture constants
+
+```kotlin
+object TaoTrackpadGesture {
+    const val Magnify: Int
+    const val Rotate: Int
+    const val SmartMagnify: Int
+    // …
+}
+
+object TaoTrackpadPhase {
+    const val Began: Int
+    const val Changed: Int
+    const val Ended: Int
+    const val Cancelled: Int
+}
+```
+
+<Callout type="info">
+For per-platform availability of pen and stylus pressure, see [Pen & stylus](/docs/tao/pen-stylus). For trackpad gestures on Wayland specifically, see [Wayland](/docs/tao/wayland).
+</Callout>

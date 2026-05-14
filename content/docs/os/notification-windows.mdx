@@ -1,0 +1,113 @@
+---
+title: Notifications on Windows
+description: WinRT Toast Notifications in Kotlin — adaptive layouts, hero images, buttons, text input, progress bars, headers, snooze/dismiss.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Windows 10/11 toasts can carry images, progress bars, selection boxes, text inputs, headers — way more than the cross-platform DSL covers. `notification-windows` wraps the full `ToastNotificationManager` API in a Kotlin DSL.
+
+## TL;DR
+- WinRT `ToastNotificationManager` via a C++/WRL JNI bridge — no JNA, no reflection.
+- Supports both MSIX-packaged and unpackaged (EXE/MSI) apps.
+- Adaptive DSL: hero image, app logo, attribution text, groups/subgroups, progress bars, selection boxes.
+- Listener for activation, dismissal, failure.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-windows:<version>")
+}
+```
+
+## Quickstart
+
+```kotlin
+import dev.nucleusframework.notification.windows.*
+
+WindowsNotificationCenter.initialize()
+
+WindowsNotificationCenter.send(toast {
+    visual {
+        text("Build finished")
+        text("artifact-2.0.0.zip uploaded")
+        heroImage("https://example.com/hero.png")
+    }
+    actions {
+        button("Open", arguments = "open")
+        button("Show in folder", arguments = "folder")
+    }
+})
+```
+
+## How it works
+
+Toasts on Windows are XML payloads dispatched through `ToastNotificationManager` and identified by an AUMID (Application User Model ID). The library handles both packaged and unpackaged cases:
+
+<Callout type="info" title="AUMID handling">
+- **MSIX / APPX**: the AUMID is resolved automatically from the package identity.
+- **Unpackaged (EXE/MSI/dev)**: Nucleus derives the AUMID from `NucleusApp.appId` and registers it on the current process via `SetCurrentProcessExplicitAppUserModelID`.
+- Pass an explicit AUMID with `WindowsNotificationCenter.initialize(aumid = "Vendor.App")` if you need to override it.
+</Callout>
+
+<Callout type="warn" title="Start Menu shortcut required for unpackaged apps">
+Unpackaged apps need a Start Menu `.lnk` shortcut whose AUMID property matches the one used at runtime. Without it, toasts may fail to appear or to persist in Action Center. The Nucleus Gradle plugin sets this up when you build with the Windows installer formats.
+</Callout>
+
+## Reference
+
+### Adaptive content
+
+```kotlin
+toast {
+    visual {
+        text("Sync in progress")
+        appLogo("logo.png", crop = AdaptiveImageCrop.Circle)
+        progressBar(
+            title = "report.pdf",
+            valueStringOverride = "3 of 5 files",
+            value = 0.6,
+            status = "Uploading",
+        )
+    }
+    actions {
+        button("Pause", arguments = "pause")
+        snoozeButton()
+        dismissButton()
+    }
+    scenario = ToastScenario.Reminder
+}
+```
+
+### Listener
+
+```kotlin
+WindowsNotificationCenter.setListener(object : ToastNotificationListener {
+    override fun onActivated(args: ToastActivatedEventArgs) { /* … */ }
+    override fun onDismissed(args: ToastDismissedEventArgs) { /* … */ }
+    override fun onFailed(args: ToastFailedEventArgs) { /* … */ }
+})
+```
+
+### Update an existing toast
+
+```kotlin
+WindowsNotificationCenter.update(
+    tag = "upload",
+    group = "transfers",
+    data = ToastNotificationData(mapOf("progressValue" to "0.8")),
+)
+```
+
+### History
+
+```kotlin
+WindowsNotificationCenter.history().forEach { entry ->
+    println("${entry.tag}: ${entry.dateTime}")
+}
+```
+
+## Notes
+- Set `AUMID` consistently between the Start Menu shortcut, your `nucleus { }` Gradle config (`packageName`), and runtime — mismatches are the cause of "the toast appears once and then never again".
+- Hero images and app logos accept remote `http(s)://` URLs in unpackaged apps as long as the URL resolves quickly; for offline-safe behaviour ship a local file via `ms-appx:///` (MSIX) or `file:///` (unpackaged).

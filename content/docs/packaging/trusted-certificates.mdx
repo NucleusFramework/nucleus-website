@@ -1,0 +1,64 @@
+---
+title: Trusted CA certificates
+description: Bundle private root CAs into the shipped JDK's cacerts so HTTPS Just Works on locked-down networks.
+---
+
+Corporate proxies, ZTNA gateways, and ISP-level filtering services often man-in-the-middle TLS with a private root CA. The default JDK trust store doesn't know about it, so every HTTPS call your app makes throws `SSLHandshakeException`. Instead of asking users to patch their JVM, declare the certificates once — Nucleus imports them into the bundled JDK's `cacerts` at packaging time.
+
+## TL;DR
+- Drop PEM or DER certificates into `nativeDistributions.trustedCertificates`.
+- Imported into the bundled JLink runtime, not the host JVM.
+- Idempotent — same content same alias, no re-imports.
+- Every packaging format embeds the patched runtime automatically.
+
+## Install
+Comes with the Gradle plugin.
+
+## Quickstart
+
+```kotlin
+nucleus {
+    application {
+        nativeDistributions {
+            trustedCertificates.from(files(
+                "certs/company-proxy-ca.pem",
+                "certs/vpn-root.crt",
+            ))
+        }
+    }
+}
+```
+
+Both PEM (`-----BEGIN CERTIFICATE-----`) and DER (binary) formats are accepted.
+
+## How it works
+
+After `createRuntimeImage` finishes, Nucleus copies the JLink runtime to `runtime-patched/` and runs `keytool -import -trustcacerts` for each certificate. The patched runtime feeds both `createDistributable` and `createSandboxedDistributable`, so every format — DMG, NSIS, DEB, PKG, AppX, … — embeds the same trusted root.
+
+Aliases are derived from the file name plus a short SHA-256 fingerprint of the content. `corp-root-ca.crt` becomes `corp-root-ca-3a1f8b2c`. Same content = same alias = idempotent. The original JLink runtime image is never modified — only the copy under `build/compose/tmp/<appName>/runtime-patched/`.
+
+```
+createRuntimeImage
+       ↓
+patchCaCertificates     ← copies runtime, runs keytool per cert
+       ↓
+createDistributable
+createSandboxedDistributable
+       ↓
+packageDmg / packageDeb / packageNsis / …
+```
+
+The `patchCaCertificates` task is only registered when `trustedCertificates` is non-empty. It runs automatically — you don't invoke it.
+
+## Reference
+
+- `nativeDistributions.trustedCertificates: ConfigurableFileCollection`
+- Task: `patchCaCertificates`
+
+The `keytool` binary used is the one from the JDK configured via `javaHome` (or the Gradle daemon's JVM if unset).
+
+## Notes
+
+- Patches the **bundled** JVM only. Your host machine's JDK is untouched.
+- For runtime-level OS trust (Keychain on macOS, CryptoAPI on Windows, NSS/system PEM on Linux), use the [`native-ssl` module](/docs/performance/native-ssl) — it reads the user's already-installed CAs without needing a build-time patch.
+- The two approaches are complementary. `trustedCertificates` is for CAs known at build time (ship to all users). `native-ssl` is for CAs your end users add themselves.

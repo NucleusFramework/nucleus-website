@@ -1,0 +1,113 @@
+---
+title: Notifications sous Linux
+description: Notifications FreeDesktop sur D-Bus — urgence, hints, sons, callbacks d'action, avec les particularités documentées par serveur.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Sous Linux, les notifications passent par le service D-Bus `org.freedesktop.Notifications` — tous les desktops modernes (GNOME, KDE, Cinnamon, Xfce, Pantheon) l'implémentent, chacun avec ses particularités. `notification-linux` est un mapping Kotlin complet de la spec, au-dessus de GLib/GIO.
+
+## En bref
+- D-Bus pur via `libgio-2.0` — pas de JNA, pas de bibliothèque D-Bus Java.
+- Couverture complète : urgence, hints, boutons d'action, image data, sons, flags transient / resident.
+- Détection par serveur via `getServerInformation()`.
+- Callbacks d'action livrés par `LinuxNotificationListener`.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-linux:<version>")
+}
+```
+
+Tire [`freedesktop-icons`](/docs/os/freedesktop-icons) transitivement pour les noms d'icônes typés.
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.notification.linux.*
+import dev.nucleusframework.freedesktop.icons.FreedesktopIcon
+
+val id = LinuxNotificationCenter.send(
+    Notification(
+        appName = "Mon App",
+        summary = "Build terminé",
+        body = "artifact-2.0.0.zip est prêt",
+        appIcon = FreedesktopIcon.Status.DIALOG_INFORMATION,
+        hints = NotificationHints(urgency = Urgency.NORMAL),
+        actions = listOf(NotificationAction("open", "Ouvrir")),
+    ),
+)
+```
+
+## Fonctionnement
+
+`LinuxNotificationCenter` ouvre une connexion D-Bus session au démarrage et la réutilise. Chaque appel notification touche `org.freedesktop.Notifications.Notify` et renvoie l'id assigné par le serveur. Les invocations d'action et les événements de fermeture reviennent par signaux D-Bus ; tu enregistres un `LinuxNotificationListener` pour les recevoir.
+
+La spec est cohérente ; les serveurs ne le sont pas. La matrice ci-dessous couvre les cas à connaître :
+
+<Callout type="info" title="Particularités par serveur">
+- **GNOME Shell** : ignore `appIcon` quand l'app a une fenêtre focus. Mets toujours `hints.imagePath` pour un rendu fiable.
+- **KDE Plasma** : respecte tous les hints, y compris `transient`, `resident`, `category`, `image-data`.
+- **Notify-send / dunst** : rendu minimal, parfois pas de boutons d'action.
+- **Sandboxes Snap / Flatpak** : le daemon filtre, certains hints (chemins de son) peuvent être ignorés.
+
+Appelle `LinuxNotificationCenter.getServerInformation()` au démarrage et logge le serveur détecté + ses capacités, ça aide en support.
+</Callout>
+
+## Référence
+
+### Urgence
+
+```kotlin
+hints = NotificationHints(urgency = Urgency.CRITICAL)
+```
+
+`LOW`, `NORMAL`, `CRITICAL`. Les notifications critiques outrepassent généralement le mode ne-pas-déranger et persistent jusqu'à rejet.
+
+### Boutons d'action
+
+```kotlin
+val n = Notification(
+    appName = "Mon App",
+    summary = "Nouveau message",
+    actions = listOf(
+        NotificationAction("reply", "Répondre"),
+        NotificationAction("archive", "Archiver"),
+    ),
+)
+
+LinuxNotificationCenter.setListener(object : LinuxNotificationListener {
+    override fun onAction(id: Long, actionKey: String) { /* … */ }
+    override fun onClosed(id: Long, reason: CloseReason) { /* … */ }
+})
+```
+
+### Image inline
+
+```kotlin
+hints = NotificationHints(
+    imageData = ImageData.fromArgb(width, height, bytes),
+)
+```
+
+Utile quand tu n'as pas de fichier sur disque — par exemple un avatar généré.
+
+### Sons
+
+```kotlin
+hints = NotificationHints(
+    soundName = NotificationSound.Notification.DIALOG_INFORMATION,
+)
+```
+
+### Fermer par programme
+
+```kotlin
+LinuxNotificationCenter.close(id)
+```
+
+## Notes
+- Sous `Xvfb` ou en CI headless : l'appel rendra la main sans erreur, mais aucun daemon n'affichera la notification.
+- Si tout marche en dev mais que rien ne s'affiche sous Flatpak, vérifie la permission portail `org.freedesktop.Notifications` dans ton manifeste.

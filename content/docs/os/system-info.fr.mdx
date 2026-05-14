@@ -1,0 +1,105 @@
+---
+title: Infos système
+description: Inventaire read-only de la machine — OS, CPU, mémoire, disques, GPUs, batteries, réseau, processus, utilisateurs — par une seule API Kotlin.
+---
+
+Introspection style sysinfo : read-only, cross-plateforme, basé JNI. À utiliser pour la télémétrie, des fonctionnalités conditionnelles, des checks de prérequis ("on a besoin de 8 Go"), un écran de diagnostic intégré, ou simplement pour imprimer l'environnement dans tes bug reports.
+
+## En bref
+- Un point d'entrée : `object SystemInfo`.
+- Couvre OS, CPU (par cœur + global), mémoire, disques, composants (sondes de température), réseaux, GPUs, batteries, processus, utilisateurs, carte-mère.
+- Ponts natifs, pas de JNA, pas de scraping procfs depuis Kotlin.
+- Vérifie toujours `isAvailable()` avant d'en dépendre.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-info:<version>")
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+import dev.nucleusframework.systeminfo.SystemInfo
+
+fun main() {
+    val os = SystemInfo.osInfo() ?: return
+    println("OS : ${os.longOsVersion} (${os.cpuArch})")
+
+    val mem = SystemInfo.memoryInfo()
+    println("Mémoire : ${mem?.usedMemory?.div(1024 * 1024)} Mo / ${mem?.totalMemory?.div(1024 * 1024)} Mo")
+
+    SystemInfo.gpus().forEach { gpu ->
+        println("GPU : ${gpu.name} — ${gpu.dedicatedVideoMemory / 1024 / 1024} Mo")
+    }
+
+    val battery = SystemInfo.batteryInfo()
+    println("Batterie : ${battery?.let { "${(it.stateOfCharge * 100).toInt()}% (${it.state})" } ?: "aucune"}")
+}
+```
+
+## Fonctionnement
+
+Chaque appel touche un pont natif — `NativeMacOsSystemInfoBridge`, `NativeWindowsSystemInfoBridge`, `NativeLinuxSystemInfoBridge` — qui enveloppe les APIs de la plateforme (`IOKit`, WMI / PDH, sysfs / procfs / udev). Les résultats sont nullables : un modèle de disque impossible à récupérer renvoie `null` plutôt qu'une valeur devinée.
+
+L'API est snapshot : chaque méthode retourne l'état à l'instant T. Cache toi-même si tu affiches en rafraîchissement.
+
+## Référence
+
+### OS
+
+```kotlin
+val os = SystemInfo.osInfo()
+// name, longOsVersion, cpuArch, kernelVersion, hostname, …
+```
+
+### CPU
+
+```kotlin
+val cpu = SystemInfo.cpuInfo()
+cpu?.cpus?.forEach { core ->
+    println("${core.brand}: ${core.frequency} MHz, usage ${core.cpuUsage}%")
+}
+```
+
+### Mémoire et disques
+
+```kotlin
+SystemInfo.memoryInfo()    // total, used, free, available, swap
+SystemInfo.disks()         // points de montage, tailles, systèmes de fichiers
+```
+
+### GPUs, batteries, réseau
+
+```kotlin
+SystemInfo.gpus()
+SystemInfo.batteryInfo()
+SystemInfo.networks()
+SystemInfo.connectivityInfo()
+```
+
+### Processus et utilisateurs
+
+```kotlin
+SystemInfo.processes()
+SystemInfo.process(pid)
+SystemInfo.users()
+```
+
+### Temps d'inactivité
+
+```kotlin
+val idleSeconds = SystemInfo.idleTime()
+```
+
+## Cas d'usage
+- **Télémétrie** — distribution anonymisée CPU / GPU / OS, sans SDK tiers.
+- **Fonctionnalités conditionnelles** — réserve un modèle ML lourd à `memoryInfo()?.totalMemory > 8 Go`.
+- **Écran de diagnostic** — laisse l'utilisateur exporter un rapport pour le support.
+- **UX consciente de l'énergie** — mets en pause la sync de fond quand `batteryInfo().state == Discharging && stateOfCharge &lt; 0.2`.
+
+## Notes
+- Certaines métriques sont spécifiques : capteurs de température rares sous Windows, modèle de carte-mère plus fiable sous Linux.
+- `processes()` peut coûter cher sur une machine chargée — privilégie `process(pid)` quand tu n'en veux qu'un.

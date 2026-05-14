@@ -1,0 +1,124 @@
+---
+title: Project setup
+description: Dépôts, propriétés Gradle, toolchains JDK et layout multi-module pour un vrai projet Nucleus.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le quickstart tient dans un module. Les vrais projets séparent UI, logique métier et colle plateforme — et les modules à la carte de Nucleus attendent un layout où les dépendances vont dans un seul sens.
+
+## L'essentiel
+- Résous le plugin depuis le Gradle Plugin Portal ; les modules runtime depuis Maven Central.
+- Fixe une toolchain JDK (17 minimum, 25 pour le cache AOT).
+- Un layout typique : `:app` (point d'entrée Nucleus) → `:ui` (Compose) → `:domain` (Kotlin pur), avec la colle plateforme là où on l'utilise.
+
+## Dépôts
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+```
+
+`google()` n'est nécessaire que si tu tires Compose Multiplatform de là ou si tu partages des modules avec Android.
+
+## Versions plugin et runtime
+
+```kotlin
+// build.gradle.kts (module app)
+plugins {
+    kotlin("jvm") version "2.0.21"
+    id("org.jetbrains.compose") version "1.7.0"
+    id("dev.nucleusframework") version "2.0.0"
+}
+```
+
+Tous les artefacts `dev.nucleusframework:nucleus.*` publient la même version. Pin une fois :
+
+```kotlin
+val nucleusVersion = "2.0.0"
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+    implementation("dev.nucleusframework:nucleus.nucleus-application:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:$nucleusVersion")
+    // ne tire que ce dont tu as besoin
+    implementation("dev.nucleusframework:nucleus.notification-common:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.global-hotkey:$nucleusVersion")
+}
+```
+
+`nucleus-application` est l'ombrelle ; il tire transitivement `core-runtime`, `aot-runtime` et `graalvm-runtime`. Tous les autres modules sont opt-in.
+
+## Toolchain JDK
+
+```kotlin
+kotlin {
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
+        // Optionnel : pin le vendor pour des builds reproductibles
+        // vendor.set(JvmVendorSpec.JETBRAINS)
+    }
+}
+```
+
+Utilise JDK 17 si tu n'as pas besoin du cache AOT, JDK 25 pour l'activer (`enableAotCache = true` dans `nativeDistributions`). Pour les native images GraalVM, configure `nucleus.application.graalvm { javaLanguageVersion.set(25) }` — voir [Configuration](/docs/start/configuration).
+
+## `gradle.properties` recommandé
+
+```properties
+org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC
+org.gradle.parallel=true
+org.gradle.caching=true
+org.gradle.configuration-cache=true
+
+kotlin.code.style=official
+```
+
+Le configuration cache marche avec le plugin Nucleus ; en cas de souci, ouvre une issue.
+
+## Layout multi-module
+
+Un découpage pragmatique :
+
+```
+my-app/
+├── settings.gradle.kts
+├── build.gradle.kts             ← conventions partagées, sans plugins
+├── app/                          ← point d'entrée Nucleus + main()
+│   └── build.gradle.kts          ← applique dev.nucleusframework
+├── ui/                           ← Composables Compose, thèmes
+│   └── build.gradle.kts
+└── domain/                       ← Kotlin pur : modèles, repositories, services
+    └── build.gradle.kts
+```
+
+Règles :
+- Seul `:app` applique `dev.nucleusframework`. Seul `:app` déclare `nucleus.application { … }`.
+- `:domain` reste Kotlin pur et pourra être partagé avec Android/iOS plus tard (passe-le sous un `commonMain` KMP le jour venu).
+- La colle plateforme (dock menu macOS, jump list Windows…) vit à côté du code qui l'utilise — le plus souvent dans `:app`.
+
+## Partage multiplatform
+
+Les modules runtime de Nucleus sont JVM-only, mais `:domain` et `:ui` peuvent être Kotlin Multiplatform sans rien changer à `:app`. C'est la target JVM de ces modules que `:app` consomme.
+
+<Callout type="tip" title="Hot Reload">
+Compose Hot Reload marche tel quel — Nucleus étend le plugin Compose au lieu de le remplacer. Le `mainClass` que tu mets dans `nucleus.application` est propagé à `compose.desktop.application.mainClass`, donc `hotRun` résout l'entry point sans config supplémentaire.
+</Callout>
+
+## Et ensuite ?
+
+- [Configuration](/docs/start/configuration) — le DSL Gradle complet.
+- [Modules](/docs/concepts/modules) — comment les modules Nucleus se composent.

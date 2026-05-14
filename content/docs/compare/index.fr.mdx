@@ -1,0 +1,51 @@
+---
+title: Pourquoi Nucleus
+description: Un seul langage, un seul process, natif partout — et comment ça se compare à Electron, Tauri, CMP vanilla.
+---
+
+Partout ailleurs, Kotlin possède toute la plateforme. Sur Android, citoyen de première classe. Sur iOS, Kotlin/Native atteint chaque API UIKit et Foundation. Sur le web, Kotlin/JS et Wasm dessinent du Compose avec toute la surface du navigateur. Desktop restait l'exception — tu pouvais rendre une fenêtre, mais atteindre l'OS exigeait de jongler avec des pointeurs, compiler des libs natives par plateforme, câbler des ponts JNI ou FFM, apprendre une API native différente pour chaque OS. Nucleus comble le gap.
+
+## TL;DR
+- Un seul langage pour l'UI, la logique métier, les appels OS, le packaging.
+- Un seul process — pas de pont IPC entre renderer et main.
+- Le même code Kotlin qui tourne déjà sur Android, iOS, web.
+- Deux runtimes (GraalVM native image, JVM + cache AOT) depuis la même source.
+
+## Comparaison
+
+| | **Nucleus** | Electron | Tauri | CMP par défaut |
+|--|------------|----------|-------|----------------|
+| Langage(s) | Kotlin | JS + Node (+ C++ pour natives) | JS + Rust | Kotlin |
+| UI | Compose + Skia GPU | Chromium (Blink + V8) | WebView OS | Compose + Skia GPU |
+| API OS | 30+ modules Kotlin, mono-process | Node `child_process` / modules natifs | Commandes Rust via IPC | Limité (`Tray`, `Notification`, pas de fenêtre décorée) |
+| Formats de packaging | **16** (DMG, PKG, NSIS, MSI, AppX, Portable, DEB, RPM, AppImage, Snap, Flatpak, ZIP, TAR, 7Z) | 5–7 via electron-builder | 5 via tauri-bundler | 6 (DMG, PKG, MSI, EXE, DEB, RPM) |
+| Auto-update | Intégré (`updater-runtime`) | electron-updater | Plugin Tauri Updater | Aucun |
+| Cold start | ~0,5 s (GraalVM) · ~1,0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
+| RAM idle | 60–150 MB | 200–500 MB | 50–80 MB | 200 MB |
+| Taille binaire | 38 MB (GraalVM) · ~120 MB (JVM) | 150–200 MB | 5–20 MB | 80–120 MB |
+| Décorations natives | Oui — Liquid Glass, Fluent, Yaru, Jewel | Limité (chrome Chromium) | Oui (chrome OS) | Limité |
+| Mindset | Un langage bout-en-bout | Deux runtimes, pont IPC | Frontend web + backend Rust | Un langage, moins de batteries |
+
+## Un langage vs quatre
+
+Electron et Tauri imposent un quotidien polyglotte. Tu écris ton UI en JavaScript, tes parties natives en Rust ou C++ ou Swift, tu colles ça avec un pont IPC, tu sépares ton équipe en mindsets. Nucleus reste en Kotlin de haut en bas — UI, logique métier, appels OS, packaging — même call graph, même modèle mémoire, même debugger.
+
+Quand tu as besoin de descendre — embarquer une vue SwiftUI, appeler Win32 directement, taper une interface D-Bus Linux-only — le [backend Tao](/docs/tao) expose `NativeView`, et [native-access](/docs/performance/native-access) te donne du FFI typé sans quitter Kotlin.
+
+## Où chaque outil gagne
+
+- **Electron** — l'écosystème le plus profond et le plus gros bassin d'embauche. Choisis-le quand la vitesse de livraison et la familiarité JS comptent plus que la RAM, la taille ou le rendu natif.
+- **Tauri** — les plus petits binaires de la liste. Choisis-le quand tu acceptes la WebView par plateforme et la friction Rust/JS.
+- **CMP vanilla** — la fondation de Nucleus. Choisis-le quand tu veux Compose sans la surface supplémentaire que Nucleus apporte (et tu écriras toi-même packaging, signature, updater, fenêtre décorée).
+- **Nucleus** — choisis-le quand tu veux un langage bout-en-bout, des décorations natives, tout l'écosystème JVM in-process, et une pipeline de packaging qui couvre déjà 16 formats et quatre stores.
+
+## Comparaisons détaillées
+
+- [Packaging — 16 formats vs le reste](/docs/compare/packaging)
+- [Nucleus vs Electron](/docs/compare/electron)
+- [Nucleus vs Tauri](/docs/compare/tauri)
+- [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default)
+
+## Notes
+
+Les chiffres de perf ci-dessus sont typiques pour une app Hello-World. Le cold start et la RAM réels scale avec ce que ton app charge. Nucleus a deux cibles runtime — choisis GraalVM native image pour le cold start et la taille, JVM + cache AOT pour le throughput ; voir [performance](/docs/performance) pour l'histoire complète. `[FACT-CHECK NEEDED]` sur les chiffres Electron/Tauri — sourcés de benchmarks publics.

@@ -1,0 +1,129 @@
+---
+title: System tray
+description: Une icône de tray rendue par Compose et un menu contextuel natif sur macOS, Windows et Linux — réactif, compatible GraalVM, sans pipeline d'export d'icônes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Construire une app de tray à la main, c'est jongler avec des fichiers `.ico`, des `NSStatusItem` AppKit, des menus XML AppIndicator, et trois sémantiques de clic différentes. `Tray()` ramène tout ça à un composable : ton icône, c'est ce que Compose sait dessiner ; ton menu, un DSL Kotlin ; ton menu réagit à l'état.
+
+<Callout type="info" title="Dépôt séparé">
+System Tray vient de [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) avec son propre cycle de release. L'artefact est `dev.nucleusframework:composenativetray`.
+</Callout>
+
+## En bref
+- Rends n'importe quel `@Composable`, `ImageVector`, `Painter` ou `DrawableResource` comme icône — net à tout DPI.
+- Réactif : change un `mutableStateOf`, icône et menu suivent.
+- Menus natifs partout : `NSStatusItem` sur macOS, `Shell_NotifyIcon` sur Windows, StatusNotifierItem / AppIndicator sous Linux.
+- Compatible GraalVM Native Image.
+
+## Installation
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:composenativetray:<version>")
+}
+```
+
+## Démarrage rapide
+
+```kotlin
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import dev.nucleusframework.tray.*
+
+Tray(
+    icon = Icons.Default.Favorite,
+    tooltip = "Mon App",
+    primaryAction = { showWindow() },
+) {
+    Item(label = "Afficher la fenêtre") { showWindow() }
+    Divider()
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+## Fonctionnement
+
+`Tray()` est un composable. Son icône est rastérisée depuis Compose à chaque changement d'état, puis remise à l'API native de tray de l'OS courant. La lambda du menu tourne dans un scope DSL réévalué à chaque recomposition — ajouter, retirer ou renommer un item ne coûte que le travail Compose habituel.
+
+Résultat : le tray fait partie de ton arbre d'état Compose. Pas d'appel rebuild ad hoc, pas de pipeline d'icônes manuel, pas de maintien triple `.ico` / `.png` / `.icns`.
+
+<Tabs items={["macOS", "Windows", "Linux (GNOME)", "Linux (KDE)"]}>
+<Tab value="macOS">
+
+Adossé à `NSStatusItem` dans la barre de menus. Les icônes vectorielles rendent au DPI natif, avec une teinte optionnelle via `tint`.
+
+</Tab>
+<Tab value="Windows">
+
+Adossé à `Shell_NotifyIcon`. Le vectoriel est rastérisé en `.ico` 32×32 par facteur d'échelle. Passe un `.ico` authoring via `windowsIcon` si tu veux le contrôle exact.
+
+</Tab>
+<Tab value="Linux (GNOME)">
+
+Via StatusNotifierItem (KStatusNotifierItem). Sous GNOME vanilla, ça requiert l'extension AppIndicator ; sous Ubuntu, ça marche out-of-the-box.
+
+</Tab>
+<Tab value="Linux (KDE)">
+
+StatusNotifierItem est natif à Plasma — tooltips au survol et badges là où Plasma le supporte, sans config.
+
+</Tab>
+</Tabs>
+
+## Sources d'icônes
+
+```kotlin
+// ImageVector
+Tray(icon = Icons.Default.Notifications, tint = Color.White, tooltip = "App") { /* … */ }
+
+// Painter
+Tray(icon = painterResource("icon.png"), tooltip = "App") { /* … */ }
+
+// Compose Multiplatform DrawableResource
+Tray(icon = Res.drawable.app_icon, tooltip = "App") { /* … */ }
+
+// Tout composable
+Tray(
+    iconContent = {
+        Box(Modifier.size(24.dp).background(Color.Red, CircleShape)) {
+            Text("3", color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
+    },
+    tooltip = "3 notifications",
+) { /* … */ }
+```
+
+## Icônes spécifiques par plateforme
+
+Quand tu veux un `.ico` natif sous Windows et un vectoriel ailleurs :
+
+```kotlin
+Tray(
+    windowsIcon = painterResource("icon.ico"),
+    macLinuxIcon = Icons.Default.Notifications,
+    tint = Color.White,
+    tooltip = "Mon App",
+) { /* menu */ }
+```
+
+## Action primaire
+
+`primaryAction` se déclenche au clic gauche (macOS / Windows) ou clic simple (Linux, dépend du desktop). Sans elle, le menu s'ouvre à chaque clic.
+
+```kotlin
+Tray(
+    icon = Icons.Default.Favorite,
+    tooltip = "Mon App",
+    primaryAction = { showWindow() },
+) {
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+## Pour continuer
+
+- [DSL menu du tray](/docs/os/tray-menu-dsl) — items, cases, sous-menus, séparateurs, composition réactive.
+- [Tray apps](/docs/os/tray-app) — fais ouvrir une popup Compose par l'icône du tray.

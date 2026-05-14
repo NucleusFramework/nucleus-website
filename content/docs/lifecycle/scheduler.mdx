@@ -1,0 +1,155 @@
+---
+title: Scheduler — cron jobs that survive reboots
+description: Register periodic, calendar, and on-boot tasks with launchd, Task Scheduler, and systemd timers from one Kotlin API.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A WorkManager-style scheduler for desktop. Register a task once and the OS — launchd on macOS, Task Scheduler on Windows, systemd timers on Linux — will fire it on schedule even when your app is closed. You write a `DesktopTask`, declare its trigger, and let the platform handle wakeups and persistence.
+
+## TL;DR
+- Three task shapes: `periodic(interval)`, `calendar(cronExpr)`, `onBoot()`.
+- `DesktopBootReceiver.isSchedulerInvocation(args)` at the top of `main()` is the entry point when the OS relaunches your binary to run a job.
+- Tasks survive reboots, support retry policies, input data (`@Serializable`), and constraints (network, charging, idle, storage).
+- Minimum periodic interval: 15 minutes.
+- Mac App Store / sandboxed `.pkg`: use [Service Management](/docs/lifecycle/service-management) instead — the scheduler writes plists at runtime which the sandbox forbids.
+
+## Install
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.scheduler:<version>")
+}
+
+plugins {
+    kotlin("plugin.serialization") version "<kotlin version>"
+}
+```
+
+`kotlinx-serialization-json` is exposed transitively.
+
+## Quickstart
+
+### 1. Declare task ids and registry
+
+```kotlin
+val SyncId = TaskId("sync")
+
+class SyncTask : DesktopTask {
+    override suspend fun doWork(context: TaskContext): TaskResult {
+        performSync()
+        return TaskResult.Success
+    }
+}
+
+val registry = TaskRegistry.Builder()
+    .register(SyncId) { SyncTask() }
+    .build()
+```
+
+### 2. Intercept scheduler invocations in main()
+
+```kotlin
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args = args, registry = registry)
+        return
+    }
+
+    // Normal UI startup
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+<Callout type="warn" title="Top of main()">
+This check must come before any UI is built — otherwise every scheduler fire opens a window.
+</Callout>
+
+### 3. Enqueue
+
+```kotlin
+val scheduler = DesktopTaskScheduler.getInstance()
+
+// Every hour
+scheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours))
+
+// Every day at 09:00
+scheduler.enqueue(TaskRequest.calendar(ReportId, CronExpression.everyDayAt(LocalTime.of(9, 0))))
+
+// Run at user login
+scheduler.enqueue(TaskRequest.onBoot(StartupCheckId))
+```
+
+## How it works
+
+The OS schedulers don't know how to "run a Kotlin function" — they only know how to run a binary. So the scheduler registers your application binary itself with the platform timer/job system, passing `--nucleus-scheduler-run <taskId>` on the command line. When that fires, your `main()` runs, `DesktopBootReceiver.isSchedulerInvocation(args)` returns `true`, and the receiver:
+
+1. Loads the persisted `TaskContext` (input data, attempt count) from the per-task metadata file.
+2. Checks any registered constraints against current system state via [`system-info`](/docs/os/system-info).
+3. If satisfied, calls your `doWork(context)`.
+4. Records the result (`Success` / `Failure` / `Retry` / `ConstraintsNotMet`) and, on `Retry`, schedules a backoff.
+
+| Platform | Mechanism | Plist / unit location |
+|---|---|---|
+| macOS | launchd plists | `~/Library/LaunchAgents/dev.nucleusframework.<appId>.<taskId>.plist` |
+| Linux | systemd-user service + timer via D-Bus to `org.freedesktop.systemd1.Manager` | `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` |
+| Windows | Task Scheduler 2.0 COM API (`ITaskService`) | `\Nucleus\<appId>\<taskId>` |
+
+On Linux and Windows, the scheduler doesn't register the app binary directly — it writes a tiny wrapper (`.sh` / `.vbs`) that checks the binary still exists. If the user uninstalls the app without cleaning up, the wrapper self-destructs: it unregisters the timer/task, deletes its metadata, and removes itself. macOS doesn't get this trick (the launchd entry must point directly at the binary to show up correctly in System Settings), so orphan cleanup there relies on you calling `DesktopTaskScheduler.cancelAll()` from sign-out / reset flows.
+
+## Reference
+
+### `DesktopTaskScheduler`
+
+| Method | Returns | |
+|---|---|---|
+| `isAvailable()` | `Boolean` | Whether the platform backend is wired up. |
+| `enqueue(request)` | `Boolean` | Registers a task. |
+| `cancel(taskId)` | `Boolean` | Removes a task. |
+| `cancelAll()` | `Unit` | Removes every task this app registered. |
+| `isScheduled(taskId)` | `Boolean` | |
+| `getTaskInfo(taskId)` | `TaskInfo?` | State, last/next run, run count, last result. |
+| `getAllTasks()` | `List<TaskInfo>` | |
+
+### `TaskRequest`
+
+Factories: `periodic(taskId, interval)`, `calendar(taskId, cron)`, `onBoot(taskId)`. Each takes a builder lambda:
+
+```kotlin
+TaskRequest.periodic(SyncId, 1.hours) {
+    inputData(SyncInput(endpoint = "https://api.example.com"))
+    retryPolicy(RetryPolicy.ExponentialBackoff(initialDelay = 30.minutes, maxAttempts = 3))
+    runImmediately()
+    constraints {
+        requiredNetworkType = NetworkType.UNMETERED
+        requiresBatteryNotLow = true
+    }
+    existingTaskPolicy(ExistingTaskPolicy.REPLACE)
+}
+```
+
+| Builder method | |
+|---|---|
+| `inputData(value)` | `@Serializable` payload, persisted as JSON. |
+| `retryPolicy(...)` | `Linear` or `Exponential`. |
+| `runImmediately()` | Fire once on registration (periodic only). |
+| `constraints { ... }` | Network / charging / idle / storage. |
+| `existingTaskPolicy(...)` | `KEEP` (default), `UPDATE_DATA`, `REPLACE`. |
+
+### `CronExpression`
+
+`everyDayAt(time)`, `everyWeekdayAt(time)`, `everyWeekdayAt(day, time)`, `everyHour()`. Times use `java.time.LocalTime`.
+
+### `TaskResult`
+
+`Success`, `Failure(message)`, `Retry(message)`.
+
+### Constraints
+
+`requiredNetworkType` (`NOT_REQUIRED` / `CONNECTED` / `UNMETERED`), `requiresBatteryNotLow`, `requiresCharging`, `requiresDeviceIdle`, `minimumStorageBytes`. Checked at execution time. Unsatisfied periodic fires are silently skipped; unsatisfied calendar / on-boot fires schedule a 5-minute retry.
+
+## Notes
+
+- Don't put secrets in `inputData` — it's persisted as plain JSON in the per-task metadata file. Pass references and resolve credentials from your keychain at run time.
+- Calendar `everyHour()` means wall-clock top-of-hour, not "one hour from enqueue". For "every hour from now", use `periodic(id, 1.hours)`.
+- Tests: the `scheduler-testing` module ships `TestTaskRunner` for isolated unit tests and `TestDesktopTaskScheduler` with virtual time, execution history, and a `TestConstraintChecker`.

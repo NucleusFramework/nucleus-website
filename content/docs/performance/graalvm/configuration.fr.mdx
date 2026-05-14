@@ -1,0 +1,107 @@
+---
+title: Configuration
+description: Le DSL graalvm { } complet — toolchain, nom d'image, march, args de build, repository de metadata, sous-réglages macOS.
+---
+
+`nucleus.application.graalvm { … }` est toute la surface Gradle GraalVM. Le plugin Nucleus étend le DSL `compose.desktop.application` de JetBrains — même forme, plus un bloc `graalvm`, le flag AOT cache, les formats de store, les deep links et le reste. Tout ci-dessous est typé `Property` et paresseux.
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Quickstart
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+
+        // La Java Toolchain Gradle télécharge Liberica NIK 25 en local.
+        // En CI, configure d'abord le JDK avec graalvm/setup-graalvm@v1.
+        javaLanguageVersion = 25
+        jvmVendor = JvmVendorSpec.BELLSOFT
+
+        buildArgs.addAll(
+            "-H:+AddAllCharsets",
+            "-Djava.awt.headless=false",
+            "-Os",
+            "-H:-IncludeMethodData",
+        )
+
+        metadataRepository {
+            enabled = true           // défaut
+            version = "0.10.6"       // défaut
+            excludedModules.add("com.example:my-lib")
+        }
+
+        // Optionnel — seulement si tu as de la metadata app-spécifique que
+        // le pipeline automatique ne couvre pas. Rare.
+        nativeImageConfigBaseDir.set(
+            layout.projectDirectory.dir("src/main/graalvm-config"),
+        )
+    }
+}
+```
+
+## Référence `graalvm { }`
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `isEnabled` | `Property<Boolean>` | `false` | Interrupteur principal. |
+| `javaLanguageVersion` | `Property<Int>` | `25` | Version de langue de la toolchain ; déclenche le download auto par Gradle. |
+| `jvmVendor` | `Property<JvmVendorSpec>` | — | Mets `BELLSOFT` pour auto-provisionner Liberica NIK. |
+| `imageName` | `Property<String>` | nom de projet | Nom du binaire de sortie. |
+| `march` | `Property<String>` | `"native"` | `native` pour le CPU courant, `compatibility` pour des CPU plus vieux. |
+| `buildArgs` | `ListProperty<String>` | vide | Args supplémentaires passés à `native-image`. |
+| `nativeImageConfigBaseDir` | `DirectoryProperty` | — | Répertoire de `reachability-metadata.json` app-spécifique. Rarement nécessaire. |
+| `macOS` | `GraalvmMacOSSettings` | — | Sous-bloc macOS (voir plus bas). |
+| `metadataRepository` | `MetadataRepositorySettings` | enabled | Oracle Reachability Metadata Repository (voir plus bas). |
+
+### Args de build recommandés
+
+| Argument | But |
+|----------|-----|
+| `-H:+AddAllCharsets` | Inclure tous les charsets — requis pour les I/O texte. |
+| `-Djava.awt.headless=false` | Activer le support GUI — obligatoire pour les apps desktop. |
+| `-Os` | Optimiser pour la taille du binaire. |
+| `-H:-IncludeMethodData` | Retirer la metadata de méthodes ; gagne plusieurs MB. |
+
+## `metadataRepository { }`
+
+Le plugin Nucleus télécharge automatiquement le [Reachability Metadata Repository d'Oracle](https://github.com/oracle/graalvm-reachability-metadata) et résout les entrées pour chaque dépendance runtime de ton classpath.
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `enabled` | `Property<Boolean>` | `true` | Désactive pour sauter le repository entièrement. |
+| `version` | `Property<String>` | `"0.10.6"` | Surcharge la version de l'artefact du repository. |
+| `excludedModules` | `SetProperty<String>` | vide | Coordonnées `group:artifact` à exclure. |
+| `moduleToConfigVersion` | `MapProperty<String, String>` | vide | Épingle la version du répertoire de metadata pour un module donné. |
+
+```kotlin
+metadataRepository {
+    moduleToConfigVersion.put("io.ktor:ktor-client-core", "3.0.0")
+    excludedModules.add("group:noisy-lib")
+}
+```
+
+## `macOS { }` — GraalvmMacOSSettings
+
+| Propriété | Défaut | Notes |
+|-----------|--------|-------|
+| `cStubsSrc` | — | Répertoire de sources pour des stubs C supplémentaires linkés dans le binaire. |
+| `minimumSystemVersion` | `"12.0"` | Patch Mach-O `LC_VERSION_MIN_MACOSX`. |
+| `macOsSdkVersion` | `"26.0"` | Version SDK estampillée dans les headers Mach-O du launcher (contrôle l'éligibilité Liquid Glass). |
+
+## Pas de variant release
+
+Contrairement aux build types JVM, GraalVM **n'a pas de variant release** — pas de `packageReleaseGraalvmNative`, pas de `runReleaseGraalvmNative`. C'est volontaire :
+
+- L'élimination de code mort de ProGuard est redondante — native-image fait déjà la DCE en monde fermé au compile time.
+- ProGuard peut renommer des classes encore référencées par `reachability-metadata.json`, cassant le build silencieusement.
+
+Utilise `-Os` dans `buildArgs` pour l'optimisation de taille. Pas de ProGuard.
+
+<Callout type="info" title="`nativeImageConfigBaseDir` est généralement vide">
+Nucleus livre toute la metadata générique et plateforme-spécifique automatiquement. Tu n'as besoin de `nativeImageConfigBaseDir` que pour des entrées app-spécifiques que les couches auto ne couvrent pas — c'est rare. Voir [Metadata automatique](/docs/performance/graalvm/automatic-metadata) pour les cinq couches.
+</Callout>

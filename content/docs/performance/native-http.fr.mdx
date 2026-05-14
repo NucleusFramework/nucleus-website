@@ -1,0 +1,115 @@
+---
+title: HTTP natif — le trust store de l'OS, pré-câblé
+description: java.net.http.HttpClient, OkHttp et Ktor préconfigurés avec NativeTrustManager. HTTPS vers les hôtes enterprise / MDM / proxy d'entreprise fonctionne directement.
+---
+
+Les apps JVM embarquent les cacerts cuits dans leur JRE — invisibles aux racines d'entreprise, aux certificats installés par MDM, et aux proxies d'inspection SSL. Résultat : `SSLHandshakeException` sur chaque machine que ton IT a touchée. Les modules HTTP natifs de Nucleus enveloppent ton client préféré avec [`NativeTrustManager`](/docs/performance/native-ssl), donc HTTPS vers ces hôtes fonctionne sans câblage manuel du trust store.
+
+## TL;DR
+- Trois modules — un pour `java.net.http.HttpClient`, un pour OkHttp, un pour Ktor (agnostique du moteur).
+- Les trois tirent `native-ssl` transitivement et résolvent les racines de confiance depuis l'OS au runtime.
+- Une ligne pour opter : `NativeHttpClient.create()`, `NativeOkHttpClient.create()`, ou `installNativeSsl()` dans un bloc Ktor.
+
+## Choisis ton client
+
+| Module | Artefact | Client |
+|--------|----------|--------|
+| `native-http` | `dev.nucleusframework:nucleus.native-http` | `java.net.http.HttpClient` (JDK 11+) |
+| `native-http-okhttp` | `dev.nucleusframework:nucleus.native-http-okhttp` | OkHttp 4 |
+| `native-http-ktor` | `dev.nucleusframework:nucleus.native-http-ktor` | Ktor Client (agnostique du moteur) |
+
+## `native-http` — `HttpClient` du JDK
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-http:<version>")
+}
+```
+
+```kotlin
+import dev.nucleusframework.nativehttp.NativeHttpClient
+
+// Client prêt à l'emploi — suit les redirections par défaut
+val client = NativeHttpClient.create()
+
+// Ou compose dans un builder existant
+val custom = HttpClient.newBuilder()
+    .withNativeSsl()
+    .connectTimeout(Duration.ofSeconds(30))
+    .followRedirects(HttpClient.Redirect.NORMAL)
+    .build()
+```
+
+`NativeHttpClient.create()` renvoie un `java.net.http.HttpClient` initialisé avec `NativeTrustManager.sslContext` et le suivi de redirections activé. `withNativeSsl()` est une extension de `HttpClient.Builder` quand tu veux contrôler le reste de la chaîne.
+
+> Attention : les redirections sont **désactivées** par défaut sur `HttpClient.Builder`. Si tu utilises `withNativeSsl()` directement, appelle `.followRedirects(NORMAL)` toi-même — sinon GitHub Releases, S3, et tout CDN qui renvoie 302 ressembleront à une erreur.
+
+## `native-http-okhttp` — OkHttp 4
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-http-okhttp:<version>")
+}
+```
+
+```kotlin
+import dev.nucleusframework.nativehttp.okhttp.NativeOkHttpClient
+
+val client = NativeOkHttpClient.create()
+
+// Ou
+val custom = OkHttpClient.Builder()
+    .withNativeSsl()
+    .callTimeout(30, TimeUnit.SECONDS)
+    .build()
+```
+
+`NativeOkHttpClient.create()` câble `sslSocketFactory` et `trustManager` sur le builder via `NativeTrustManager`. OkHttp 4 est tiré transitivement.
+
+## `native-http-ktor` — Ktor Client
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-http-ktor:<version>")
+    // Choisis exactement un moteur
+    implementation("io.ktor:ktor-client-cio:<ktor-version>")
+    // ou ktor-client-java, ktor-client-okhttp, ktor-client-apache5
+}
+```
+
+```kotlin
+import dev.nucleusframework.nativehttp.ktor.installNativeSsl
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+
+val client = HttpClient(CIO) {
+    installNativeSsl()
+}
+```
+
+`installNativeSsl()` est une extension de `HttpClientConfig`. Au runtime elle détecte le moteur Ktor actif et applique la bonne surface SSL :
+
+| Moteur | Ce qu'il configure |
+|--------|--------------------|
+| CIO | `https { trustManager = NativeTrustManager.trustManager }` |
+| Java | `config { sslContext(NativeTrustManager.sslContext) }` |
+| OkHttp | `config { sslSocketFactory(..., NativeTrustManager.trustManager) }` |
+| Apache5 | `sslContext = NativeTrustManager.sslContext` |
+
+Les JARs des moteurs sont `compileOnly` dans `native-http-ktor` — seul le moteur que tu déclares vraiment doit être sur le classpath runtime.
+
+## Comment ça marche
+
+Chaque module est un fin adaptateur au-dessus de `native-ssl`. À la première utilisation, `NativeTrustManager` parcourt paresseusement le trust store de l'OS (Keychain sous macOS, stores Crypt32 sous Windows, les chemins standards de bundles PEM sous Linux) et merge ces ancres avec les défauts JVM. Le résultat est un seul `X509ExtendedTrustManager` qui accepte à la fois le programme racine Apple/Microsoft et tout ce que ton IT ou ton utilisateur a ajouté. Voir [SSL natif](/docs/performance/native-ssl) pour les détails par plateforme.
+
+Les modules ne remplacent pas ton client HTTP — ils remplacent son trust manager. Connection pooling, HTTP/2, interceptors, timeouts : tout reste à toi.
+
+## Référence
+
+| API | Description |
+|-----|-------------|
+| `NativeHttpClient.create(): HttpClient` | `java.net.http.HttpClient` prêt à l'emploi avec trust natif + suivi de redirections |
+| `HttpClient.Builder.withNativeSsl(): HttpClient.Builder` | Extension de builder pour `java.net.http` |
+| `NativeOkHttpClient.create(): OkHttpClient` | Client OkHttp prêt à l'emploi |
+| `OkHttpClient.Builder.withNativeSsl(): OkHttpClient.Builder` | Extension de builder pour OkHttp |
+| `HttpClientConfig<T>.installNativeSsl()` | Plugin Ktor — conscient du moteur |

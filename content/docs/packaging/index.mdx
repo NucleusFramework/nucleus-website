@@ -1,0 +1,82 @@
+---
+title: One DSL, sixteen installers
+description: Every desktop installer format your users expect, declared once in Gradle.
+---
+
+Most JVM packaging tools cap out at four or five formats — jpackage, the JetBrains Compose default, install4j. Nucleus ships sixteen distributable formats from a single `nucleus { … }` block. Pick the ones you need; the build matrix takes care of the rest.
+
+## TL;DR
+- 16 formats covering every mainstream desktop channel — App Store, Microsoft Store, Snapcraft, Flathub, GitHub Releases, ad-hoc URLs.
+- One Gradle DSL, one CI workflow. No CMake, no platform-specific maintainers.
+- Store builds get a separate sandboxed pipeline automatically (PKG, AppX, Flatpak).
+- Code signing, notarization, trusted CA bundling, and auto-update wire into the same DSL.
+
+## Install
+The packaging DSL is part of the Gradle plugin — no separate dependency.
+
+```kotlin
+plugins {
+    id("dev.nucleusframework") version "2.0.0"
+}
+```
+
+## Quickstart
+
+```kotlin
+nucleus {
+    application {
+        mainClass = "com.example.MainKt"
+
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Dmg, TargetFormat.Pkg,
+                TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
+                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage,
+                TargetFormat.Snap, TargetFormat.Flatpak,
+                TargetFormat.Zip,
+            )
+            packageName = "MyApp"
+            packageVersion = "1.0.0"
+        }
+    }
+}
+```
+
+Then:
+
+```bash
+./gradlew packageDistributionForCurrentOS
+```
+
+Every format requested for the host OS lands under `build/compose/binaries/`.
+
+## Coverage matrix
+
+| OS | Direct distribution | Store | Universal archives |
+|----|---------------------|-------|--------------------|
+| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7Z |
+| Windows | NSIS, MSI, Portable | MSIX / AppX (Microsoft Store) | ZIP, TAR, 7Z |
+| Linux | DEB, RPM, AppImage | Snap, Flatpak | ZIP, TAR, 7Z |
+
+Sixteen total: `Dmg`, `Pkg`, `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable`, `Deb`, `Rpm`, `AppImage`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZip`, and the intermediate `RawAppImage`. Pass them to `targetFormats(...)`.
+
+## How it works
+
+Under the hood Nucleus runs jpackage to produce a platform `app-image`, then hands that image to electron-builder's `--prepackaged` mode to drive every installer format. This hybrid keeps the JVM runtime jpackage tuning while picking up electron-builder's installer breadth — NSIS, MSIX, Snap, Flatpak, AppImage — none of which jpackage supports.
+
+When you mix direct-distribution formats with store formats, Nucleus splits into two parallel pipelines: a regular `createDistributable` for DMG/NSIS/DEB and a `createSandboxedDistributable` for PKG/AppX/Flatpak that pre-extracts native libraries, injects sandbox-aware JVM args, and applies the right entitlements. See [sandboxing](/docs/packaging/sandboxing).
+
+Per-OS knobs live under `nativeDistributions.macOS { … }`, `windows { … }`, and `linux { … }` — see the dedicated pages.
+
+## Reference
+
+- macOS — DMG, PKG, universal binaries, Liquid Glass, layered icons → [building for macOS](/docs/packaging/macos)
+- Windows — NSIS, MSI, MSIX/AppX, Portable → [building for Windows](/docs/packaging/windows)
+- Linux — DEB, RPM, AppImage, Snap, Flatpak → [building for Linux](/docs/packaging/linux)
+- [Code signing](/docs/packaging/code-signing) · [Trusted certificates](/docs/packaging/trusted-certificates) · [Sandboxing](/docs/packaging/sandboxing)
+- [Auto-update](/docs/packaging/auto-update) · [Publishing](/docs/packaging/publishing) · [CI/CD](/docs/packaging/ci-cd)
+- Full DSL: [Gradle DSL reference](/docs/reference/gradle-dsl).
+
+## Notes
+
+The complete `targetFormats` list is the source of truth: `dev.nucleusframework.desktop.application.dsl.TargetFormat`. Formats not supported on the host OS are silently skipped at `packageDistributionForCurrentOS` time — useful for matrix CI where the same workflow runs on macOS, Windows, and Linux.

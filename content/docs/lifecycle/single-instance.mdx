@@ -1,0 +1,103 @@
+---
+title: One app, one process
+description: Enforce a single running instance and forward relaunches (CLI args, deep links) to it.
+---
+
+Double-click your app twice and most users expect the second click to focus the running window, not spawn a second process. `SingleInstanceManager` makes that the default — and gives you a clean way to pass arguments from the second invocation to the primary one.
+
+## TL;DR
+- Comes with `nucleus-application` — `nucleusApplication { }` acquires the lock for you by default.
+- Or call `SingleInstanceManager.isSingleInstance(...)` manually if you don't use `nucleusApplication { }`.
+- File-lock based: portable across macOS, Windows, Linux — no LaunchServices / mutex / DBus plumbing to write.
+- Two callbacks let secondary instances write payloads (CLI args, deep link URIs) that the primary reads atomically.
+- Default lock identifier comes from `NucleusApp.appId` injected by the Gradle plugin.
+
+## Install
+
+Included in `core-runtime`, which `nucleus-application` already depends on.
+
+```kotlin
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+## Quickstart
+
+With `nucleusApplication { }` — enabled out of the box:
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args, enableSingleInstance = true) {
+    DecoratedWindow(onCloseRequest = ::exitApplication) { /* ... */ }
+}
+```
+
+Manually, when you wire your own `application { }`:
+
+```kotlin
+import dev.nucleusframework.core.runtime.SingleInstanceManager
+
+fun main() = application {
+    var restoreRequested by remember { mutableStateOf(false) }
+
+    val isSingle = remember {
+        SingleInstanceManager.isSingleInstance(
+            onRestoreFileCreated = {
+                // Runs on the SECOND instance — `this` is the IPC file path.
+                // Write whatever you want the primary to see.
+            },
+            onRestoreRequest = {
+                // Runs on the PRIMARY instance when another launch is detected.
+                restoreRequested = true
+            },
+        )
+    }
+
+    if (!isSingle) {
+        exitApplication()
+        return@application
+    }
+
+    Window(onCloseRequest = ::exitApplication) {
+        LaunchedEffect(restoreRequested) {
+            if (restoreRequested) {
+                window.toFront(); window.requestFocus()
+                restoreRequested = false
+            }
+        }
+    }
+}
+```
+
+## How it works
+
+A lock file lives in the system temp dir (overridable via `Configuration.lockFilesDir`). Acquiring it uses `java.nio.channels.FileLock` — atomic, kernel-backed, and released automatically when the JVM exits or crashes. If the lock is already held, the secondary writes a "restore request" file next to it; the primary watches that path and fires `onRestoreRequest`.
+
+This avoids three different per-OS APIs you'd otherwise reach for: macOS LaunchServices (one bundle id, one process), a Windows named mutex, and Linux DBus name ownership. A single shared mechanism works everywhere, and crucially, it survives JVM crashes — the OS releases file locks automatically, so a force-killed primary doesn't lock everyone out.
+
+The two callbacks are the IPC layer. They're called with the same `Path` (the restore-request file), so on the secondary side you write something to it (typically a deep-link URI via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links)), and on the primary side you read it back. Anything more than a single URI? Use that path as a rendezvous point for whatever format you like.
+
+## Reference
+
+### `SingleInstanceManager`
+
+| Member | Signature | Notes |
+|---|---|---|
+| `isSingleInstance(onRestoreFileCreated, onRestoreRequest)` | `(Path.() -> Unit, Path.() -> Unit) -> Boolean` | Returns `true` if this is the primary, `false` if another instance holds the lock. |
+| `configuration` | `var Configuration` | Override lock dir / identifier before the first call. |
+
+### `Configuration`
+
+| Property | Default | Description |
+|---|---|---|
+| `lockFilesDir` | `java.io.tmpdir` | Where the lock and restore-request files live. |
+| `lockIdentifier` | `NucleusApp.appId` | Unique identifier — derives the lock file name. |
+| `lockFileName` / `restoreRequestFileName` | Derived | Override only if you need fixed names. |
+
+## Notes
+
+- `nucleusApplication { enableSingleInstance = false }` opts out.
+- Pair this with [`DeepLinkHandler`](/docs/lifecycle/deep-links) to forward `myapp://...` URLs to the primary.
+- The lock file is per-user (temp dir), so two different users on the same machine both get to run the app.

@@ -1,0 +1,39 @@
+---
+title: Cycle de vie, du démarrage à froid à la mise en veille
+description: La surface OS d'une app Nucleus — verrou d'instance, deep links, login items, tâches de fond, énergie.
+---
+
+Une app desktop ne se résume pas à une fenêtre. Elle démarre depuis un binaire packagé, doit se comporter correctement quand on la lance deux fois, accepte des URL passées par l'OS, s'affiche dans le dock avec un badge, est relancée au login, exécute des cron jobs pendant que tu dors, et lève le pied sur batterie. Le cluster `lifecycle/` câble Nucleus à toute cette conversation.
+
+## TL;DR
+- `SingleInstance` garantit "une seule app à la fois" et redirige les args CLI vers l'instance primaire.
+- `DeepLinkHandler` + le bloc Gradle `protocol { }` gèrent les URL `monapp://...` sur Apple Events (macOS), registre (Windows) et MIME types `.desktop` (Linux).
+- `NucleusApp` expose bundle id, version, vendeur et AUMID injectés par le plugin au build.
+- `ExecutableRuntime` te dit si l'app a été lancée depuis `./gradlew run`, un DMG, MSIX, Flatpak, AppImage, etc.
+- Les modules `launcher-*` pilotent le menu du dock / la jump list / le quicklist Unity de chaque OS.
+- `autolaunch` active le démarrage au login ; `scheduler` enregistre des jobs cron qui survivent aux reboots ; `service-management-macos` fait la même chose pour des agents macOS compatibles sandbox.
+- `energy-manager` throttle le process quand la fenêtre est minimisée et garde l'écran allumé au besoin.
+- `taskbar-progress` peint la progression directement sur le dock / taskbar / Unity launcher.
+
+## Le cycle de vie, page par page
+
+| Étape | Module | Page |
+|---|---|---|
+| Démarrage à froid, "y a quelqu'un ?" | `nucleus-application` + `core-runtime` | [Single instance](/docs/lifecycle/single-instance) |
+| URL et associations de fichiers | `core-runtime` + DSL plugin | [Deep links](/docs/lifecycle/deep-links) |
+| "Qui suis-je ?" au runtime | `core-runtime` (`NucleusApp`) | [App metadata](/docs/lifecycle/app-metadata) |
+| "Comment ai-je été packagé ?" | `core-runtime` (`ExecutableRuntime`) | [Executable type](/docs/lifecycle/executable-type) |
+| Menu du dock (macOS) | `launcher-macos` | [Launcher : macOS](/docs/lifecycle/launcher-macos) |
+| Overlays taskbar, jump list (Windows) | `launcher-windows` | [Launcher : Windows](/docs/lifecycle/launcher-windows) |
+| Unity launcher, quicklist (Linux) | `launcher-linux` | [Launcher : Linux](/docs/lifecycle/launcher-linux) |
+| Démarrage au login | `autolaunch` | [Auto-launch](/docs/lifecycle/auto-launch) |
+| Tâches périodiques / cron | `scheduler` | [Scheduler](/docs/lifecycle/scheduler) |
+| Agents `SMAppService` (macOS) | `service-management-macos` | [Service management](/docs/lifecycle/service-management) |
+| Efficacité énergétique + keep-awake | `energy-manager` | [Energy manager](/docs/lifecycle/energy-manager) |
+| Progression dans le dock / la taskbar | `taskbar-progress` (+ `-tao`) | [Taskbar progress](/docs/lifecycle/taskbar-progress) |
+
+## Modèle mental
+
+Chaque page part du principe que ton app survit à n'importe quelle fenêtre. L'utilisateur la quitte depuis le dock, la relance via une notification, dépose un `.csv` sur son icône, la programme pour se réveiller à 3h du matin, puis se plaint qu'elle a vidé la batterie. Chacun de ces modules est un wrapper opinionné au-dessus de l'API native correspondante — `SMAppService`, `ITaskbarList3`, `NSDockTile`, `com.canonical.Unity.LauncherEntry`, timers systemd, `SetProcessInformation` et compagnie — pour que tu livres un seul code Kotlin et que l'OS reconnaisse quand même son rejeton.
+
+Deux modules sont les primitives porteuses sur lesquelles le reste s'appuie : `core-runtime` (la fondation — `Platform`, `NucleusApp`, `SingleInstanceManager`, `DeepLinkHandler`, `ExecutableRuntime`) et `nucleus-application` (le point d'entrée `nucleusApplication { }` qui les amorce pour toi). Commence par ces deux pages.
