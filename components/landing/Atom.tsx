@@ -32,12 +32,11 @@ export function Atom({ speed = 1, size = 560, accent = '#5B8DEF' }: AtomProps) {
   const s = (sec: number) => `${(sec / speed).toFixed(2)}s`;
 
   return (
-    <div className="atom-wrap" style={{ width: size, height: size }}>
+    <div className="atom-wrap" style={{ width: `min(${size}px, 100%)` }}>
       <svg
         viewBox="-280 -280 560 560"
-        width={size}
-        height={size}
         className="atom-svg"
+        preserveAspectRatio="xMidYMid meet"
         aria-hidden="true"
       >
         <defs>
@@ -192,10 +191,14 @@ export function Atom({ speed = 1, size = 560, accent = '#5B8DEF' }: AtomProps) {
       <style>{`
         .atom-wrap {
           position: relative;
-          display: inline-block;
+          display: block;
+          aspect-ratio: 1 / 1;
+          max-width: 100%;
         }
         .atom-svg {
           display: block;
+          width: 100%;
+          height: 100%;
           overflow: visible;
         }
         .nucleus-core {
