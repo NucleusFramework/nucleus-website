@@ -57,7 +57,7 @@ export const heroT = {
       React.createElement('span', { className: 'hero-sub-dim' }, 'One language, every screen, every architecture.'),
     ),
     fr: React.createElement(React.Fragment, null,
-      'Du vrai multiplateforme — pas seulement macOS, Windows et Linux, mais la même base Kotlin que tes apps ',
+      'Du vrai multiplateforme — pas seulement macOS, Windows et Linux, mais la même base Kotlin que les apps ',
       React.createElement('span', { className: 'hero-sub-em' }, 'Android'), ', ',
       React.createElement('span', { className: 'hero-sub-em' }, 'iOS'), ' et ',
       React.createElement('span', { className: 'hero-sub-em' }, 'web'),
@@ -165,12 +165,12 @@ export const oneLangT = {
   themTag: { en: 'Hybrid stack', fr: 'Stack hybride' } as Bi<string>,
   themCap: {
     en: 'Web UI in one language, native core in another, OS bindings per platform — every boundary becomes an IPC bridge, a serialization step, and a context switch in your head.',
-    fr: 'UI dans un langage, cœur natif dans un autre, bindings par OS — chaque frontière devient un pont IPC, une étape de sérialisation, et un changement de contexte dans ta tête.',
+    fr: 'UI dans un langage, cœur natif dans un autre, bindings par OS — chaque frontière devient un pont IPC, une étape de sérialisation, et un changement de contexte mental.',
   } as Bi<string>,
   usTag: { en: 'Nucleus + Compose', fr: 'Nucleus + Compose' } as Bi<string>,
   usCap: {
     en: 'Compose for UI, Kotlin for logic, OS calls and packaging — one language top to bottom, no IPC, one mindset, one call graph.',
-    fr: 'Compose pour l\'UI, Kotlin pour la logique, les appels OS et le packaging — un seul langage de bout en bout, pas d\'IPC, une seule mentalité, un seul graphe d\'appel.',
+    fr: 'Compose pour l\'UI, Kotlin pour la logique, les appels OS et le packaging — un seul langage de bout en bout, pas d\'IPC, un seul état d\'esprit, un seul graphe d\'appel.',
   } as Bi<string>,
 };
 
@@ -191,7 +191,7 @@ export const toolkitsT = {
   } as Bi,
   subtitle: {
     en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, or IntelliJ Jewel. Each toolkit ships with a matching DecoratedWindow. macOS and Yaru are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
-    fr: 'Écris ton UI une fois en Compose, affiche-la dans le style desktop de ton choix — macOS, Windows 11 Fluent, Ubuntu Yaru ou IntelliJ Jewel. Chaque toolkit embarque un DecoratedWindow assorti. macOS et Yaru sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
+    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS, Windows 11 Fluent, Ubuntu Yaru ou IntelliJ Jewel. Chaque toolkit embarque un DecoratedWindow assorti. macOS et Yaru sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
   } as Bi<string>,
   isNew: { en: 'New · 2.0', fr: 'Nouveau · 2.0' } as Bi<string>,
   macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,
@@ -207,7 +207,7 @@ export const toolkitsT = {
       ' stays the same Composable either way.',
     ),
     fr: React.createElement(React.Fragment, null,
-      'Choisis-en un par OS. Ou mélange librement — chaque toolkit fonctionne sur chaque plateforme, donc tu peux livrer un build Fluent sur macOS pendant que tu prototypes son look natif. Ton ',
+      'Un par OS, ou mélange libre — chaque toolkit fonctionne sur chaque plateforme : livrer un build Fluent sur macOS pour prototyper son look natif reste possible. Le ',
       React.createElement('code', null, 'DecoratedWindow'),
       ' reste le même Composable, dans tous les cas.',
     ),
@@ -251,8 +251,8 @@ export const perfT = {
     ),
   } as Bi,
   subtitle: {
-    en: "Nucleus is the only desktop framework where the same Kotlin code ships two ways: as a GraalVM native image — for instant cold start and a tiny resident set — or on a modern JDK with AOT cache, where HotSpot's JIT delivers throughput approaching C++ and Rust on hot paths. Same source. Same build. Two runtimes.",
-    fr: "Nucleus est le seul framework desktop où le même code Kotlin se livre de deux façons : en image native GraalVM — pour un démarrage à froid instantané et une empreinte minuscule — ou sur un JDK moderne avec cache AOT, où le JIT de HotSpot approche la perf de C++ et Rust sur les chemins chauds. Même source. Même build. Deux runtimes.",
+    en: "Same Kotlin code, two runtimes: a GraalVM native image for instant cold start and a tiny resident set, or a modern JDK with AOT cache where HotSpot's JIT gets close to C++ and Rust on hot paths. Same source. Same build.",
+    fr: "Le même code Kotlin, deux runtimes : une image native GraalVM pour un démarrage à froid instantané et une empreinte minuscule, ou un JDK moderne avec cache AOT où le JIT de HotSpot s'approche du C++ et de Rust sur les chemins chauds. Même source. Même build.",
   } as Bi<string>,
 };
 
@@ -267,7 +267,7 @@ export const rmodeT = {
   nativeTagline: { en: 'Instant cold start. Tiny footprint.', fr: 'Démarrage à froid instantané. Empreinte minuscule.' } as Bi<string>,
   nativeDesc: {
     en: 'Your whole app is AOT-compiled to a standalone binary. No JVM startup, no class loading — the process is alive in half a second. Smallest resident set on the market.',
-    fr: 'Toute ton app est compilée AOT en binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde. La plus petite empreinte mémoire du marché.',
+    fr: 'L\'app entière est compilée AOT en binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde. La plus petite empreinte mémoire du marché.',
   } as Bi<string>,
   nativeColdStart: { en: 'Cold start', fr: 'Démarrage à froid' } as Bi<string>,
   nativeRam: { en: 'RAM idle', fr: 'RAM au repos' } as Bi<string>,
@@ -285,7 +285,7 @@ export const rmodeT = {
   aotTagline: { en: 'Peak JIT throughput. Plugins, agents, full reflection.', fr: 'Débit JIT au sommet. Plugins, agents, réflexion totale.' } as Bi<string>,
   aotDesc: {
     en: "HotSpot's C2 JIT is the most mature compiler ever built. JDK 25's AOT cache primes class metadata so you skip the warm-up — and you keep everything closed-world gives up: dynamic class loading, full reflection, JVM agents, scripting engines, live plugins and extensions.",
-    fr: "Le JIT C2 de HotSpot est le compilateur le plus mûr jamais construit. Le cache AOT de JDK 25 amorce les métadonnées de classes : tu sautes le warm-up — et tu gardes tout ce que le closed-world abandonne : chargement dynamique, réflexion totale, agents JVM, moteurs de scripting, plugins et extensions à chaud.",
+    fr: "Le JIT C2 de HotSpot est le compilateur le plus mûr jamais construit. Le cache AOT de JDK 25 amorce les métadonnées de classes : le warm-up disparaît — et tout ce que le closed-world abandonne reste accessible : chargement dynamique, réflexion totale, agents JVM, moteurs de scripting, plugins et extensions à chaud.",
   } as Bi<string>,
   aotThruLabel: { en: '≈ C++ / Rust on hot paths', fr: '≈ C++ / Rust sur les chemins chauds' } as Bi<string>,
   aotThruNote: { en: 'HotSpot C2 · escape analysis · vectorization', fr: 'HotSpot C2 · escape analysis · vectorisation' } as Bi<string>,
@@ -311,8 +311,8 @@ export const npT = {
     ),
   } as Bi,
   subtitle: {
-    en: 'Win32 ITaskbarList3. NSUserNotifications. freedesktop D-Bus. Carbon. ScreenCaptureKit. Every desktop API ever shipped is its own tiny ordeal — different language, different threading model, different conventions. Nucleus wraps every one in a Kotlin function that feels obvious. The result: a cross-platform abstraction simpler than the original, on every platform.',
-    fr: 'Win32 ITaskbarList3. NSUserNotifications. freedesktop D-Bus. Carbon. ScreenCaptureKit. Chaque API desktop jamais livrée est son propre petit calvaire — langage différent, modèle de threading différent, conventions différentes. Nucleus enveloppe chacune dans une fonction Kotlin qui paraît évidente. Résultat : une abstraction multiplateforme plus simple que l\'originale, sur chaque plateforme.',
+    en: 'Win32 ITaskbarList3. NSUserNotifications. freedesktop D-Bus. IOKit. ScreenCaptureKit. Each desktop API is its own tiny ordeal — different language, different threading model, different conventions. Nucleus wraps every one in a Kotlin function that feels obvious. The result: a cross-platform abstraction simpler than the original, on every platform.',
+    fr: 'Win32 ITaskbarList3. NSUserNotifications. freedesktop D-Bus. IOKit. ScreenCaptureKit. Chaque API desktop est son propre petit calvaire — langage différent, modèle de threading différent, conventions différentes. Nucleus enveloppe chacune dans une fonction Kotlin qui paraît évidente. Résultat : une abstraction multiplateforme plus simple que l\'originale, sur chaque plateforme.',
   } as Bi<string>,
   exNotification: { en: 'Notification', fr: 'Notification' } as Bi<string>,
   exTray: { en: 'System tray', fr: 'Zone de notification' } as Bi<string>,
@@ -321,7 +321,7 @@ export const npT = {
   exUpdate: { en: 'Auto-update', fr: 'Mise à jour auto' } as Bi<string>,
   exTaskbar: { en: 'Dock / taskbar', fr: 'Dock / barre des tâches' } as Bi<string>,
   nativeApi: { en: 'Native API', fr: 'API native' } as Bi<string>,
-  threadingNote: { en: 'Threading model: yours to figure out', fr: 'Modèle de threading : à toi de te débrouiller' } as Bi<string>,
+  threadingNote: { en: 'Threading model: yours to figure out', fr: 'Modèle de threading : à la charge du développeur' } as Bi<string>,
   fewerLines: {
     en: React.createElement(React.Fragment, null, 'fewer', React.createElement('br'), 'lines'),
     fr: React.createElement(React.Fragment, null, 'lignes', React.createElement('br'), 'en moins'),
@@ -432,15 +432,15 @@ export const installT = {
   } as Bi,
   sub: {
     en: 'Decorated window, dark-mode-aware, auto-updating. The demo ships with full source — clone, build, and replace.',
-    fr: 'Fenêtre décorée, consciente du mode sombre, mise à jour automatique. La démo est livrée avec le source complet — clone, build, et remplace.',
+    fr: 'Fenêtre décorée, consciente du mode sombre, mise à jour automatique. La démo est livrée avec le source complet — cloner, builder, remplacer.',
   } as Bi<string>,
   copied: { en: 'Copied', fr: 'Copié' } as Bi<string>,
   copy: { en: 'Copy', fr: 'Copier' } as Bi<string>,
   meta: {
     en: 'Detects your architecture · downloads · installs · launches.',
-    fr: 'Détecte ton architecture · télécharge · installe · lance.',
+    fr: 'Détecte l\'architecture · télécharge · installe · lance.',
   } as Bi<string>,
-  readGuide: { en: 'Or read the install guide →', fr: 'Ou lis le guide d\'installation →' } as Bi<string>,
+  readGuide: { en: 'Or read the install guide →', fr: 'Ou lire le guide d\'installation →' } as Bi<string>,
 };
 
 // =====================================================================
