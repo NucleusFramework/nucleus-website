@@ -1,4 +1,5 @@
 import * as React from 'react';
+import Link from 'next/link';
 import { Atom } from '@/components/landing/Atom';
 import { type Lang, heroT, pick } from '@/lib/landing-i18n';
 import { formatStarCount } from '@/lib/site';
@@ -24,12 +25,12 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
           <p className="hero-sub">{pick(heroT.sub, lang)}</p>
 
           <div className="hero-cta">
-            <a href={installHref} className="btn btn-primary">
+            <Link href={installHref} className="btn btn-primary">
               {pick(heroT.ctaPrimary, lang)}
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-            </a>
+            </Link>
             <a
               href="https://github.com/NucleusFramework/Nucleus"
               className="hero-stars"

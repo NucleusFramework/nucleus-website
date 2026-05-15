@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/page';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
@@ -23,6 +24,9 @@ function makeLocaleLink(lang: string) {
       if (!firstSegment || !knownLocales.has(firstSegment)) {
         nextHref = `/${lang}${href}`;
       }
+    }
+    if (typeof nextHref === 'string' && nextHref.startsWith('/') && !nextHref.startsWith('//')) {
+      return <Link href={nextHref} {...rest} />;
     }
     return <a href={nextHref} {...rest} />;
   };
