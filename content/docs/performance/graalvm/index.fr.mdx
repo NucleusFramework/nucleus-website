@@ -3,7 +3,7 @@ title: GraalVM Native Image — cold start instantané, binaire minuscule
 description: ~50 ms jusqu'au premier frame, 60 MB de RAM au repos, binaire autonome de 38 MB. AOT en monde fermé, mais la metadata de réflexion est résolue automatiquement pour chaque module Nucleus.
 ---
 
-GraalVM Native Image AOT-compile le app Compose Desktop entière en un binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde, avec la plus petite empreinte résidente du marché. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, chaque appel réflectif déclaré d'avance. Nucleus fait ce travail de déclaration pour toi.
+GraalVM Native Image AOT-compile le app Compose Desktop entière en un binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde, avec la plus petite empreinte résidente du marché. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, chaque appel réflectif déclaré d'avance. Nucleus fait ce travail de déclaration automatiquement.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
@@ -20,7 +20,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 - Préoccupations de distribution — App Store / MSIX / Snap, installateur le plus petit, pas de surprise Java pour l'utilisateur.
 - Budgets mémoire serrés — environnements sandboxés, hardware bas de gamme.
 
-## Ce que on sacrifies
+## Ce qu'on sacrifie
 
 GraalVM n'est pas gratuit :
 
@@ -34,7 +34,7 @@ Pour la plupart des libs Kotlin idiomatiques — ktor, kotlinx.serialization, Co
 
 ### BellSoft Liberica NIK 25 (full)
 
-La compilation native-image **exige [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/)** en distribution **full**. Le plugin Gradle la télécharge automatiquement via la Java Toolchain quand on mets `jvmVendor = JvmVendorSpec.BELLSOFT`.
+La compilation native-image **exige [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/)** en distribution **full**. Le plugin Gradle la télécharge automatiquement via la Java Toolchain quand on met `jvmVendor = JvmVendorSpec.BELLSOFT`.
 
 <Callout type="error" title="Les autres distributions échouent">
 Oracle GraalVM, GraalVM CE et Liberica NIK Lite n'ont pas le support AWT/Swing native-image dont les apps desktop ont besoin. Utilise la distribution Liberica NIK full.
@@ -52,7 +52,7 @@ Oracle GraalVM, GraalVM CE et Liberica NIK Lite n'ont pas le support AWT/Swing n
 
 Trois modules coopèrent :
 
-- **`nucleus.graalvm-runtime`** — la lib de support runtime. Substitutions SVM `@TargetClass` pour les bouts d'AWT qui ne marchent pas tels quels sous native-image (Win32 font manager, Fontconfig, WMClass X11). Auto-enregistrement des ressources. Le `GraalVmInitializer` que on appelles depuis `main()`.
+- **`nucleus.graalvm-runtime`** — la lib de support runtime. Substitutions SVM `@TargetClass` pour les bouts d'AWT qui ne marchent pas tels quels sous native-image (Win32 font manager, Fontconfig, WMClass X11). Auto-enregistrement des ressources. Le `GraalVmInitializer` qu'on appelle depuis `main()`.
 - **Le plugin Gradle Nucleus** — pipeline de metadata en cinq couches (fichiers curés par lib, repo Reachability d'Oracle, entrées spécifiques plateforme, analyse statique de bytecode, baseline générique), plus le graphe de tâches `packageGraalvmNative`.
 - **`nucleus.nucleus-application`** — câble l'initializer pour soi et fournit la même surface `DecoratedWindow` / `NucleusWindow` que le chemin JVM. Même code source, deux artefacts.
 
@@ -72,6 +72,6 @@ nucleus.application {
 ## Étapes suivantes
 
 - [Configuration](/docs/performance/graalvm/configuration) — DSL Gradle complet, arguments de build recommandés.
-- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — comment réflexion / ressources / JNI sont résolus pour toi.
+- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — comment réflexion / ressources / JNI sont résolus automatiquement.
 - [Bootstrap runtime](/docs/performance/graalvm/runtime-bootstrap) — le module `graalvm-runtime`, fixes de polices, patterns de ressources.
 - [Tâches & CI](/docs/performance/graalvm/tasks-ci) — tâches Gradle, emplacements de sortie, matrice GitHub Actions.

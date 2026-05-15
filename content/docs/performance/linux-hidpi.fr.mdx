@@ -3,14 +3,14 @@ title: HiDPI Linux — détection native du facteur d'échelle pour AWT/JBR
 description: L'OpenJDK standard ne détecte pas le facteur d'échelle d'affichage Linux. linux-hidpi lit GSettings, GDK_SCALE et Xft.dpi via JNI et applique le bon ui-scale avant qu'AWT ne s'initialise.
 ---
 
-L'OpenJDK standard sous Linux ignore le facteur d'échelle natif — sur un écran HiDPI, la fenêtre Compose Desktop s'affiche en 1x, minuscule et floue. JetBrains Runtime gère ça en interne ; partout ailleurs on dois le faire toi-même. `linux-hidpi` reflète la logique de détection de `systemScale.c` de JBR dans un bridge JNI, pour que n'importe quelle JVM — y compris GraalVM Native Image — ait le bon DPI.
+L'OpenJDK standard sous Linux ignore le facteur d'échelle natif — sur un écran HiDPI, la fenêtre Compose Desktop s'affiche en 1x, minuscule et floue. JetBrains Runtime gère ça en interne ; partout ailleurs on doit le faire manuellement. `linux-hidpi` reflète la logique de détection de `systemScale.c` de JBR dans un bridge JNI, pour que n'importe quelle JVM — y compris GraalVM Native Image — ait le bon DPI.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 ## TL;DR
 - Détecte le facteur d'échelle Linux depuis GSettings, `GDK_SCALE`, `GDK_DPI_SCALE`, `Xft.dpi` ou `J2D_UISCALE`.
 - Applique via `sun.java2d.uiScale` **avant** qu'AWT ne s'initialise.
-- Déjà câblé quand on dépends de [`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap) — `GraalVmInitializer.initialize()` l'appelle pour toi.
+- Déjà câblé quand on dépend de [`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap) — `GraalVmInitializer.initialize()` l'appelle automatiquement.
 - Le backend Tao a son propre chemin HiDPI — voir [`/docs/tao/hidpi`](/docs/tao/hidpi).
 
 <Callout type="info" title="Utilisateurs JBR : on n'en as pas besoin">
@@ -25,7 +25,7 @@ dependencies {
 }
 ```
 
-Tu peux sauter cette dépendance quand on dépends déjà de `graalvm-runtime` — il tire `linux-hidpi` transitivement et `GraalVmInitializer.initialize()` l'invoque.
+Il est possible de sauter cette dépendance quand on dépend déjà de `graalvm-runtime` — il tire `linux-hidpi` transitivement et `GraalVmInitializer.initialize()` l'invoque.
 
 ## Quickstart
 
@@ -42,14 +42,14 @@ fun main() {
     }
 
     application {
-        // ton app Compose Desktop
+        // l'app Compose Desktop
     }
 }
 ```
 
 La fonction est un no-op (renvoie `0.0`) sur les plateformes non-Linux — laisse l'appel en place, il ne coûte rien sous macOS/Windows.
 
-Ou, si on ne veux pas du check de propriété système, en une ligne :
+Ou, si l'on ne veux pas du check de propriété système, en une ligne :
 
 ```kotlin
 import dev.nucleusframework.hidpi.applyLinuxHiDpiScale

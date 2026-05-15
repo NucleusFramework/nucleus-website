@@ -40,9 +40,9 @@ val custom = HttpClient.newBuilder()
     .build()
 ```
 
-`NativeHttpClient.create()` renvoie un `java.net.http.HttpClient` initialisé avec `NativeTrustManager.sslContext` et le suivi de redirections activé. `withNativeSsl()` est une extension de `HttpClient.Builder` quand on veux contrôler le reste de la chaîne.
+`NativeHttpClient.create()` renvoie un `java.net.http.HttpClient` initialisé avec `NativeTrustManager.sslContext` et le suivi de redirections activé. `withNativeSsl()` est une extension de `HttpClient.Builder` quand on veut contrôler le reste de la chaîne.
 
-> Attention : les redirections sont **désactivées** par défaut sur `HttpClient.Builder`. Si on utilises `withNativeSsl()` directement, appelle `.followRedirects(NORMAL)` toi-même — sinon GitHub Releases, S3, et tout CDN qui renvoie 302 ressembleront à une erreur.
+> Attention : les redirections sont **désactivées** par défaut sur `HttpClient.Builder`. Si on utilise `withNativeSsl()` directement, appelle `.followRedirects(NORMAL)` manuellement — sinon GitHub Releases, S3, et tout CDN qui renvoie 302 ressembleront à une erreur.
 
 ## `native-http-okhttp` — OkHttp 4
 
@@ -96,13 +96,13 @@ val client = HttpClient(CIO) {
 | OkHttp | `config { sslSocketFactory(..., NativeTrustManager.trustManager) }` |
 | Apache5 | `sslContext = NativeTrustManager.sslContext` |
 
-Les JARs des moteurs sont `compileOnly` dans `native-http-ktor` — seul le moteur que on déclares vraiment doit être sur le classpath runtime.
+Les JARs des moteurs sont `compileOnly` dans `native-http-ktor` — seul le moteur qu'on déclare vraiment doit être sur le classpath runtime.
 
 ## Comment ça marche
 
 Chaque module est un fin adaptateur au-dessus de `native-ssl`. À la première utilisation, `NativeTrustManager` parcourt paresseusement le trust store de l'OS (Keychain sous macOS, stores Crypt32 sous Windows, les chemins standards de bundles PEM sous Linux) et merge ces ancres avec les défauts JVM. Le résultat est un seul `X509ExtendedTrustManager` qui accepte à la fois le programme racine Apple/Microsoft et tout ce que le IT ou le utilisateur a ajouté. Voir [SSL natif](/docs/performance/native-ssl) pour les détails par plateforme.
 
-Les modules ne remplacent pas le client HTTP — ils remplacent son trust manager. Connection pooling, HTTP/2, interceptors, timeouts : tout reste à toi.
+Les modules ne remplacent pas le client HTTP — ils remplacent son trust manager. Connection pooling, HTTP/2, interceptors, timeouts : tout reste à charge.
 
 ## Référence
 

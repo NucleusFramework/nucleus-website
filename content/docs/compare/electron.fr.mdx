@@ -29,13 +29,13 @@ Electron a fait livrer des apps desktop en JavaScript à toute la planète en pa
 
 ## L'impôt Chromium
 
-Electron livre un navigateur complet par app parce que c'est la seule façon de rendre du contenu web avec la cohérence qu'attendent les devs JS. Coût : chaque app Electron paie V8, Blink, Skia, plus un runtime Node, tous liés dans l'arbre de process. Six apps Electron idle sur la machine, et on es à 3 GB de RAM sans rien faire.
+Electron livre un navigateur complet par app parce que c'est la seule façon de rendre du contenu web avec la cohérence qu'attendent les devs JS. Coût : chaque app Electron paie V8, Blink, Skia, plus un runtime Node, tous liés dans l'arbre de process. Six apps Electron idle sur la machine, et on est à 3 GB de RAM sans rien faire.
 
 Nucleus rend l'UI Compose directement vers Skia via le backend Skiko de Compose Multiplatform. Pas de Blink, pas de V8, pas de Node. La JVM exécute le code ; Skia GPU peint les pixels. Tout vit dans un seul process, partageant un seul heap. Le plafond de perf est celui de la JVM — et sur les hot paths, la JVM atteint le throughput de C++ une fois HotSpot chauffé.
 
 ## L'impôt IPC
 
-Le renderer d'Electron ne peut pas toucher l'OS — pour ça il envoie des messages via `ipcRenderer` / `ipcMain`. Chaque lecture de fichier, chaque clic dans la system tray, chaque notification, traverse une frontière de sérialisation. La sécurité de type s'arrête au câble. Tu ajoutes des couches de wrappers `contextBridge`, on débugges depuis deux fenêtres devtools, on maintiens deux moitiés de chaque fonctionnalité.
+Le renderer d'Electron ne peut pas toucher l'OS — pour ça il envoie des messages via `ipcRenderer` / `ipcMain`. Chaque lecture de fichier, chaque clic dans la system tray, chaque notification, traverse une frontière de sérialisation. La sécurité de type s'arrête au câble. On ajoute des couches de wrappers `contextBridge`, on débugue depuis deux fenêtres devtools, on maintient deux moitiés de chaque fonctionnalité.
 
 Avec Nucleus, le UI Compose appelle `NotificationManager.send(...)`, `GlobalHotKeyManager.register(...)` ou `SystemInfo.cpuInfo()` directement. Même call graph, même coroutine, même debugger.
 
@@ -67,11 +67,11 @@ Apporte le design system par-dessus — adaptateurs Material 2/3 livrés out of 
 
 ## Quand choisir Electron
 
-Tu es une équipe JS qui livre une v1, le produit existe déjà en web app, et le budget RAM/perf absorbe l'impôt Chromium. Ou on as un codebase Electron existant et le coût de migration l'emporte sur l'impôt continu.
+Une équipe une équipe JS qui livre une v1, le produit existe déjà en web app, et le budget RAM/perf absorbe l'impôt Chromium. Ou on a un codebase Electron existant et le coût de migration l'emporte sur l'impôt continu.
 
 ## Quand choisir Nucleus
 
-Tu veux un seul langage bout-en-bout, du rendu natif, du packaging store-ready et l'écosystème JVM in-process. Tu livres à des réseaux d'entreprise où les CA racines corporate comptent et `native-ssl` t'épargne un quart des incidents. Le cold start tient à cœur au point de câbler GraalVM Native Image.
+Pour qui veut un seul langage bout-en-bout, du rendu natif, du packaging store-ready et l'écosystème JVM in-process. Pour qui livre à des réseaux d'entreprise où les CA racines corporate comptent et `native-ssl` épargne un quart des incidents. Le cold start tient à cœur au point de câbler GraalVM Native Image.
 
 ## Notes
 

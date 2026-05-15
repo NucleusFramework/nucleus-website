@@ -7,7 +7,7 @@ Double-clique deux fois sur le app et la plupart des utilisateurs s'attendent à
 
 ## TL;DR
 - Fourni avec `nucleus-application` — `nucleusApplication { }` acquiert le verrou pour soi par défaut.
-- Ou appelle `SingleInstanceManager.isSingleInstance(...)` à la main si on n'utilises pas `nucleusApplication { }`.
+- Ou appelle `SingleInstanceManager.isSingleInstance(...)` à la main si l'on n'utilises pas `nucleusApplication { }`.
 - Basé sur un file-lock : portable macOS / Windows / Linux — pas de LaunchServices / mutex / DBus à câbler.
 - Deux callbacks laissent l'instance secondaire écrire un payload (args CLI, URI deep link) que la primaire lit atomiquement.
 - L'identifiant par défaut vient de `NucleusApp.appId` injecté par le plugin Gradle.
@@ -34,7 +34,7 @@ fun main(args: Array<String>) = nucleusApplication(args, enableSingleInstance = 
 }
 ```
 
-À la main, quand on câbles le propre `application { }` :
+À la main, quand on câble le propre `application { }` :
 
 ```kotlin
 import dev.nucleusframework.core.runtime.SingleInstanceManager
@@ -46,7 +46,7 @@ fun main() = application {
         SingleInstanceManager.isSingleInstance(
             onRestoreFileCreated = {
                 // Sur la SECONDE instance — `this` est le chemin du fichier IPC.
-                // Écris ce que on veux que la primaire lise.
+                // Écris ce qu'on veut que la primaire lise.
             },
             onRestoreRequest = {
                 // Sur la PRIMAIRE quand un autre lancement est détecté.
@@ -77,7 +77,7 @@ Un fichier de verrou vit dans le dossier temp (configurable via `Configuration.l
 
 Ça t'évite trois API spécifiques à chaque OS : LaunchServices sur macOS (un bundle id, un process), un named mutex Windows, l'ownership d'un nom DBus sur Linux. Un seul mécanisme partagé marche partout, et surtout survit aux crashes JVM — les file locks sont relâchés par l'OS, donc un primaire tué de force ne bloque pas tout le monde.
 
-Les deux callbacks portent l'IPC. Ils reçoivent le même `Path` (le fichier restore-request), donc côté secondaire on y écris quelque chose (typiquement un URI deep-link via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links)), côté primaire on le relis. Plus qu'un URI ? Sers-toi de ce path comme point de rendez-vous pour le format que on veux.
+Les deux callbacks portent l'IPC. Ils reçoivent le même `Path` (le fichier restore-request), donc côté secondaire on y écris quelque chose (typiquement un URI deep-link via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links)), côté primaire on le relis. Plus qu'un URI ? Utiliser ce path comme point de rendez-vous pour le format qu'on veut.
 
 ## Référence
 
@@ -85,7 +85,7 @@ Les deux callbacks portent l'IPC. Ils reçoivent le même `Path` (le fichier res
 
 | Membre | Signature | Notes |
 |---|---|---|
-| `isSingleInstance(onRestoreFileCreated, onRestoreRequest)` | `(Path.() -> Unit, Path.() -> Unit) -> Boolean` | Renvoie `true` si on es la primaire, `false` sinon. |
+| `isSingleInstance(onRestoreFileCreated, onRestoreRequest)` | `(Path.() -> Unit, Path.() -> Unit) -> Boolean` | Renvoie `true` si l'on est la primaire, `false` sinon. |
 | `configuration` | `var Configuration` | Surcharge le dossier / l'identifiant avant le premier appel. |
 
 ### `Configuration`
@@ -94,7 +94,7 @@ Les deux callbacks portent l'IPC. Ils reçoivent le même `Path` (le fichier res
 |---|---|---|
 | `lockFilesDir` | `java.io.tmpdir` | Où vivent les fichiers de verrou et de restore-request. |
 | `lockIdentifier` | `NucleusApp.appId` | Identifiant unique — dérive le nom du fichier de verrou. |
-| `lockFileName` / `restoreRequestFileName` | Dérivés | À surcharger uniquement si on veux des noms fixes. |
+| `lockFileName` / `restoreRequestFileName` | Dérivés | À surcharger uniquement si l'on veut des noms fixes. |
 
 ## Notes
 
