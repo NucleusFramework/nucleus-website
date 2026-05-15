@@ -3,18 +3,18 @@ title: HiDPI Linux — détection native du facteur d'échelle pour AWT/JBR
 description: L'OpenJDK standard ne détecte pas le facteur d'échelle d'affichage Linux. linux-hidpi lit GSettings, GDK_SCALE et Xft.dpi via JNI et applique le bon ui-scale avant qu'AWT ne s'initialise.
 ---
 
-L'OpenJDK standard sous Linux ignore le facteur d'échelle natif — sur un écran HiDPI, ta fenêtre Compose Desktop s'affiche en 1x, minuscule et floue. JetBrains Runtime gère ça en interne ; partout ailleurs tu dois le faire toi-même. `linux-hidpi` reflète la logique de détection de `systemScale.c` de JBR dans un bridge JNI, pour que n'importe quelle JVM — y compris GraalVM Native Image — ait le bon DPI.
+L'OpenJDK standard sous Linux ignore le facteur d'échelle natif — sur un écran HiDPI, la fenêtre Compose Desktop s'affiche en 1x, minuscule et floue. JetBrains Runtime gère ça en interne ; partout ailleurs on dois le faire toi-même. `linux-hidpi` reflète la logique de détection de `systemScale.c` de JBR dans un bridge JNI, pour que n'importe quelle JVM — y compris GraalVM Native Image — ait le bon DPI.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 ## TL;DR
 - Détecte le facteur d'échelle Linux depuis GSettings, `GDK_SCALE`, `GDK_DPI_SCALE`, `Xft.dpi` ou `J2D_UISCALE`.
 - Applique via `sun.java2d.uiScale` **avant** qu'AWT ne s'initialise.
-- Déjà câblé quand tu dépends de [`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap) — `GraalVmInitializer.initialize()` l'appelle pour toi.
+- Déjà câblé quand on dépends de [`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap) — `GraalVmInitializer.initialize()` l'appelle pour toi.
 - Le backend Tao a son propre chemin HiDPI — voir [`/docs/tao/hidpi`](/docs/tao/hidpi).
 
-<Callout type="info" title="Utilisateurs JBR : tu n'en as pas besoin">
-Si ton app tourne sur JetBrains Runtime (le défaut du chemin AWT de `nucleus-application`), JBR gère le scaling par moniteur nativement. `linux-hidpi` n'est utile que pour OpenJDK standard et GraalVM Native Image, où JBR n'est pas une option.
+<Callout type="info" title="Utilisateurs JBR : on n'en as pas besoin">
+Si le app tourne sur JetBrains Runtime (le défaut du chemin AWT de `nucleus-application`), JBR gère le scaling par moniteur nativement. `linux-hidpi` n'est utile que pour OpenJDK standard et GraalVM Native Image, où JBR n'est pas une option.
 </Callout>
 
 ## Install
@@ -25,7 +25,7 @@ dependencies {
 }
 ```
 
-Tu peux sauter cette dépendance quand tu dépends déjà de `graalvm-runtime` — il tire `linux-hidpi` transitivement et `GraalVmInitializer.initialize()` l'invoque.
+Tu peux sauter cette dépendance quand on dépends déjà de `graalvm-runtime` — il tire `linux-hidpi` transitivement et `GraalVmInitializer.initialize()` l'invoque.
 
 ## Quickstart
 
@@ -49,7 +49,7 @@ fun main() {
 
 La fonction est un no-op (renvoie `0.0`) sur les plateformes non-Linux — laisse l'appel en place, il ne coûte rien sous macOS/Windows.
 
-Ou, si tu ne veux pas du check de propriété système, en une ligne :
+Ou, si on ne veux pas du check de propriété système, en une ligne :
 
 ```kotlin
 import dev.nucleusframework.hidpi.applyLinuxHiDpiScale
@@ -94,7 +94,7 @@ Extraits automatiquement par `NativeLibraryLoader` de `core-runtime` à la premi
 
 ## Contournements DPI fractionnaire
 
-Le scaling fractionnaire de GNOME (`125%`, `150%`) s'expose via `GDK_DPI_SCALE`. AWT ne parle pas le fractionnaire nativement — il arrondit à l'entier le plus proche. Si ton texte est flou sur un écran à 125%, passe au backend Tao ou force un pipeline de rendu à 1.5x via `GDK_SCALE=2` et `GDK_DPI_SCALE=0.75`.
+Le scaling fractionnaire de GNOME (`125%`, `150%`) s'expose via `GDK_DPI_SCALE`. AWT ne parle pas le fractionnaire nativement — il arrondit à l'entier le plus proche. Si le texte est flou sur un écran à 125%, passe au backend Tao ou force un pipeline de rendu à 1.5x via `GDK_SCALE=2` et `GDK_DPI_SCALE=0.75`.
 
 ## Notes
 

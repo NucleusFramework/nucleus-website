@@ -5,11 +5,11 @@ description: Enregistre des tâches périodiques, calendaires et on-boot via lau
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Un scheduler style WorkManager pour le desktop. Tu enregistres une tâche une fois et l'OS — launchd sur macOS, Task Scheduler sur Windows, timers systemd sur Linux — la déclenche à l'heure dite, même quand ton app est fermée. Tu écris un `DesktopTask`, tu déclares son trigger, la plateforme s'occupe des réveils et de la persistance.
+Un scheduler style WorkManager pour le desktop. Tu enregistres une tâche une fois et l'OS — launchd sur macOS, Task Scheduler sur Windows, timers systemd sur Linux — la déclenche à l'heure dite, même quand le app est fermée. Tu écris un `DesktopTask`, on déclares son trigger, la plateforme s'occupe des réveils et de la persistance.
 
 ## TL;DR
 - Trois formes : `periodic(interval)`, `calendar(cronExpr)`, `onBoot()`.
-- `DesktopBootReceiver.isSchedulerInvocation(args)` tout en haut de `main()` est le point d'entrée quand l'OS relance ton binaire pour exécuter un job.
+- `DesktopBootReceiver.isSchedulerInvocation(args)` tout en haut de `main()` est le point d'entrée quand l'OS relance le binaire pour exécuter un job.
 - Les tâches survivent aux reboots, supportent des retry policies, des input data (`@Serializable`), et des contraintes (réseau, charge, idle, stockage).
 - Intervalle périodique minimum : 15 minutes.
 - Mac App Store / `.pkg` sandboxé : utilise plutôt [Service Management](/docs/lifecycle/service-management) — le scheduler écrit des plists au runtime, ce que la sandbox interdit.
@@ -76,11 +76,11 @@ scheduler.enqueue(TaskRequest.onBoot(StartupCheckId))
 
 ## Comment ça marche
 
-Les schedulers des OS ne savent pas "exécuter une fonction Kotlin" — ils savent juste exécuter un binaire. Donc le scheduler enregistre ton binaire d'app avec le système de timer de la plateforme, en passant `--nucleus-scheduler-run <taskId>` en ligne de commande. Quand ça tire, ton `main()` tourne, `DesktopBootReceiver.isSchedulerInvocation(args)` renvoie `true`, et le receiver :
+Les schedulers des OS ne savent pas "exécuter une fonction Kotlin" — ils savent juste exécuter un binaire. Donc le scheduler enregistre le binaire d'app avec le système de timer de la plateforme, en passant `--nucleus-scheduler-run <taskId>` en ligne de commande. Quand ça tire, le `main()` tourne, `DesktopBootReceiver.isSchedulerInvocation(args)` renvoie `true`, et le receiver :
 
 1. Charge le `TaskContext` persisté (input data, attempt count) depuis le fichier de metadata.
 2. Vérifie les contraintes via [`system-info`](/docs/os/system-info).
-3. Si OK, appelle ton `doWork(context)`.
+3. Si OK, appelle le `doWork(context)`.
 4. Enregistre le résultat (`Success` / `Failure` / `Retry` / `ConstraintsNotMet`) et programme un backoff si `Retry`.
 
 | Plateforme | Mécanisme | Emplacement |
@@ -89,7 +89,7 @@ Les schedulers des OS ne savent pas "exécuter une fonction Kotlin" — ils save
 | Linux | service + timer systemd user via D-Bus | `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` |
 | Windows | Task Scheduler 2.0 COM (`ITaskService`) | `\Nucleus\<appId>\<taskId>` |
 
-Sur Linux et Windows, le scheduler n'enregistre pas le binaire directement — il écrit un petit wrapper (`.sh` / `.vbs`) qui vérifie que le binaire existe encore. Si l'utilisateur désinstalle sans cleanup, le wrapper se détruit lui-même : il dé-enregistre le timer, supprime sa metadata, se supprime. macOS n'a pas cette astuce (l'entrée launchd doit pointer directement le binaire pour s'afficher correctement dans Réglages), donc le nettoyage des orphelins s'appuie sur ton appel à `DesktopTaskScheduler.cancelAll()` dans les flows de logout / reset.
+Sur Linux et Windows, le scheduler n'enregistre pas le binaire directement — il écrit un petit wrapper (`.sh` / `.vbs`) qui vérifie que le binaire existe encore. Si l'utilisateur désinstalle sans cleanup, le wrapper se détruit lui-même : il dé-enregistre le timer, supprime sa metadata, se supprime. macOS n'a pas cette astuce (l'entrée launchd doit pointer directement le binaire pour s'afficher correctement dans Réglages), donc le nettoyage des orphelins s'appuie sur le appel à `DesktopTaskScheduler.cancelAll()` dans les flows de logout / reset.
 
 ## Référence
 
@@ -144,6 +144,6 @@ TaskRequest.periodic(SyncId, 1.hours) {
 
 ## Notes
 
-- Pas de secrets dans `inputData` — c'est du JSON sur disque. Passe des références et résous les creds depuis ton keychain au runtime.
+- Pas de secrets dans `inputData` — c'est du JSON sur disque. Passe des références et résous les creds depuis le keychain au runtime.
 - `everyHour()` veut dire top-of-hour wall-clock, pas "1h après enqueue". Pour "1h après maintenant", utilise `periodic(id, 1.hours)`.
 - Tests : le module `scheduler-testing` fournit `TestTaskRunner` pour les unit tests et `TestDesktopTaskScheduler` avec temps virtuel, historique d'exécution, et un `TestConstraintChecker`.

@@ -3,7 +3,7 @@ title: Deep links et schémas d'URL
 description: "Enregistre des handlers monapp:// sur macOS, Windows et Linux depuis un seul bloc Gradle."
 ---
 
-Une URL, c'est la manière universelle pour l'OS — et les autres apps — de parler à la tienne. Un lien dans un mail, un message Slack, un QR code : ça finit en `monapp://action?id=42` sur la machine de quelqu'un. Nucleus enregistre le protocole au packaging et te tend l'URI dans ton `main()` au runtime.
+Une URL, c'est la manière universelle pour l'OS — et les autres apps — de parler à la tienne. Un lien dans un mail, un message Slack, un QR code : ça finit en `monapp://action?id=42` sur la machine de quelqu'un. Nucleus enregistre le protocole au packaging et tend l'URI dans le `main()` au runtime.
 
 ## TL;DR
 - Déclare les protocoles une fois dans `nucleus { application { nativeDistributions { protocol(...) } } }`.
@@ -63,12 +63,12 @@ Les trois OS livrent les URL de trois façons différentes :
 | OS | Mécanisme |
 |---|---|
 | macOS | Apple Events. L'app déjà lancée reçoit des événements `GetURL` via `NSAppleEventManager` (ou `Desktop.setOpenURIHandler` d'AWT sur JBR/OpenJDK). Le plugin déclare le schéma dans `Info.plist` sous `CFBundleURLTypes`. |
-| Windows | Entrée registre sous `HKCU\Software\Classes\<scheme>`. Cliquer une URL `monapp://...` lance ton `.exe` avec l'URL en premier argument CLI — un nouveau process. |
+| Windows | Entrée registre sous `HKCU\Software\Classes\<scheme>`. Cliquer une URL `monapp://...` lance le `.exe` avec l'URL en premier argument CLI — un nouveau process. |
 | Linux | Un fichier `.desktop` avec `MimeType=x-scheme-handler/monapp;` plus l'association `xdg-mime`. L'URL arrive aussi en argument CLI. |
 
 `DeepLinkHandler.setHandler(args, onDeepLink)` masque la différence : sur macOS il installe le handler Apple-event d'AWT pour que le callback se déclenche pendant que l'app tourne, sur Windows / Linux il scanne `args` à la recherche d'entrées URI. Combine avec `SingleInstanceManager` pour le cas très courant Windows / Linux où un second `.exe` est lancé juste pour livrer l'URL : la secondaire écrit l'URI dans le fichier restore-request, la primaire le relit.
 
-Le plugin s'occupe de tout le statique — `Info.plist`, entrées registre, fichiers `.desktop`. Toi tu décris le protocole une fois.
+Le plugin s'occupe de tout le statique — `Info.plist`, entrées registre, fichiers `.desktop`. Toi on décris le protocole une fois.
 
 ## Référence
 
@@ -101,5 +101,5 @@ Raccourci pour `DeepLinkHandler.setHandler` qui diffère l'inscription jusqu'au 
 ## Notes
 
 - Teste en dev avec `xdg-open monapp://test` (Linux), `open monapp://test` (macOS), `start monapp://test` (Windows). Les entrées de jump-list ne marchent que sur builds packagés — voir [Launcher : Windows](/docs/lifecycle/launcher-windows).
-- L'URI de cold start (celle qui a lancé l'app) est aussi dans `DeepLinkHandler.uri` — lis-la après avoir enregistré ton handler.
-- Pour les associations de fichiers (ouvrir un `.csv` avec ton app), utilise le DSL `fileAssociation(...)` du plugin.
+- L'URI de cold start (celle qui a lancé l'app) est aussi dans `DeepLinkHandler.uri` — lis-la après avoir enregistré le handler.
+- Pour les associations de fichiers (ouvrir un `.csv` avec le app), utilise le DSL `fileAssociation(...)` du plugin.

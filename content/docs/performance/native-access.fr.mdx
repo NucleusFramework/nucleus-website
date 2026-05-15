@@ -1,6 +1,6 @@
 ---
 title: Accès natif — la metadata de réflexion résolue pour toi
-description: Nucleus injecte automatiquement les reflect-config, resource-config et metadata JNI pour chaque module Nucleus et la plupart des libs Kotlin idiomatiques — ton build GraalVM marche sans écrire de JSON.
+description: Nucleus injecte automatiquement les reflect-config, resource-config et metadata JNI pour chaque module Nucleus et la plupart des libs Kotlin idiomatiques — le build GraalVM marche sans écrire de JSON.
 ---
 
 GraalVM Native Image a une taxe célèbre : chaque `Class.forName` réflectif, chaque glob `getResource`, chaque appel JNI doit être déclaré en JSON au build. L'hypothèse du monde fermé rend le binaire minuscule et le cold start instantané — mais écrire la metadata de reachability à la main est le genre de travail qui mange silencieusement une semaine. Nucleus le fait pour toi.
@@ -10,12 +10,12 @@ import { Callout } from 'fumadocs-ui/components/callout';
 ## TL;DR
 - Nucleus livre **cinq couches de metadata automatique** — config par lib, le Reachability Repository d'Oracle, des entrées spécifiques à la plateforme, l'analyse statique de bytecode, et une baseline générique. Elles se mergent automatiquement au build.
 - Pour chaque module runtime Nucleus, le `reflect-config` / `resource-config` / `jni-config` correspondant est déjà dans le JAR.
-- Résultat : `./gradlew packageGraalvmNative` produit un binaire qui marche sans que tu écrives une ligne de metadata.
+- Résultat : `./gradlew packageGraalvmNative` produit un binaire qui marche sans que on écrives une ligne de metadata.
 - Un agent de tracing (`runWithNativeAgent`) est dispo comme filet de sécurité final.
 
 ## Le problème que ça résout
 
-Si tu as déjà GraalVM-buildé une app Compose Desktop à la main, tu connais la boucle : build, run, crash sur une entrée réflexion manquante, ajouter du JSON, rebuilder. Compose seul demande des centaines d'entrées. Ajoute Skiko, ktor, kotlinx.serialization, SQLite, Coil — tu maintiens un `reachability-metadata.json` de plusieurs milliers de lignes qui casse à chaque bump de dépendance.
+Si on as déjà GraalVM-buildé une app Compose Desktop à la main, on connais la boucle : build, run, crash sur une entrée réflexion manquante, ajouter du JSON, rebuilder. Compose seul demande des centaines d'entrées. Ajoute Skiko, ktor, kotlinx.serialization, SQLite, Coil — on maintiens un `reachability-metadata.json` de plusieurs milliers de lignes qui casse à chaque bump de dépendance.
 
 Nucleus remplace cette boucle par de l'automatisation au build.
 
@@ -45,7 +45,7 @@ Le JAR `graalvm-runtime` enregistre quatre patterns larges :
 C'est la raison principale pour laquelle "les icônes s'affichent blanches en image native" n'arrive pas sous Nucleus.
 
 <Callout type="info" title="Compromis sur la taille du binaire">
-Le glob est large exprès. Si tu dépends de la lib d'icônes IntelliJ Platform et que la taille du binaire est critique, surcharge avec un `resource-config.json` plus serré.
+Le glob est large exprès. Si on dépends de la lib d'icônes IntelliJ Platform et que la taille du binaire est critique, surcharge avec un `resource-config.json` plus serré.
 </Callout>
 
 ## Substitutions de polices
@@ -66,21 +66,21 @@ Même avec cinq niveaux, des cas-bords existent : réflexion pilotée par des va
 ./gradlew runWithNativeAgent
 ```
 
-Parcours chaque écran et chaque feature. L'agent enregistre les accès réflexion / JNI / ressources / proxies, puis **merge dédupliqué** dans ta config. La plupart du temps il ne trouve rien — c'est le but.
+Parcours chaque écran et chaque feature. L'agent enregistre les accès réflexion / JNI / ressources / proxies, puis **merge dédupliqué** dans la config. La plupart du temps il ne trouve rien — c'est le but.
 
 ## Nettoyer la metadata manuelle
 
-Si tu as accumulé des entrées manuelles que les couches automatiques couvrent maintenant :
+Si on as accumulé des entrées manuelles que les couches automatiques couvrent maintenant :
 
 ```bash
 ./gradlew cleanupGraalvmMetadata
 ```
 
-La tâche diff tes entrées manuelles contre L1+L2+L3+L4 et retire tout ce qui est redondant, en reportant exactement ce qui a changé.
+La tâche diff les entrées manuelles contre L1+L2+L3+L4 et retire tout ce qui est redondant, en reportant exactement ce qui a changé.
 
-## Aller plus loin — écris ton propre code natif en Kotlin
+## Aller plus loin — écris le propre code natif en Kotlin
 
-Si tu dois appeler une API plateforme qu'aucun module runtime Nucleus ne couvre (CoreGraphics, IOKit, Win32, GTK4, …), [**NucleusNativeAccess**](https://github.com/NucleusFramework/NucleusNativeAccess) est un plugin séparé qui te laisse écrire le côté natif en **Kotlin/Native** et génère le bridge FFM automatiquement. Le plugin émet `reflect-config.json`, `resource-config.json` et `reachability-metadata.json` pour les proxies générés — récupérés transparente­ment par le pipeline GraalVM Nucleus.
+Si on dois appeler une API plateforme qu'aucun module runtime Nucleus ne couvre (CoreGraphics, IOKit, Win32, GTK4, …), [**NucleusNativeAccess**](https://github.com/NucleusFramework/NucleusNativeAccess) est un plugin séparé qui laisse écrire le côté natif en **Kotlin/Native** et génère le bridge FFM automatiquement. Le plugin émet `reflect-config.json`, `resource-config.json` et `reachability-metadata.json` pour les proxies générés — récupérés transparente­ment par le pipeline GraalVM Nucleus.
 
 L'ID du plugin est `dev.nucleusframeworknativeaccess`, versionné indépendamment de Nucleus. Voir [son repository](https://github.com/NucleusFramework/NucleusNativeAccess) pour la table de mapping complète et des exemples.
 
@@ -95,7 +95,7 @@ Certaines catégories de libs rendent GraalVM impraticable, peu importe la metad
 - OSGi / classloaders custom
 - Génération de bytecode runtime (ByteBuddy, cglib, mocking ASM)
 
-Si tu dépends de l'un d'eux, livre plutôt le [build AOT cache](/docs/performance/aot-cache). Pour tout le reste — Compose, ktor, kotlinx.serialization, Coil, SQLite, Jewel, SLF4J, Kotlin idiomatique — Nucleus gère.
+Si on dépends de l'un d'eux, livre plutôt le [build AOT cache](/docs/performance/aot-cache). Pour tout le reste — Compose, ktor, kotlinx.serialization, Coil, SQLite, Jewel, SLF4J, Kotlin idiomatique — Nucleus gère.
 
 ## Référence
 

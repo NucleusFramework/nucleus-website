@@ -3,7 +3,7 @@ title: GraalVM Native Image — cold start instantané, binaire minuscule
 description: ~50 ms jusqu'au premier frame, 60 MB de RAM au repos, binaire autonome de 38 MB. AOT en monde fermé, mais la metadata de réflexion est résolue automatiquement pour chaque module Nucleus.
 ---
 
-GraalVM Native Image AOT-compile ton app Compose Desktop entière en un binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde, avec la plus petite empreinte résidente du marché. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, chaque appel réflectif déclaré d'avance. Nucleus fait ce travail de déclaration pour toi.
+GraalVM Native Image AOT-compile le app Compose Desktop entière en un binaire autonome. Pas de démarrage JVM, pas de chargement de classes — le process est vivant en une demi-seconde, avec la plus petite empreinte résidente du marché. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, chaque appel réflectif déclaré d'avance. Nucleus fait ce travail de déclaration pour toi.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
@@ -20,12 +20,12 @@ import { Callout } from 'fumadocs-ui/components/callout';
 - Préoccupations de distribution — App Store / MSIX / Snap, installateur le plus petit, pas de surprise Java pour l'utilisateur.
 - Budgets mémoire serrés — environnements sandboxés, hardware bas de gamme.
 
-## Ce que tu sacrifies
+## Ce que on sacrifies
 
 GraalVM n'est pas gratuit :
 
 - **Pas de JIT** — le débit CPU max tourne autour de 82% de HotSpot C2 sur les chemins chauds (chart du landing). Pour du calcul lourd soutenu, [AOT cache](/docs/performance/aot-cache) gagne.
-- **Monde fermé** — pas de `Class.forName` piloté par des valeurs runtime, pas de classloaders dynamiques, pas de moteurs de script, pas de frameworks d'annotation-processing runtime, pas de génération de bytecode runtime. Si ta liste de deps inclut Spring, Lucene, Groovy, libs JNA-lourdes, mocks ByteBuddy : livre AOT cache à la place.
+- **Monde fermé** — pas de `Class.forName` piloté par des valeurs runtime, pas de classloaders dynamiques, pas de moteurs de script, pas de frameworks d'annotation-processing runtime, pas de génération de bytecode runtime. Si la liste de deps inclut Spring, Lucene, Groovy, libs JNA-lourdes, mocks ByteBuddy : livre AOT cache à la place.
 - **Builds par plateforme** — l'image native doit être compilée sur chaque OS cible. La matrice CI est la réponse.
 
 Pour la plupart des libs Kotlin idiomatiques — ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose, SLF4J — Nucleus gère de manière transparente.
@@ -34,7 +34,7 @@ Pour la plupart des libs Kotlin idiomatiques — ktor, kotlinx.serialization, Co
 
 ### BellSoft Liberica NIK 25 (full)
 
-La compilation native-image **exige [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/)** en distribution **full**. Le plugin Gradle la télécharge automatiquement via la Java Toolchain quand tu mets `jvmVendor = JvmVendorSpec.BELLSOFT`.
+La compilation native-image **exige [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/)** en distribution **full**. Le plugin Gradle la télécharge automatiquement via la Java Toolchain quand on mets `jvmVendor = JvmVendorSpec.BELLSOFT`.
 
 <Callout type="error" title="Les autres distributions échouent">
 Oracle GraalVM, GraalVM CE et Liberica NIK Lite n'ont pas le support AWT/Swing native-image dont les apps desktop ont besoin. Utilise la distribution Liberica NIK full.
@@ -52,9 +52,9 @@ Oracle GraalVM, GraalVM CE et Liberica NIK Lite n'ont pas le support AWT/Swing n
 
 Trois modules coopèrent :
 
-- **`nucleus.graalvm-runtime`** — la lib de support runtime. Substitutions SVM `@TargetClass` pour les bouts d'AWT qui ne marchent pas tels quels sous native-image (Win32 font manager, Fontconfig, WMClass X11). Auto-enregistrement des ressources. Le `GraalVmInitializer` que tu appelles depuis `main()`.
+- **`nucleus.graalvm-runtime`** — la lib de support runtime. Substitutions SVM `@TargetClass` pour les bouts d'AWT qui ne marchent pas tels quels sous native-image (Win32 font manager, Fontconfig, WMClass X11). Auto-enregistrement des ressources. Le `GraalVmInitializer` que on appelles depuis `main()`.
 - **Le plugin Gradle Nucleus** — pipeline de metadata en cinq couches (fichiers curés par lib, repo Reachability d'Oracle, entrées spécifiques plateforme, analyse statique de bytecode, baseline générique), plus le graphe de tâches `packageGraalvmNative`.
-- **`nucleus.nucleus-application`** — câble l'initializer pour toi et fournit la même surface `DecoratedWindow` / `NucleusWindow` que le chemin JVM. Même code source, deux artefacts.
+- **`nucleus.nucleus-application`** — câble l'initializer pour soi et fournit la même surface `DecoratedWindow` / `NucleusWindow` que le chemin JVM. Même code source, deux artefacts.
 
 ```kotlin
 // Même source qu'une app JVM. Le plugin génère le bon artefact.

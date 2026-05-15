@@ -3,7 +3,7 @@ title: Migrer de Nucleus 1.x vers 2.0
 description: Un port quasi mécanique — renomme le namespace, fais glisser ~30 lignes de bootstrap dans nucleusApplication.
 ---
 
-Nucleus 2.0 consolide le framework autour d'un point d'entrée unique — `nucleusApplication` — et renomme le namespace en `dev.nucleusframework`. La migration est quasi mécanique : search/replace du namespace, puis déplace ton bloc `application { }` dans `nucleusApplication(args) { }`. Le DSL qui en sort retire une trentaine de lignes de bootstrap d'un `main()` typique.
+Nucleus 2.0 consolide le framework autour d'un point d'entrée unique — `nucleusApplication` — et renomme le namespace en `dev.nucleusframework`. La migration est quasi mécanique : search/replace du namespace, puis déplace le bloc `application { }` dans `nucleusApplication(args) { }`. Le DSL qui en sort retire une trentaine de lignes de bootstrap d'un `main()` typique.
 
 ## TL;DR
 - Plugin id : `io.github.kdroidfilter.nucleus` → `dev.nucleusframework`.
@@ -22,7 +22,7 @@ Les artefacts 2.0 ciblent JDK 17 (`nucleus-application`) et JDK 25 (la stack Jew
 kotlin { jvmToolchain(25) }
 ```
 
-Symptôme si tu sautes : `Dependency resolution is looking for a library compatible with JVM runtime version 11, but 'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible with JVM runtime version 25 or newer.`
+Symptôme si on sautes : `Dependency resolution is looking for a library compatible with JVM runtime version 11, but 'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible with JVM runtime version 25 or newer.`
 
 ### Repo snapshots IntelliJ
 2.0 tire Jewel `0.37.0-262.4852.74`, qui ne vit que dans le repo snapshots IntelliJ. Ajoute-le à `settings.gradle.kts` :
@@ -38,7 +38,7 @@ dependencyResolutionManagement {
 }
 ```
 
-Si tu déclares Jewel directement, bump-le sur la même coordonnée que Nucleus apporte transitivement :
+Si on déclares Jewel directement, bump-le sur la même coordonnée que Nucleus apporte transitivement :
 
 ```toml
 intellijIcons = "262.4852.74"
@@ -96,7 +96,7 @@ Aucun renommage de classe — seul le préfixe de package change.
 
 ## Étape 3 — Passe à `nucleusApplication`
 
-En 1.x tu emballais le `application { }` de Compose Desktop avec des helpers Nucleus. En 2.0 `nucleusApplication` fait le bootstrap dans le bon ordre et expose un `NucleusApplicationScope` unifié.
+En 1.x on emballais le `application { }` de Compose Desktop avec des helpers Nucleus. En 2.0 `nucleusApplication` fait le bootstrap dans le bon ordre et expose un `NucleusApplicationScope` unifié.
 
 ### Avant — `main()` 1.x
 
@@ -167,7 +167,7 @@ Mettre ces checks dans le scope acquiert le lock single-instance d'abord — exa
 Ce que `nucleusApplication` gère maintenant, dans l'ordre :
 
 1. `GraalVmInitializer.initialize()` — fonts, charsets, HiDPI, `java.home`.
-2. Timer de training AOT (si `-Dnucleus.aot.mode=training` et que tu appelles `aotTraining(…)`).
+2. Timer de training AOT (si `-Dnucleus.aot.mode=training` et que on appelles `aotTraining(…)`).
 3. Lock single-instance. Une seconde instance relaie son deep link CLI à la primaire et sort en code 0.
 4. Priming plateforme : cache `AutoLaunch.wasStartedAtLogin(args)` chauffé ; sur Windows `WindowsJumpListManager.setProcessAppId()` appelé avant toute fenêtre. Les deux par réflection — ne se déclenchent que si les modules sont sur le classpath.
 5. Résolution backend (`NucleusBackend.Auto` choisit AWT ou Tao).
@@ -175,7 +175,7 @@ Ce que `nucleusApplication` gère maintenant, dans l'ordre :
 
 ## Étape 4 — Remplace `Window { }` par `DecoratedWindow { }`
 
-Trois saveurs, choisis celle qui matche ton design system :
+Trois saveurs, choisis celle qui matche le design system :
 
 | Composable | Module |
 |------------|--------|
@@ -196,7 +196,7 @@ fun NucleusApplicationScope.JewelDecoratedWindow(
 )
 ```
 
-Tout composable wrapper que tu as écrit en 1.x doit devenir une extension sur le même scope :
+Tout composable wrapper que on as écrit en 1.x doit devenir une extension sur le même scope :
 
 ```diff
  @Composable

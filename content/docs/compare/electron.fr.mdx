@@ -29,49 +29,49 @@ Electron a fait livrer des apps desktop en JavaScript à toute la planète en pa
 
 ## L'impôt Chromium
 
-Electron livre un navigateur complet par app parce que c'est la seule façon de rendre du contenu web avec la cohérence qu'attendent les devs JS. Coût : chaque app Electron paie V8, Blink, Skia, plus un runtime Node, tous liés dans l'arbre de process. Six apps Electron idle sur ta machine, et tu es à 3 GB de RAM sans rien faire.
+Electron livre un navigateur complet par app parce que c'est la seule façon de rendre du contenu web avec la cohérence qu'attendent les devs JS. Coût : chaque app Electron paie V8, Blink, Skia, plus un runtime Node, tous liés dans l'arbre de process. Six apps Electron idle sur la machine, et on es à 3 GB de RAM sans rien faire.
 
-Nucleus rend l'UI Compose directement vers Skia via le backend Skiko de Compose Multiplatform. Pas de Blink, pas de V8, pas de Node. La JVM exécute ton code ; Skia GPU peint les pixels. Tout vit dans un seul process, partageant un seul heap. Le plafond de perf est celui de la JVM — et sur les hot paths, la JVM atteint le throughput de C++ une fois HotSpot chauffé.
+Nucleus rend l'UI Compose directement vers Skia via le backend Skiko de Compose Multiplatform. Pas de Blink, pas de V8, pas de Node. La JVM exécute le code ; Skia GPU peint les pixels. Tout vit dans un seul process, partageant un seul heap. Le plafond de perf est celui de la JVM — et sur les hot paths, la JVM atteint le throughput de C++ une fois HotSpot chauffé.
 
 ## L'impôt IPC
 
-Le renderer d'Electron ne peut pas toucher l'OS — pour ça il envoie des messages via `ipcRenderer` / `ipcMain`. Chaque lecture de fichier, chaque clic dans la system tray, chaque notification, traverse une frontière de sérialisation. La sécurité de type s'arrête au câble. Tu ajoutes des couches de wrappers `contextBridge`, tu débugges depuis deux fenêtres devtools, tu maintiens deux moitiés de chaque fonctionnalité.
+Le renderer d'Electron ne peut pas toucher l'OS — pour ça il envoie des messages via `ipcRenderer` / `ipcMain`. Chaque lecture de fichier, chaque clic dans la system tray, chaque notification, traverse une frontière de sérialisation. La sécurité de type s'arrête au câble. Tu ajoutes des couches de wrappers `contextBridge`, on débugges depuis deux fenêtres devtools, on maintiens deux moitiés de chaque fonctionnalité.
 
-Avec Nucleus, ton UI Compose appelle `NotificationManager.send(...)`, `GlobalHotKeyManager.register(...)` ou `SystemInfo.cpuInfo()` directement. Même call graph, même coroutine, même debugger.
+Avec Nucleus, le UI Compose appelle `NotificationManager.send(...)`, `GlobalHotKeyManager.register(...)` ou `SystemInfo.cpuInfo()` directement. Même call graph, même coroutine, même debugger.
 
 ## Décorations natives
 
-Les fenêtres Electron ressemblent à Chrome. Pour passer pour natives, tu te bats avec le chrome Chromium — frames custom, `vibrancy`, régions draggables encodées en CSS. La couche [fenêtre décorée](/docs/window) de Nucleus rend la titre bar dans Compose avec quatre toolkits :
+Les fenêtres Electron ressemblent à Chrome. Pour passer pour natives, on bats avec le chrome Chromium — frames custom, `vibrancy`, régions draggables encodées en CSS. La couche [fenêtre décorée](/docs/window) de Nucleus rend la titre bar dans Compose avec quatre toolkits :
 
 - macOS — Liquid Glass au SDK 26+, automatique via patching `vtool`.
 - Fluent — acrylique Windows 11, indices de snap-layout, mica.
 - Yaru — disposition de boutons native Ubuntu qui réagit aux réglages GNOME en live.
 - Jewel — look IntelliJ Platform.
 
-Apporte ton design system par-dessus — adaptateurs Material 2/3 livrés out of the box.
+Apporte le design system par-dessus — adaptateurs Material 2/3 livrés out of the box.
 
 ## Là où Electron gagne encore
 
 - **Bassin d'embauche.** Tout le monde connaît JS. Moins de gens connaissent Kotlin Multiplatform desktop.
 - **Âge de l'écosystème.** Electron a livré VS Code, Slack, Discord, Figma, Notion. Cicatrices accumulées sur une décennie.
-- **Réemploi web.** Si ton produit est déjà une single-page app, l'emballer dans Electron bat la réécriture en Compose pour la v1.
+- **Réemploi web.** Si le produit est déjà une single-page app, l'emballer dans Electron bat la réécriture en Compose pour la v1.
 - **Bibliothèques Node.** La surface npm est plus large que n'importe quelle catégorie de bibliothèques JVM unique — même si la JVM écrase npm en nombre absolu (~500k artefacts Maven Central).
 
 ## Là où Nucleus prend l'avantage
 
 - Un langage, un mindset, un debugger. UI, métier, appels OS, packaging — tout Kotlin, même call graph.
-- Rendu natif — ton app n'a pas l'air d'un site web qui prétend être une app.
+- Rendu natif — le app n'a pas l'air d'un site web qui prétend être une app.
 - Deux runtimes (GraalVM Native Image · JVM + cache AOT) depuis la même source — voir [performance](/docs/performance/index).
 - 16 formats de packaging vs 5–7 — voir [comparaison packaging](/docs/compare/packaging).
 - Le catalogue JVM complet tourne in-process. Apache Lucene, DuckDB, ONNX Runtime, Tika, Netty, Spark — tous à un `implementation` de distance, sans pont natif.
 
 ## Quand choisir Electron
 
-Tu es une équipe JS qui livre une v1, ton produit existe déjà en web app, et ton budget RAM/perf absorbe l'impôt Chromium. Ou tu as un codebase Electron existant et le coût de migration l'emporte sur l'impôt continu.
+Tu es une équipe JS qui livre une v1, le produit existe déjà en web app, et le budget RAM/perf absorbe l'impôt Chromium. Ou on as un codebase Electron existant et le coût de migration l'emporte sur l'impôt continu.
 
 ## Quand choisir Nucleus
 
-Tu veux un seul langage bout-en-bout, du rendu natif, du packaging store-ready et l'écosystème JVM in-process. Tu livres à des réseaux d'entreprise où les CA racines corporate comptent et `native-ssl` t'épargne un quart des incidents. Le cold start te tient à cœur au point de câbler GraalVM Native Image.
+Tu veux un seul langage bout-en-bout, du rendu natif, du packaging store-ready et l'écosystème JVM in-process. Tu livres à des réseaux d'entreprise où les CA racines corporate comptent et `native-ssl` t'épargne un quart des incidents. Le cold start tient à cœur au point de câbler GraalVM Native Image.
 
 ## Notes
 

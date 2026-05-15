@@ -1,19 +1,19 @@
 ---
 title: Migrer de JBR vers Tao
-description: Ce qui change quand tu bascules de JetBrains Runtime à Tao — comportement, perf, et quand garder JBR.
+description: Ce qui change quand on bascules de JetBrains Runtime à Tao — comportement, perf, et quand garder JBR.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
-Si tu es sur Nucleus 1.x avec `decorated-window-jbr` (ou `decorated-window-jni`), le passage à Tao c'est un swap de dépendance plus un flag de backend. L'API `DecoratedWindow` est identique — ce sont les octets en dessous qui changent.
+Si on es sur Nucleus 1.x avec `decorated-window-jbr` (ou `decorated-window-jni`), le passage à Tao c'est un swap de dépendance plus un flag de backend. L'API `DecoratedWindow` est identique — ce sont les octets en dessous qui changent.
 
 ## TL;DR
 - Remplace `decorated-window-jbr` (ou `-jni`) par `decorated-window-tao` et passe `backend = NucleusBackend.Tao`.
 - Plus d'AWT — fini `ComposeWindow`, fini l'EDT Swing. `nucleusWindow.unsafe.taoWindow` remplace `unsafe.awtWindow`.
 - La mémoire résidente passe de ~120 Mo à ~60 Mo sur un Hello World ; cold start divisé par deux sur GraalVM.
 - À retester : drag-and-drop, deep links, dialogs fichier, overlays natifs.
-- Garde JBR quand ton app tire des widgets Swing ou des composants AWT tiers.
+- Garde JBR quand le app tire des widgets Swing ou des composants AWT tiers.
 
 ## Bascule la dépendance
 
@@ -58,22 +58,22 @@ nucleusApplication(backend = NucleusBackend.Tao) {
 </Tab>
 </Tabs>
 
-Si tu gardes les deux backends au classpath, `NucleusBackend.Auto` prend Tao quand il est dispo.
+Si on gardes les deux backends au classpath, `NucleusBackend.Auto` prend Tao quand il est dispo.
 
 ## Différences de comportement
 
-| Aspect                        | JBR / JNI                            | Tao                                       |
+| Aspect | JBR / JNI | Tao |
 |-------------------------------|--------------------------------------|-------------------------------------------|
-| Fenêtre sous-jacente          | `ComposeWindow` (extends `JFrame`)   | `TaoWindow` (handle Rust)                 |
-| Dispatch d'événements         | EDT AWT                              | Event loop Tao sur main thread            |
-| `unsafe.awtWindow`            | Non-null                             | Null (utilise `unsafe.taoWindow`)         |
-| Dialogs natifs                | Via AWT/Swing                        | Via module [`file-dialog`](/docs/ecosystem/file-dialog) |
-| Drag-and-drop                 | AWT TransferHandler                  | `TaoDragAndDropPayload`                   |
-| Deep links                    | Apple Event handler AWT / AppKit     | `TaoDeepLinkBridge.setSink`               |
-| Wayland                       | XWayland                             | Natif                                     |
-| `-XstartOnFirstThread`        | Non requis                           | Requis sur macOS (plugin gère)            |
-| Mémoire résidente (Hello)     | ~120 Mo                              | ~60 Mo                                    |
-| GraalVM native-image          | Partiel                              | Complet                                   |
+| Fenêtre sous-jacente | `ComposeWindow` (extends `JFrame`) | `TaoWindow` (handle Rust) |
+| Dispatch d'événements | EDT AWT | Event loop Tao sur main thread |
+| `unsafe.awtWindow` | Non-null | Null (utilise `unsafe.taoWindow`) |
+| Dialogs natifs | Via AWT/Swing | Via module [`file-dialog`](/docs/ecosystem/file-dialog) |
+| Drag-and-drop | AWT TransferHandler | `TaoDragAndDropPayload` |
+| Deep links | Apple Event handler AWT / AppKit | `TaoDeepLinkBridge.setSink` |
+| Wayland | XWayland | Natif |
+| `-XstartOnFirstThread` | Non requis | Requis sur macOS (plugin gère) |
+| Mémoire résidente (Hello) | ~120 Mo | ~60 Mo |
+| GraalVM native-image | Partiel | Complet |
 
 ## À retester
 
