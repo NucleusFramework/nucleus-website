@@ -1,7 +1,7 @@
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import type { ReactNode } from 'react';
 import { source } from '@/lib/source';
-import { baseOptions } from '../../layout.config';
+import { baseOptionsFor } from '../../layout.config';
 
 export default async function Layout({
   params,
@@ -17,7 +17,7 @@ export default async function Layout({
     source.pageTree;
   return (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    <DocsLayout tree={tree as any} i18n {...baseOptions}>
+    <DocsLayout tree={tree as any} i18n {...baseOptionsFor(lang)}>
       {children}
     </DocsLayout>
   );

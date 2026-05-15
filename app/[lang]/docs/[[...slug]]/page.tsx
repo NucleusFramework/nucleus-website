@@ -4,6 +4,29 @@ import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/page
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { source } from '@/lib/source';
 import { SITE } from '@/lib/site';
+import { i18n } from '@/lib/i18n';
+
+function makeLocaleLink(lang: string) {
+  const knownLocales = new Set(i18n.languages);
+  return function LocaleLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+    const { href, ...rest } = props;
+    let nextHref = href;
+    if (
+      typeof href === 'string' &&
+      href.startsWith('/') &&
+      !href.startsWith('//') &&
+      !href.startsWith(`/${lang}/`) &&
+      href !== `/${lang}`
+    ) {
+      const segments = href.split('/');
+      const firstSegment = segments[1];
+      if (!firstSegment || !knownLocales.has(firstSegment)) {
+        nextHref = `/${lang}${href}`;
+      }
+    }
+    return <a href={nextHref} {...rest} />;
+  };
+}
 
 interface Params {
   lang: string;
@@ -22,7 +45,7 @@ export default async function Page(props: { params: Promise<Params> }) {
       <DocsTitle>{page.data.title}</DocsTitle>
       {page.data.description ? <DocsDescription>{page.data.description}</DocsDescription> : null}
       <DocsBody>
-        <MDX components={{ ...defaultMdxComponents }} />
+        <MDX components={{ ...defaultMdxComponents, a: makeLocaleLink(lang) }} />
       </DocsBody>
     </DocsPage>
   );

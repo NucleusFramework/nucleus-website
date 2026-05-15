@@ -8,7 +8,7 @@ interface FooterProps {
 }
 
 export function Footer({ lang }: FooterProps) {
-  const docsBase = lang === 'fr' ? '/fr/docs' : '/docs';
+  const docsBase = `/${lang}/docs`;
   return (
     <footer className="footer">
       <div className="footer-inner">
