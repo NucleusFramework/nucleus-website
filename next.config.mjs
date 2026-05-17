@@ -13,6 +13,10 @@ const config = {
   outputFileTracingRoot: process.cwd(),
   experimental: {
     optimizePackageImports: ['fumadocs-ui', 'fumadocs-core'],
+    cpus: 80,
+    workerThreads: true,
+    staticGenerationMaxConcurrency: 80,
+    staticGenerationMinPagesPerWorker: 1,
   },
   ...(isExport
     ? {
