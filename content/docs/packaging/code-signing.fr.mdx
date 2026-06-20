@@ -1,16 +1,18 @@
 ---
 title: Signature de code
-description: Signer et notariser sur macOS, signer avec PFX ou Azure Artifact Signing sur Windows.
+description: Signer et notariser sur macOS, signer avec PFX ou Azure Artifact Signing sur Windows, et signer DEB/RPM en GPG sur Linux.
 ---
 
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
 
-Les apps desktop non signées meurent à la porte sur macOS et Windows : Gatekeeper les refuse, SmartScreen avertit l'utilisateur, le Microsoft Store rejette l'upload. Nucleus branche signature et notarisation dans le même DSL Gradle que le packaging — un bloc par OS.
+Les apps desktop non signées meurent à la porte sur macOS et Windows : Gatekeeper les refuse, SmartScreen avertit l'utilisateur, le Microsoft Store rejette l'upload. Sur Linux il n'y a pas de gatekeeper, mais un `.deb`/`.rpm` téléchargé en direct n'apporte aucune preuve de son origine. Nucleus branche signature et notarisation dans le même DSL Gradle que le packaging — un bloc par OS, ou un seul bloc unifié `signing { }`.
 
 ## TL;DR
 - macOS : Developer ID Application + notarisation `notarytool`, trois modes d'auth.
 - Windows : certificat `.pfx` ou Azure Artifact Signing (cloud).
-- Linux : la signature GPG des repos DEB/RPM sort du périmètre ; on signe avec les outils de la distro.
+- Linux : signe DEB/RPM avec ta propre clé GPG pour la distribution hors store. La méthode DEB par défaut est une signature détachée `.asc` (ne nécessite que `gpg`) ; le RPM est signé dans son header.
+- Signer tes paquets Linux **ne change rien** à leur installation — la vérification reste optionnelle pour l'utilisateur.
 - CI ready — actions composites pour le setup keychain et la signature depuis secrets.
 
 ## Installation
@@ -18,7 +20,7 @@ Livré avec le plugin Gradle.
 
 ## Démarrage rapide
 
-<Tabs items={['macOS', 'Windows']}>
+<Tabs items={['macOS', 'Windows', 'Linux']}>
 <Tab value="macOS">
 
 ```kotlin
@@ -49,6 +51,21 @@ windows {
     }
 }
 ```
+
+</Tab>
+<Tab value="Linux">
+
+```kotlin
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")                       // l'id de ta clé GPG
+        // passphrase.set(System.getenv("LINUX_GPG_PASSPHRASE"))  // seulement si la clé en a une
+    }
+}
+```
+
+La clé est lue depuis ton trousseau GPG local. En CI, pointe plutôt `keyFile` sur une clé exportée — voir [Gestion des secrets en CI](#gestion-des-secrets-en-ci).
 
 </Tab>
 </Tabs>
@@ -125,19 +142,125 @@ windows {
 }
 ```
 
+### Linux — signature GPG des DEB/RPM
+Sur Linux il n'y a pas de gatekeeper OS à satisfaire. L'intérêt de la signature ici : permettre à quiconque télécharge ton `.deb`/`.rpm` en direct (hors dépôt apt/dnf) de prouver qu'il vient bien de toi et n'a pas été altéré. Tu signes avec ta propre clé GPG — sans certificat payant, sans autorité.
+
+**1. Génère une clé une fois** (passe cette étape si tu en as déjà une) :
+
+```bash
+gpg --full-generate-key          # RSA 4096, ton nom + email
+gpg --list-secret-keys --keyid-format=long
+# sec   rsa4096/AB12CD34EF56 ...  → l'id de la clé est "AB12CD34EF56"
+```
+
+**2. Active la signature** avec cet id de clé :
+
+```kotlin
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")
+    }
+}
+```
+
+**3. Builde.** Chaque paquet sort signé, avec la clé publique écrite à côté :
+
+```text
+MyApp-1.0.0-linux-x64.deb
+MyApp-1.0.0-linux-x64.deb.asc        # signature détachée (DEB)
+MyApp-1.0.0-linux-x64.deb.pub.asc    # ta clé publique
+MyApp-1.0.0-linux-x64.rpm            # signature intégrée au header RPM
+MyApp-1.0.0-linux-x64.rpm.pub.asc
+```
+
+Publie le paquet **et** son `.pub.asc` (plus le `.deb.asc` pour le DEB) sur ta page de téléchargement.
+
+**4. Tes utilisateurs vérifient** avant de faire confiance à un téléchargement :
+
+```bash
+# DEB — signature détachée
+gpg --import MyApp-1.0.0-linux-x64.deb.pub.asc
+gpg --verify MyApp-1.0.0-linux-x64.deb.asc MyApp-1.0.0-linux-x64.deb
+# → Good signature from "Your Name <you@example.com>"
+
+# RPM — signature du header
+sudo rpm --import MyApp-1.0.0-linux-x64.rpm.pub.asc
+rpm -K MyApp-1.0.0-linux-x64.rpm
+# → digests signatures OK
+```
+
+<Callout type="info">
+**La signature ne change rien à l'installation.** Un paquet signé s'installe exactement comme un non signé — `sudo dpkg -i MyApp.deb`, `sudo rpm -i MyApp.rpm`, ou la commande `apt`/`dnf` équivalente fonctionnent à l'identique, avec ou sans la clé importée. La vérification est une étape optionnelle que l'utilisateur lance *avant* d'installer. Elle ne devient obligatoire que si l'utilisateur l'impose explicitement (ex. une policy `debsig-verify`, ou une vérification RPM stricte).
+</Callout>
+
+#### Méthodes de signature DEB
+`debMethod` contrôle comment le DEB est signé (`DebSignMethod`) :
+
+- **`Detached`** (défaut) — écrit un `<pkg>.deb.asc` détaché, vérifié avec `gpg --verify <pkg>.deb.asc <pkg>.deb`. Ne nécessite que `gpg`, donc marche sur toutes les distros. C'est le défaut parce que `dpkg-sig` a été retiré des Debian/Ubuntu récents.
+- **`DpkgSig`** — intègre un membre `_gpgorigin` via `dpkg-sig`, vérifié avec un simple `gpg --verify <pkg>.deb`. Nécessite `dpkg-sig` installé au build.
+- **`Debsig`** — intègre un membre `_gpgorigin` via `debsigs`, vérifié avec `debsig-verify`. Nécessite en plus une policy et un keyring par clé côté client.
+
+```kotlin
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")
+        debMethod = DebSignMethod.Detached   // Detached | DpkgSig | Debsig
+    }
+}
+```
+
+La clé de signature ne touche jamais ton vrai trousseau pendant le build : Nucleus importe `keyFile` dans un `GNUPGHOME` jetable, supprimé ensuite.
+
+### Bloc signing unifié
+Tu préfères un seul point d'entrée pour toutes les plateformes ? Enveloppe les blocs par OS dans un seul `signing { }`. Il agit sur les mêmes settings, donc tu peux mélanger les deux styles librement :
+
+```kotlin
+nativeDistributions {
+    signing {
+        macOS   { sign.set(true); identity.set("Developer ID Application: My Company (TEAMID)") }
+        windows { enabled = true; certificateFile.set(file("certs/certificate.pfx")) }
+        linux   { enabled.set(true); keyId.set("AB12CD34EF56") }
+    }
+}
+```
+
 ### Gestion des secrets en CI
-Ne commit jamais de certificats. Sur GitHub Actions, encode le PFX en base64 et décode-le au build. Pour macOS, l'action composite `setup-macos-signing` crée un keychain temporaire et importe les certificats depuis les secrets — voir [CI/CD](/docs/packaging/ci-cd).
+Ne commit jamais de certificats ni de clés privées. Sur GitHub Actions, encode le PFX en base64 et décode-le au build. Pour macOS, l'action composite `setup-macos-signing` crée un keychain temporaire et importe les certificats depuis les secrets — voir [CI/CD](/docs/packaging/ci-cd).
+
+Pour Linux, exporte la clé privée et stocke-la en secrets :
+
+```bash
+gpg --armor --export-secret-keys AB12CD34EF56   # à coller dans le secret LINUX_GPG_PRIVATE_KEY
+```
+
+Ajoute `LINUX_GPG_PRIVATE_KEY`, `LINUX_GPG_KEY_ID` et (si définie) `LINUX_GPG_PASSPHRASE`. Les workflows de release écrivent un fichier de clé temporaire et les passent au build via les propriétés `compose.desktop.linux.signing.*` ; quand les secrets sont absents, le build est simplement laissé non signé. Configure le build pour les lire :
+
+```kotlin
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set(System.getenv("LINUX_GPG_KEY_ID"))
+        keyFile.set(file(System.getenv("LINUX_GPG_KEY_FILE") ?: "build/signing-key.asc"))
+        passphrase.set(System.getenv("LINUX_GPG_PASSPHRASE"))
+    }
+}
+```
 
 ## Référence
 
 - `macOS.signing { }` — `sign`, `identity`, `keychain`, `prefix`
 - `macOS.notarization { }` — `appleID`+`password`+`teamID`, ou `keychainProfile`(+`keychainPath`), ou `apiKey`+`apiKeyId`+`apiIssuer`
 - `windows.signing { }` — `enabled`, `certificateFile`, `certificatePassword`, `certificateSha1`, `certificateSubjectName`, `algorithm`, `timestampServer`, plus champs Azure
+- `linux.signing { }` — `enabled`, `keyId`, `keyFile`, `passphrase`, `debMethod` (`Detached` | `DpkgSig` | `Debsig`)
+- `signing { macOS { } windows { } linux { } }` — bloc unifié sur les mêmes settings par OS
 
 Référence complète dans la [référence Gradle DSL](/docs/reference/gradle-dsl).
 
 ## Notes
 
 - **Entitlements pour le hardened runtime.** Entitlements minimales JVM : `com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`, `com.apple.security.cs.allow-dyld-environment-variables`. Voir [sandboxing](/docs/packaging/sandboxing) pour les entitlements du PKG sandboxé.
-- **Propriétés Gradle équivalentes.** Chaque champ de notarisation a une propriété Gradle `compose.desktop.mac.notarization.<name>` — utile quand on préfère passer les secrets via `-P` plutôt qu'en variables d'env.
+- **Propriétés Gradle équivalentes.** Chaque champ de notarisation a une propriété Gradle `compose.desktop.mac.notarization.<name>` — utile quand on préfère passer les secrets via `-P` plutôt qu'en variables d'env. La signature Linux a les mêmes : `compose.desktop.linux.sign` et `compose.desktop.linux.signing.{keyId,keyFile,passphrase}`.
+- **La signature Linux est opt-in.** Elle reste désactivée tant que `linux.signing.enabled` n'est pas `true` avec un `keyId` défini. La signature au niveau dépôt (apt/dnf `Release.gpg`, `InRelease`) est un sujet distinct, hors périmètre — ici on signe le paquet autonome pour le téléchargement direct.
 - **Rotation du `.pfx`.** Mets à jour le certificat au moins 30 jours avant expiration — un binaire signé mais expiré échoue SmartScreen jusqu'à une nouvelle signature timestampée.
