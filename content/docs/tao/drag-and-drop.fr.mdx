@@ -1,0 +1,133 @@
+---
+title: Drag and drop
+description: Reçois les fichiers déposés sur le backend Tao via l'API standard dragAndDropTarget de Compose.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le backend Tao achemine le drag-and-drop natif vers Compose via l'API standard
+`Modifier.dragAndDropTarget`. Quand un élément est déposé sur ta fenêtre,
+`DragAndDropEvent.nativeEvent` est un `TaoDragAndDropPayload` qui porte les chemins des
+fichiers déposés, et `event.awtTransferable` donne accès aux mêmes données par le chemin
+habituel des `DataFlavor` — sans initialiser la boîte à outils AWT.
+
+<Callout type="info">
+Les dépôts entrants ne portent que des fichiers. Le texte, le HTML et les URL ne sont pas
+encore livrés.
+</Callout>
+
+## Ajouter la dépendance
+
+Le drag-and-drop est fourni avec le backend Tao. Ajoute l'artifact du backend à ta build :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Aucune configuration supplémentaire n'est nécessaire. Dès qu'une fenêtre tourne sur le backend
+Tao, les cibles de dépôt reçoivent les événements.
+
+## Recevoir des fichiers déposés
+
+Attache un `DragAndDropTarget` à un composable avec `Modifier.dragAndDropTarget` et lis les
+fichiers depuis le payload Tao dans `onDrop` :
+
+```kotlin
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import dev.nucleusframework.window.tao.TaoDragAndDropPayload
+
+@Composable
+fun DropZone() {
+    val target = remember {
+        object : DragAndDropTarget {
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                val payload = event.nativeEvent as? TaoDragAndDropPayload
+                val files = payload?.files ?: emptyList()
+                files.forEach { path -> println("déposé : $path") }
+                return files.isNotEmpty()
+            }
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .dragAndDropTarget(
+                shouldStartDragAndDrop = { true },
+                target = target,
+            ),
+    )
+}
+```
+
+`TaoDragAndDropPayload.files` est une `List<String>` de chemins absolus. `onDrop` renvoie
+`true` quand ta cible accepte les données.
+
+Si tu consommes déjà les dépôts par le chemin portable de Compose Desktop, continue d'utiliser
+`event.awtTransferable` et `DataFlavor.javaFileListFlavor` — le backend Tao l'alimente avec les
+mêmes chemins, donc ce code fonctionne sans modification.
+
+## Fonctionnement
+
+Il n'y a pas de `DropTarget` AWT sur le chemin d'entrée. La fenêtre native signale un dépôt via
+le pont JNI en Rust, et le scene host Compose de Tao en construit un `DragAndDropEvent`. Le
+`nativeEvent` de l'événement est un `TaoDragAndDropPayload`, et le host enveloppe aussi les
+chemins dans un `Transferable` interne pour que `event.awtTransferable` continue de fonctionner.
+Cet adaptateur vit dans la couche `java.datatransfer` et ne démarre jamais la boîte à outils AWT.
+
+L'acheminement entrant (un dépôt dans ta fenêtre) est câblé sur chaque host de plateforme.
+L'acheminement sortant (un glisser qui quitte ta fenêtre) est géré par un
+`PlatformDragAndDropManager` interne et est opt-in par host : là où une plateforme n'a pas encore
+de lanceur sortant, le geste est signalé comme non démarré. Les deux chemins incrémentent des
+compteurs sur `TaoDnDDiagnostics`.
+
+## Référence de l'API
+
+### Lire un payload déposé
+
+`TaoDragAndDropPayload` est la valeur que tu obtiens depuis `DragAndDropEvent.nativeEvent` sur
+le backend Tao. Tu ne le construis jamais toi-même.
+
+| Membre  | Type           | Description                             |
+|---------|----------------|-----------------------------------------|
+| `files` | `List<String>` | Chemins absolus des fichiers déposés.   |
+
+### Inspecter la tuyauterie DnD
+
+`TaoDnDDiagnostics` est un objet qui expose des compteurs d'état Compose et un journal du
+dernier message. Lis les compteurs dans un composable pour observer la tuyauterie ; ils se
+mettent à jour au fil des événements.
+
+| Membre              | Type                   | Description                                                        |
+|---------------------|------------------------|--------------------------------------------------------------------|
+| `constructed`       | `MutableIntState`      | Nombre de gestionnaires de drag-and-drop construits.               |
+| `isRequiredQueries` | `MutableIntState`      | Fois où Compose a demandé si un transfert sortant est requis.      |
+| `requests`          | `MutableIntState`      | Demandes de transfert sortant reçues.                              |
+| `transfers`         | `MutableIntState`      | Transferts sortants démarrés.                                      |
+| `lastMessage`       | `MutableState<String?>`| Dernier message de diagnostic, ou `null`.                          |
+| `log(msg: String)`  | `Unit`                 | Enregistre un message de diagnostic.                               |
+
+```kotlin
+import androidx.compose.material.Text
+import dev.nucleusframework.window.tao.TaoDnDDiagnostics
+
+@Composable
+fun DnDStatus() {
+    Text("transferts : ${TaoDnDDiagnostics.transfers.intValue}")
+    TaoDnDDiagnostics.lastMessage.value?.let { Text(it) }
+}
+```
+
+## Et ensuite
+
+- [Le backend Tao](/docs/tao) — le backend de fenêtre sans AWT qui livre ces événements.
+- [Multi-touch](/docs/tao/multi-touch) — les gestes du trackpad sur le même backend.
+- [Fenêtre décorée](/docs/tao/decorated-window) — fenêtres, barres de titre et handles natifs.

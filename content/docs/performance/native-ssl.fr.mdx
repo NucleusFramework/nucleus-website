@@ -1,26 +1,23 @@
 ---
-title: SSL natif — les racines de confiance depuis l'OS, pas le JRE
-description: Un X509TrustManager qui merge les défauts JVM avec le keychain / cert store de l'OS, pour que les racines d'entreprise et CAs installés par MDM marchent simplement.
+title: SSL natif
+description: Lis les certificats de confiance depuis le store de l'OS et fusionne-les avec les défauts de la JVM dans un seul trust manager.
 ---
 
-Une app JVM livrée avec un JRE embarqué ne fait confiance qu'aux cacerts cuits dans ce JRE. Les CA racines installées par une politique IT d'entreprise, un MDM, ou un proxy d'inspection SSL sont invisibles — chaque handshake HTTPS vers ces hôtes échoue. `native-ssl` lit les certificats trustés directement depuis le store de l'OS sur les trois plateformes et les merge avec les défauts JVM dans un seul `X509ExtendedTrustManager`.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Un seul singleton : `NativeTrustManager`. Lazy, thread-safe.
-- macOS : framework Security via JNI — ancres système + domaine user/admin avec évaluation complète des trust settings.
-- Windows : Crypt32 via JNI — stores `ROOT` et `CA` sur les scopes user, machine, group policy, enterprise.
-- Linux : pure-JVM — lit les bundles PEM que `crypto/x509` lit.
-- HTTPS vers les hôtes corporate, MDM ou inspectés par proxy fonctionne sans câblage manuel du trust store.
+`native-ssl` te permet de construire la confiance TLS à partir du store de certificats du système d'exploitation, et non uniquement des `cacerts` embarqués dans ton JRE. Le module lit les racines de confiance connues de l'OS sous macOS, Windows et Linux, les fusionne avec les défauts de la JVM, et expose le résultat sous la forme d'un unique `X509TrustManager`.
 
-## Install
+## Ajouter la dépendance
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.native-ssl:<version>")
 }
 ```
 
-## Quickstart
+## Construire un trust manager
+
+`NativeTrustManager` est un objet avec trois propriétés initialisées à la demande. Lis celle dont ta pile HTTP a besoin :
 
 ```kotlin
 import dev.nucleusframework.nativessl.NativeTrustManager
@@ -33,39 +30,48 @@ val sslContext: SSLContext = NativeTrustManager.sslContext
 val sslSocketFactory: SSLSocketFactory = NativeTrustManager.sslSocketFactory
 ```
 
-Passe-les à le client HTTP. Si ce client est `java.net.http`, OkHttp ou Ktor, utilise plutôt les adaptateurs [HTTP natif](/docs/performance/native-http) — ils s'occupent du câblage.
+<Callout type="tip">
+Si ton client est `java.net.http`, OkHttp ou Ktor, utilise plutôt les adaptateurs [HTTP natif](/docs/performance/native-http).
+Ils lisent ces propriétés et les câblent dans le client à ta place.
+</Callout>
 
-## Comment ça marche
+## Fonctionnement
+
+La première lecture de n'importe quelle propriété de `NativeTrustManager` construit une seule fois un `X509TrustManager` combiné, à la demande et de façon thread-safe, puis le met en cache. La construction collecte les émetteurs acceptés par défaut de la JVM, y ajoute les certificats signalés par l'OS, et charge les deux ensembles dans un nouveau `KeyStore` qui alimente le trust manager renvoyé. Si l'OS ne signale aucun certificat, les défauts de la JVM sont utilisés tels quels.
+
+Les certificats de l'OS incluent les racines installées par une politique d'entreprise, un MDM ou un proxy d'inspection TLS — des racines que les `cacerts` d'un JRE embarqué ne contiennent pas, ce qui fait autrement échouer les handshakes HTTPS vers ces hôtes.
+
+La collecte des certificats dépend de la plateforme. macOS et Windows passent par un bridge JNI livré dans le JAR ; Linux lit des bundles de certificats sur le disque, sans bibliothèque native.
 
 ### macOS
 
-Framework Security via `libnucleus_ssl.dylib` (embarqué dans le JAR pour `arm64` et `x86_64`). Deux passes :
+Le framework Security est appelé via `libnucleus_ssl.dylib` (embarqué pour `arm64` et `x86_64`), en deux passes :
 
 1. **Ancres système** — `SecTrustCopyAnchorCertificates()` renvoie chaque racine livrée par Apple.
-2. **Domaines user & admin** — `SecTrustSettingsCopyCertificates()` énumère tout ce qui a des trust settings explicites. Chaque candidat est évalué via une logique miroir de [JetBrains jvm-native-trusted-roots](https://github.com/JetBrains/jvm-native-trusted-roots) :
-   - Trust settings user d'abord, puis admin.
-   - Pas de trust settings → évaluation live via `SecTrustEvaluateWithError`.
-   - Trust settings array vide → trusté (selon les docs Apple).
-   - `kSecTrustSettingsResult` doit être `TrustRoot` ; le cert doit être auto-signé (égalité de DN **et** signature vérifiée contre sa propre clé).
-   - `kSecTrustSettingsPolicy`, si présent, doit être `kSecPolicyAppleSSL`.
-   - Les clés de contrainte inconnues rejettent le certificat — mieux vaut échouer fermé que relâcher silencieusement les règles.
+2. **Domaines user et admin** — `SecTrustSettingsCopyCertificates()` énumère les certificats dotés de trust settings explicites. Chaque candidat est évalué avec une logique qui reprend celle de [JetBrains jvm-native-trusted-roots](https://github.com/JetBrains/jvm-native-trusted-roots) :
+   - Les trust settings user sont examinés d'abord, puis ceux d'admin.
+   - En l'absence de trust settings, l'évaluation se fait en direct via `SecTrustEvaluateWithError`.
+   - Un tableau de trust settings vide compte comme de confiance, selon la documentation d'Apple.
+   - `kSecTrustSettingsResult` doit valoir `TrustRoot`, et le certificat doit être auto-signé (égalité de DN et signature vérifiée contre sa propre clé).
+   - `kSecTrustSettingsPolicy`, s'il est présent, doit valoir `kSecPolicyAppleSSL`.
+   - Les clés de contrainte inconnues rejettent le certificat : mieux vaut échouer fermé que relâcher les règles en silence.
 
 ### Windows
 
-Crypt32 via `nucleus_ssl.dll` (embarqué pour `x64` et `ARM64`). Scanne cinq emplacements de stores sur deux types :
+Crypt32 est appelé via `nucleus_ssl.dll` (embarqué pour `x64` et `ARM64`). Le module scanne deux types de stores sur plusieurs emplacements :
 
 | Type de store | Règle d'inclusion |
-|---------------|--------------------|
-| `ROOT` | CAs racines trustées — incluses inconditionnellement |
-| `CA` | CAs intermédiaires — validées via `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_BASE)` avec révocation cache-only |
+|---------------|-------------------|
+| `ROOT` | CA racines de confiance, incluses inconditionnellement |
+| `CA` | CA intermédiaires, validées via `CertGetCertificateChain` et `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_BASE)` avec révocation en cache seul |
 
-Emplacements : `CURRENT_USER`, `LOCAL_MACHINE`, `CURRENT_USER_GROUP_POLICY`, `LOCAL_MACHINE_GROUP_POLICY`, `LOCAL_MACHINE_ENTERPRISE`. Les certs distribués par Group Policy et Active Directory atterrissent dans des stores que `SunMSCAPI` n'atteint pas.
+Les emplacements scannés sont `CURRENT_USER`, `LOCAL_MACHINE`, `CURRENT_USER_GROUP_POLICY`, `LOCAL_MACHINE_GROUP_POLICY` et `LOCAL_MACHINE_ENTERPRISE`. Les certificats distribués par Group Policy et Active Directory atterrissent dans des stores que `SunMSCAPI` n'atteint pas.
 
-La déduplication se fait par empreinte SHA-1 (`CERT_HASH_PROP_ID`), l'identité standard de Windows. Si la lib JNI échoue à se charger, le module retombe sur les keystores `Windows-ROOT`, `Windows-CA`, `Windows-MY` de `SunMSCAPI`.
+Dans le bridge natif, la déduplication se fait par empreinte SHA-1 (`CERT_HASH_PROP_ID`). Si la bibliothèque JNI échoue à se charger, le module retombe sur les keystores `Windows-ROOT`, `Windows-CA` et `Windows-MY` de `SunMSCAPI`.
 
 ### Linux
 
-Pure-JVM — pas de lib partagée. Lit les mêmes chemins que `crypto/x509` de Go :
+Pur JVM, sans bibliothèque partagée. Le module lit les mêmes chemins que `crypto/x509` de Go :
 
 | Chemin | Distribution |
 |--------|--------------|
@@ -75,34 +81,29 @@ Pure-JVM — pas de lib partagée. Lit les mêmes chemins que `crypto/x509` de G
 | `/etc/pki/tls/cacert.pem` | OpenELEC |
 | `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` | CentOS, RHEL 7 |
 | `/etc/ssl/cert.pem` | Alpine |
-| `/etc/ssl/certs/` *(dir)* | SLES10/SLES11 |
+| `/etc/ssl/certs/` *(dir)* | SLES 10, SLES 11 |
 | `/etc/pki/tls/certs/` *(dir)* | Fedora, RHEL |
 | `/system/etc/security/cacerts/` *(dir)* | Android |
 
-Déduplication par contenu DER entre toutes les sources.
+Sous Linux, les certificats sont dédupliqués par contenu DER entre toutes les sources.
 
-## Référence
+## Référence de l'API
 
-| API | Description |
-|-----|-------------|
-| `NativeTrustManager.trustManager: X509ExtendedTrustManager` | Trust manager combiné (défauts JVM + natif OS) |
+`NativeTrustManager` est le seul point d'entrée public. Il expose trois propriétés en lecture seule et aucune méthode.
+
+| Propriété | Description |
+|-----------|-------------|
+| `NativeTrustManager.trustManager: X509TrustManager` | Trust manager combiné (défauts JVM plus racines natives de l'OS) |
 | `NativeTrustManager.sslContext: SSLContext` | Contexte `TLS` initialisé avec le trust manager |
-| `NativeTrustManager.sslSocketFactory: SSLSocketFactory` | Dérivé de `sslContext` |
-| `NativeTrustManager.isAvailable(): Boolean` | `false` seulement si le bridge JNI a échoué sous macOS/Windows |
-| `interface NativeCertificateProvider` | SPI si l'on veut brancher une source de certs custom |
+| `NativeTrustManager.sslSocketFactory: SSLSocketFactory` | Socket factory dérivée de `sslContext` |
 
-## Cas d'usage
-
-- **Réseaux d'entreprise** avec des CAs racines internes déployées via Group Policy ou MDM.
-- **Proxies d'inspection SSL** (Zscaler, Netskope, Blue Coat, …) qui re-signent chaque cert avec une racine custom.
-- **PKI auto-hébergée** pour les environnements de staging où l'utilisateur a installé la racine de dev en local.
-- **Tout ce à quoi `keytool -import` était historiquement la réponse.**
+La collecte des certificats est interne et s'adapte à la plateforme courante. Il n'existe aucun point d'extension public pour fournir une source de certificats personnalisée.
 
 ## Notes
 
 ### ProGuard
 
-Les classes du bridge JNI doivent être préservées sous macOS et Windows. Le plugin Gradle Nucleus ajoute les règles automatiquement ; si l'on maintient la config ProGuard à la main :
+Les classes du bridge JNI doivent être conservées sous macOS et Windows. Le plugin Gradle Nucleus ajoute ces règles automatiquement ; ajoute-les toi-même si tu maintiens la config ProGuard à la main :
 
 ```proguard
 -keep class dev.nucleusframework.nativessl.mac.NativeSslBridge {
@@ -115,10 +116,16 @@ Les classes du bridge JNI doivent être préservées sous macOS et Windows. Le p
 
 ### Logging
 
-Les logs debug sont taggés `NativeCertificateProvider`, `NativeSslBridge`, `WindowsCertificateProvider`, `LinuxCertificateProvider`, etc. Coupés par défaut. Active-les avec :
+Les logs de debug sont taggés `NativeCertificateProvider`, `NativeSslBridge`, `WindowsCertificateProvider` et `LinuxCertificateProvider`. Ils sont coupés par défaut. Active-les avec :
 
 ```kotlin
 import dev.nucleusframework.core.runtime.tools.allowNucleusRuntimeLogging
 
 allowNucleusRuntimeLogging = true
 ```
+
+## Et ensuite
+
+- [HTTP natif](/docs/performance/native-http) — câble le trust manager natif dans `java.net.http`, OkHttp et Ktor.
+- [HiDPI Linux](/docs/performance/linux-hidpi) — un autre module de performance appuyé sur du natif.
+- [Modules](/docs/concepts/modules) — la liste complète des modules Nucleus et ce que chacun apporte.

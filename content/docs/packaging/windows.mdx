@@ -1,24 +1,28 @@
 ---
 title: Building for Windows
-description: NSIS, MSI, MSIX/AppX, Portable — sideload or hit the Microsoft Store.
+description: Package a Nucleus app for Windows as an NSIS, MSI, MSIX/AppX, or Portable build and sign it for distribution.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Windows users get five installers from one DSL: NSIS (the classic Windows installer experience), NSIS Web (downloader stub), MSI for enterprise deployment, MSIX/AppX for the Microsoft Store and modern sideloading, and a Portable mode that needs no installer at all.
+In this tutorial, you'll package a Nucleus app for Windows in one or more of five formats —
+NSIS, NSIS Web, MSI, MSIX/AppX, and Portable — and sign the result for distribution.
 
-## TL;DR
-- `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable` — pick one or all five.
-- AppX uses MSIX packaging; with Developer Mode enabled, you can build and sideload locally.
-- Code signing via `.pfx` certificate or Azure Artifact Signing.
-- MSIX bundle (amd64 + arm64) produced by the `build-windows-appxbundle` CI action.
+## Before you start
 
-## Install
-Comes with the Gradle plugin.
+Windows packaging is part of the Nucleus Gradle plugin, so no extra dependency is required.
+You do need:
 
-## Quickstart
+- The Nucleus plugin applied to your build. It provides the `windows { }` block used below.
+- **Windows Developer Mode** enabled to build an AppX package locally
+  (Settings → System → For developers). GitHub-hosted Windows runners already have it on.
+- A `.pfx`/`.p12` certificate or Azure Artifact Signing credentials to sign a build.
 
-```kotlin
+## Configure the Windows build
+
+Add the formats you want to `targetFormats(...)`, then configure the `windows { }` block:
+
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         nativeDistributions {
@@ -48,10 +52,19 @@ nucleus {
 }
 ```
 
-## How it works
+The five Windows formats are:
 
-### NSIS — the everyday installer
-Most desktop apps ship NSIS. Nucleus exposes the full electron-builder NSIS surface: one-click vs assisted, per-user vs per-machine, language picker, custom header/sidebar bitmaps, license dialog, and a `script` / `includeScript` escape hatch for full custom NSIS sources.
+- `TargetFormat.Nsis` — the standard Windows installer.
+- `TargetFormat.NsisWeb` — an NSIS downloader stub that fetches the payload at install time.
+- `TargetFormat.Msi` — a Windows Installer package for enterprise deployment.
+- `TargetFormat.AppX` — an MSIX/AppX package for the Microsoft Store and sideloading.
+- `TargetFormat.Portable` — a single executable that runs without installation.
+
+## Customize the NSIS installer
+
+Nucleus exposes the electron-builder NSIS options: one-click or assisted installs, per-user or
+per-machine placement, a language picker, custom header and sidebar bitmaps, a license dialog,
+and a `script` / `includeScript` escape hatch for custom NSIS sources.
 
 ```kotlin
 windows {
@@ -73,16 +86,22 @@ windows {
 }
 ```
 
-### MSI for enterprise
-The MSI target is enabled by `TargetFormat.Msi`. Pin `upgradeUuid` to a fixed value so Windows correctly matches successor versions during upgrade. Without a stable UUID, every new build looks like a separate product.
+## Build an MSI for enterprise deployment
 
-### AppX / MSIX
-AppX targets produce an `.appx` (or `.msixbundle` via CI). The Desktop Bridge runs with `runFullTrust` — so **not** sandboxed in the Windows sense — but they unlock the Microsoft Store, modern updaters, and clean uninstall.
+The MSI target is enabled by `TargetFormat.Msi`. Set `upgradeUuid` to a fixed value so Windows
+matches successor versions during an upgrade. Without a stable UUID, every new build is treated
+as a separate product.
+
+## Build an AppX or MSIX package
+
+AppX targets produce an `.appx` (or a `.msixbundle` via CI). The Desktop Bridge runs with
+`runFullTrust`, so the app is not sandboxed in the Windows sense, but the format is accepted by
+the Microsoft Store and supports clean install and uninstall.
 
 ```kotlin
 windows {
     appx {
-        // Sideload identity — any CN that matches your signing cert
+        // Sideload identity — any CN that matches your signing certificate
         identityName = "MyCompany.MyApp"
         publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
         publisherDisplayName = "My Company"
@@ -103,18 +122,27 @@ windows {
 ```
 
 <Callout type="warn" title="Developer Mode required for local AppX builds">
-Local AppX builds need Windows **Developer Mode** enabled (Settings → System → For developers). GitHub-hosted Windows runners already have it on.
+Local AppX builds need Windows Developer Mode enabled (Settings → System → For developers).
+GitHub-hosted Windows runners already have it on.
 </Callout>
 
 <Callout type="warn" title="Microsoft Store identity">
-For Microsoft Store submissions, `identityName`, `publisher`, and `publisherDisplayName` must match the values Partner Center assigned to your reservation — the Store rejects mismatches at upload time. `publisher` is the `CN=<GUID>` issued by Partner Center, not your local signing certificate's CN.
+For Microsoft Store submissions, `identityName`, `publisher`, and `publisherDisplayName` must
+match the values Partner Center assigned to your reservation; the Store rejects mismatches at
+upload time. `publisher` is the `CN=<GUID>` issued by Partner Center, not your local signing
+certificate's CN.
 </Callout>
 
-### Portable mode
-`TargetFormat.Portable` produces a single executable that unpacks to a temp directory at launch. No installer UI, no admin, no registry — useful for thumb-drive distribution.
+## Enable Portable mode
 
-### File associations and deep links
-Declared at the top level and propagated into every Windows format:
+`TargetFormat.Portable` produces a single executable that unpacks to a temporary directory at
+launch. No installer UI, no admin rights, no registry entries — useful for thumb-drive
+distribution.
+
+## Add file associations and deep links
+
+Declare associations and URL protocols on `nativeDistributions`; they propagate into every
+Windows format:
 
 ```kotlin
 nativeDistributions {
@@ -127,14 +155,27 @@ nativeDistributions {
 }
 ```
 
-For Windows-specific overrides (custom file icon) use the `windows.fileAssociation(...)` overload.
+For a Windows-specific file icon, call `windows.fileAssociation(...)` instead.
 
 ## Reference
 
-The `windows { }` block exposes: `iconFile`, `packageName`, `console`, `dirChooser`, `perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion`, `exePackageVersion`, plus sub-blocks `nsis { }`, `appx { }`, `signing { }`. Full per-property reference: [Gradle DSL reference](/docs/reference/gradle-dsl).
+The `windows { }` block exposes `iconFile`, `packageName`, `console`, `dirChooser`,
+`perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion`, and
+`exePackageVersion`, plus the sub-blocks `nsis { }`, `appx { }`, and `signing { }`. See the
+[Gradle DSL reference](/docs/reference/gradle-dsl) for every property.
 
 ## Notes
 
-- The MSI installer is built by electron-builder's WiX wrapper; for serious enterprise MSI customization (custom dialogs, registry tweaks beyond installation paths), use NSIS instead.
-- `latest.yml` (Windows update metadata) is generated for NSIS, MSI, and Portable. AppX is store-managed so it has no auto-update YML.
-- `WindowsJumpListManager.setProcessAppId()` is called automatically by `nucleusApplication` on Windows — taskbar grouping and AUMID-aware notifications work out of the box.
+- The MSI installer is built by electron-builder's WiX wrapper. For enterprise MSI
+  customization beyond installation paths (custom dialogs, registry tweaks), use NSIS instead.
+- `latest.yml` (Windows update metadata) is generated for NSIS, MSI, and Portable. AppX is
+  store-managed and has no auto-update YML.
+- `WindowsJumpListManager.setProcessAppId()` is called automatically on Windows during startup,
+  so taskbar grouping and AUMID-aware notifications work without extra configuration.
+
+## What's next
+
+- [Code signing](/docs/packaging/code-signing) — PFX and Azure Artifact Signing for Windows builds.
+- [Publishing](/docs/packaging/publishing) — push releases to GitHub, S3, or a generic server.
+- [CI/CD](/docs/packaging/ci-cd) — build and sign Windows packages on GitHub Actions.
+- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` configuration surface.

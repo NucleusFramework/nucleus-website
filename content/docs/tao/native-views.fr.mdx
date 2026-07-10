@@ -1,0 +1,193 @@
+---
+title: Vues natives sur Tao
+description: Intègre une vue native de la plateforme — AppKit/SwiftUI, WebView2 ou GTK — dans une mise en page Compose avec le backend Tao.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le composable `NativeView` intègre une vue native de la plateforme dans une mise en page
+Compose sur le backend Tao. C'est l'équivalent Tao d'`AndroidView` sur Android et d'`UIKitView`
+sur Compose iOS : tu fournis un `NucleusPlatformView`, et Nucleus reparente son handle natif
+dans la fenêtre Tao, le garde dimensionné sur l'emplacement de la mise en page Compose, et le
+libère quand le composable quitte la composition.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework")
+}
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+`NativeView` et `NucleusPlatformView` vivent dans `dev.nucleusframework.window.tao`, fournis
+par `decorated-window-tao`. Ils sont disponibles dans toute fenêtre ouverte sur le backend Tao.
+
+## Intégrer une vue native
+
+Enveloppe ton handle natif dans un `NucleusPlatformView` et passe une `factory` à `NativeView`.
+La variante que tu implémentes décide de la stratégie d'intégration : `NsView` sur macOS,
+`HWnd` sur Windows, `GtkWidget` sur Linux :
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.window.tao.NativeView
+import dev.nucleusframework.window.tao.NucleusPlatformView
+
+// Une vue macOS adossée à un handle NSView* brut, obtenu depuis ton
+// propre pont AppKit / SwiftUI.
+class WebPlatformView(private val handle: Long) : NucleusPlatformView.NsView {
+    override val nsViewHandle: Long = handle
+
+    override fun dispose() {
+        // Libère la vue native créée dans la factory.
+    }
+}
+
+@Composable
+fun BrowserPane(url: String) {
+    NativeView(
+        factory = { WebPlatformView(createNativeWebView(url)) },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+```
+
+`factory` s'exécute une seule fois et son résultat est mémorisé pendant toute la durée de vie
+du composable. Nucleus appelle `dispose()` quand `NativeView` quitte la composition. La vue
+native suit automatiquement la position et la taille de l'emplacement — tu ne fixes pas les
+cadres toi-même.
+
+<Callout type="info">
+Nucleus ne crée pas la vue native à ta place. Ci-dessus, `createNativeWebView` est un
+espace réservé pour ton propre code d'interop, qui renvoie le handle de la plateforme (un
+`NSView*` sur macOS, un `HWND` ou un contrôleur WebView2 sur Windows, un `GtkWidget*` sur
+Linux) sous forme de `Long`.
+</Callout>
+
+## Fonctionnement
+
+`NativeView` lit la variante du `NucleusPlatformView` renvoyé par `factory` et route vers le
+chemin d'intégration correspondant. Sur macOS, le `NsView` est ajouté comme frère de la vue
+de contenu Tao ; sur Windows, le `HWnd` est reparenté sous le HWND principal de Tao ; sur
+Linux, le `GtkWidget` est ajouté au widget de contenu GTK de Tao. Chaque chemin suit
+l'emplacement Compose avec `onGloballyPositioned` et transmet les bornes au côté natif, si
+bien que la vue intégrée accompagne les redimensionnements et le défilement sans câblage
+supplémentaire.
+
+Si la variante renvoyée ne correspond pas au système d'exploitation courant — ou si la
+plomberie de scène de la plateforme n'est pas disponible — `NativeView` affiche un
+`Box(modifier)` vide au lieu d'échouer. Tu peux ainsi écrire un seul point d'appel par
+plateforme et t'appuyer sur ce repli sur les autres.
+
+L'emplacement `content` optionnel affiche de l'UI Compose par-dessus la vue intégrée. Sur
+macOS, c'est un `NSView` de superposition frère avec son propre `CAMetalLayer` et sa
+`ComposeScene` ; sur Windows, un HWND de premier niveau composité via DirectComposition ; sur
+Linux, il s'affiche en ligne dans la même scène de fenêtre. Les événements du pointeur
+traversent vers la vue native, sauf dans les régions que tu marques avec
+`Modifier.consumeOverlayPointerEvents()`.
+
+## Référence de l'API
+
+### Décrire la vue native
+
+`NucleusPlatformView` est une interface scellée. Implémente exactement une variante de
+plateforme et expose le handle correspondant sous forme de `Long` :
+
+| Variante | Plateforme | Propriété de handle |
+|---|---|---|
+| `NucleusPlatformView.NsView` | macOS | `nsViewHandle` — pointeur vers ton `NSView*` |
+| `NucleusPlatformView.HWnd` | Windows | `hwndHandle` — pointeur vers ton `HWND` |
+| `NucleusPlatformView.GtkWidget` | Linux | `gtkWidgetHandle` — pointeur vers ton `GtkWidget*` |
+
+L'interface déclare aussi des rappels de cycle de vie dont le corps est vide par défaut.
+Redéfinis ceux dont ta vue a besoin :
+
+| Membre | Appelé quand |
+|---|---|
+| `resize(widthPx, heightPx)` | La taille logique de la vue intégrée change. |
+| `setBounds(xPx, yPx, widthPx, heightPx)` | Le cadre complet change ; à redéfinir quand le rectangle de dessin de la vue est découplé du rectangle de sa fenêtre (par exemple WebView2). |
+| `setCornerRadius(radiusPx)` | Le rognage des coins arrondis change et le rognage générique de l'hôte n'atteint pas la surface de la vue. |
+| `clearFocus()` | La fenêtre hôte ou une couche Compose frère prend le focus. |
+| `dispose()` | Démontage final — libère les ressources natives que tu possèdes. |
+
+### Intégrer la vue
+
+```kotlin
+@Composable
+fun NativeView(
+    factory: () -> NucleusPlatformView,
+    modifier: Modifier = Modifier,
+    update: (NucleusPlatformView) -> Unit = {},
+    cornerRadius: Dp = Dp.Unspecified,
+    content: @Composable () -> Unit = {},
+)
+```
+
+| Paramètre | Notes |
+|---|---|
+| `factory` | Crée le `NucleusPlatformView`. S'exécute une fois ; le résultat est mémorisé puis libéré quand le composable quitte la composition. |
+| `modifier` | Dimensionne et positionne l'emplacement. La vue intégrée le remplit. |
+| `update` | S'exécute à chaque recomposition avec la vue mémorisée. Sert à pousser un nouvel état dans la vue native. |
+| `cornerRadius` | Rognage des coins arrondis ; voir plus bas. |
+| `content` | Superposition Compose affichée par-dessus la vue native. |
+
+### Superposer du contenu Compose
+
+L'emplacement `content` dessine de l'UI Compose par-dessus la vue intégrée. Par défaut, les
+événements natifs du pointeur la traversent vers la vue sous-jacente. Enveloppe une région
+interactive avec `Modifier.consumeOverlayPointerEvents()` pour router à la place les
+événements de cette région vers Compose :
+
+```kotlin
+import dev.nucleusframework.window.tao.consumeOverlayPointerEvents
+
+NativeView(
+    factory = { WebPlatformView(createNativeWebView(url)) },
+    modifier = Modifier.fillMaxSize(),
+) {
+    // Une barre d'outils Compose au-dessus de la vue web ; le bouton reste
+    // interactif, les clics ailleurs atteignent la vue web en dessous.
+    Button(
+        onClick = { /* recharger */ },
+        modifier = Modifier.consumeOverlayPointerEvents(),
+    ) {
+        Text("Recharger")
+    }
+}
+```
+
+Pour les champs de saisie, passe un curseur pour que toute la région affiche le I-beam :
+`consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
+
+<Callout type="warn">
+La superposition `content` n'est prise en charge que sur macOS et Windows. Sur Linux, la
+variante `GtkWidget` ignore la lambda `content`.
+</Callout>
+
+### Rogner en coins arrondis
+
+Le `Modifier.clip()` de Compose ne se propage pas aux vues natives intégrées, la même
+limitation qu'`AndroidView` et `UIKitView`. Utilise `cornerRadius` à la place :
+
+```kotlin
+NativeView(
+    factory = { WebPlatformView(createNativeWebView(url)) },
+    modifier = Modifier.fillMaxSize(),
+    cornerRadius = 12.dp,
+)
+```
+
+Passe `Dp.Infinity` pour un rognage entièrement circulaire quelle que soit la taille. La
+valeur par défaut, `Dp.Unspecified`, n'applique aucun rognage.
+
+## Et ensuite
+
+- [Le backend Tao](/docs/tao) — ce que couvre le backend sans AWT.
+- [DecoratedWindow sur Tao](/docs/tao/decorated-window) — ouvre la fenêtre qui héberge la vue.
+- [Multi-touch et gestes du trackpad](/docs/tao/multi-touch) — lis les événements d'entrée Tao.

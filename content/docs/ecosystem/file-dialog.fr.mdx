@@ -1,24 +1,23 @@
 ---
 title: Dialogues de fichiers natifs
-description: FileKit — pickers natifs open / save / folder qui rendent bien sur chaque OS.
+description: Utilise FileKit pour les dialogues natifs open, save et folder, avec les métadonnées GraalVM fournies par le plugin Nucleus.
 ---
 
-Compose Multiplatform ne livre pas de dialogues de fichiers. Nucleus délibérément non plus — la communauté a déjà livré la bonne réponse.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Utilise [**FileKit**](https://github.com/vinceglb/FileKit) par [@vinceglb](https://github.com/vinceglb).
-- Pickers natifs : `NSOpenPanel`/`NSSavePanel` sur macOS, `IFileOpenDialog`/`IFileSaveDialog` sur Windows, xdg-desktop-portal sur Linux.
-- Nucleus livre des métadonnées de reachability GraalVM préchargées pour FileKit — Native Image marche direct.
+Compose Multiplatform n'inclut pas de dialogues de fichiers, et Nucleus n'en ajoute pas non plus. Utilise [FileKit](https://github.com/vinceglb/FileKit) pour les dialogues natifs d'ouverture, d'enregistrement et de sélection de dossier. Le plugin Gradle Nucleus fournit les métadonnées de reachability GraalVM pour FileKit, de sorte que les dialogues fonctionnent sous `native-image` sans configuration supplémentaire.
 
-## Installation
+## Ajouter la dépendance
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("io.github.vinceglb:filekit-compose:<version>")
 }
 ```
 
-## Démarrage rapide
+## Afficher un sélecteur de fichier
+
+Crée un launcher avec `rememberFilePickerLauncher` et appelle `launch()` depuis un gestionnaire de clic :
 
 ```kotlin
 val launcher = rememberFilePickerLauncher(
@@ -33,26 +32,36 @@ Button(onClick = { launcher.launch() }) {
 }
 ```
 
-## Comment ça marche
+Le callback reçoit un `PlatformFile?`, qui vaut null lorsque l'utilisateur annule. `PlatformFile` est le handle de fichier cross-plateforme de FileKit, avec des helpers de lecture, d'écriture et de métadonnées.
 
-FileKit pilote le vrai dialogue natif sur chaque OS :
+## Fonctionnement
 
-- **macOS** — `NSOpenPanel` / `NSSavePanel` via Cocoa.
-- **Windows** — `IFileOpenDialog` / `IFileSaveDialog` via JNA COM.
-- **Linux** — `FileChooser` de xdg-desktop-portal, avec fallback GTK / zenity.
+FileKit appelle le dialogue natif sur chaque système d'exploitation :
 
-Filtres de types de fichiers avec descriptions, modes single-file / multi-file / folder / save, API Compose-friendly (`rememberFilePickerLauncher`) et une abstraction cross-platform `PlatformFile` avec helpers read/write/metadata.
+- **macOS** — `NSOpenPanel` et `NSSavePanel` via Cocoa.
+- **Windows** — `IFileOpenDialog` et `IFileSaveDialog` via JNA COM.
+- **Linux** — le `FileChooser` de xdg-desktop-portal, avec repli sur GTK et zenity.
 
-## GraalVM native image — zéro config
+Il prend en charge les filtres de type avec descriptions ; les modes single-file, multi-file, folder et save ; et une API Compose (`rememberFilePickerLauncher`) construite autour du handle `PlatformFile`.
 
-Le plugin Gradle Nucleus livre des **métadonnées de reachability préchargées pour FileKit** dans son [bundle de métadonnées de bibliothèques](/docs/performance/graalvm/automatic-metadata). Les métadonnées sont incluses conditionnellement uniquement quand `io.github.vinceglb.filekit` est sur le classpath runtime, et couvrent :
+## Exécuter sous GraalVM native image
 
-- Types Foundation proxy + callbacks macOS (`FoundationLibrary`, `ID`, callbacks runnable).
-- Bindings COM JNA Windows (`FileDialog`, `FileOpenDialog`, `FileSaveDialog`, `ShellItem`, `Shell32`, `COMDLG_FILTERSPEC`, `PROPERTYKEY`, …).
-- Proxy D-Bus xdg-desktop-portal (`FileChooserDbusInterface`) pour Linux.
+Le plugin Gradle Nucleus fournit les métadonnées de reachability pour FileKit dans son [bundle de métadonnées de bibliothèques](/docs/performance/graalvm/automatic-metadata). Les métadonnées ne sont incluses que lorsque `io.github.vinceglb.filekit` est présent sur le classpath d'exécution, et couvrent :
 
-Si on package avec le plugin Nucleus et cibles `native-image`, FileKit marche out of the box — pas de `reachability-metadata.json` manuel, pas de tracing-agent.
+- Les types de proxy et de callback Foundation sur macOS (`FoundationLibrary`, `ID`, callbacks runnable).
+- Les bindings COM JNA Windows (`FileDialog`, `FileOpenDialog`, `FileSaveDialog`, `ShellItem`, `Shell32`, `COMDLG_FILTERSPEC`, `PROPERTYKEY`).
+- Le proxy D-Bus xdg-desktop-portal pour Linux (`FileChooserDbusInterface`).
 
-## Pourquoi Nucleus ne livre pas ça
+<Callout type="info">
+Lorsque tu construis avec le plugin Nucleus et que tu cibles `native-image`, les dialogues fonctionnent sans `reachability-metadata.json` manuel ni passage du tracing-agent.
+</Callout>
 
-FileKit couvre déjà toute la surface nativement, est maintenu activement, et s'intègre proprement avec l'état Compose. Le réimplémenter dans Nucleus dupliquerait l'effort sans bénéfice.
+## Notes
+
+FileKit encapsule déjà chaque dialogue natif et s'intègre à l'état Compose, donc Nucleus en dépend plutôt que de réimplémenter la même surface.
+
+## Et ensuite
+
+- [Métadonnées GraalVM automatiques](/docs/performance/graalvm/automatic-metadata) — comment le plugin fournit les métadonnées de reachability pour les bibliothèques connues.
+- [Vérification orthographique native](/docs/ecosystem/spell-check) — une autre bibliothèque de l'écosystème adossée au natif.
+- [Vue d'ensemble de l'écosystème](/docs/ecosystem) — les bibliothèques qui s'associent à Nucleus.

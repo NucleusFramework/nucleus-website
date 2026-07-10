@@ -1,31 +1,71 @@
 ---
 title: Installation
-description: Ajoute le plugin Gradle Nucleus à le projet Kotlin sur macOS, Linux ou Windows.
+description: Ajoute le plugin Gradle Nucleus à un projet Kotlin pour cibler macOS, Linux et Windows depuis un seul build.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Nucleus se livre comme un plugin Gradle. On l'ajoute à le projet Kotlin et on peut cibler macOS, Linux et Windows depuis le même build.
+Dans ce tutoriel, tu vas ajouter le plugin Gradle Nucleus à un projet Kotlin. Une fois le plugin
+appliqué, le même build peut compiler, lancer et empaqueter une application de bureau pour macOS,
+Linux et Windows.
 
-## L'essentiel
-- Le plugin vit sur le [Gradle Plugin Portal](https://plugins.gradle.org/plugin/dev.nucleusframework) — aucune config de dépôt supplémentaire.
-- Prérequis : JDK 17+, Gradle 8+, Kotlin 2.0+. JDK 25+ débloque le cache AOT.
+## Avant de commencer
 
-## Prérequis
+Nucleus s'appuie sur Compose Multiplatform et demande :
 
-| Outil | Version | Notes |
-|---|---|---|
-| JDK | 17+ | JBR 17+ recommandé pour le backend AWT ; JDK 25+ active le cache AOT. |
-| Gradle | 8.0+ | Wrapper fourni dans les nouveaux projets. |
-| Kotlin | 2.0+ | Compose Multiplatform exige Kotlin 2.x. |
-| OS | macOS 12+, Windows 10+, Linux (glibc 2.31+) | Le backend Tao demande Wayland ou X11 sur Linux. |
+- **JDK 17 ou version ultérieure** dans ton `PATH`. La [JetBrains Runtime](https://github.com/JetBrains/JetBrainsRuntime)
+  est recommandée quand tu utilises le backend AWT.
+- **Kotlin 2.0 ou version ultérieure** — Compose Multiplatform exige Kotlin 2.x.
+- **Gradle 8.0 ou version ultérieure**. Le wrapper Gradle fourni dans les nouveaux projets suffit.
 
-<Callout type="tip" title="Choisir le JDK">
-Pour le dev, n'importe quel JDK 17+ convient. Pour livrer un binaire GraalVM, installe une distribution GraalVM 25 et laisse le plugin invoquer `native-image`. Le plugin peut aussi utiliser la JetBrains Runtime (JBR) pour le backend AWT.
+<Callout type="info">
+Le JDK 25 ou version ultérieure n'est requis que pour générer le cache AOT (`enableAotCache` dans
+`nativeDistributions`). N'importe quel JDK 17+ convient pour le développement.
 </Callout>
 
-## Et ensuite ?
+## Appliquer le plugin
 
-- [Quickstart](/docs/start/quickstart) — une fenêtre Tao qui tourne.
-- [Project setup](/docs/start/project-setup) — dépôts, propriétés Gradle, layout multi-module.
-- [Configuration](/docs/start/configuration) — le DSL `nucleus { … }` complet.
+Dans le `build.gradle.kts` de ton module, applique le plugin Nucleus aux côtés des plugins Kotlin et Compose :
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("jvm") version "2.0.21"
+    id("org.jetbrains.compose") version "1.7.0"
+    id("dev.nucleusframework") version "2.0.0"
+}
+```
+
+Le bloc `plugins` résout `dev.nucleusframework` depuis le Gradle Plugin Portal ; aucun dépôt
+`pluginManagement` supplémentaire n'est nécessaire.
+
+## Ajouter les dépôts
+
+Les modules runtime de Nucleus sont publiés sur Maven Central sous le groupe `dev.nucleusframework`.
+Ajoute les dépôts dont le plugin et son runtime ont besoin :
+
+```kotlin title="build.gradle.kts"
+repositories {
+    mavenCentral()
+    google()
+}
+```
+
+`google()` n'est nécessaire que si tu résous les artefacts Compose Multiplatform depuis ce dépôt ou
+si tu partages des modules avec Android.
+
+## Vérifier que le plugin est appliqué
+
+L'application du plugin enregistre un groupe de tâches `nucleus`. Liste ses tâches pour confirmer que
+le plugin est chargé :
+
+```shell
+./gradlew tasks --group nucleus
+```
+
+Si la commande affiche les tâches du groupe, le plugin est appliqué et tu peux commencer à construire.
+
+## Et ensuite
+
+- [Quickstart](/docs/start/quickstart) — écris une fonction `main`, lance une fenêtre Tao native et empaquette un installeur.
+- [Project setup](/docs/start/project-setup) — dépôts, propriétés Gradle, toolchains JDK et layout multi-module.
+- [Configuration](/docs/start/configuration) — le DSL `nucleus { }` complet.

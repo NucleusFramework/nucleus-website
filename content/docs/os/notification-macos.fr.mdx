@@ -1,48 +1,43 @@
 ---
 title: Notifications sur macOS
-description: Mapping complet en Kotlin du framework UserNotifications d'Apple — catégories, pièces jointes, saisie texte, planifications, niveaux d'interruption.
+description: Bindings Kotlin du framework UserNotifications d'Apple couvrant l'autorisation, les catégories, les pièces jointes, la saisie texte, les planifications et les niveaux d'interruption.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quand "titre + corps" ne suffit plus — rappels planifiés, actions de réponse texte, alertes time-sensitive, sons personnalisés — descends à `notification-macos`. Il expose toute la surface `UNUserNotificationCenter` en Kotlin.
+Le module `notification-macos` te permet de piloter le framework UserNotifications d'Apple depuis
+Kotlin. Tu demandes l'autorisation, planifies des notifications, enregistres des catégories
+d'actions avec saisie texte, ajoutes des pièces jointes et traites les réponses via
+`NotificationCenter` et un délégué typé.
 
-## En bref
-- Adossé au framework `UserNotifications.framework` d'Apple via un pont JNI.
-- Demande d'autorisation, catégories avec boutons d'action (y compris saisie texte), images / vidéos en pièce jointe.
-- Déclencheurs : immédiat, intervalle de temps, calendrier.
-- Niveaux d'interruption : passive, active, timeSensitive, critical.
+## Ajouter la dépendance
 
-<Callout type="warn" title="App bundlée obligatoire">
-macOS ne délivre les notifications que pour une app signée avec un bundle identifier. En dev, utilise `./gradlew runDistributable` ou `./gradlew runGraalvmNative` — un `./gradlew run` produit un process JVM non bundlé que le système ignore silencieusement.
-</Callout>
-
-## Installation
-
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.notification-macos:<version>")
 }
 ```
 
-## Démarrage rapide
+## Envoyer une notification
+
+Demande l'autorisation, puis soumets une `NotificationRequest` avec `NotificationCenter.add` :
 
 ```kotlin
 import dev.nucleusframework.notification.*
 
 NotificationCenter.requestAuthorization(
     setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
-) { granted, _ ->
+) { granted, error ->
     if (!granted) return@requestAuthorization
 
-    NotificationCenter.send(
+    NotificationCenter.add(
         NotificationRequest(
             identifier = "greeting",
             content = NotificationContent(
                 title = "Hello",
                 body = "Bienvenue dans Nucleus",
                 sound = NotificationSound.Default,
-                interruptionLevel = InterruptionLevel.TimeSensitive,
+                interruptionLevel = InterruptionLevel.TIME_SENSITIVE,
             ),
             trigger = NotificationTrigger.TimeInterval(interval = 5.0),
         ),
@@ -50,15 +45,44 @@ NotificationCenter.requestAuthorization(
 }
 ```
 
+Pour une livraison immédiate, laisse `trigger` non renseigné (sa valeur par défaut est `null`).
+
+<Callout type="warn">
+macOS ne délivre les notifications que depuis une app bundlée dotée d'un bundle identifier. En
+développement, lance `./gradlew runDistributable` ou `./gradlew runGraalvmNative` — un simple
+`./gradlew run` produit un process JVM non bundlé que le système ignore silencieusement.
+</Callout>
+
 ## Fonctionnement
 
-Chaque API est un wrapper typé sur l'appel Objective-C correspondant. `NotificationCenter` vit dans le process et transmet les callbacks `UNUserNotificationCenterDelegate` au `NotificationCenterDelegate` qu'on enregistre. Autorisation, catégories et notifications en attente sont interrogeables — pas d'état caché.
+Chaque API est un wrapper typé sur l'appel UserNotifications correspondant, atteint via un pont
+JNI. `NotificationCenter` est un singleton qui transmet les callbacks
+`UNUserNotificationCenterDelegate` au `NotificationCenterDelegate` que tu enregistres. Sur les
+plateformes autres que macOS, chaque méthode est un no-op ; teste d'abord
+`NotificationCenter.isAvailable`.
 
-Les catégories laissent enregistrer en amont des jeux de boutons d'action réutilisables (avec saisie texte si besoin), puis on y fais référence par identifiant dans chaque `NotificationRequest`.
+Les catégories te permettent d'enregistrer en amont des jeux de boutons d'action réutilisables —
+y compris des actions de saisie texte — puis d'y faire référence par identifiant depuis un
+`NotificationContent`. Le système stocke le jeu de catégories, donc chaque requête ne porte que
+la chaîne `categoryIdentifier`.
 
-## Référence
+Les callbacks du délégué ne sont pas dispatchés sur les threads AWT ou Swing. Repasse sur le
+dispatcher UI actif avant de toucher à l'état de l'interface depuis `willPresent` ou `didReceive`.
 
-### Autorisation
+## Référence de l'API
+
+### Vérifier la disponibilité
+
+```kotlin
+if (NotificationCenter.isAvailable) {
+    // exécution sur macOS avec pont natif chargé et app bundlée
+}
+```
+
+### Demander l'autorisation
+
+`requestAuthorization` prend un ensemble de valeurs `AuthorizationOption` et un callback qui
+rapporte le résultat :
 
 ```kotlin
 NotificationCenter.requestAuthorization(
@@ -66,7 +90,14 @@ NotificationCenter.requestAuthorization(
 ) { granted, error -> /* … */ }
 ```
 
-### Catégories avec boutons d'action
+Options disponibles : `BADGE`, `SOUND`, `ALERT`, `CRITICAL_ALERT`,
+`PROVIDES_APP_NOTIFICATION_SETTINGS`, `PROVISIONAL`, `TIME_SENSITIVE`.
+
+### Enregistrer des catégories avec boutons d'action
+
+Construis une `NotificationCategory` à partir d'entrées `NotificationAction` ou
+`TextInputNotificationAction`, puis enregistre l'ensemble complet avec
+`setNotificationCategories` :
 
 ```kotlin
 val category = NotificationCategory(
@@ -84,7 +115,11 @@ val category = NotificationCategory(
 NotificationCenter.setNotificationCategories(setOf(category))
 ```
 
-### Pièces jointes
+Réfère-toi à la catégorie depuis une notification via `NotificationContent.categoryIdentifier`.
+
+### Ajouter des pièces jointes
+
+`NotificationAttachment.url` est une chaîne de chemin de fichier, pas un `java.net.URI` :
 
 ```kotlin
 val request = NotificationRequest(
@@ -92,37 +127,58 @@ val request = NotificationRequest(
     content = NotificationContent(
         title = "Capture enregistrée",
         body = "Clique pour prévisualiser",
-        attachments = listOf(NotificationAttachment(identifier = "img", url = file.toURI())),
+        attachments = listOf(
+            NotificationAttachment(identifier = "img", url = imageFile.absolutePath),
+        ),
     ),
-    trigger = NotificationTrigger.Immediate,
 )
 ```
 
-### Déclencheurs
+### Planifier avec des déclencheurs
 
 | Déclencheur | Cas d'usage |
 | --- | --- |
-| `NotificationTrigger.Immediate` | maintenant |
-| `NotificationTrigger.TimeInterval(interval, repeats)` | différé ou récurrent |
-| `NotificationTrigger.Calendar(dateComponents, repeats)` | "tous les lundis à 9h" |
+| `trigger = null` (défaut) | maintenant |
+| `NotificationTrigger.TimeInterval(interval, repeats)` | différé ou récurrent (la récurrence exige `interval >= 60`) |
+| `NotificationTrigger.Calendar(dateComponents, repeats)` | "tous les lundis à 9h" via `DateComponents` |
 
-### Délégué
+### Traiter les réponses avec un délégué
 
-Implémente `NotificationCenterDelegate` pour réagir aux taps, sélections d'action et réponses texte :
+Implémente `NotificationCenterDelegate` pour contrôler la présentation au premier plan et réagir
+aux taps, sélections d'action et réponses de saisie texte :
 
 ```kotlin
 NotificationCenter.setDelegate(object : NotificationCenterDelegate {
-    override fun didReceive(response: NotificationResponse) { /* … */ }
     override fun willPresent(notification: DeliveredNotification): Set<PresentationOption> =
         setOf(PresentationOption.BANNER, PresentationOption.SOUND)
+
+    override fun didReceive(response: NotificationResponse) { /* … */ }
 })
 ```
 
-### Inspection d'état
+`willPresent` retourne les options de présentation à utiliser tant que l'app est au premier plan ;
+retourne un ensemble vide pour traiter la notification silencieusement. `NotificationResponse.userText`
+contient le texte saisi par l'utilisateur dans une `TextInputNotificationAction`.
 
-`getDeliveredNotifications`, `getPendingNotifications`, `removeDelivered`, `removePending` donnent un contrôle complet sur ce qui est affiché et ce qui est en file.
+### Inspecter et supprimer les notifications
+
+`getPendingNotifications` et `getDeliveredNotifications` prennent des callbacks et rapportent ce
+qui est en file ou affiché. Supprime des entrées avec `removePendingNotifications(ids)` /
+`removeAllPendingNotifications()` et `removeDeliveredNotifications(ids)` /
+`removeAllDeliveredNotifications()`.
 
 ## Notes
-- Les apps sandboxées ont besoin de l'entitlement notifications, configuré via `entitlementsFile` dans le DSL Gradle Nucleus.
-- Mets `interruptionLevel = InterruptionLevel.Critical` et demande l'option d'autorisation correspondante pour passer outre les modes Focus.
-- Un bundle identifier qui ne matche pas est la cause numéro un d'échec silencieux — vérifie que `NucleusApp.appId` correspond au bundle id de l'app packagée.
+
+- Les apps sandboxées ont besoin de l'entitlement notifications. Fais pointer la propriété
+  `entitlementsFile` macOS du DSL Gradle Nucleus vers un fichier `.entitlements` qui le déclare.
+- Pour les alertes qui passent outre les modes Focus, mets
+  `interruptionLevel = InterruptionLevel.CRITICAL` et demande `AuthorizationOption.CRITICAL_ALERT`.
+- Un bundle identifier qui ne correspond pas est la cause numéro un d'échec silencieux — vérifie
+  que `NucleusApp.appId` correspond au bundle id de l'app packagée.
+
+## Et ensuite
+
+- [Notifications multiplateformes](/docs/os/notifications) — l'API partagée `NotificationManager`.
+- [Notifications sur Windows](/docs/os/notification-windows) — les toasts via `WindowsNotificationCenter`.
+- [Notifications sur Linux](/docs/os/notification-linux) — les notifications freedesktop via `LinuxNotificationCenter`.
+- [Signature de code](/docs/packaging/code-signing) — signe et bundle l'app pour que macOS délivre ses notifications.

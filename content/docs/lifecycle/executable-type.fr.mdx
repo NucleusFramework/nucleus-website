@@ -1,59 +1,108 @@
 ---
 title: Comment ai-je été lancée ?
-description: Détecte au runtime si l'app tourne en DMG, MSIX, Flatpak, AppImage, ./gradlew run, etc.
+description: Détecte au runtime comment l'app a été empaquetée et lancée, d'un DMG ou d'un Snap à un simple ./gradlew run.
 ---
 
-Le même code Kotlin peut être livré en DMG, MSIX, Flatpak, Snap, AppImage, installeur `.exe`, ou simplement `./gradlew run` dans le IDE. Chacune de ces formes change des règles dures — où on peut écrire, quel canal d'update utiliser, à quoi ressemble le chemin d'install. `ExecutableRuntime` permet de brancher sur ça sans deviner.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- `ExecutableRuntime.type(): ExecutableType` renvoie le format de packaging. Le plugin Nucleus pose la system property `nucleus.executable.type` au packaging.
-- Helpers : `isAppX()`, `isFlatpak()`, `isDmg()`, `isAppImage()`, `isJar()` (alias dev mode), etc.
-- Sert à gater l'auto-update, les chemins fichiers, les stratégies store vs direct, le code sandbox-aware.
+`ExecutableRuntime` indique comment le processus courant a été empaqueté et lancé : un DMG, un
+APPX, un Flatpak, un Snap, un AppImage, un installeur `.exe`, ou un simple `./gradlew run`.
+Lis-le quand ton code doit se brancher sur le format d'empaquetage, par exemple pour choisir un
+canal de mise à jour, résoudre un chemin en écriture, ou détecter un sandbox.
 
-## Installation
+## Ajouter la dépendance
 
-Fourni avec `core-runtime`. Le module `aot-runtime` réexporte les mêmes types si l'on ne veux que la détection AOT.
+`ExecutableRuntime` et `ExecutableType` sont fournis par `core-runtime`, que l'umbrella Nucleus
+tire déjà. Ajoute-le explicitement seulement si tu dépends du module seul :
 
-## Quickstart
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+Le module `aot-runtime` réexporte les deux types sous forme de type aliases, de sorte que du
+code purement AOT peut dépendre de lui seul.
+
+## Détecter le format d'empaquetage
+
+Appelle `ExecutableRuntime.type()` et branche sur le `ExecutableType` renvoyé :
 
 ```kotlin
 import dev.nucleusframework.core.runtime.ExecutableRuntime
 import dev.nucleusframework.core.runtime.ExecutableType
 
 when (ExecutableRuntime.type()) {
-    ExecutableType.AppX     -> showMicrosoftStoreUpdate()
-    ExecutableType.Snap     -> showSnapStoreUpdate()
-    ExecutableType.Flatpak  -> showFlathubUpdate()
-    ExecutableType.Pkg      -> showMacAppStoreUpdate()
-    else                    -> NucleusUpdater { /* ... */ }.checkForUpdates()
-}
-
-if (ExecutableRuntime.isAppX()) {
-    // Sandboxé : écris dans le state du package, pas dans HOME
+    ExecutableType.APPX    -> showMicrosoftStoreUpdate()
+    ExecutableType.SNAP    -> showSnapStoreUpdate()
+    ExecutableType.FLATPAK -> showFlathubUpdate()
+    ExecutableType.PKG     -> showMacAppStoreUpdate()
+    else                   -> checkForUpdatesDirectly()
 }
 ```
 
-## Comment ça marche
+Pour un seul format, utilise le `is*()` correspondant :
 
-Le plugin Gradle écrit `-Dnucleus.executable.type=<kind>` dans le `.cfg` du launcher au packaging. La même property est baked-in pour les builds native-image. `ExecutableRuntime.type()` ne fait que la lire — donc c'est exactement aussi fiable que le pipeline de packaging (et complètement découplé d'heuristiques fichier type "est-ce que `/snap/` est dans mon path").
+```kotlin
+if (ExecutableRuntime.isAppX()) {
+    // Sandboxé : écris dans le state du package, pas dans des chemins HOME arbitraires
+}
+```
 
-En `./gradlew run`, aucune property n'est posée, donc le runtime renvoie `Jar` — sers-t'en comme signal dev mode. Conséquence : les features qui ont besoin d'une détection fiable (comme [`AutoLaunch.wasStartedAtLogin()`](/docs/lifecycle/auto-launch)) court-circuitent en dev pour éviter les faux positifs.
+## Fonctionnement
 
-## Référence
+Le plugin Gradle Nucleus enregistre le format d'empaquetage au moment du build. Pour les apps
+JVM empaquetées, il pose `-Dnucleus.executable.type=<kind>` dans le fichier `.cfg` du launcher ;
+pour les builds GraalVM native-image, où cette system property n'est pas disponible, il écrit un
+fichier marqueur `.nucleus-executable-type` à côté de l'exécutable.
 
-### `ExecutableRuntime`
+`ExecutableRuntime.type()` lit d'abord la system property, puis se rabat sur le fichier marqueur.
+La détection correspond exactement à ton pipeline d'empaquetage, et ne repose pas sur des
+heuristiques de fichiers comme vérifier si `/snap/` est dans le chemin.
 
-| Méthode | Renvoie | Notes |
+Quand aucune des deux sources n'est présente, comme avec `./gradlew run` ou tout exécutable non
+empaqueté, `type()` renvoie `ExecutableType.DEV`. Sers-t'en comme signal de mode dev.
+
+<Callout type="info">
+Les fonctionnalités qui ont besoin d'une détection fiable de l'empaquetage court-circuitent en
+mode dev pour éviter les faux positifs. Par exemple,
+[`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/auto-launch) renvoie `false` dès que
+`ExecutableRuntime.isDev()` vaut `true`.
+</Callout>
+
+## Référence de l'API
+
+### ExecutableRuntime
+
+| Membre | Renvoie | Notes |
 |---|---|---|
-| `type()` | `ExecutableType` | Lit `nucleus.executable.type`. |
-| `isAppX()`, `isFlatpak()`, `isSnap()`, `isAppImage()`, `isDmg()`, `isPkg()`, `isExe()`, `isMsi()`, `isDeb()`, `isRpm()`, `isJar()` | `Boolean` | Un par variante. |
+| `type()` | `ExecutableType` | Lit la property `nucleus.executable.type`, puis le fichier marqueur. |
+| `type(propertyName)` | `ExecutableType` | Lit le format depuis une system property personnalisée. |
+| `parseType(rawValue)` | `ExecutableType` | Parse une chaîne brute ; une entrée inconnue donne `DEV`. |
+| `markerVersion()` | `String?` | Version de l'app depuis le fichier marqueur (builds native-image). |
+| `isGraalVmNativeImage` | `Boolean` | `true` en exécution comme image native GraalVM. |
+| `isExe()`, `isMsi()`, `isNsis()`, `isNsisWeb()`, `isPortable()`, `isAppX()`, `isDmg()`, `isPkg()`, `isDeb()`, `isRpm()`, `isSnap()`, `isFlatpak()`, `isAppImage()`, `isPacman()`, `isZip()`, `isTar()`, `isSevenZ()`, `isDev()` | `Boolean` | Un test par valeur de `ExecutableType`. |
 
-### `ExecutableType`
+### ExecutableType
 
-`Jar, AppImage, Dmg, Pkg, Exe, Msi, AppX, Deb, Rpm, Flatpak, Snap` et compagnie.
+Un enum avec une valeur par format d'empaquetage pris en charge :
+
+- Windows : `EXE`, `MSI`, `NSIS`, `NSIS_WEB`, `PORTABLE`, `APPX`
+- macOS : `DMG`, `PKG`
+- Linux : `DEB`, `RPM`, `SNAP`, `FLATPAK`, `APPIMAGE`, `PACMAN`
+- Archives : `ZIP`, `TAR`, `SEVEN_Z`
+- Dev : `DEV`
 
 ## Notes
 
-- La variante `Jar` couvre `./gradlew run` et tout exécutable non packagé — pratique comme signal dev.
-- Pour la version, utilise [`NucleusApp.version`](/docs/lifecycle/app-metadata) — `ExecutableRuntime` ne connaît que la forme.
-- Le mode AOT (training vs runtime) vit dans un module voisin — `AotRuntime.mode()`.
+- `DEV` couvre `./gradlew run` et tout autre exécutable non empaqueté. C'est aussi le repli pour
+  un type inconnu ou manquant, donc un résultat `DEV` ne distingue pas « dans l'IDE » d'un
+  « empaquetage mal configuré ».
+- `ExecutableRuntime` ne connaît que le format d'empaquetage, pas le contenu de l'app. Pour la
+  version en cours d'exécution, utilise [`NucleusApp.version`](/docs/lifecycle/app-metadata).
+
+## Et ensuite
+
+- [Métadonnées de l'app](/docs/lifecycle/app-metadata) — lis l'id, la version et l'éditeur de l'app au runtime.
+- [Auto-launch](/docs/lifecycle/auto-launch) — démarre l'app au login, en fonction du format d'empaquetage.
+- [Mises à jour automatiques](/docs/packaging/auto-update) — choisis une stratégie de mise à jour par canal de distribution.

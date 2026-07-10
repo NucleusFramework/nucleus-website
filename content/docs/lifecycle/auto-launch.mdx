@@ -1,28 +1,30 @@
 ---
 title: Launch at login
-description: Cross-platform start-at-login — MSIX startup tasks, Win32 registry, macOS SMAppService, Linux systemd, Flatpak portal.
+description: Enable, disable, and query start-at-login from Kotlin with a single API that resolves the backend for the current packaging format.
 ---
 
-Launch-at-login should be one boolean. It isn't — every OS has its own mechanism, every packaging format reroutes it differently, and "the user disabled this via Task Manager" is a state you must respect. `autolaunch` exposes a single API that resolves the right backend for the current runtime and refuses to disrespect explicit user choices.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- One API across MSIX, Win32 (MSI/NSIS), macOS DMG/PKG (macOS 13+), Linux systemd-user, Linux Flatpak portal.
-- Backend selection is automatic — based on [`ExecutableRuntime.type()`](/docs/lifecycle/executable-type).
-- Five states: `ENABLED`, `DISABLED`, `DISABLED_BY_USER`, `DISABLED_BY_POLICY`, `ENABLED_BY_POLICY`, `UNSUPPORTED`.
-- Never loop on `BLOCKED_BY_USER` — that's an explicit user choice and the API will keep refusing.
-- `wasStartedAtLogin(args)` tells you if this very launch was a login one — useful to skip splash, start minimized, etc.
+The `autolaunch` module lets you enable, disable, and query start-at-login from Kotlin without
+writing per-OS code. It resolves the backend for the current packaging format at runtime — MSIX
+startup tasks, the Win32 registry, macOS `SMAppService`, Linux systemd user services, and the
+Flatpak background portal — and respects states the user set outside your app.
 
-## Install
+## Add the dependency
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.autolaunch:<version>")
 }
 ```
 
-On macOS, the JNI bridge in `nucleus.service-management-macos` is pulled in transitively — no extra declaration.
+On macOS, the JNI bridge in `nucleus.service-management-macos` is pulled in transitively, so you
+do not declare it separately.
 
-## Quickstart
+## Check and toggle auto-launch
+
+Read the current state with `AutoLaunch.state()` and branch on it. Call `enable()` or `disable()`
+to change it, and `openSystemSettings()` when the user must act in system UI:
 
 ```kotlin
 import dev.nucleusframework.autolaunch.AutoLaunch
@@ -32,17 +34,18 @@ when (AutoLaunch.state()) {
     AutoLaunchState.ENABLED          -> {}
     AutoLaunchState.DISABLED         -> AutoLaunch.enable()
     AutoLaunchState.DISABLED_BY_USER -> AutoLaunch.openSystemSettings()
-    AutoLaunchState.UNSUPPORTED      -> { /* macOS < 13, unsupported Linux env */ }
+    AutoLaunchState.UNSUPPORTED      -> { /* macOS < 13, unsupported Linux environment */ }
     else -> {}
-}
-
-// At main() entry — detect a login-triggered launch
-if (AutoLaunch.wasStartedAtLogin(args)) {
-    startMinimized = true
 }
 ```
 
-In Compose:
+<Callout type="warn">
+Never loop on `BLOCKED_BY_USER`. When the user disables the app through Task Manager or System
+Settings, `enable()` returns `BLOCKED_BY_USER` and keeps refusing until the user re-enables it
+manually. Send them to `openSystemSettings()` instead.
+</Callout>
+
+To wire a toggle in Compose, drive it from `state()`:
 
 ```kotlin
 Switch(
@@ -54,60 +57,105 @@ Switch(
 )
 ```
 
+## Detect a login launch
+
+`wasStartedAtLogin(args)` reports whether the current process was spawned by the login mechanism
+rather than started by hand. Check it at your `main()` entry point to skip a splash screen or start
+minimized:
+
+```kotlin
+fun main(args: Array<String>) {
+    if (AutoLaunch.wasStartedAtLogin(args)) {
+        startMinimized = true
+    }
+    // ...
+}
+```
+
+<Callout type="info">
+On macOS the login AppleEvent is delivered after `NSApplication.run()` starts, so the first call
+from `main()` usually returns `false`. The method caches positive results, so it is safe to poll it
+from a `LaunchedEffect` once the Compose loop is up.
+</Callout>
+
 ## How it works
+
+The runtime selects a backend from the operating system and the detected executable type — no
+per-OS conditional code on your side:
 
 | Packaging | Backend |
 |---|---|
-| MSIX | WinRT `Windows.ApplicationModel.StartupTask`. Manifest extension auto-injected by the plugin via `appx { addAutoLaunchExtension = true }`. |
-| Win32 (MSI / NSIS) | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` + reading `StartupApproved\Run` to detect user disable. |
+| MSIX | WinRT `Windows.ApplicationModel.StartupTask`. The plugin injects the manifest extension when `appx { addAutoLaunchExtension = true }`. |
+| Win32 (MSI / NSIS) | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, reading `StartupApproved\Run` to detect a user disable. |
 | macOS DMG / PKG (13+) | `SMAppService.mainApp`. Appears under System Settings → General → Login Items. |
-| Linux (deb / rpm / AppImage / dev) | systemd user service. |
-| Linux (Flatpak) | XDG Desktop Portal `org.freedesktop.portal.Background.RequestBackground`. |
+| Linux (host: deb / rpm / AppImage) | systemd user service under `~/.config/systemd/user/`. |
+| Linux (Flatpak) | XDG Desktop Portal `org.freedesktop.portal.Background`. |
 
-The runtime picks the backend at startup using `ExecutableRuntime`. None of this requires per-OS conditional code on your side.
+Three invariants the module enforces, which you should not work around:
 
-Three invariants the module enforces and you should not work around:
+1. **User choices are final.** Once the user disables auto-launch through system UI, the state is
+   `DISABLED_BY_USER` and `enable()` returns `BLOCKED_BY_USER` until the user re-enables it.
+2. **Silent updates do not reset state.** The Win32 backend writes to `Run` only on `enable()` and
+   touches `StartupApproved` only on `disable()`.
+3. **MSIX requires the manifest extension.** Without `<uap5:StartupTask>` in
+   `Package.appxmanifest`, the API returns `UNSUPPORTED`. Set `addAutoLaunchExtension = true` in the
+   plugin block and the plugin adds it.
 
-1. **Never loop on `BLOCKED_BY_USER`.** When the user toggled the app off via Task Manager / System Settings, calling `enable()` again is a no-op on MSIX and would be disrespectful on Win32. The API returns `BLOCKED_BY_USER` instead.
-2. **Silent updates must not reset auto-launch state.** The Win32 backend only writes to `Run` when you call `enable()`. It never touches `StartupApproved` unless you call `disable()`.
-3. **MSIX requires the manifest extension.** Without `<uap5:StartupTask>` in `Package.appxmanifest`, the API returns `UNSUPPORTED`. Set `addAutoLaunchExtension = true` in your plugin block and the plugin handles it.
+## API reference
 
-## Reference
+### AutoLaunch
 
-### `AutoLaunch`
+`AutoLaunch` is an object; all methods are static.
 
 | Method | Returns | Notes |
 |---|---|---|
-| `state()` | `AutoLaunchState` | Current state. |
-| `enable()` | `AutoLaunchResult` | See result table. |
-| `disable()` | `AutoLaunchResult` | |
-| `openSystemSettings()` | `Boolean` | `ms-settings:startupapps` (Windows), Login Items pane (macOS), best-effort on Linux. |
-| `wasStartedAtLogin(args)` | `Boolean` | Detects whether the current process was spawned by login. Returns `false` in dev mode. |
-| `diagnostic()` | `String` | Human-readable backend trace — for support tickets. |
-| `preload()` | `Unit` | Eagerly initializes the backend (optional — saves a few ms on first call). |
+| `state()` | `AutoLaunchState` | Current auto-launch state. |
+| `enable()` | `AutoLaunchResult` | Requests auto-launch on. |
+| `disable()` | `AutoLaunchResult` | Requests auto-launch off. |
+| `openSystemSettings()` | `Boolean` | Opens `ms-settings:startupapps` (Windows) or System Settings → General → Login Items (macOS). `true` if the UI launched. |
+| `wasStartedAtLogin(args)` | `Boolean` | Whether this process was spawned by login. Returns `false` in dev mode. |
+| `isEnabled()` | `Boolean` | `true` for `ENABLED` or `ENABLED_BY_POLICY`. |
+| `isUserLocked()` | `Boolean` | `true` when the state is `DISABLED_BY_USER`. |
+| `diagnostic()` | `String` | Human-readable backend trace for support tickets. |
+| `preload()` | `Unit` | Eagerly resolves the backend and loads its JNI library. Call from a background thread to avoid a first-call stall on macOS. |
 
-### `AutoLaunchState`
+### AutoLaunchState
 
 `ENABLED`, `DISABLED`, `DISABLED_BY_USER`, `DISABLED_BY_POLICY`, `ENABLED_BY_POLICY`, `UNSUPPORTED`.
 
-### `AutoLaunchResult`
+`DISABLED_BY_POLICY` and `ENABLED_BY_POLICY` are read-only Group Policy states (MSIX only).
+
+### AutoLaunchResult
 
 `OK`, `UNCHANGED`, `BLOCKED_BY_USER`, `BLOCKED_BY_POLICY`, `UNSUPPORTED`, `ERROR`.
 
-### `AutoLaunchConfig`
+### AutoLaunchConfig
 
-Override defaults before the first `AutoLaunch` call:
+Override the defaults before the first `AutoLaunch` call:
 
 | Property | Affects |
 |---|---|
-| `taskId` | MSIX startup task id. |
-| `executablePath` | Win32, Linux systemd path; Linux Flatpak basename. |
-| `autostartArgument` | CLI marker added to the registered command (Win32 + Linux Flatpak). |
+| `taskId` | MSIX startup task id; must match `<uap5:StartupTask TaskId="...">`. |
+| `executablePath` | Win32 `HKCU\...\Run` path. Resolved from the running process when `null`. |
+| `autostartArgument` | CLI marker appended to the registered command (default `--nucleus-autostart`). |
 | `registryValueName` | Win32 `HKCU\...\Run` value name. |
-| `backgroundReason` | Reason string for the Flatpak portal prompt. |
+| `backgroundReason` | Reason string shown in the Flatpak portal prompt. |
 
 ## Notes
 
-- MSIX-only quirk: toggling auto-launch programmatically does **not** update the Task Manager "Startup apps" tab live — Windows refreshes that view after the next login. The state itself is correct; only the Task Manager display lags.
-- Detection of a login-triggered launch on macOS relies on the undocumented `LaunchInstanceID` env var that `launchd` sets on managed jobs — Apple ships no public API for this (radar FB10207829). It's empirical but reliable.
-- `wasStartedAtLogin()` short-circuits to `false` in dev mode (`ExecutableRuntime.isJar()`) to avoid false positives from env vars inherited from the parent shell.
+- On MSIX, toggling auto-launch programmatically does not refresh the Task Manager "Startup apps"
+  tab live — Windows updates that view after the next login. The stored state is correct; only the
+  display lags.
+- macOS login detection reads the `keyAELaunchedAsLogInItem` marker from the AppleEvent that
+  `loginwindow` dispatches at login. Apple ships no public API for this.
+- `wasStartedAtLogin()` returns `false` in dev mode (`ExecutableRuntime.isDev()`) to avoid false
+  positives from environment variables inherited from the parent shell. Production builds must set
+  the `nucleus.executable.type` system property or ship the `.nucleus-executable-type` marker file,
+  or `ExecutableRuntime` defaults to `DEV` and the method always returns `false`.
+
+## What's next
+
+- [Executable type](/docs/lifecycle/executable-type) — how the runtime detects the packaging format that drives backend selection.
+- [Service management](/docs/lifecycle/service-management) — register login items, agents, and daemons on macOS.
+- [Single instance](/docs/lifecycle/single-instance) — route login launches into an already-running process.
+- [Scheduler](/docs/lifecycle/scheduler) — run background work after a login launch.

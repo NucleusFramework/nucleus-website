@@ -1,78 +1,111 @@
 ---
 title: Nucleus vs Electron
-description: Chromium et un pont Node, ou Skia natif et un seul process Kotlin.
+description: Comment Nucleus et Electron diffèrent sur le rendu, l'accès à l'OS, les décorations de fenêtre et le packaging.
 ---
 
-Electron a fait livrer des apps desktop en JavaScript à toute la planète en payant un impôt — un Chromium par app, deux runtimes par process, de l'IPC entre renderer et main, de la RAM se comptant en centaines de mégaoctets. Nucleus fait l'échange inverse : garder l'ergonomie dev, virer le Chromium, faire tourner un seul process Kotlin de l'UI à l'OS.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Un langage contre quatre. Un process contre renderer + main + pont IPC.
-- Renderer Skia natif au lieu de Chromium — cold start ~0,5 s, RAM ~60 MB (GraalVM).
-- Auto-update, signature, sandboxing, 16 formats de packaging — parité complète avec electron-builder, sans le contexte JS.
-- Perd sur le bassin d'embauche et l'âge de l'écosystème. Electron a la plus grosse communauté JS desktop.
+Electron rend l'UI desktop avec un Chromium embarqué et exécute la logique applicative dans
+un process Node séparé, en communiquant par IPC. Nucleus rend l'UI Compose vers Skia et
+exécute l'UI, la logique métier et l'accès à l'OS dans un seul process Kotlin. Cette page
+compare les deux.
 
 ## Comparaison
 
 | | **Nucleus** | Electron |
 |--|------------|----------|
 | Langages | Kotlin | JS + Node + modules natifs |
-| Renderer | Compose UI + Skia GPU | Chromium (Blink + V8) |
-| Modèle process | Mono-process | Renderer + main + IPC |
+| Rendu | Compose UI + Skia GPU | Chromium (Blink + V8) |
+| Modèle de process | Mono-process | Renderer + main + IPC |
 | API natives | 30+ modules Kotlin, in-process | Node `child_process` / modules natifs |
 | Chrome OS | Fenêtres décorées : Liquid Glass, Fluent, Yaru, Jewel | Chrome Chromium |
 | Cold start | ~0,5 s (GraalVM) · ~1,0 s (JVM+AOT) | 2–3 s |
-| RAM idle | 60–150 MB | 200–500 MB |
+| RAM au repos | 60–150 MB | 200–500 MB |
 | Taille binaire | 38 MB (GraalVM) · ~120 MB (JVM) | 150–200 MB |
-| Auto-update | Intégré (`updater-runtime`) | electron-updater (mature) |
+| Auto-update | Intégré (`updater-runtime`) | electron-updater |
 | Packaging | 16 formats depuis un DSL | 5–7 via electron-builder |
 | Écosystème | JVM (Maven Central, ~500k libs) | npm |
 
-## L'impôt Chromium
+<Callout type="info">
+Les chiffres de mémoire et de cold start varient beaucoup d'une app à l'autre. Les
+fourchettes Electron ci-dessus correspondent à une enveloppe typique « Hello World plus
+petite single-page app » issue de benchmarks publics, pas à des valeurs fixes.
+</Callout>
 
-Electron livre un navigateur complet par app parce que c'est la seule façon de rendre du contenu web avec la cohérence qu'attendent les devs JS. Coût : chaque app Electron paie V8, Blink, Skia, plus un runtime Node, tous liés dans l'arbre de process. Six apps Electron idle sur la machine, et on est à 3 GB de RAM sans rien faire.
+## Rendu
 
-Nucleus rend l'UI Compose directement vers Skia via le backend Skiko de Compose Multiplatform. Pas de Blink, pas de V8, pas de Node. La JVM exécute le code ; Skia GPU peint les pixels. Tout vit dans un seul process, partageant un seul heap. Le plafond de perf est celui de la JVM — et sur les hot paths, la JVM atteint le throughput de C++ une fois HotSpot chauffé.
+Electron embarque un moteur de navigateur complet dans chaque app : V8, Blink et Skia, plus
+un runtime Node, tous liés dans l'arbre de process. Chaque app en cours porte sa propre
+copie, si bien que la consommation mémoire s'accumule sur plusieurs apps.
 
-## L'impôt IPC
+Nucleus rend l'UI Compose vers Skia via le backend Skiko de Compose Multiplatform. Il n'y a
+ni Blink, ni V8, ni Node. La JVM exécute ton code et Skia dessine sur le GPU, le tout dans un
+seul process partageant un seul heap. Une fois HotSpot chauffé, le débit sur les hot paths
+est comparable à celui du code natif.
 
-Le renderer d'Electron ne peut pas toucher l'OS — pour ça il envoie des messages via `ipcRenderer` / `ipcMain`. Chaque lecture de fichier, chaque clic dans la system tray, chaque notification, traverse une frontière de sérialisation. La sécurité de type s'arrête au câble. On ajoute des couches de wrappers `contextBridge`, on débugue depuis deux fenêtres devtools, on maintient deux moitiés de chaque fonctionnalité.
+## Accès à l'OS
 
-Avec Nucleus, le UI Compose appelle `NotificationManager.send(...)`, `GlobalHotKeyManager.register(...)` ou `SystemInfo.cpuInfo()` directement. Même call graph, même coroutine, même debugger.
+Le process renderer d'Electron ne peut pas appeler l'OS directement. Il envoie des messages
+au process main via `ipcRenderer` et `ipcMain`, donc chaque lecture de fichier, chaque clic
+dans la system tray et chaque notification traverse une frontière de sérialisation. La
+sécurité de type s'arrête à cette frontière, et chaque fonctionnalité est répartie sur deux
+process avec des wrappers `contextBridge` et deux jeux de devtools.
 
-## Décorations natives
+Avec Nucleus, ton UI Compose appelle `NotificationManager.send(...)`,
+`GlobalHotKeyManager.register(...)` ou `SystemInfo.cpuInfo()` directement — même call graph,
+même coroutine, même debugger.
 
-Les fenêtres Electron ressemblent à Chrome. Pour passer pour natives, on bats avec le chrome Chromium — frames custom, `vibrancy`, régions draggables encodées en CSS. La couche [fenêtre décorée](/docs/window) de Nucleus rend la titre bar dans Compose avec quatre toolkits :
+## Décorations de fenêtre
 
-- macOS — Liquid Glass au SDK 26+, automatique via patching `vtool`.
-- Fluent — acrylique Windows 11, indices de snap-layout, mica.
-- Yaru — disposition de boutons native Ubuntu qui réagit aux réglages GNOME en live.
+Les fenêtres Electron s'affichent avec le chrome de Chromium. Obtenir un rendu natif oblige à
+remplacer le cadre, appliquer la vibrancy et encoder les régions déplaçables en CSS. La
+couche [fenêtre décorée](/docs/window) de Nucleus dessine la barre de titre dans Compose avec
+quatre toolkits :
+
+- macOS — Liquid Glass au SDK 26+, appliqué automatiquement via le patching `vtool`.
+- Fluent — acrylique Windows 11, indices de snap-layout et mica.
+- Yaru — disposition de boutons Ubuntu qui suit les réglages GNOME en direct.
 - Jewel — look IntelliJ Platform.
 
-Apporte le design system par-dessus — adaptateurs Material 2/3 livrés out of the box.
+Des adaptateurs Material 2 et Material 3 sont fournis pour venir par-dessus.
 
-## Là où Electron gagne encore
+## Là où Electron convient mieux
 
-- **Bassin d'embauche.** Tout le monde connaît JS. Moins de gens connaissent Kotlin Multiplatform desktop.
-- **Âge de l'écosystème.** Electron a livré VS Code, Slack, Discord, Figma, Notion. Cicatrices accumulées sur une décennie.
-- **Réemploi web.** Si le produit est déjà une single-page app, l'emballer dans Electron bat la réécriture en Compose pour la v1.
-- **Bibliothèques Node.** La surface npm est plus large que n'importe quelle catégorie de bibliothèques JVM unique — même si la JVM écrase npm en nombre absolu (~500k artefacts Maven Central).
+- **Bassin d'embauche.** Plus de développeurs connaissent JavaScript que Kotlin Multiplatform desktop.
+- **Âge de l'écosystème.** Electron fait tourner VS Code, Slack, Discord, Figma et Notion,
+  avec une décennie d'usage en production.
+- **Réemploi web.** Si ton produit est déjà une single-page app, l'emballer dans Electron
+  demande moins de travail que le réécrire en Compose pour une première version.
+- **Bibliothèques Node.** npm couvre une surface plus large dans certaines catégories, même
+  si la JVM compte plus d'artefacts au total (~500k sur Maven Central).
 
-## Là où Nucleus prend l'avantage
+## Là où Nucleus convient mieux
 
-- Un langage, un mindset, un debugger. UI, métier, appels OS, packaging — tout Kotlin, même call graph.
-- Rendu natif — le app n'a pas l'air d'un site web qui prétend être une app.
-- Deux runtimes (GraalVM Native Image · JVM + cache AOT) depuis la même source — voir [performance](/docs/performance/index).
-- 16 formats de packaging vs 5–7 — voir [comparaison packaging](/docs/compare/packaging).
-- Le catalogue JVM complet tourne in-process. Apache Lucene, DuckDB, ONNX Runtime, Tika, Netty, Spark — tous à un `implementation` de distance, sans pont natif.
+- Un seul langage pour l'UI, la logique métier, les appels OS et le packaging — un seul call
+  graph, un seul debugger.
+- Un rendu natif plutôt qu'un navigateur embarqué.
+- Deux runtimes (GraalVM Native Image et JVM + cache AOT) depuis la même source — voir
+  [performance](/docs/performance/index).
+- 16 formats de packaging contre 5–7 — voir [comparaison packaging](/docs/compare/packaging).
+- Le catalogue de bibliothèques JVM tourne in-process. Apache Lucene, DuckDB, ONNX Runtime,
+  Tika, Netty et Spark sont à une dépendance `implementation` de distance, sans pont natif.
 
 ## Quand choisir Electron
 
-Une équipe une équipe JS qui livre une v1, le produit existe déjà en web app, et le budget RAM/perf absorbe l'impôt Chromium. Ou on a un codebase Electron existant et le coût de migration l'emporte sur l'impôt continu.
+Tu as une équipe JavaScript qui livre une première version, ton produit existe déjà en web
+app, et ton budget mémoire et performance peut absorber le Chromium embarqué. Ou tu as un
+codebase Electron existant dont la migration coûte plus cher que la charge continue.
 
 ## Quand choisir Nucleus
 
-Pour qui veut un seul langage bout-en-bout, du rendu natif, du packaging store-ready et l'écosystème JVM in-process. Pour qui livre à des réseaux d'entreprise où les CA racines corporate comptent et `native-ssl` épargne un quart des incidents. Le cold start tient à cœur au point de câbler GraalVM Native Image.
+Tu veux un seul langage de bout en bout, un rendu natif, des installeurs natifs et
+l'écosystème JVM in-process. Tu livres à des réseaux d'entreprise où les CA racines corporate
+comptent et où `native-ssl` les prend en charge. Le cold start compte assez pour câbler
+GraalVM Native Image.
 
-## Notes
+## Et ensuite
 
-`[FACT-CHECK NEEDED]` sur les chiffres exacts RAM/cold-start d'Electron — ils varient énormément par app. La fourchette 200–500 MB / 2–3 s est l'enveloppe typique « Hello World + petit SPA » des benchmarks publics.
+- [Nucleus vs Tauri](/docs/compare/tauri) — une autre comparaison de shell natif.
+- [Comparaison packaging](/docs/compare/packaging) — formats et signature selon les frameworks.
+- [Performance](/docs/performance/index) — les runtimes GraalVM et JVM.
+- [Fenêtres décorées](/docs/window) — barres de titre natives et chrome de fenêtre.

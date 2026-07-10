@@ -1,40 +1,65 @@
 ---
 title: Correcteur orthographique natif
-description: PlatformSpellCheckerKt — un wrapper Kotlin Multiplatform sur le moteur de correction natif de chaque OS.
+description: Vérifie l'orthographe dans une application Kotlin avec PlatformSpellCheckerKt, un wrapper sur le moteur de correction natif de chaque système d'exploitation.
 ---
 
-La correction orthographique est un domaine profond et lourd en locales. La bonne réponse est d'utiliser le même moteur que l'OS utilise partout ailleurs — et l'écosystème Kotlin a déjà le wrapper.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Utilise [**PlatformSpellCheckerKt**](https://github.com/Wavesonics/PlatformSpellCheckerKt) par [@Wavesonics](https://github.com/Wavesonics).
-- Wrappe `NSSpellChecker` sur macOS, `ISpellChecker` sur Windows (depuis Windows 8), et `enchant`/`hunspell` sur Linux.
-- Suggestions, détection de langue, dictionnaires custom.
+[PlatformSpellCheckerKt](https://github.com/Wavesonics/PlatformSpellCheckerKt) te permet de
+vérifier l'orthographe depuis Kotlin en utilisant le moteur de correction natif de chaque système
+d'exploitation. Nucleus ne fournit pas de module de correction orthographique ; cette bibliothèque
+couvre déjà les plateformes visées par Nucleus, alors ajoute-la directement à ton application.
 
-## Installation
+## Ajouter la dépendance
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("com.darkrockstudios:platform-spellchecker:<version>")
+    implementation("com.darkrockstudios:platform-spellcheckerkt:<version>")
 }
 ```
 
-## Démarrage rapide
+## Vérifier l'orthographe
+
+Crée un checker via `PlatformSpellCheckerFactory`, puis vérifie soit un mot seul, soit une chaîne
+entière :
 
 ```kotlin
-val checker = PlatformSpellChecker()
+val checker = PlatformSpellCheckerFactory().createSpellChecker()
 
-val misspellings = checker.check("This is a sentance with errors")
-// → [Misspelling(word = "sentance", suggestions = ["sentence", ...])]
+// Vérifie un seul mot ; le résultat porte les corrections suggérées.
+val result = checker.checkWord("sentance")
+val suggestions = result.suggestions // ex. ["sentence", ...]
+
+// Vérifie une chaîne complète ; chaque entrée indique le mot mal orthographié et sa position.
+val misspellings = checker.checkMultiword("This is a sentance with errors")
+// chaque entrée : misspelledWord, startIndex, length
 ```
 
-## Comment ça marche
+`checkWord` valide un seul token et renvoie ses suggestions. `checkMultiword` parcourt une chaîne
+et renvoie une entrée par faute, chacune avec le mot et sa position dans le texte.
+
+## Fonctionnement
+
+La bibliothèque s'appuie sur le moteur de correction déjà intégré au système hôte :
 
 - **macOS** — `NSSpellChecker`, le même moteur que TextEdit et les champs de texte système.
-- **Windows** — Windows Spell Check API (`ISpellChecker`), disponible depuis Windows 8.
-- **Linux** — `enchant` / `hunspell`.
+- **Windows** — la Windows Spell Checking API (disponible depuis Windows 8), via l'interface COM
+  `ISpellCheckerFactory`.
+- **Linux** — `hunspell`.
 
-On obtient des suggestions, de la détection de langue, et le support de dictionnaires custom — même comportement que l'utilisateur voit déjà partout dans son OS.
+Comme elle utilise le moteur de la plateforme, le comportement de correction, les dictionnaires
+installés et la détection de langue correspondent à ce que l'utilisateur voit déjà ailleurs sur son
+système.
 
-## Pourquoi Nucleus ne livre pas ça
+## Notes
 
-La correction orthographique est lourde en locales et bénéficie d'une bibliothèque focalisée et bien testée. PlatformSpellCheckerKt wrappe déjà les bons moteurs natifs sans limitation JVM que Nucleus aurait à contourner.
+<Callout type="warn">
+Sur Linux, la correction orthographique dépend de `hunspell`. Installe-le via le gestionnaire de
+paquets de ta distribution ; s'il est absent, le checker ne peut pas fonctionner.
+</Callout>
+
+## Et ensuite
+
+- [L'écosystème JVM](/docs/ecosystem) — des bibliothèques qui couvrent les besoins courants du desktop.
+- [Fenêtres de fichiers natives](/docs/ecosystem/file-dialog) — FileKit pour les sélecteurs d'ouverture, d'enregistrement et de dossier.
+- [Quickstart](/docs/start/quickstart) — construis et lance une application Nucleus.

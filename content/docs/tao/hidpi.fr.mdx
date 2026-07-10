@@ -1,30 +1,19 @@
 ---
 title: HiDPI par moniteur
-description: Drag une fenêtre entre un écran 4K et un 1080p — Tao met à jour la surface, Compose reste en Dp, le rendu reste net.
+description: Le backend Tao suit un facteur de scale par fenêtre pour que les mises en page Compose restent en Dp et que le rendu corresponde à la densité pixel de chaque écran.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Les configurations à DPI mixtes sont la norme : un moniteur 4K à côté d'un laptop 1080p, scaling fractionnaire sous Linux, Retina miroir sur du non-Retina sur macOS. Le backend Tao suit l'output courant de chaque fenêtre et reconfigure sa surface de rendu à chaque changement de scale — Compose reste en `Dp`, le GPU rasterise à la bonne densité.
+Le backend Tao suit le facteur de scale de l'écran courant de chaque fenêtre et reconfigure sa surface de rendu quand ce facteur change. Ta mise en page Compose reste en `Dp` ; seul le rendu rasterisé change pour correspondre à la densité pixel de l'écran. Le HiDPI par moniteur fait partie de `decorated-window-tao` et ne demande aucune configuration supplémentaire.
 
-## TL;DR
-- Chaque fenêtre a son propre facteur de scale ; Tao le met à jour au déplacement entre moniteurs.
-- Les valeurs Compose `Dp` restent logiques — Skiko rasterise à la densité pixel de chaque fenêtre.
-- Marche sur macOS (Retina + arrangement d'écrans), Windows (Per-Monitor V2), Linux Wayland (`wp_fractional_scale_v1`).
-- Pour les sessions X11, voir le module [`linux-hidpi`](/docs/performance/linux-hidpi).
+## Lire la densité courante
 
-## Install
-
-Inclus avec `decorated-window-tao`. Aucun opt-in.
-
-## Comment ça marche
-
-À l'ouverture d'un `DecoratedWindow` sur Tao, le backend demande à l'output actif son facteur de scale et configure la surface Skiko en conséquence — `CAMetalLayer.contentsScale` sur macOS, l'espace colorimétrique de la swapchain sur Windows, buffer scale EGL sur Wayland. La fenêtre native reçoit `WindowEvent::ScaleFactorChanged` chaque fois que l'utilisateur drag entre écrans, branche un moniteur ou change le scale système. Tao remonte ça à la `ComposeScene`, qui propage une nouvelle `LocalDensity` à les composables.
-
-Conséquence pratique : `Modifier.size(48.dp)` vaut 48 dp sur un moniteur 1.0 (48 pixels), 96 dp sur un 2.0 (96 pixels), 72 dp sur un output Wayland 1.5. L'UI ne change pas — seul le rendu rasterisé change.
+Lis `LocalDensity` dans n'importe quel composable pour obtenir le facteur de scale de la fenêtre où il s'affiche :
 
 ```kotlin
-import androidx.compose.runtime.*
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalDensity
 
 @Composable
@@ -34,24 +23,41 @@ fun ShowDensity() {
 }
 ```
 
-## Différences vs `linux-hidpi`
+La valeur se met à jour automatiquement quand la fenêtre passe sur un écran de facteur de scale différent.
 
-`linux-hidpi` est un helper X11/AWT : il lit le scale système depuis GSettings / `Xft.dpi` et l'applique aux propriétés JVM avant le boot d'AWT. C'est un unique scale global, posé une fois au démarrage. Utilise-le quand on livre les backends AWT (JBR / JNI) sur sessions X11.
+## Fonctionnement
 
-Le backend Tao n'en a pas besoin — il observe les changements de scale par fenêtre au runtime. Quand on migre de JBR vers Tao sur Linux, on peut retirer la dépendance `linux-hidpi`.
+À l'ouverture d'un `DecoratedWindow` sur Tao, le backend demande à l'écran actif son facteur de scale et configure la surface Skiko en conséquence : `CAMetalLayer.contentsScale` sur macOS, l'espace colorimétrique de la swapchain sur Windows et le buffer scale EGL sur Wayland.
+
+La fenêtre native reçoit un événement `ScaleFactorChanged` chaque fois que tu la déplaces entre écrans, que tu branches un moniteur externe ou que tu changes le scale système. Tao transmet cet événement à la `ComposeScene`, qui propage une nouvelle `LocalDensity` à tes composables.
+
+Résultat : un `Modifier.size(48.dp)` occupe 48 pixels physiques sur un écran 1.0, 96 pixels physiques sur un écran 2.0 et 72 pixels physiques sur un output Wayland fractionnaire 1.5. La mise en page ne change pas — seul le rendu rasterisé change.
+
+## linux-hidpi et les backends AWT
+
+Le module [`linux-hidpi`](/docs/performance/linux-hidpi) lit un unique scale global depuis l'environnement de bureau (GSettings, Mutter, `GDK_SCALE` ou `Xft.dpi`) et l'applique aux propriétés JVM avant l'initialisation d'AWT, via `applyLinuxHiDpiScale()`. Il pose un seul scale au démarrage et ne réagit pas aux changements par fenêtre.
+
+Le backend Tao n'utilise pas ce helper — il observe les changements de scale par fenêtre au runtime. Quand tu migres des backends AWT vers Tao sur Linux, tu peux retirer la dépendance `linux-hidpi`.
 
 <Callout type="info">
-Pour des setups X11 uniquement où on doit utiliser les backends AWT, garde le module `linux-hidpi`. Voir [/docs/performance/linux-hidpi](/docs/performance/linux-hidpi).
+Garde `linux-hidpi` uniquement pour les sessions où tu utilises encore les backends AWT (JBR ou JNI). Voir [linux-hidpi](/docs/performance/linux-hidpi).
 </Callout>
 
-## Reference
+## Référence de l'API
 
-- `LocalDensity.current` — densité Compose de la fenêtre courante.
-- `Platform.isWayland` — distingue Wayland (scaling fractionnaire) de X11.
-- `WindowState` — garde les tailles en `Dp`, jamais en pixels.
+- `LocalDensity.current` — la densité Compose de la fenêtre où le composable s'affiche.
+- `Platform.isWayland` — `true` sur une session Wayland, où le scaling fractionnaire est par moniteur ; `false` sur X11.
+- `WindowState` — conserve les tailles de fenêtre en `Dp`, jamais en pixels, pour qu'elles survivent à un changement de scale.
 
 ## Notes
 
-- Sur Windows 10 1607+, Tao déclare Per-Monitor V2 DPI awareness via le manifest. Le plugin Gradle s'en charge pour les builds packagés.
-- Sur macOS, les backing stores Retina sont automatiques — pas d'opt-in.
-- Le scaling fractionnaire sur KDE Plasma marche sur X11 et Wayland avec Tao, mais Wayland donne la précision par moniteur.
+- Sur Windows 10 1607 et versions ultérieures, Tao déclare la conscience DPI Per-Monitor V2 via le manifest de l'application. Le plugin Gradle Nucleus écrit ce manifest pour les builds packagés.
+- Sur macOS, les backing stores Retina sont configurés automatiquement.
+- Le scaling fractionnaire sur KDE Plasma fonctionne sur X11 et Wayland, mais seul Wayland rapporte une précision par moniteur.
+
+## Et ensuite
+
+- [Backend Tao](/docs/tao) — le backend de fenêtrage natif sans AWT.
+- [Wayland](/docs/tao/wayland) — détection de session et comportement spécifique à Wayland.
+- [linux-hidpi](/docs/performance/linux-hidpi) — détection du scale global pour les backends AWT.
+- [Fenêtre décorée](/docs/tao/decorated-window) — la fenêtre dans laquelle tu affiches ton UI.

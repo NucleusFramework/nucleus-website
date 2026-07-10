@@ -1,0 +1,136 @@
+---
+title: SF Symbols
+description: Type-safe Kotlin constants for Apple SF Symbol names used by macOS APIs.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`sf-symbols` provides Apple's [SF Symbols](https://developer.apple.com/sf-symbols/) names as
+typed Kotlin constants. macOS APIs that draw a symbol take its name as a string; instead of
+writing `"scissors"` by hand, you reference `SFSymbolObjectsAndTools.SCISSORS` and let the
+compiler check it. Other Nucleus macOS modules accept these constants wherever they take an icon.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.sf-symbols:<version>")
+}
+```
+
+<Callout type="info">
+`menu-macos` exposes `sf-symbols` through `api()`. If you already depend on `menu-macos`, the
+constants are on your classpath without a separate declaration.
+</Callout>
+
+## Reference a symbol
+
+Every symbol is a value of the sealed interface `SFSymbol`. Pick a constant from the category
+enum that matches the symbol's context:
+
+```kotlin
+import dev.nucleusframework.sfsymbols.SFSymbolGeneral
+import dev.nucleusframework.sfsymbols.SFSymbolMedia
+import dev.nucleusframework.sfsymbols.SFSymbolObjectsAndTools
+
+val gear = SFSymbolGeneral.GEAR
+val play = SFSymbolMedia.PLAY
+val scissors = SFSymbolObjectsAndTools.SCISSORS
+```
+
+Each constant carries its SF Symbols name in `symbolName`. Pass the constant straight to a macOS
+API that takes a symbol — for example, a native menu item icon:
+
+```kotlin
+import dev.nucleusframework.menu.macos.NsMenuItemImage
+import dev.nucleusframework.sfsymbols.SFSymbolObjectsAndTools
+
+val icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.SCISSORS)
+```
+
+For a name not covered by the constants, or to target a symbol from a newer SF Symbols release,
+use `SFSymbol.Custom`:
+
+```kotlin
+import dev.nucleusframework.sfsymbols.SFSymbol
+
+val custom = SFSymbol.Custom("my.custom.symbol")
+```
+
+## How it works
+
+Every constant exposes a `symbolName` string that holds its SF Symbols name — `GEAR` resolves to
+`"gear"`, `PLAY` to `"play"`. `Custom` wraps an arbitrary string in the same type, so any
+`SFSymbol` is ultimately a name that macOS can look up with `NSImage.imageWithSystemSymbolName`.
+
+When you hand an `SFSymbol` to a macOS module, only the `symbolName` reaches the native layer. The
+system resolves that name to the installed SF Symbols glyph at render time, so the symbol follows
+the user's system appearance without shipping any image assets.
+
+The constants are plain strings, so the module compiles on any platform. SF Symbols themselves
+require macOS 11 or later; on earlier macOS or other operating systems, a name resolves to nothing.
+
+## API reference
+
+### Categories
+
+`SFSymbol` is a sealed interface. Each category is an enum whose entries map to SF Symbols names;
+`Custom` is a value class for everything else. All 21 category enums implement `SFSymbol`, so any
+constant is usable wherever an `SFSymbol` is expected.
+
+| Category | Symbols | Examples |
+| --- | --- | --- |
+| `SFSymbolGeneral` | 1362 | `GEAR`, `GEARSHAPE` |
+| `SFSymbolHuman` | 596 | `ACCESSIBILITY`, `BRAIN` |
+| `SFSymbolShapes` | 542 | `APP`, `APP_BADGE` |
+| `SFSymbolArrows` | 535 | `ARROW_LEFT`, `ARROW_CLOCKWISE` |
+| `SFSymbolTransportation` | 417 | `AIRPLANE`, `AIRPLANE_ARRIVAL` |
+| `SFSymbolObjectsAndTools` | 358 | `SCISSORS`, `FOLDER`, `TRASH` |
+| `SFSymbolDevices` | 349 | `DESKTOPCOMPUTER`, `KEYBOARD` |
+| `SFSymbolNumbers` | 301 | `_0_CIRCLE`, `_0_CIRCLE_FILL` |
+| `SFSymbolWeather` | 286 | `CLOUD`, `SUN_MAX`, `BOLT` |
+| `SFSymbolStatus` | 273 | `CHECKMARK`, `INFO_CIRCLE` |
+| `SFSymbolCommerce` | 264 | `BAG`, `BAG_BADGE_PLUS` |
+| `SFSymbolMedia` | 238 | `PLAY`, `PAUSE`, `STOP` |
+| `SFSymbolLetters` | 142 | `A_CIRCLE`, `A_SQUARE` |
+| `SFSymbolTextFormatting` | 117 | `BOLD`, `CHARACTER` |
+| `SFSymbolCommunication` | 101 | `ENVELOPE`, `PHONE`, `MESSAGE` |
+| `SFSymbolPower` | 76 | `POWER`, `POWER_CIRCLE` |
+| `SFSymbolSecurity` | 62 | `KEY`, `KEY_FILL` |
+| `SFSymbolHealth` | 57 | `ALLERGENS`, `BASEBALL` |
+| `SFSymbolLocation` | 47 | `FLAG`, `COMPASS_DRAWING` |
+| `SFSymbolTime` | 45 | `ALARM`, `ALARM_FILL` |
+| `SFSymbolConnectivity` | 27 | `CABLE_COAXIAL`, `CABLE_CONNECTOR` |
+
+<Callout type="info">
+Number symbols begin with a digit, which is not a valid Kotlin identifier, so their constants are
+prefixed with an underscore: `SFSymbolNumbers._0_CIRCLE` maps to `"0.circle"`.
+</Callout>
+
+### Build a custom symbol
+
+`SFSymbol.Custom(symbolName: String)` is an inline value class. Its `symbolName` is used verbatim,
+so use it for symbols outside the predefined constants or from a newer SF Symbols version:
+
+```kotlin
+SFSymbol.Custom("bird.fill")
+SFSymbol.Custom("my.custom.symbol")
+```
+
+### Use a symbol with menu-macos
+
+`NsMenuItemImage.SystemSymbol` has an overload that takes an `SFSymbol` directly, so a constant
+becomes a menu item icon without touching its `symbolName`:
+
+```kotlin
+import dev.nucleusframework.menu.macos.NsMenuItemImage
+import dev.nucleusframework.sfsymbols.SFSymbolGeneral
+
+NsMenuItemImage.SystemSymbol(SFSymbolGeneral.GEAR)
+```
+
+## What's next
+
+- [Native menu bar](/docs/os/menu-macos) — attach `SystemSymbol` icons to menu items.
+- [FreeDesktop icon names](/docs/os/freedesktop-icons) — the equivalent typed icon constants for Linux.
+- [OS integration](/docs/os) — the rest of the desktop OS modules.

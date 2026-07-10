@@ -1,64 +1,86 @@
 ---
 title: Certificats CA de confiance
-description: Embarque des CA racines privées dans le JDK livré pour que HTTPS marche sur les réseaux verrouillés.
+description: Importe des certificats de CA racines privées dans le JDK embarqué avec ton application empaquetée pour que ses appels HTTPS leur fassent confiance.
 ---
 
-Les proxys d'entreprise, les passerelles ZTNA et les services de filtrage FAI font souvent du man-in-the-middle TLS avec une CA racine privée. Le trust store JDK par défaut ne la connaît pas, donc chaque appel HTTPS de le app jette `SSLHandshakeException`. Plutôt que demander à l'utilisateur de patcher son JVM, déclare les certificats une fois — Nucleus les importe dans le `cacerts` du JDK livré au moment du packaging.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Dépose des certificats PEM ou DER dans `nativeDistributions.trustedCertificates`.
-- Importés dans le runtime JLink livré, pas dans le JVM hôte.
-- Idempotent — même contenu, même alias, pas de ré-import.
-- Chaque format de packaging embarque automatiquement le runtime patché.
+Nucleus peut importer des certificats de CA privées dans le keystore `cacerts` du JDK qu'il embarque
+avec ton application empaquetée. Tu déclares les fichiers de certificat dans le DSL Gradle, et Nucleus
+les importe au moment de l'empaquetage : l'application livrée leur fait confiance sans aucune
+modification sur la machine de l'utilisateur.
 
-## Installation
-Livré avec le plugin Gradle.
+C'est utile quand ton application tourne derrière un proxy d'entreprise, une passerelle ZTNA ou un
+service de filtrage qui termine le TLS avec une CA racine privée que le trust store JDK par défaut
+ne connaît pas. Sans le certificat, chaque appel HTTPS échoue avec `SSLHandshakeException`.
 
-## Démarrage rapide
+## Déclarer les certificats
 
-```kotlin
+Ajoute les fichiers de certificat à `nativeDistributions.trustedCertificates` :
+
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         nativeDistributions {
-            trustedCertificates.from(files(
-                "certs/company-proxy-ca.pem",
-                "certs/vpn-root.crt",
-            ))
+            trustedCertificates.from(
+                files(
+                    "certs/company-ca.pem",
+                    "certs/vpn-root.crt",
+                ),
+            )
         }
     }
 }
 ```
 
-Les formats PEM (`-----BEGIN CERTIFICATE-----`) et DER (binaire) sont acceptés.
+Les fichiers PEM (`-----BEGIN CERTIFICATE-----`) et DER (binaire) sont acceptés. La fonctionnalité
+fait partie du plugin Gradle Nucleus : il n'y a aucune dépendance supplémentaire à ajouter.
 
-## Comment ça marche
+## Fonctionnement
 
-Après `createRuntimeImage`, Nucleus copie le runtime JLink dans `runtime-patched/` et lance `keytool -import -trustcacerts` pour chaque certificat. Le runtime patché nourrit à la fois `createDistributable` et `createSandboxedDistributable`, donc chaque format — DMG, NSIS, DEB, PKG, AppX, … — embarque la même racine de confiance.
+Une fois que `createRuntimeImage` a produit le runtime JLink, Nucleus le copie dans `runtime-patched/`
+et lance `keytool -import -trustcacerts` sur le `cacerts` de la copie pour chaque certificat. L'image
+runtime d'origine n'est jamais modifiée sur place. La copie patchée est ensuite utilisée par
+`createDistributable` et par `createSandboxedDistributable`, donc chaque format d'empaquetage embarque
+la même racine de confiance.
 
-Les alias sont dérivés du nom de fichier plus une courte empreinte SHA-256 du contenu. `corp-root-ca.crt` devient `corp-root-ca-3a1f8b2c`. Même contenu = même alias = idempotent. L'image runtime JLink originale n'est jamais modifiée — seule la copie sous `build/compose/tmp/<appName>/runtime-patched/`.
+Chaque certificat reçoit un alias stable dérivé de son nom de fichier et de son contenu : le nom est
+mis en minuscules, les caractères non alphanumériques deviennent `-`, il est tronqué à 32 caractères,
+puis les 8 premiers caractères hexadécimaux du hash SHA-256 du contenu sont ajoutés. Par exemple,
+`company-ca.crt` devient `company-ca-3a1f8b2c`. Comme l'alias inclut le hash du contenu, importer deux
+fois le même certificat produit le même alias ; `keytool` signale que l'alias existe déjà et Nucleus
+le saute, donc relancer le build ne duplique jamais d'entrées.
 
-```
-createRuntimeImage
-       ↓
-patchCaCertificates     ← copie le runtime, lance keytool par cert
-       ↓
-createDistributable
-createSandboxedDistributable
-       ↓
-packageDmg / packageDeb / packageNsis / …
-```
+Le binaire `keytool` provient du JDK défini par le `javaHome` de l'application. Si `javaHome` n'est
+pas défini, Nucleus utilise le JVM qui exécute le build. Le keystore est ouvert avec le mot de passe
+`cacerts` standard `changeit`.
 
-La tâche `patchCaCertificates` n'est enregistrée que quand `trustedCertificates` est non vide. Elle tourne automatiquement — on ne l'invoques pas.
+La tâche `patchCaCertificates` n'est enregistrée que lorsque `trustedCertificates` n'est pas vide. Elle
+s'exécute automatiquement pendant l'empaquetage ; tu ne l'invoques pas directement.
 
-## Référence
+## Référence de l'API
 
-- `nativeDistributions.trustedCertificates: ConfigurableFileCollection`
-- Tâche : `patchCaCertificates`
-
-Le binaire `keytool` utilisé est celui du JDK configuré via `javaHome` (ou le JVM du daemon Gradle si non défini).
+| Symbole | Type | Description |
+| --- | --- | --- |
+| `nativeDistributions.trustedCertificates` | `ConfigurableFileCollection` | Fichiers de certificat CA (PEM ou DER) à importer dans le `cacerts` du JDK embarqué. |
+| `patchCaCertificates` | Tâche Gradle | Copie l'image runtime et importe chaque certificat. Enregistrée uniquement quand `trustedCertificates` n'est pas vide. |
 
 ## Notes
 
-- Patche uniquement le JVM **livré**. Le JDK de la machine hôte n'est pas touché.
-- Pour la confiance OS au runtime (Keychain sur macOS, CryptoAPI sur Windows, NSS/PEM système sur Linux), utilise le [module `native-ssl`](/docs/performance/native-ssl) — il lit les CA installées par l'utilisateur sans patch au build.
-- Les deux approches sont complémentaires. `trustedCertificates` pour les CA connues au build (livrées à tous les utilisateurs). `native-ssl` pour celles que les utilisateurs finaux ajoutent eux-mêmes.
+- Seul le JDK **embarqué** est patché. Le JDK de la machine de l'utilisateur et celui qui exécute le
+  build ne sont pas touchés.
+- `trustedCertificates` couvre les CA connues au moment du build, livrées à tous les utilisateurs. Pour
+  faire confiance aux CA que les utilisateurs finaux installent eux-mêmes au runtime (Keychain sur
+  macOS, CryptoAPI sur Windows, NSS ou stores PEM système sur Linux), utilise plutôt le
+  [module `native-ssl`](/docs/performance/native-ssl).
+
+<Callout type="info">
+Les deux approches sont complémentaires. Livre les CA connues au build avec `trustedCertificates`, et
+lis les CA déjà installées par l'utilisateur avec `native-ssl`.
+</Callout>
+
+## Et ensuite
+
+- [Signature du code](/docs/packaging/code-signing) — signe et notarise l'application empaquetée.
+- [native-ssl](/docs/performance/native-ssl) — fais confiance aux stores de certificats du système d'exploitation au runtime.
+- [Référence du DSL Gradle](/docs/reference/gradle-dsl) — la surface de configuration complète de `nucleus { }`.

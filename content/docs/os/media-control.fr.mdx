@@ -1,85 +1,113 @@
 ---
 title: Contrôles média
-description: Publie les métadonnées "Now Playing" et reçois les événements de lecture depuis le HUD OS — MPNowPlayingInfoCenter macOS, SMTC Windows, MPRIS Linux — par une seule API Kotlin.
+description: Publie les métadonnées de lecture dans le centre média système et gère les commandes de lecture sur macOS, Windows et Linux depuis Kotlin.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Chaque OS moderne expose un HUD média système — Control Center sur macOS, overlay volume Windows 11, indicateurs GNOME / KDE sous Linux. L'app y apparaît avec les métadonnées et on réagit aux events play / pause / next / prev via un seul module Kotlin.
+Les contrôles média te permettent de publier les métadonnées d'une piste dans le centre média
+du système d'exploitation et de recevoir les commandes de lecture depuis Kotlin. Un seul objet
+`MediaControlService` enveloppe l'interface D-Bus MPRIS sous Linux,
+`MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` sur macOS et les System Media Transport
+Controls (SMTC) sur Windows.
 
-## En bref
-- Linux : [spec MPRIS D-Bus](https://specifications.freedesktop.org/mpris-spec/latest/) — intégré à GNOME Shell, KDE Plasma, `playerctl`.
-- macOS : `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`. Intégré à Control Center, le widget Now Playing, les touches médias.
-- Windows : `SystemMediaTransportControls`. Intégré à l'overlay Windows 10/11, SoundBar, écran de verrouillage, touches médias matérielles.
-- Un callback pour les events entrants, un setter pour métadonnées et état sortants.
+## Ajouter la dépendance
 
-## Installation
-
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.media-control:<version>")
 }
 ```
 
-## Démarrage rapide
+## Publier les métadonnées de lecture
+
+Vérifie que le backend natif est chargé, configure l'identité du lecteur, puis pousse les
+métadonnées et l'état de lecture :
 
 ```kotlin
-import dev.nucleusframework.media.control.*
+import dev.nucleusframework.media.control.MediaControlService
+import dev.nucleusframework.media.control.MediaMetadata
+import dev.nucleusframework.media.control.MediaPlaybackState
+import dev.nucleusframework.media.control.MediaPlaybackStatus
 
 if (MediaControlService.isAvailable()) {
     MediaControlService.configure()
-
-    MediaControlService.attach { event ->
-        when (event) {
-            MediaControlEvent.Play     -> player.play()
-            MediaControlEvent.Pause    -> player.pause()
-            MediaControlEvent.Next     -> player.skipToNext()
-            MediaControlEvent.Previous -> player.skipToPrevious()
-            is MediaControlEvent.Seek  -> player.seekTo(event.toUs)
-            else -> {}
-        }
-    }
 
     MediaControlService.setMetadata(
         MediaMetadata(
             title = "Strobe",
             artist = "deadmau5",
             album = "For Lack of a Better Name",
-            artUri = "https://example.com/cover.png",
-            durationUs = 10 * 60 * 1_000_000L,
+            coverUrl = "file:///tmp/cover.png",
+            duration = 10 * 60 * 1_000L,
         ),
     )
 
     MediaControlService.setPlaybackState(
-        MediaPlaybackState(status = MediaPlaybackStatus.Playing, positionUs = 0, rate = 1.0),
+        MediaPlaybackState(status = MediaPlaybackStatus.PLAYING, positionMs = 0),
     )
 }
 ```
 
+`duration` et `positionMs` sont en millisecondes. Sous Linux, un `coverUrl` qui pointe vers un
+fichier local doit utiliser le schéma `file://`.
+
+## Gérer les commandes de lecture
+
+Enregistre un listener avec `attach` pour recevoir les commandes du centre média de l'OS. Le
+callback est dispatché sur l'EDT Swing, donc tu peux modifier l'état Compose ou Swing
+directement :
+
+```kotlin
+import dev.nucleusframework.media.control.MediaControlEvent
+
+MediaControlService.attach { event ->
+    when (event) {
+        MediaControlEvent.Play -> player.play()
+        MediaControlEvent.Pause -> player.pause()
+        MediaControlEvent.Toggle -> player.toggle()
+        MediaControlEvent.Next -> player.skipToNext()
+        MediaControlEvent.Previous -> player.skipToPrevious()
+        MediaControlEvent.Stop -> player.stop()
+        is MediaControlEvent.SeekBy -> player.seekBy(event.offsetMs)
+        is MediaControlEvent.SetPosition -> player.seekTo(event.positionMs)
+        else -> {}
+    }
+}
+```
+
+Un seul listener est actif à la fois : rappeler `attach` remplace le précédent. Appelle
+`detach()` pour arrêter de recevoir les événements et te désenregistrer du centre média.
+
 ## Fonctionnement
 
-`MediaControlService` est un singleton qui enveloppe un pont natif par OS :
+`MediaControlService` est un singleton qui délègue à un pont natif propre à chaque OS.
+`isAvailable()` renvoie `true` uniquement quand ce pont s'est chargé correctement sur la
+plateforme courante ; quand il renvoie `false`, chaque appel est un no-op, ce qui te permet de
+protéger l'initialisation avec une seule vérification.
 
-- **Linux** : GLib/GIO (`libgio-2.0`) publie un objet D-Bus `org.mpris.MediaPlayer2.Player`.
-- **macOS** : `MediaPlayer.framework` via un pont JNI Objective-C.
-- **Windows** : `SystemMediaTransportControls` via C++/WRL.
+`configure()` définit l'identité du lecteur. Sous Linux, il enregistre le nom de bus MPRIS
+(par défaut `org.mpris.MediaPlayer2.<appId>`, tiré de `NucleusApp.appId`) ; sur macOS,
+l'identité provient du bundle de l'application hôte ; sur Windows, il utilise l'AUMID de
+l'application. Les deux paramètres ont une valeur par défaut, donc `configure()` sans argument
+est le cas courant.
 
-Configuration une fois au démarrage, puis on pousse métadonnées et état de lecture au fil de la lecture. Les events entrants arrivent sur le thread du pont — fais le marshalling vers le thread audio ou la boucle principale manuellement.
+Une fois configuré, pousse les métadonnées et l'état de lecture au fil des changements du
+lecteur. Les commandes entrantes sont analysées depuis le pont natif et livrées à ton listener
+sur l'EDT Swing.
 
-<Callout type="info" title="Capacités par plateforme">
-Les events que l'OS peut renvoyer diffèrent :
+<Callout type="info" title="Événements par plateforme">
+Les commandes que l'OS peut renvoyer diffèrent selon la plateforme :
 
-- **Linux (MPRIS)** peut émettre toutes les variantes de `MediaControlEvent`.
-- **macOS** émet uniquement `Play`, `Pause`, `Toggle`, `Next`, `Previous`, `Stop`, `SetPosition`.
-- **Windows (SMTC)** émet `Play`, `Pause`, `Next`, `Previous`, `Stop`, `SetPosition`, plus `SeekBy` relatif (±10 s avance / retour).
-- `SetVolume`, `OpenUri`, `Raise`, `Quit` sont Linux uniquement.
-- `setVolume(...)` est un no-op sur macOS et Windows — le volume système est géré séparément.
+- **Linux (MPRIS)** émet toutes les variantes de `MediaControlEvent`.
+- **macOS** émet `Play`, `Pause`, `Toggle`, `Next`, `Previous`, `Stop` et `SetPosition`.
+- **Windows (SMTC)** émet `Play`, `Pause`, `Next`, `Previous`, `Stop`, `SeekBy` et `SetPosition`.
 </Callout>
 
-## Référence
+## Référence de l'API
 
-### Métadonnées
+### Définir les métadonnées
 
 ```kotlin
 MediaControlService.setMetadata(
@@ -87,53 +115,82 @@ MediaControlService.setMetadata(
         title = "Track",
         artist = "Artist",
         album = "Album",
-        artUri = "file:///tmp/cover.png",
-        durationUs = 3 * 60 * 1_000_000L,
+        coverUrl = "file:///tmp/cover.png",
+        duration = 3 * 60 * 1_000L,
     ),
 )
 ```
 
-### État de lecture
+Chaque champ de `MediaMetadata` est nullable et vaut `null` par défaut. `duration` est en
+millisecondes.
+
+### Définir l'état de lecture
 
 ```kotlin
 MediaControlService.setPlaybackState(
     MediaPlaybackState(
-        status = MediaPlaybackStatus.Playing,
-        positionUs = currentPositionUs,
-        rate = 1.0,
+        status = MediaPlaybackStatus.PLAYING,
+        positionMs = currentPositionMs,
     ),
 )
 ```
 
-Pousse une mise à jour à chaque démarrage, pause ou seek — la barre du HUD reflète `positionUs` et `rate`.
+`status` vaut `MediaPlaybackStatus.STOPPED`, `PAUSED` ou `PLAYING`. `positionMs` est optionnel
+et vaut `null` par défaut. Pousse une mise à jour à chaque lecture, pause, arrêt et seek pour
+que la barre de progression du système reste juste.
 
-### Listener
+### Définir le volume
+
+```kotlin
+MediaControlService.setVolume(0.5)
+```
+
+`volume` est ramené dans l'intervalle `0.0`–`1.0`.
+
+### Attacher et détacher
 
 ```kotlin
 MediaControlService.attach { event -> /* gère */ }
 MediaControlService.detach()
 ```
 
-### Intégration par OS
+### Notes par plateforme
 
 <Tabs items={["macOS", "Windows", "Linux"]}>
 <Tab value="macOS">
 
-Configurer `LSApplicationCategoryType` à `public.app-category.music` (ou media) dans l'Info.plist pour que le widget Now Playing traite le app correctement. Les touches médias matérielles livrent Play/Pause/Next/Prev quand le app est le client "now playing" actif.
+Définis `LSApplicationCategoryType` à `public.app-category.music` dans l'`Info.plist` pour que
+le widget Now Playing traite l'application comme un lecteur média. Les touches médias
+matérielles livrent Play, Pause, Next et Previous quand l'application est le client
+now-playing actif.
 
 </Tab>
 <Tab value="Windows">
 
-L'intégration Action Center est automatique. Le système prend le dernier publisher SMTC comme source "now playing".
+L'intégration SMTC est automatique dès que tu appelles `configure()`. Le système considère le
+dernier publisher comme source now-playing courante, et l'identité se résout via l'AUMID de
+l'application.
 
 </Tab>
 <Tab value="Linux">
 
-Mets `appId` correctement via `NucleusApp.appId` — MPRIS expose le bus name comme `org.mpris.MediaPlayer2.<appId>`. `playerctl` et les indicateurs découvrent le player par énumération de ce préfixe.
+`configure()` enregistre le nom de bus MPRIS `org.mpris.MediaPlayer2.<appId>`, dérivé de
+`NucleusApp.appId`. `playerctl` et les indicateurs de bureau découvrent le lecteur en
+énumérant ce préfixe. Passe un `dbusName` personnalisé pour le remplacer.
 
 </Tab>
 </Tabs>
 
 ## Notes
-- Appelle toujours `MediaControlService.isAvailable()` avant `configure()` — sur Linux sans D-Bus session, le service se dégrade silencieusement.
-- Mets `setPlaybackState` à jour au moins une fois par seconde pendant la lecture, sinon la barre du HUD dérive.
+
+- `setVolume(...)` est un no-op sur macOS — Now Playing n'a pas de canal de volume par
+  application.
+- Sous Linux sans D-Bus de session, `isAvailable()` renvoie `false` et chaque appel est un no-op.
+
+## Et ensuite
+
+- [Raccourcis globaux](/docs/os/global-hotkey) — associe les touches médias et d'autres
+  raccourcis à l'échelle du système.
+- [Infos système](/docs/os/system-info) — interroge l'OS, le CPU, la batterie et les écrans
+  depuis Kotlin.
+- [Démarrage rapide](/docs/start/quickstart) — construis et lance ta première application Nucleus.

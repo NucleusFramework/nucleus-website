@@ -1,0 +1,187 @@
+---
+title: Native views on Tao
+description: Embed a platform-native view — AppKit/SwiftUI, WebView2, or GTK — inside a Compose layout on the Tao backend.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `NativeView` composable embeds a platform-native view inside a Compose layout on the
+Tao backend. It is the Tao equivalent of `AndroidView` on Android and `UIKitView` on
+Compose iOS: you supply a `NucleusPlatformView`, and Nucleus reparents its underlying
+handle into the Tao window, keeps it sized to the Compose layout slot, and disposes it
+when the composable leaves.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework")
+}
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+`NativeView` and `NucleusPlatformView` live in `dev.nucleusframework.window.tao`, provided
+by `decorated-window-tao`. They are available inside any window opened on the Tao backend.
+
+## Embed a native view
+
+Wrap your platform handle in a `NucleusPlatformView` and pass a `factory` to `NativeView`.
+The variant you implement decides the embedding strategy — `NsView` on macOS, `HWnd` on
+Windows, `GtkWidget` on Linux:
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.window.tao.NativeView
+import dev.nucleusframework.window.tao.NucleusPlatformView
+
+// A macOS view backed by a raw NSView* handle you obtain from your
+// own AppKit / SwiftUI bridge.
+class WebPlatformView(private val handle: Long) : NucleusPlatformView.NsView {
+    override val nsViewHandle: Long = handle
+
+    override fun dispose() {
+        // Release the native view you created in the factory.
+    }
+}
+
+@Composable
+fun BrowserPane(url: String) {
+    NativeView(
+        factory = { WebPlatformView(createNativeWebView(url)) },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+```
+
+`factory` runs once and its result is remembered for the lifetime of the composable.
+Nucleus calls `dispose()` when `NativeView` leaves the composition. The native view
+tracks the layout slot's position and size automatically — you don't set frames yourself.
+
+<Callout type="info">
+Nucleus does not create the native view for you. `createNativeWebView` above is a
+placeholder for your own interop code that returns the platform handle (an `NSView*` on
+macOS, an `HWND` or WebView2 controller on Windows, a `GtkWidget*` on Linux) as a `Long`.
+</Callout>
+
+## How it works
+
+`NativeView` reads the variant of the `NucleusPlatformView` returned by `factory` and
+routes to the matching embedding path. On macOS the `NsView` is added as a sibling of the
+Tao content view; on Windows the `HWnd` is reparented under the main Tao HWND; on Linux
+the `GtkWidget` is added to Tao's GTK content widget. Each path tracks the Compose layout
+slot with `onGloballyPositioned` and forwards the bounds to the native side, so the
+embedded view follows resizes and scrolls with no extra wiring.
+
+If the returned variant doesn't match the current OS — or the platform's scene plumbing
+isn't available — `NativeView` renders an empty `Box(modifier)` instead of failing. This
+lets you write one call site per platform and rely on the fallback on the others.
+
+The optional `content` slot renders Compose UI on top of the embedded view. On macOS it is
+a sibling overlay `NSView` with its own `CAMetalLayer` and `ComposeScene`; on Windows it is
+a top-level layered HWND composited via DirectComposition; on Linux it renders inline in the
+same window scene. Pointer events fall through to the native view except inside regions you
+mark with `Modifier.consumeOverlayPointerEvents()`.
+
+## API reference
+
+### Describe the native view
+
+`NucleusPlatformView` is a sealed interface. Implement exactly one platform variant and
+expose the corresponding handle as a `Long`:
+
+| Variant | Platform | Handle property |
+|---|---|---|
+| `NucleusPlatformView.NsView` | macOS | `nsViewHandle` — pointer to your `NSView*` |
+| `NucleusPlatformView.HWnd` | Windows | `hwndHandle` — pointer to your `HWND` |
+| `NucleusPlatformView.GtkWidget` | Linux | `gtkWidgetHandle` — pointer to your `GtkWidget*` |
+
+The interface also declares lifecycle callbacks with default no-op bodies. Override the ones
+your view needs:
+
+| Member | Called when |
+|---|---|
+| `resize(widthPx, heightPx)` | The embedded view's logical size changes. |
+| `setBounds(xPx, yPx, widthPx, heightPx)` | The full frame changes; override when the view's drawing rect is decoupled from its window rect (for example, WebView2). |
+| `setCornerRadius(radiusPx)` | The rounded-corner clip changes and the host's generic clip can't reach the view's surface. |
+| `clearFocus()` | The host window or a sibling Compose layer takes focus. |
+| `dispose()` | Final teardown — release the native resources you own. |
+
+### Embed the view
+
+```kotlin
+@Composable
+fun NativeView(
+    factory: () -> NucleusPlatformView,
+    modifier: Modifier = Modifier,
+    update: (NucleusPlatformView) -> Unit = {},
+    cornerRadius: Dp = Dp.Unspecified,
+    content: @Composable () -> Unit = {},
+)
+```
+
+| Parameter | Notes |
+|---|---|
+| `factory` | Creates the `NucleusPlatformView`. Runs once; the result is remembered and disposed when the composable leaves. |
+| `modifier` | Sizes and positions the layout slot. The embedded view fills it. |
+| `update` | Runs on every recomposition with the remembered view. Use it to push new state into the native view. |
+| `cornerRadius` | Rounded-corner clip; see below. |
+| `content` | Compose overlay rendered on top of the native view. |
+
+### Overlay Compose content
+
+The `content` slot draws Compose UI over the embedded view. By default native pointer
+events pass through it to the underlying view. Wrap an interactive region with
+`Modifier.consumeOverlayPointerEvents()` to route events in that region to Compose instead:
+
+```kotlin
+import dev.nucleusframework.window.tao.consumeOverlayPointerEvents
+
+NativeView(
+    factory = { WebPlatformView(createNativeWebView(url)) },
+    modifier = Modifier.fillMaxSize(),
+) {
+    // A Compose toolbar over the web view; the button stays interactive,
+    // clicks elsewhere reach the web view underneath.
+    Button(
+        onClick = { /* reload */ },
+        modifier = Modifier.consumeOverlayPointerEvents(),
+    ) {
+        Text("Reload")
+    }
+}
+```
+
+For text-input fields, pass a cursor so the whole region shows the I-beam:
+`consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
+
+<Callout type="warn">
+The `content` overlay is supported on macOS and Windows only. On Linux the `GtkWidget`
+variant ignores the `content` lambda.
+</Callout>
+
+### Clip to rounded corners
+
+Compose's `Modifier.clip()` does not propagate to embedded native views, the same
+limitation as `AndroidView` and `UIKitView`. Use `cornerRadius` instead:
+
+```kotlin
+NativeView(
+    factory = { WebPlatformView(createNativeWebView(url)) },
+    modifier = Modifier.fillMaxSize(),
+    cornerRadius = 12.dp,
+)
+```
+
+Pass `Dp.Infinity` to clip fully circular regardless of size. The default,
+`Dp.Unspecified`, applies no clip.
+
+## What's next
+
+- [The Tao backend](/docs/tao) — what the no-AWT backend covers.
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — open the window that hosts the view.
+- [Multi-touch and trackpad gestures](/docs/tao/multi-touch) — read Tao input events.

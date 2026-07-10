@@ -1,39 +1,38 @@
 ---
 title: Notifications cross-plateforme
-description: Envoie une notification sur macOS, Windows et Linux depuis un seul DSL Kotlin — titre, message, image, boutons d'action, callbacks de cycle de vie.
+description: Envoie des notifications desktop sur macOS, Windows et Linux depuis une seule API Kotlin.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Chaque OS desktop expose sa propre pile de notifications — UserNotifications sur macOS, toasts WinRT sur Windows, FreeDesktop D-Bus sous Linux. `notification-common` rassemble l'intersection dans un seul DSL Kotlin : le cas 80 % tient en une dépendance.
+`notification-common` te permet d'envoyer une notification desktop depuis Kotlin sans écrire de code par plateforme. Le module expose une fonction `notification(...)` et un `NotificationManager` qui détecte l'OS courant à l'exécution et délègue au backend natif adéquat sur macOS, Windows ou Linux.
 
-## En bref
-- Un DSL : `notification { … }.send()`.
-- Titre, corps, grande image, petite icône, jusqu'à cinq boutons d'action, callbacks de cycle de vie.
-- Route vers `notification-macos`, `notification-windows` ou `notification-linux` à l'exécution.
-- Descends au module par OS pour les barres de progression, la planification, les catégories.
+L'API commune couvre le sous-ensemble partagé : titre, corps de texte, grande image, petite icône, jusqu'à cinq boutons d'action et callbacks de cycle de vie. Pour les fonctionnalités propres à une plateforme (planification, catégories, barres de progression, images héros), utilise directement le module par OS.
 
-## Installation
+## Ajouter la dépendance
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.notification-common:<version>")
 }
 ```
 
-Cette unique dépendance tire les trois modules par plateforme ; seul celui qui correspond est chargé à l'exécution.
+Cette dépendance tire les trois modules par plateforme de façon transitive. Seul le module correspondant à l'OS hôte est chargé à l'exécution.
 
-## Démarrage rapide
+## Envoyer une notification
 
 ```kotlin
-import dev.nucleusframework.notification.common.*
+import dev.nucleusframework.notification.common.NotificationManager
+import dev.nucleusframework.notification.common.notification
 
 NotificationManager.initialize()
 
-val n = notification {
-    title = "Téléchargement terminé"
-    message = "report.pdf a été enregistré"
+val n = notification(
+    title = "Téléchargement terminé",
+    message = "report.pdf a été enregistré",
+    onActivated = { openFile() },
+) {
     button("Ouvrir") { openFile() }
     button("Afficher dans le dossier") { showInFolder() }
 }
@@ -41,55 +40,73 @@ val n = notification {
 n.send()
 ```
 
+`title` et `message`, tout comme les callbacks, sont des paramètres de la fonction `notification(...)`. Le bloc lambda final sert uniquement à déclarer les boutons d'action via `button(title, onClick)`.
+
 ## Fonctionnement
 
-`NotificationManager` détecte la plateforme active au démarrage et délègue au pont natif adéquat. Le DSL ne capture que le plus petit dénominateur commun : texte, image, jusqu'à cinq boutons et événements de cycle de vie (`onShown`, `onDismissed`, `onAction`). Tout ce qui dépasse — planifications, catégories, images héros, barres de progression — reste dans le module par OS.
+`NotificationManager` détecte la plateforme active à la première utilisation et délègue au pont natif adéquat. Appeler `NotificationManager.initialize()` initialise le sous-système immédiatement ; sinon l'initialisation se fait paresseusement au premier `send()`.
 
-Il est possible de mixer : passer par l'API commune pour la plupart des notifications, puis basculer sur `WindowsNotificationCenter` ou `NotificationCenter` (macOS) quand une notification précise a besoin du reste.
+La fonction `notification(...)` construit une valeur `Notification`. Appeler `send()` dessus route vers `NotificationManager.send(notification)` et renvoie un `NotificationResult`. La même instance `Notification` peut être envoyée plusieurs fois ; chaque appel produit une nouvelle notification OS.
 
-<Tabs items={["macOS", "Windows", "Linux"]}>
+Les callbacks de cycle de vie ne s'exécutent pas forcément sur un thread UI : reviens sur ton dispatcher UI avant de toucher à l'état Compose.
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
 <Tab value="macOS">
 
-Route vers [`notification-macos`](/docs/os/notification-macos). Requiert l'autorisation utilisateur et une app signée bundlée (`./gradlew runDistributable`).
+Délègue à [`notification-macos`](/docs/os/notification-macos). Requiert l'autorisation utilisateur et une app signée et bundlée. Teste sur le binaire packagé (`./gradlew runDistributable`).
 
 </Tab>
 <Tab value="Windows">
 
-Route vers [`notification-windows`](/docs/os/notification-windows). L'AUMID est dérivé de `NucleusApp.appId` pour les apps non packagées ; les apps MSIX utilisent leur identité de package.
+Délègue à [`notification-windows`](/docs/os/notification-windows), qui affiche des toasts WinRT.
 
 </Tab>
 <Tab value="Linux">
 
-Route vers [`notification-linux`](/docs/os/notification-linux) via `org.freedesktop.Notifications` sur D-Bus. Fonctionne sous GNOME, KDE, Cinnamon, tout ce qui expose un daemon de notifications.
+Délègue à [`notification-linux`](/docs/os/notification-linux), qui utilise `org.freedesktop.Notifications` sur D-Bus. Fonctionne sur tout bureau exécutant un daemon de notifications, dont GNOME, KDE et Cinnamon.
 
 </Tab>
 </Tabs>
 
-## Référence
+## Référence de l'API
 
 ### Construire une notification
 
+Passe le contenu et les callbacks en paramètres de la fonction, et déclare les boutons dans le bloc :
+
 ```kotlin
-val n = notification {
-    title = "Nouveau message d'Alice"
-    message = "Tu as vu le dernier build ?"
+val n = notification(
+    title = "Nouveau message d'Alice",
+    message = "Tu as vu le dernier build ?",
+    onActivated = { openConversation() },
+    onDismissed = { reason -> log.info("rejetée: $reason") },
+    onFailed = { log.warn("échec de l'affichage de la notification") },
+) {
     button("Répondre") { /* … */ }
     button("Muet") { /* … */ }
-    onShown { id -> log.info("affichée: $id") }
-    onDismissed { reason -> log.info("rejetée: $reason") }
 }
 ```
+
+- `onActivated: (() -> Unit)?` — l'utilisateur a cliqué sur le corps de la notification.
+- `onDismissed: ((DismissReason) -> Unit)?` — la notification a été rejetée. `DismissReason` vaut `USER_DISMISSED`, `TIMED_OUT`, `APPLICATION` ou `UNKNOWN`.
+- `onFailed: (() -> Unit)?` — l'affichage de la notification a échoué.
+
+Tu peux ajouter jusqu'à cinq boutons ; au-delà, une exception est levée.
 
 ### Envoyer
 
+`send()` renvoie un `NotificationResult` :
+
 ```kotlin
 when (val result = n.send()) {
-    is NotificationResult.Shown -> /* livrée */
-    is NotificationResult.Failed -> log.warn(result.toString())
+    is NotificationResult.Success -> result.handle.dismiss()
+    is NotificationResult.Failure -> log.warn(result.reason)
 }
 ```
 
-### Disponibilité
+`NotificationResult.Success` porte un `NotificationHandle` ; appelle `handle.dismiss()` pour fermer la notification par programme tant qu'elle est visible. `NotificationResult.Failure` porte une chaîne `reason`.
+
+### Vérifier la disponibilité
 
 ```kotlin
 if (!NotificationManager.isAvailable()) {
@@ -97,6 +114,12 @@ if (!NotificationManager.isAvailable()) {
 }
 ```
 
-## Notes
-- Pour les APIs plus riches : [macOS](/docs/os/notification-macos), [Windows](/docs/os/notification-windows), [Linux](/docs/os/notification-linux).
-- macOS ignore silencieusement les notifications des apps non bundlées — teste toujours sur le binaire packagé.
+<Callout type="warn">
+macOS ignore silencieusement les notifications des apps non bundlées. Teste toujours sur le binaire packagé.
+</Callout>
+
+## Et ensuite
+
+- [Notifications macOS](/docs/os/notification-macos) — autorisation, planification, catégories et pièces jointes.
+- [Notifications Windows](/docs/os/notification-windows) — contenu des toasts, barres de progression et historique.
+- [Notifications Linux](/docs/os/notification-linux) — indices d'urgence, actions et daemon D-Bus.

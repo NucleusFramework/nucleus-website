@@ -1,81 +1,129 @@
 ---
 title: Dark mode detector
-description: A reactive isSystemInDarkMode() composable plus a Flow-backed API — the system theme as live state, not a one-shot read.
+description: Detect the operating system's dark mode from Kotlin and recompose your Compose UI when the theme changes.
 ---
 
-Compose Desktop's `isSystemInDarkTheme()` reads the OS theme exactly once. Toggle dark mode in System Settings and your UI freezes in the previous palette until you restart. `darkmode-detector` replaces it with a reactive listener that triggers recomposition the instant the system theme flips.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- `@Composable isSystemInDarkMode()` — drop-in replacement, reactive.
-- `IDarkModeDetector.isDark: StateFlow<Boolean>` — coroutine-friendly.
-- macOS via Cocoa KVO, Windows via registry watch, Linux via `xdg-desktop-portal`.
-- No polling, no AWT, no JNA.
+`darkmode-detector` reports whether the operating system is in dark mode and notifies you when
+that changes. It provides an `isSystemInDarkMode()` composable that recomposes on theme changes,
+plus an imperative `IDarkModeDetector` for use outside Compose. macOS, Windows, and Linux are
+supported.
 
-## Install
+## Add the dependency
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
 }
 ```
 
-## Quickstart
+## Detect dark mode in Compose
+
+Call `isSystemInDarkMode()` and use the result to select your color scheme. The composable
+recomposes when the system theme changes:
 
 ```kotlin
-import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
 
 @Composable
 fun App() {
     val isDark = isSystemInDarkMode()
-    MaterialTheme(colorScheme = if (isDark) darkColorScheme() else lightColorScheme()) {
-        // Your UI recomposes when the OS theme changes.
+    MaterialTheme(
+        colorScheme = if (isDark) darkColorScheme() else lightColorScheme(),
+    ) {
+        // Content recomposes when the OS theme flips.
     }
 }
 ```
+
+Compose's own `isSystemInDarkTheme()` reads the OS theme once and does not update when the user
+switches themes at runtime. `isSystemInDarkMode()` returns the current value and registers a
+listener that triggers recomposition on every change.
+
+<Callout type="info">
+Inside a `@Preview` (when `LocalInspectionMode` is `true`), `isSystemInDarkMode()` delegates to
+Compose's `isSystemInDarkTheme()` so previews render without a running detector.
+</Callout>
 
 ## How it works
 
-Each platform plugs into the OS's own change-notification mechanism:
+Each platform reads the system theme through a native JNI bridge and watches the OS for changes.
+No polling is involved; the detector reacts to change notifications from the OS itself.
 
-- **macOS**: Cocoa KVO on `NSApp.effectiveAppearance`. The bridge wakes on the AppKit notification queue and republishes to a `StateFlow` on a Nucleus dispatcher.
-- **Windows**: registry watch on `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`.
-- **Linux**: `org.freedesktop.appearance` portal (color-scheme), with a fallback to GSettings.
+- **macOS**: reads the `AppleInterfaceStyle` system preference and registers an observer through
+  `NSDistributedNotificationCenter`.
+- **Windows**: reads the registry value
+  `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`
+  and watches it with `RegNotifyChangeKeyValue` on a native background thread.
+- **Linux**: reads the XDG Desktop Portal `color-scheme` preference over the
+  `org.freedesktop.portal.Settings` D-Bus interface; a value of `1` means prefer-dark.
 
-`isSystemInDarkMode()` wires that flow into a Compose `State`, so any reader recomposes on change.
+On unsupported platforms, `getPlatformDarkModeDetector()` returns `NoopDarkModeDetector`, which
+always reports light and ignores listeners.
 
-## Reference
+## API reference
 
-### Composable
+### Read the current theme
+
+`getPlatformDarkModeDetector()` returns the `IDarkModeDetector` for the current platform. Call
+`isDark()` for a one-shot read:
 
 ```kotlin
-val isDark: Boolean = isSystemInDarkMode()
-```
+import dev.nucleusframework.darkmodedetector.getPlatformDarkModeDetector
 
-### Imperative / coroutines
-
-```kotlin
 val detector = getPlatformDarkModeDetector()
-detector.start()
-
-scope.launch {
-    detector.isDark.collect { isDark ->
-        println("dark mode: $isDark")
-    }
-}
-
-// later
-detector.stop()
+val dark: Boolean = detector.isDark()
 ```
 
-### Testing / fallbacks
+### Listen for changes
+
+Register a `java.util.function.Consumer<Boolean>` to be notified when the theme changes, and
+remove it when you are done:
 
 ```kotlin
+import dev.nucleusframework.darkmodedetector.getPlatformDarkModeDetector
+import java.util.function.Consumer
+
+val detector = getPlatformDarkModeDetector()
+
+val listener = Consumer<Boolean> { isDark ->
+    println("dark mode: $isDark")
+}
+detector.registerListener(listener)
+
+// Later, stop receiving updates.
+detector.removeListener(listener)
+```
+
+The full interface:
+
+```kotlin
+interface IDarkModeDetector {
+    fun isDark(): Boolean
+    fun registerListener(listener: Consumer<Boolean>)
+    fun removeListener(listener: Consumer<Boolean>)
+}
+```
+
+### Use a no-op detector
+
+`NoopDarkModeDetector` implements `IDarkModeDetector` without touching the OS. It always returns
+`false` from `isDark()` and ignores listeners — useful in tests or headless environments:
+
+```kotlin
+import dev.nucleusframework.darkmodedetector.IDarkModeDetector
+import dev.nucleusframework.darkmodedetector.NoopDarkModeDetector
+
 val detector: IDarkModeDetector = NoopDarkModeDetector
 ```
 
-Use `NoopDarkModeDetector` in tests or on platforms where the live detector is not desired.
+## What's next
 
-## Notes
-- The very first read is synchronous; subsequent changes come through the `StateFlow` and trigger Compose recomposition.
-- On Linux, ensure the portal is available (it is on every modern desktop). Headless / CI environments fall back to "light".
+- [System colors](/docs/os/system-color) — read the system accent color and high-contrast state.
+- [System info](/docs/os/system-info) — query the OS, CPU, memory, and battery from Kotlin.
+- [OS integration](/docs/os) — the rest of the desktop OS APIs.

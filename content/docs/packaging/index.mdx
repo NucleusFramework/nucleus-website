@@ -1,28 +1,28 @@
 ---
-title: One DSL, sixteen installers
-description: Every desktop installer format your users expect, declared once in Gradle.
+title: One DSL, eighteen installers
+description: Declare the desktop distribution formats you need in the Gradle plugin's DSL and build each one the host operating system supports.
 ---
 
-Most JVM packaging tools cap out at four or five formats — jpackage, the JetBrains Compose default, install4j. Nucleus ships sixteen distributable formats from a single `nucleus { … }` block. Pick the ones you need; the build matrix takes care of the rest.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- 16 formats covering every mainstream desktop channel — App Store, Microsoft Store, Snapcraft, Flathub, GitHub Releases, ad-hoc URLs.
-- One Gradle DSL, one CI workflow. No CMake, no platform-specific maintainers.
-- Store builds get a separate sandboxed pipeline automatically (PKG, AppX, Flatpak).
-- Code signing, notarization, trusted CA bundling, and auto-update wire into the same DSL.
+Nucleus declares every desktop distribution format in one `nucleus { }` Gradle block. You choose the
+formats with `targetFormats(...)`, and a single task builds each one the host operating system can
+produce. `TargetFormat` defines 18 formats, covering direct installers, store packages, and plain
+archives.
 
-## Install
-The packaging DSL is part of the Gradle plugin — no separate dependency.
+## Declare the formats
 
-```kotlin
+The packaging DSL ships with the Gradle plugin, so there is no separate dependency to add:
+
+```kotlin title="build.gradle.kts"
 plugins {
     id("dev.nucleusframework") version "2.0.0"
 }
 ```
 
-## Quickstart
+List the formats you want inside `nativeDistributions`:
 
-```kotlin
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         mainClass = "com.example.MainKt"
@@ -30,8 +30,8 @@ nucleus {
         nativeDistributions {
             targetFormats(
                 TargetFormat.Dmg, TargetFormat.Pkg,
-                TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
-                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage,
+                TargetFormat.Exe, TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
+                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman,
                 TargetFormat.Snap, TargetFormat.Flatpak,
                 TargetFormat.Zip,
             )
@@ -42,41 +42,57 @@ nucleus {
 }
 ```
 
-Then:
+## Build the installers
 
-```bash
+```shell
 ./gradlew packageDistributionForCurrentOS
 ```
 
-Every format requested for the host OS lands under `build/compose/binaries/`.
+Every format requested for the host operating system is written under `build/compose/binaries/`.
 
-## Coverage matrix
+<Callout type="info">
+Formats the host operating system cannot produce are skipped silently. The same build script runs
+unchanged on macOS, Windows, and Linux, which suits matrix CI.
+</Callout>
 
-| OS | Direct distribution | Store | Universal archives |
-|----|---------------------|-------|--------------------|
-| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7Z |
-| Windows | NSIS, MSI, Portable | MSIX / AppX (Microsoft Store) | ZIP, TAR, 7Z |
-| Linux | DEB, RPM, AppImage | Snap, Flatpak | ZIP, TAR, 7Z |
+## Supported formats
 
-Sixteen total: `Dmg`, `Pkg`, `Nsis`, `NsisWeb`, `Msi`, `AppX`, `Portable`, `Deb`, `Rpm`, `AppImage`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZip`, and the intermediate `RawAppImage`. Pass them to `targetFormats(...)`.
+`TargetFormat` defines 18 constants. The table groups them by how you ship each build:
+
+| OS | Direct distribution | Store | Archives |
+|----|---------------------|-------|----------|
+| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7z |
+| Windows | Exe, NSIS, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
+| Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
+
+The full set of enum constants is `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`,
+`NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, and `SevenZ`.
+Pass any of them to `targetFormats(...)`. The declaring type is
+`dev.nucleusframework.desktop.application.dsl.TargetFormat`.
 
 ## How it works
 
-Under the hood Nucleus runs jpackage to produce a platform `app-image`, then hands that image to electron-builder's `--prepackaged` mode to drive every installer format. This hybrid keeps the JVM runtime jpackage tuning while picking up electron-builder's installer breadth — NSIS, MSIX, Snap, Flatpak, AppImage — none of which jpackage supports.
+Nucleus runs jpackage to produce a platform `app-image`, then hands that image to electron-builder's
+`--prepackaged` mode to drive each installer format. The hybrid keeps jpackage's JVM runtime tuning
+while using electron-builder for the formats jpackage does not support, such as NSIS, AppX, Snap,
+Flatpak, and AppImage.
 
-When you mix direct-distribution formats with store formats, Nucleus splits into two parallel pipelines: a regular `createDistributable` for DMG/NSIS/DEB and a `createSandboxedDistributable` for PKG/AppX/Flatpak that pre-extracts native libraries, injects sandbox-aware JVM args, and applies the right entitlements. See [sandboxing](/docs/packaging/sandboxing).
+When you mix direct-distribution formats with store formats, Nucleus runs two pipelines: a regular
+`createDistributable` for formats like DMG, NSIS, and DEB, and a `createSandboxedDistributable` for
+the store formats PKG, AppX, and Flatpak. The sandboxed pipeline pre-extracts native libraries,
+injects sandbox-aware JVM arguments, and applies the matching entitlements. See
+[Sandboxing](/docs/packaging/sandboxing).
 
-Per-OS knobs live under `nativeDistributions.macOS { … }`, `windows { … }`, and `linux { … }` — see the dedicated pages.
+## Configure each platform
 
-## Reference
+Per-OS settings live under `nativeDistributions.macOS { }`, `windows { }`, and `linux { }`:
 
-- macOS — DMG, PKG, universal binaries, Liquid Glass, layered icons → [building for macOS](/docs/packaging/macos)
-- Windows — NSIS, MSI, MSIX/AppX, Portable → [building for Windows](/docs/packaging/windows)
-- Linux — DEB, RPM, AppImage, Snap, Flatpak → [building for Linux](/docs/packaging/linux)
-- [Code signing](/docs/packaging/code-signing) · [Trusted certificates](/docs/packaging/trusted-certificates) · [Sandboxing](/docs/packaging/sandboxing)
-- [Auto-update](/docs/packaging/auto-update) · [Publishing](/docs/packaging/publishing) · [CI/CD](/docs/packaging/ci-cd)
-- Full DSL: [Gradle DSL reference](/docs/reference/gradle-dsl).
+- [Building for macOS](/docs/packaging/macos) — DMG, PKG, universal binaries, and layered icons.
+- [Building for Windows](/docs/packaging/windows) — Exe, NSIS, MSI, AppX, and Portable.
+- [Building for Linux](/docs/packaging/linux) — DEB, RPM, AppImage, Pacman, Snap, and Flatpak.
 
-## Notes
+## What's next
 
-The complete `targetFormats` list is the source of truth: `dev.nucleusframework.desktop.application.dsl.TargetFormat`. Formats not supported on the host OS are silently skipped at `packageDistributionForCurrentOS` time — useful for matrix CI where the same workflow runs on macOS, Windows, and Linux.
+- [Code signing](/docs/packaging/code-signing) — sign and notarize builds for each platform.
+- [Publishing](/docs/packaging/publishing) — push installers to GitHub Releases, S3, or a generic host.
+- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` DSL.

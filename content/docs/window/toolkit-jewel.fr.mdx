@@ -1,67 +1,109 @@
 ---
 title: Jewel — IntelliJ Platform
-description: Le look IntelliJ Platform pour les outils dev cross-plateformes. Clair, sombre, et les mêmes Composables que JetBrains.
+description: Applique les couleurs et les métriques Jewel à une DecoratedWindow pour que la barre de titre et le cadre adoptent le look IntelliJ Platform.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quand on construit un outil dev — client base de données, dashboard de build, app de code review — Material n'est pas le bon vocabulaire. Jewel est le design system JetBrains pour la plateforme IntelliJ. Le toolkit Jewel de Nucleus le branche dans `DecoratedWindow` pour t'apporter le look IDE sur chaque OS.
+Jewel est le design system de JetBrains pour la plateforme IntelliJ. Le toolkit Jewel de
+Nucleus applique les couleurs et les métriques Jewel à `DecoratedWindow`, pour que la barre de
+titre et le cadre de la fenêtre adoptent le look IntelliJ sur macOS, Windows et Linux. Il
+fonctionne sur les backends Tao et AWT derrière la même API.
 
-## TL;DR
-- Même API `DecoratedWindow`, barre de titre et contenu stylés Jewel.
-- Thèmes clair et sombre qui suivent le système.
-- Fonctionne sur Tao et AWT — on choisit le runtime, pas l'API.
-- S'associe naturellement aux widgets `org.jetbrains.jewel` à l'intérieur.
-
-## Install
+## Ajouter la dépendance
 
 ```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
     implementation("dev.nucleusframework:nucleus.decorated-window-jewel:<version>")
-    // et le module de thème Jewel de au choix
+    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
+    // Un module de thème Jewel — choisis celui qui correspond à la build IDE ciblée.
     implementation("org.jetbrains.jewel:jewel-int-ui-standalone-243:<version>")
 }
 ```
 
-## Quickstart
+Le toolkit dépend de `decorated-window-core` et d'un module de backend (`-tao`, `-jbr` ou
+`-jni`). En le combinant avec `-tao`, tu obtiens le backend de fenêtrage natif en Rust.
+
+## Créer une fenêtre stylée Jewel
+
+Enveloppe le contenu de la fenêtre dans un thème Jewel, puis ouvre une `JewelDecoratedWindow` :
 
 ```kotlin
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import dev.nucleusframework.application.*
-import dev.nucleusframework.window.jewel.*
-import org.jetbrains.jewel.foundation.theme.JewelTheme
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import dev.nucleusframework.window.jewel.JewelDecoratedWindow
+import dev.nucleusframework.window.jewel.JewelTitleBar
 import org.jetbrains.jewel.intui.standalone.theme.IntUiTheme
 
 fun main() = nucleusApplication {
     IntUiTheme(isDark = isSystemInDarkMode()) {
-        JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
-            JewelTitleBar { _ -> /* widgets header */ }
-            Box(Modifier.fillMaxSize()) { /* widgets Jewel ici */ }
+        JewelDecoratedWindow(
+            onCloseRequest = ::exitApplication,
+            title = "Tools",
+        ) {
+            JewelTitleBar { /* contenu de la barre de titre */ }
+            Box(Modifier.fillMaxSize()) {
+                // les widgets Jewel se placent ici
+            }
         }
     }
 }
 ```
 
-## Comment ça marche
+La fenêtre lit le thème Jewel courant et en dérive sa barre de titre et son cadre : changer
+`isDark` fait donc basculer toute la fenêtre entre les palettes IntelliJ claire et sombre.
 
-`JewelDecoratedWindow` est un wrapper Composable fin autour de `DecoratedWindow`. Il lit `JewelTheme.globalColors` et en dérive un `TitleBarStyle` / `DecoratedWindowStyle` qui correspondent — glyphes des caption buttons, couleur de bordure, padding du contenu. À l'intérieur, on compose avec les widgets Jewel habituels (`Text`, `DefaultButton`, `OutlinedButton`, lazy lists, etc.).
-
-`rememberJewelWindowStyle()` et `rememberJewelTitleBarStyle()` exposent les styles dérivés si l'on veut construire les propres wrappers — par exemple un Composable qui bascule Jewel ou Material via un feature flag.
-
-Le module repose sur `decorated-window-core` et un backend (`-tao`, `-jbr` ou `-jni`). Combine-le à `-tao` pour la plus petite image GraalVM et le support Wayland complet.
-
-## Reference
-
-- `JewelDecoratedWindow(...)` — fenêtre stylée Jewel.
-- `JewelDecoratedDialog(...)` — variante modale.
-- `JewelTitleBar` / `JewelDialogTitleBar` — slots de barre de titre.
-- `rememberJewelWindowStyle(): DecoratedWindowStyle`
-- `rememberJewelTitleBarStyle(): TitleBarStyle`
-
-<Callout type="tip">
-Besoin d'une tool window à onglets avec des splits façon éditeur ? Combine ce toolkit avec `HorizontalSplitLayout` / `VerticalSplitLayout` de Jewel dans le contenu. Le feeling IDE, le domaine.
+<Callout type="info">
+`JewelDecoratedWindow` lit `JewelTheme.globalColors` : tu dois donc l'appeler à l'intérieur
+d'un thème Jewel comme `IntUiTheme`. Sans thème, le composable n'a aucune couleur d'où dériver
+son style.
 </Callout>
+
+## Fonctionnement
+
+`JewelDecoratedWindow` est un wrapper Composable autour de `DecoratedWindow`. Il lit
+`JewelTheme.globalColors`, dérive un `DecoratedWindowStyle` et un `TitleBarStyle` du thème
+Jewel actif, puis les installe via `NucleusDecoratedWindowTheme` avant d'ouvrir la fenêtre. À
+l'intérieur, tu composes avec les widgets Jewel habituels — `Text`, `DefaultButton`,
+`OutlinedButton`, lazy lists, et les autres.
+
+Il existe deux surcharges. Celle sur `NucleusApplicationScope` — utilisée ci-dessus dans
+`nucleusApplication { }` — est indépendante du backend et fonctionne aussi bien sur Tao que sur
+AWT depuis le même site d'appel. La surcharge sur l'`ApplicationScope` de Compose repose sur
+AWT (JBR/JNI) et vise un point d'entrée `application { }` classique.
+
+`rememberJewelWindowStyle()` et `rememberJewelTitleBarStyle()` exposent directement les styles
+dérivés. Utilise-les pour construire ton propre wrapper — par exemple un composable qui bascule
+entre Jewel et un autre toolkit à l'exécution.
+
+## Référence de l'API
+
+### Ouvrir une fenêtre ou un dialogue
+
+- `JewelDecoratedWindow(...)` — une fenêtre stylée Jewel. Disponible sur
+  `NucleusApplicationScope` (indépendante du backend) et sur `ApplicationScope` (basée sur AWT).
+- `JewelDecoratedDialog(...)` — la variante dialogue modal. Une fonction de premier niveau est
+  basée sur AWT ; la surcharge sur `NucleusApplicationScope` est indépendante du backend.
+
+### Ajouter une barre de titre
+
+- `DecoratedWindowScope.JewelTitleBar(...)` — le slot de barre de titre d'une fenêtre.
+- `DecoratedDialogScope.JewelDialogTitleBar(...)` — le slot de barre de titre d'un dialogue.
+
+### Lire les styles dérivés
+
+- `rememberJewelWindowStyle(): DecoratedWindowStyle` — le style du cadre de fenêtre dérivé du
+  thème Jewel actif.
+- `rememberJewelTitleBarStyle(): TitleBarStyle` — le style de barre de titre dérivé du thème
+  Jewel actif.
+
+## Et ensuite
+
+- [Toolkit Material](/docs/window/toolkit-material) — le style Material 2 et Material 3 pour `DecoratedWindow`.
+- [DecoratedWindow](/docs/window) — l'API sous-jacente de fenêtre et de barre de titre.
+- [Backends](/docs/concepts/backends) — comment les backends Tao et AWT diffèrent.

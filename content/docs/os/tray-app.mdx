@@ -1,27 +1,26 @@
 ---
 title: Tray-anchored apps
-description: A Compose popup window anchored to the tray icon — Bartender / iStat-style menu bar apps, in Kotlin.
+description: TrayApp anchors a Compose popup window to a system tray icon so you can build menu bar apps in Kotlin.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-`TrayApp` turns a tray icon into a full Compose window that pops up beside it — the menu bar app pattern made famous by Bartender, iStat Menus, Hidden Bar. Click the icon, a window slides in. Click away, it slides out.
+`TrayApp` anchors a full Compose window to a system tray icon: left-click the icon to open the
+window beside it, and click away to close it. It implements the menu bar app pattern used by
+tools such as Bartender, iStat Menus, and Hidden Bar.
 
 <Callout type="warn" title="Experimental">
-`TrayApp` is in alpha. The API may move. Opt in with `@OptIn(ExperimentalTrayAppApi::class)`.
+`TrayApp` is in alpha and the API may change. Opt in with `@OptIn(ExperimentalTrayAppApi::class)`.
 </Callout>
 
-## TL;DR
-- The entire popup is a Compose canvas — anything you can render, you can anchor.
-- Visibility, size, dismiss mode controllable via `TrayAppState`.
-- Can be combined with a right-click context menu.
-- Smooth enter/exit animations with platform defaults.
+## Add the dependency
 
-## Install
+`TrayApp` ships with [`composenativetray`](/docs/os/system-tray). If that dependency is on your
+classpath, no extra artifact is required.
 
-`TrayApp` ships with [`composenativetray`](/docs/os/system-tray) — no extra dependency.
+## Create a tray app
 
-## Quickstart
+Pass an icon, a tooltip, a window size, and the Compose content to render in the popup:
 
 ```kotlin
 @OptIn(ExperimentalTrayAppApi::class)
@@ -43,9 +42,16 @@ fun main() = application {
 
 ## How it works
 
-`TrayApp` is a tray icon plus a transparent, undecorated, always-on-top Compose window. The library tracks the tray icon's screen position and parks the window next to it with the right offset for each OS. Click-outside-to-dismiss is wired into the OS focus loss event, so the popup feels native on every desktop.
+`TrayApp` is a tray icon plus a transparent, undecorated, always-on-top Compose window. The
+library tracks the tray icon's screen position and places the window next to it with the correct
+offset for each operating system.
 
-## State management
+Click-outside-to-dismiss is wired to the OS focus-loss event, so the popup closes the way native
+menu bar windows do on each desktop.
+
+## Control visibility and size with state
+
+Hold a `TrayAppState` to show, hide, resize, or change the dismiss mode from your own code:
 
 ```kotlin
 @OptIn(ExperimentalTrayAppApi::class)
@@ -70,19 +76,9 @@ fun main() = application {
 }
 ```
 
-### `TrayAppState`
+## Add a context menu
 
-| API | Description |
-| --- | --- |
-| `isVisible: StateFlow<Boolean>` | current visibility |
-| `show() / hide() / toggle()` | imperative control |
-| `setWindowSize(size)` | resize on the fly |
-| `setDismissMode(mode)` | `AUTO` (click outside closes) or `MANUAL` |
-| `onVisibilityChanged(cb)` | observe transitions |
-
-## With a context menu
-
-Left-click opens the popup, right-click opens a classic menu:
+Left-click opens the popup; right-click opens a classic menu:
 
 ```kotlin
 @OptIn(ExperimentalTrayAppApi::class)
@@ -101,23 +97,12 @@ fun main() = application {
 }
 ```
 
-## Window options
+## Hide the Dock icon on macOS
 
-| Parameter | Default | Notes |
-| --- | --- | --- |
-| `windowSize` | `DpSize(300.dp, 200.dp)` | initial size |
-| `visibleOnStart` | `false` | show immediately |
-| `enterTransition` / `exitTransition` | platform default | animations |
-| `transparent` | `true` | transparent background |
-| `undecorated` | `true` | no chrome |
-| `resizable` | `false` | user resize |
-| `horizontalOffset` / `verticalOffset` | 0 / platform default | nudge against the tray anchor |
+A tray app usually does not need a Dock icon. On macOS, set `LSUIElement = true` in the app's
+`Info.plist`. The Nucleus Gradle plugin exposes `macOS.infoPlist.extraKeysRawXml` for this:
 
-## Tray-only lifecycle (macOS)
-
-A tray app usually does not want a Dock icon. On macOS, configure `LSUIElement = true` in your app's Info.plist — the Nucleus Gradle plugin exposes `macOS.infoPlist.extraKeysRawXml` for this:
-
-```kotlin
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         nativeDistributions {
@@ -134,9 +119,34 @@ nucleus {
 }
 ```
 
-The app will run with no Dock entry and no menu bar — just the tray icon.
+The app then runs with no Dock entry and no menu bar — only the tray icon.
 
-## See also
+## API reference
 
-- [System tray](/docs/os/system-tray) and [Tray menu DSL](/docs/os/tray-menu-dsl).
-- [Single instance](/docs/lifecycle/single-instance) — useful so that re-launching from a `.app` re-shows the popup instead of starting a second process.
+### TrayApp window options
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `windowSize` | `DpSize(300.dp, 200.dp)` | initial size |
+| `visibleOnStart` | `false` | show immediately |
+| `enterTransition` / `exitTransition` | platform default | animations |
+| `transparent` | `true` | transparent background |
+| `undecorated` | `true` | no chrome |
+| `resizable` | `false` | user resize |
+| `horizontalOffset` / `verticalOffset` | 0 / platform default | nudge against the tray anchor |
+
+### TrayAppState
+
+| API | Description |
+| --- | --- |
+| `isVisible: StateFlow<Boolean>` | current visibility |
+| `show() / hide() / toggle()` | imperative control |
+| `setWindowSize(size)` | resize on the fly |
+| `setDismissMode(mode)` | `AUTO` (click outside closes) or `MANUAL` |
+| `onVisibilityChanged(cb)` | observe transitions |
+
+## What's next
+
+- [System tray](/docs/os/system-tray) — the tray icon API that `TrayApp` builds on.
+- [Tray menu DSL](/docs/os/tray-menu-dsl) — build the right-click menu.
+- [Single instance](/docs/lifecycle/single-instance) — re-launching from a `.app` re-shows the popup instead of starting a second process.

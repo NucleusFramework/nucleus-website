@@ -1,20 +1,27 @@
 ---
 title: Quickstart
-description: Cinq minutes entre un dossier vide et une app desktop native packagée, propulsée par Tao.
+description: Construis et lance ta première app desktop Nucleus, puis empaquette-la en installateur natif.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Une app Nucleus complète tient en deux fichiers : un script Gradle et un `main` Kotlin. À la fin de cette page on a une fenêtre qui tourne, puis un installateur signé pour le OS courant.
+Dans ce tutoriel, tu vas créer une app desktop Nucleus à partir de zéro, la lancer dans une
+fenêtre native Tao, puis l'empaqueter en installateur pour ton système d'exploitation actuel.
+L'app entière tient en deux fichiers : un script de build Gradle et une fonction `main` Kotlin.
 
-## L'essentiel
-- Un seul plugin : `id("dev.nucleusframework")`.
-- Un seul point d'entrée : `nucleusApplication { … }`.
-- Une seule commande : `./gradlew run`. Une autre : `./gradlew packageDistributionForCurrentOS`.
+## Avant de commencer
 
-## 1. `build.gradle.kts`
+Nucleus s'appuie sur Compose Multiplatform et nécessite :
 
-```kotlin
+- **JDK 17 ou une version ultérieure** dans ton `PATH`. [JetBrains Runtime](https://github.com/JetBrains/JetBrainsRuntime)
+  est recommandé quand tu utilises le backend AWT.
+- **Kotlin 2.0 ou une version ultérieure** et **Gradle 8.x**.
+
+## Créer le script de build
+
+Dans un dossier de projet vide, crée `build.gradle.kts` et applique le plugin Nucleus :
+
+```kotlin title="build.gradle.kts"
 plugins {
     kotlin("jvm") version "2.0.21"
     id("org.jetbrains.compose") version "1.7.0"
@@ -28,7 +35,7 @@ repositories {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    // Optionnel : activer le backend Tao (fenêtrage natif Rust)
+    // Active le backend Tao (fenêtrage natif en Rust)
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.0.0")
 }
 
@@ -43,7 +50,9 @@ nucleus.application {
 }
 ```
 
-## 2. `src/main/kotlin/com/example/Main.kt`
+## Écrire l'application
+
+Crée `src/main/kotlin/com/example/Main.kt` :
 
 ```kotlin
 package com.example
@@ -51,11 +60,10 @@ package com.example
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import dev.nucleusframework.nucleusapplication.DecoratedWindow
-import dev.nucleusframework.nucleusapplication.NucleusBackend
-import dev.nucleusframework.nucleusapplication.nucleusApplication
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
 
 fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
     DecoratedWindow(
@@ -69,34 +77,36 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 }
 ```
 
-<Callout type="info" title="Choix du backend">
-`NucleusBackend.Auto` (par défaut) prend Tao si `decorated-window-tao` est sur le classpath, sinon le backend AWT. Force-le explicitement avec `NucleusBackend.Tao` ou `NucleusBackend.Awt`. Voir [Backends](/docs/concepts/backends).
+Le point d'entrée `nucleusApplication` démarre le runtime Nucleus et ouvre une `DecoratedWindow` —
+une fenêtre Compose avec une barre de titre native.
+
+<Callout type="info">
+`NucleusBackend.Auto` (la valeur par défaut) choisit Tao quand `decorated-window-tao` est sur
+le classpath, et se rabat sur le backend AWT sinon. Force un backend avec `NucleusBackend.Tao`
+ou `NucleusBackend.Awt`. Voir [Backends](/docs/concepts/backends).
 </Callout>
 
-## 3. Lance-la
+## Lancer l'application
 
-```bash
+```shell
 ./gradlew run
 ```
 
-Une fenêtre native s'ouvre avec une title bar custom (Tao sous Linux/Windows ; native macOS sur macOS).
+Une fenêtre native s'ouvre avec une barre de titre personnalisée — dessinée par Tao sous Linux
+et Windows, et par le système sur macOS.
 
-## 4. Package-la
+## Empaqueter l'application
 
-```bash
+```shell
 ./gradlew packageDistributionForCurrentOS
 ```
 
-L'installateur atterrit dans `build/compose/binaries/main/<format>/`. Sur macOS c'est un `.dmg`, sur Windows un `.msi`, sur Linux un `.deb`. Ajoute des formats en étendant `targetFormats(...)` — 16 sont supportés, voir [Configuration](/docs/start/configuration).
+L'installateur est écrit dans `build/compose/binaries/main/<format>/` : un `.dmg` sur macOS, un
+`.msi` sur Windows et un `.deb` sur Linux. Ajoute des formats en étendant `targetFormats(...)`.
+Voir [Configuration](/docs/start/configuration).
 
-## Ce qu'on viens de livrer
+## Et ensuite
 
-- Une vraie fenêtre native, rendue GPU via Skia, décorée par le [backend Tao](/docs/concepts/backends).
-- Tout le runtime Nucleus branché : lock single-instance, handler de deep link, détection du cache AOT, initialiseur GraalVM.
-- Un pipeline d'installateur prêt à signer. Pour activer le signing et la notarisation sur macOS ou Authenticode sur Windows, configure les blocs `macOS { signing { … } }` / `windows { signing { … } }` — voir [Configuration](/docs/start/configuration).
-
-## Et ensuite ?
-
-- [Project setup](/docs/start/project-setup) — layout multi-module, propriétés Gradle, config JDK recommandée.
-- [Configuration](/docs/start/configuration) — le DSL complet.
-- [Architecture](/docs/concepts/architecture) — ce qui tourne vraiment sous le `main`.
+- [Project setup](/docs/start/project-setup) — organisation multi-module, propriétés Gradle et config JDK.
+- [Configuration](/docs/start/configuration) — le DSL `nucleus { }` complet.
+- [Architecture](/docs/concepts/architecture) — ce qui tourne sous ta fonction `main`.

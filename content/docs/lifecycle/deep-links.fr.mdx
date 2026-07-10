@@ -1,76 +1,92 @@
 ---
 title: Deep links et schémas d'URL
-description: "Enregistre des handlers monapp:// sur macOS, Windows et Linux depuis un seul bloc Gradle."
+description: Enregistre un schéma d'URL personnalisé au packaging et reçois l'URI du deep link entrant dans ton app Nucleus au runtime.
 ---
 
-Une URL, c'est la manière universelle pour l'OS — et les autres apps — de parler à la tienne. Un lien dans un mail, un message Slack, un QR code : ça finit en `monapp://action?id=42` sur la machine de quelqu'un. Nucleus enregistre le protocole au packaging et tend l'URI dans le `main()` au runtime.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Déclare les protocoles une fois dans `nucleus { application { nativeDistributions { protocol(...) } } }`.
-- Le plugin écrit la plomberie : LSBundleURLTypes (macOS), entrées registre HKCU (Windows), MimeType `.desktop` (Linux).
-- `DeepLinkHandler.setHandler(args, onDeepLink)` parse l'URI qu'elle arrive via Apple Events ou args CLI.
-- Combine avec [`SingleInstanceManager`](/docs/lifecycle/single-instance) pour transférer les URI d'une instance secondaire vers la primaire en cours.
+Les deep links te permettent d'enregistrer un schéma d'URL personnalisé `myapp://` et de recevoir l'URI entrante en Kotlin. Le plugin Gradle Nucleus enregistre le schéma auprès de l'OS au packaging, et `DeepLinkHandler`, dans `core-runtime`, livre l'URI au runtime, qu'elle arrive via les Apple Events macOS ou via les arguments de ligne de commande.
 
-## Installation
+## Ajouter la dépendance
 
-Fourni avec `core-runtime` (tiré transitivement par `nucleus-application`).
+`DeepLinkHandler` est fourni par `core-runtime`, que `nucleus-application` tire transitivement. Si tu dépends déjà de `nucleus-application`, tu l'as. Sinon, ajoute le module directement :
 
-## Quickstart
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
 
-### 1. Déclare le schéma
+## Déclarer le schéma d'URL
 
-```kotlin
+Enregistre le schéma dans le bloc `nativeDistributions` du plugin Nucleus. Le plugin écrit l'enregistrement propre à la plateforme dans chaque installeur qu'il génère :
+
+```kotlin title="build.gradle.kts"
 nucleus.application {
     nativeDistributions {
+        // protocol(name, vararg schemes)
+        // name est affiché dans l'UI de l'OS ; schemes sont les préfixes d'URL (sans "://").
         protocol("MyApp", "myapp")
-        // protocol(name, vararg schemes) — name visible dans l'UI de l'OS,
-        // schemes = les préfixes (sans ://) que voulu capturer.
     }
 }
 ```
 
-### 2. Traite les URI entrantes
+## Traiter les URI entrantes
+
+Dans `nucleusApplication { }`, enregistre un callback avec `onDeepLink`. Il choisit le chemin de livraison selon le backend actif (AWT ou Tao) et se déclenche à la fois pour l'URI de cold start et pour les activations ultérieures :
+
+```kotlin
+import java.net.URI
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    onDeepLink { uri: URI ->
+        // Route selon uri.host / uri.path / les paramètres de requête.
+        navigateTo(uri)
+    }
+
+    DecoratedWindow(onCloseRequest = ::exitApplication) {
+        // ...
+    }
+}
+```
+
+Sans le point d'entrée `nucleusApplication`, câble `DeepLinkHandler` toi-même. `setHandler` est sûr sur tous les backends ; sur macOS, tu installes en plus le handler Apple Events d'AWT :
 
 ```kotlin
 import dev.nucleusframework.core.runtime.DeepLinkHandler
 
-fun main(args: Array<String>) = nucleusApplication(args) {
-    onDeepLink { uri ->
-        // uri est un java.net.URI — route sur uri.host / uri.path / query
-        navigateTo(uri)
-    }
-
-    DecoratedWindow(onCloseRequest = ::exitApplication) { /* ... */ }
-}
-```
-
-Sans `nucleusApplication { }` :
-
-```kotlin
 fun main(args: Array<String>) {
     DeepLinkHandler.setHandler(args) { uri -> navigateTo(uri) }
-    // Sur macOS, ajoute aussi :
+    // macOS uniquement, et seulement pour les lancements pilotés par AWT.
     DeepLinkHandler.installAwtAppleEventHandler()
 
-    application { /* ... */ }
+    application {
+        // ...
+    }
 }
 ```
 
-## Comment ça marche
+<Callout type="warn">
+`installAwtAppleEventHandler` initialise AWT. Sur le backend Tao (`decorated-window-tao`), AWT et Tao créent chacun leur propre `NSApp` et bloquent la boucle d'événements sur macOS. Utilise `nucleusApplication { onDeepLink { … } }`, qui choisit le bon chemin selon le backend.
+</Callout>
 
-Les trois OS livrent les URL de trois façons différentes :
+## Fonctionnement
+
+Chaque OS livre les URL différemment :
 
 | OS | Mécanisme |
 |---|---|
-| macOS | Apple Events. L'app déjà lancée reçoit des événements `GetURL` via `NSAppleEventManager` (ou `Desktop.setOpenURIHandler` d'AWT sur JBR/OpenJDK). Le plugin déclare le schéma dans `Info.plist` sous `CFBundleURLTypes`. |
-| Windows | Entrée registre sous `HKCU\Software\Classes\<scheme>`. Cliquer une URL `monapp://...` lance le `.exe` avec l'URL en premier argument CLI — un nouveau process. |
-| Linux | Un fichier `.desktop` avec `MimeType=x-scheme-handler/monapp;` plus l'association `xdg-mime`. L'URL arrive aussi en argument CLI. |
+| macOS | Apple Events. L'app en cours d'exécution reçoit des événements `GetURL`, exposés via `Desktop.setOpenURIHandler` sur le backend AWT. Le plugin déclare le schéma dans `Info.plist` sous `CFBundleURLTypes`. |
+| Windows | Une entrée de registre sous `HKCU\Software\Classes\<scheme>`. Ouvrir une URL `myapp://...` lance ton `.exe` avec l'URL en premier argument de ligne de commande — un nouveau process. |
+| Linux | Un fichier `.desktop` avec `MimeType=x-scheme-handler/myapp;` plus une association `xdg-mime`. L'activation passe l'URL en argument de ligne de commande. |
 
-`DeepLinkHandler.setHandler(args, onDeepLink)` masque la différence : sur macOS il installe le handler Apple-event d'AWT pour que le callback se déclenche pendant que l'app tourne, sur Windows / Linux il scanne `args` à la recherche d'entrées URI. Combine avec `SingleInstanceManager` pour le cas très courant Windows / Linux où un second `.exe` est lancé juste pour livrer l'URL : la secondaire écrit l'URI dans le fichier restore-request, la primaire le relit.
+`setHandler(args, onDeepLink)` réconcilie ces différences. Sur le chemin AWT, `installAwtAppleEventHandler` enregistre un handler Apple Events pour que le callback se déclenche pendant que l'app tourne déjà ; sur Windows et Linux, `setHandler` scanne `args` à la recherche de la première entrée contenant `://`. L'URI de cold start n'est livrée au handler qu'une fois par process, donc l'enregistrer depuis un scope Compose qui se relance à la recomposition ne la redéclenche pas.
 
-Le plugin s'occupe de tout le statique — `Info.plist`, entrées registre, fichiers `.desktop`. On décrit le protocole une fois.
+Windows et Linux démarrent un nouveau process à chaque activation. Combine avec `SingleInstanceManager` pour transférer l'URI vers l'instance déjà en cours : le process secondaire enregistre son URI avec `captureFromArgs` et l'écrit avec `writeUriTo(path)` avant de quitter, et l'instance primaire la relit avec `readUriFrom(path)`.
 
-## Référence
+Le plugin génère tout l'enregistrement statique — entrées `Info.plist`, clés de registre Windows et fichiers `.desktop`. Tu déclares le schéma une seule fois.
+
+## Référence de l'API
 
 ### DSL Gradle
 
@@ -80,26 +96,37 @@ nativeDistributions {
 }
 ```
 
-### `DeepLinkHandler`
+### DeepLinkHandler
+
+`object DeepLinkHandler` dans `dev.nucleusframework.core.runtime`.
 
 | Membre | Signature | Notes |
 |---|---|---|
-| `setHandler(args, onDeepLink)` | `(Array<String>, (URI) -> Unit) -> Unit` | Câble le handler. Appelle-le avant `application { }`. |
-| `installAwtAppleEventHandler()` | `() -> Unit` | macOS uniquement ; idempotent. `nucleusApplication { }` l'appelle automatiquement. |
-| `uri` | `var URI?` | L'URI la plus récente, p. ex. celle du cold start. |
-| `writeUriTo(path)` | `(Path) -> Unit` | Persiste l'URI courante — à combiner avec `SingleInstanceManager`. |
-| `deliver(uri)` | `(URI) -> Unit` | Injecte une URI manuellement (utile en test). |
+| `setHandler` | `(args: Array<String>, onDeepLink: (URI) -> Unit)` | Enregistre le callback et livre l'URI de cold start une seule fois. Sûr sur tous les backends. |
+| `captureFromArgs` | `(args: Array<String>)` | Enregistre une URI depuis `args` dans `uri` sans installer de callback ni toucher AWT. Utilisé par le bootstrap secondaire du single-instance. |
+| `installAwtAppleEventHandler` | `()` | macOS uniquement. Installe le handler Apple Events d'AWT et initialise AWT. |
+| `writeUriTo` | `(path: Path)` | Écrit l'`uri` courante dans un fichier. À combiner avec `SingleInstanceManager`. |
+| `readUriFrom` | `(path: Path)` | Lit une URI depuis un fichier et déclenche le callback. |
+| `deliver` | `(newUri: URI)` | Injecte une URI dans la chaîne du handler. Utilisé par les chemins de livraison alternatifs et en test. |
+| `uri` | `URI?` (lecture seule) | L'URI reçue la plus récente, y compris celle du cold start. |
 
-### `NucleusApplicationScope.onDeepLink`
+### NucleusApplicationScope.onDeepLink
 
 ```kotlin
 nucleusApplication { onDeepLink { uri -> /* ... */ } }
 ```
 
-Raccourci pour `DeepLinkHandler.setHandler` qui diffère l'inscription jusqu'au démarrage de l'app.
+Enregistre un callback `DeepLinkHandler` qui diffère jusqu'au démarrage de l'application et choisit le chemin de livraison adapté au backend.
 
 ## Notes
 
-- Teste en dev avec `xdg-open monapp://test` (Linux), `open monapp://test` (macOS), `start monapp://test` (Windows). Les entrées de jump-list ne marchent que sur builds packagés — voir [Launcher : Windows](/docs/lifecycle/launcher-windows).
-- L'URI de cold start (celle qui a lancé l'app) est aussi dans `DeepLinkHandler.uri` — lis-la après avoir enregistré le handler.
-- Pour les associations de fichiers (ouvrir un `.csv` avec le app), utilise le DSL `fileAssociation(...)` du plugin.
+- `DeepLinkHandler.register(args, onDeepLink)` est déprécié : il installe toujours le handler AWT et est incompatible avec le backend Tao sur macOS. Utilise `onDeepLink { … }` ou `setHandler`.
+- Teste en développement avec `xdg-open myapp://test` (Linux), `open myapp://test` (macOS) ou `start myapp://test` (Windows). L'enregistrement via l'installeur ne s'applique qu'aux builds packagés — voir [Launcher : Windows](/docs/lifecycle/launcher-windows).
+- L'URI de cold start est aussi stockée dans `DeepLinkHandler.uri` ; lis-la après avoir enregistré ton handler.
+- Pour les associations de fichiers (ouvrir un `.csv` avec ton app), utilise plutôt le DSL `fileAssociation(...)` du plugin.
+
+## Et ensuite
+
+- [Instance unique](/docs/lifecycle/single-instance) — transfère un deep link d'un process relancé vers celui déjà en cours.
+- [Launcher : macOS](/docs/lifecycle/launcher-macos) — l'intégration `Info.plist` et Apple Events.
+- [Launcher : Windows](/docs/lifecycle/launcher-windows) — l'enregistrement dans le registre et les entrées de jump-list.

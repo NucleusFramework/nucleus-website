@@ -1,25 +1,26 @@
 ---
 title: System info
-description: Read-only inventory of the host — OS, CPU, memory, disks, GPUs, batteries, network, processes, users — through one Kotlin API.
+description: Read host details — OS, CPU, memory, disks, GPUs, batteries, network, processes, and users — through the SystemInfo object.
 ---
 
-Sysinfo-style hardware and OS introspection: read-only, cross-platform, JNI-backed. Use it for telemetry, conditional features, requirements checks ("we need 8 GB to enable this"), in-app diagnostics screens, or just printing the running environment in your bug reports.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- One entry point: `object SystemInfo`.
-- Covers OS, CPU (per-core + global), memory, disks, components (temperature sensors), networks, GPUs, batteries, processes, users, motherboard.
-- Native bridges, no JNA, no procfs scraping from Kotlin.
-- Always check `isAvailable()` before you bet on it.
+`SystemInfo` lets you read host details from Kotlin: the operating system, CPU, memory, disks,
+GPUs, batteries, network interfaces, processes, and users. Each reading is a snapshot taken at
+call time, backed by a per-platform native library on macOS, Windows, and Linux.
 
-## Install
+## Add the dependency
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.system-info:<version>")
 }
 ```
 
-## Quickstart
+## Read the host
+
+`SystemInfo` is an `object`. Call its methods directly and check for `null`: a value that
+cannot be retrieved on a given host returns `null` rather than a guess.
 
 ```kotlin
 import dev.nucleusframework.systeminfo.SystemInfo
@@ -40,66 +41,98 @@ fun main() {
 }
 ```
 
+Call `SystemInfo.isAvailable()` first when you need to know whether the native library loaded on
+the current platform.
+
 ## How it works
 
-Every call hits a native bridge — `NativeMacOsSystemInfoBridge`, `NativeWindowsSystemInfoBridge`, `NativeLinuxSystemInfoBridge` — that wraps platform APIs (`IOKit`, WMI / PDH, sysfs / procfs / udev). Results are nullable: a disk model that is impossible to retrieve on a particular host returns `null` rather than guessed values.
+Each method delegates to a native library, one per operating system, loaded through JNI. The
+library reads the underlying platform APIs and returns plain Kotlin data classes.
 
-The API is snapshot-oriented: each method returns the values at call time. Cache them yourself if you display them on a refresh interval.
+The API is snapshot-oriented: each call reads the current values and returns immediately. There
+is no polling or subscription. To display readings on a refresh interval, call the method again
+and cache the result yourself.
 
-## Reference
+Nullable returns and empty lists mean the value was unavailable, not that an error was thrown.
+List methods such as `disks()` and `gpus()` return an empty list when nothing could be read;
+single-value methods such as `cpuInfo()` return `null`.
 
-### OS
+## API reference
+
+### Operating system
 
 ```kotlin
 val os = SystemInfo.osInfo()
-// name, longOsVersion, cpuArch, kernelVersion, hostname, …
+// name, osVersion, longOsVersion, kernelVersion, distributionId,
+// hostName, cpuArch, uptime, bootTime
 ```
+
+`osInfo()` returns `OsInfo?`.
 
 ### CPU
 
 ```kotlin
-val cpu = SystemInfo.cpuInfo()
+val cpu = SystemInfo.cpuInfo()   // CpuGlobalInfo?
 cpu?.cpus?.forEach { core ->
     println("${core.brand}: ${core.frequency} MHz, usage ${core.cpuUsage}%")
 }
+println("Global usage: ${cpu?.globalCpuUsage}%")
 ```
 
-### Memory & disks
+`cpuInfo()` returns a `CpuGlobalInfo?` holding `globalCpuUsage`, `physicalCoreCount`, and a
+`cpus: List<CpuInfo>` with one entry per logical core.
+
+### Memory and disks
 
 ```kotlin
-SystemInfo.memoryInfo()    // total, used, free, available, swap
-SystemInfo.disks()         // mount points, sizes, file system types
+SystemInfo.memoryInfo()   // MemoryInfo? — total, free, available, used, and swap counters
+SystemInfo.disks()        // List<DiskInfo> — name, fileSystem, mountPoint, totalSpace, availableSpace
 ```
 
-### GPUs, batteries, networks
+### GPUs, batteries, and network
 
 ```kotlin
-SystemInfo.gpus()          // List<GpuInfo>
-SystemInfo.batteryInfo()   // BatteryInfo? — charge, state, cycle count
-SystemInfo.networks()      // List<NetworkInterfaceInfo>
-SystemInfo.connectivityInfo() // online?, metered?
+SystemInfo.gpus()             // List<GpuInfo>
+SystemInfo.batteryInfo()      // BatteryInfo? — stateOfCharge, state, cycleCount, health, …
+SystemInfo.networks()         // List<NetworkInterfaceInfo>
+SystemInfo.connectivityInfo() // ConnectivityInfo? — isConnected, meteredStatus
 ```
 
-### Processes & users
+`BatteryInfo.state` is a `BatteryState` enum: `Charging`, `Discharging`, `Full`, or `Unknown`.
+`ConnectivityInfo.meteredStatus` is a `MeteredStatus` enum: `NOT_AVAILABLE`, `UNKNOWN`,
+`UNMETERED`, or `METERED`.
+
+### Processes and users
 
 ```kotlin
-SystemInfo.processes()     // every running process
-SystemInfo.process(pid)
-SystemInfo.users()
+SystemInfo.processes()    // List<ProcessInfo> — every running process
+SystemInfo.process(pid)   // ProcessInfo? — a single process by pid: Long
+SystemInfo.users()        // List<UserInfo>
 ```
 
-### Idle time
+### Other readings
 
 ```kotlin
-val idleSeconds = SystemInfo.idleTime()
+SystemInfo.components()    // List<ComponentInfo> — temperature sensors
+SystemInfo.motherboard()   // MotherboardInfo?
+SystemInfo.product()       // ProductInfo?
+SystemInfo.idleTime()      // Long — seconds since last user input, or -1 if unavailable
 ```
-
-## Use cases
-- **Telemetry** — anonymised CPU / GPU / OS distribution, no third-party SDK.
-- **Conditional features** — gate a heavy ML model behind `memoryInfo()?.totalMemory > 8.GiB`.
-- **Diagnostics screen** — let users export a report for support tickets.
-- **Power-aware UX** — pause background sync when `batteryInfo().state == Discharging && stateOfCharge &lt; 0.2`.
 
 ## Notes
-- Some metrics are platform-specific: temperature sensors are scarce on Windows, motherboard model is most reliable on Linux.
-- `processes()` can be expensive on busy systems — prefer `process(pid)` when you only need one.
+
+- Some readings are platform-specific. Temperature sensors through `components()` are sparse on
+  Windows, and `motherboard()` is most complete on Linux.
+- `processes()` walks every process and can be expensive on a busy host. Use `process(pid)` when
+  you only need one.
+
+<Callout type="info">
+`idleTime()` returns `-1` when the platform library did not load, the same value
+`isAvailable()` reports as `false`.
+</Callout>
+
+## What's next
+
+- [System color](/docs/os/system-color) — read the system accent and high-contrast state.
+- [Dark mode](/docs/os/dark-mode) — detect and observe the system light/dark setting.
+- [Modules](/docs/concepts/modules) — the full list of Nucleus modules and their artifacts.
