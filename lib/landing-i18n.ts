@@ -175,6 +175,57 @@ export const oneLangT = {
 };
 
 // =====================================================================
+// Accessibility
+// =====================================================================
+export const accessibilityT = {
+  eyebrow: { en: 'Native accessibility', fr: 'Accessibilité native' } as Bi<string>,
+  title: {
+    en: React.createElement(React.Fragment, null,
+      'One semantics tree. ',
+      React.createElement('span', { className: 'hero-grad' }, 'Three native screen readers.'),
+    ),
+    fr: React.createElement(React.Fragment, null,
+      'Un arbre de sémantique. ',
+      React.createElement('span', { className: 'hero-grad' }, 'Trois lecteurs d\'écran natifs.'),
+    ),
+  } as Bi,
+  subtitle: {
+    en: 'The Tao backend projects your Compose semantics onto NSAccessibility, UI Automation, and AT-SPI. VoiceOver, Narrator, and Orca just work — no extra wiring, no platform-specific code. And accessibility matters now more than ever: as AI agents increasingly interact with applications, they rely on the same structured accessibility trees to read and control programs.',
+    fr: 'Le backend Tao projette ta sémantique Compose sur NSAccessibility, UI Automation et AT-SPI. VoiceOver, Narrator et Orca fonctionnent directement — pas de câblage supplémentaire, pas de code spécifique par plateforme. Et l\'accessibilité compte plus que jamais : alors que les agents IA interagissent de plus en plus avec les applications, ils s\'appuient sur les mêmes arbres d\'accessibilité structurés pour lire et contrôler les programmes.',
+  } as Bi<string>,
+  macosName: { en: 'macOS', fr: 'macOS' } as Bi<string>,
+  macosReader: { en: 'VoiceOver', fr: 'VoiceOver' } as Bi<string>,
+  macosApi: { en: 'NSAccessibility', fr: 'NSAccessibility' } as Bi<string>,
+  macosTag: { en: 'AXIdentifier · testTag', fr: 'AXIdentifier · testTag' } as Bi<string>,
+  windowsName: { en: 'Windows', fr: 'Windows' } as Bi<string>,
+  windowsReader: { en: 'Narrator', fr: 'Narrator' } as Bi<string>,
+  windowsApi: { en: 'UI Automation', fr: 'UI Automation' } as Bi<string>,
+  windowsTag: { en: 'AutomationId · testTag', fr: 'AutomationId · testTag' } as Bi<string>,
+  linuxName: { en: 'Linux', fr: 'Linux' } as Bi<string>,
+  linuxReader: { en: 'Orca', fr: 'Orca' } as Bi<string>,
+  linuxApi: { en: 'AT-SPI via AccessKit', fr: 'AT-SPI via AccessKit' } as Bi<string>,
+  linuxTag: { en: 'AccessKit author id · testTag', fr: 'AccessKit author id · testTag' } as Bi<string>,
+  footnote: {
+    en: 'No assistive tech attached? The backend skips the walk entirely, so scrolling and animation stay smooth. The first screen-reader query activates the projection automatically.',
+    fr: 'Aucune technologie d\'assistance connectée ? Le backend saute le parcours entièrement pour garder le défilement et les animations fluides. La première requête d\'un lecteur d\'écran active la projection automatiquement.',
+  } as Bi<string>,
+  // Preview UI strings
+  pv_settings: { en: 'Settings', fr: 'Paramètres' } as Bi<string>,
+  pv_account: { en: 'Account', fr: 'Compte' } as Bi<string>,
+  pv_active: { en: 'Active', fr: 'Actif' } as Bi<string>,
+  pv_voiceOver: { en: 'VoiceOver', fr: 'VoiceOver' } as Bi<string>,
+  pv_focusHint: { en: 'Focus moves to the switch', fr: 'Le focus se déplace sur le switch' } as Bi<string>,
+  pv_easeOfAccess: { en: 'Ease of Access', fr: 'Accès facile' } as Bi<string>,
+  pv_narrator: { en: 'Narrator', fr: 'Narrateur' } as Bi<string>,
+  pv_describe: { en: 'Describe the world around me', fr: 'Décrire le monde autour de moi' } as Bi<string>,
+  pv_focusedElement: { en: 'Focused element', fr: 'Élément focalisé' } as Bi<string>,
+  pv_accessibility: { en: 'Accessibility', fr: 'Accessibilité' } as Bi<string>,
+  pv_screenReader: { en: 'Screen Reader', fr: 'Lecteur d\'écran' } as Bi<string>,
+  pv_orca: { en: 'Orca Screen Reader', fr: 'Lecteur d\'écran Orca' } as Bi<string>,
+  pv_atspi: { en: 'AT-SPI bus bridged via AccessKit', fr: 'Bus AT-SPI ponté via AccessKit' } as Bi<string>,
+};
+
+// =====================================================================
 // Toolkits
 // =====================================================================
 export const toolkitsT = {
