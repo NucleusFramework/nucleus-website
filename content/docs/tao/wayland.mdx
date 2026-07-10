@@ -1,61 +1,84 @@
 ---
 title: Native Wayland
-description: Compose Desktop runs on Wayland directly — no XWayland fallback, fractional scaling, real gestures.
+description: The Tao backend renders Compose Desktop apps directly on Wayland and falls back to X11 automatically.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-On JBR, Linux Compose apps fall back to XWayland — fuzzy fractional scaling, no real gesture support, broken HiDPI on mixed displays. The Tao backend talks Wayland directly: real surfaces, real fractional scale, real `wl_pointer_gestures`.
+On Linux, the Tao backend renders Compose Desktop apps directly on Wayland through native Wayland
+protocols, rather than through the XWayland compatibility layer. When no Wayland session is
+available, it falls back to X11 without any code change. This page covers what the Wayland path
+supports, how it works, and how to read the current session from Kotlin.
 
-## TL;DR
-- Native `wl_surface` — no XWayland round-trip.
-- Fractional scaling via `wp_fractional_scale_v1` (no 1x/2x staircase).
-- Multi-touch and pen via `pointer-gestures-unstable-v1` and `wp_tablet_v2`.
-- Drag-and-drop via `wl_data_device`, client-side decorations via `xdg-decoration`.
-- Falls back to X11 transparently on legacy sessions.
+## Add the dependency
 
-## Install
+Wayland support ships with the Tao backend. There is no separate artifact.
 
-Bundled with `decorated-window-tao`.
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
 
-## Quickstart — detect the session
+## Detect the session
+
+You rarely branch on the session type — the same Compose code runs on Wayland and X11. Detection is
+useful for diagnostics and feature gates, since taskbar progress, badges, and global hotkeys behave
+differently per session.
 
 ```kotlin
+import dev.nucleusframework.core.runtime.LinuxDesktopEnvironment
 import dev.nucleusframework.core.runtime.Platform
 
 val onWayland = Platform.isWayland
-val desktopEnv = Platform.Current.let { if (it == Platform.Linux) LinuxDesktopFileDetector.detect() else null }
+val desktopEnv = if (Platform.Current == Platform.Linux) LinuxDesktopEnvironment.Current else null
 ```
-
-You won't typically branch on this — Compose code stays identical. But it's handy for diagnostics and feature gates (badges, taskbar progress, global hotkeys behave differently per session).
 
 ## How it works
 
-Tao binds the standard Wayland protocols at startup: `xdg-shell` for windows, `xdg-decoration` to negotiate server- vs client-side decorations, `wp_fractional_scale_v1` for sub-integer scale factors, `pointer-gestures-unstable-v1` for pinch/swipe, `wp_tablet_v2` for stylus. Skiko renders to an EGL surface attached to that `wl_surface`.
+Tao binds the standard Wayland protocols at startup: `xdg-shell` for windows, `xdg-decoration` to
+negotiate server- or client-side decorations, `wp_fractional_scale_v1` for sub-integer scale
+factors, `pointer-gestures-unstable-v1` for pinch and swipe, and `wp_tablet_v2` for stylus input.
+Skiko renders to an EGL surface attached to the window's `wl_surface`.
 
-When the compositor signals a scale change (the user drags your window between a 1.0 and 1.5 monitor), Tao reconfigures the EGL surface and emits a density change to Compose. Your `Dp` values stay logical; the rendered output goes crisp. See [Per-monitor HiDPI](/docs/tao/hidpi) for the details.
+When the compositor signals a scale change — for example, when you drag a window from a 1.0 monitor
+to a 1.5 monitor — Tao reconfigures the EGL surface and emits a density change to Compose. Your `Dp`
+values stay logical and the rendered output stays crisp. See [Per-monitor HiDPI](/docs/tao/hidpi)
+for the details.
 
-If you launch on an X11 session (or a Wayland compositor that refuses XDG decorations), Tao falls back to X11 automatically. The Compose code doesn't change.
+On an X11 session, or on a Wayland compositor that refuses XDG decorations, Tao falls back to X11
+automatically. The Compose code does not change.
 
-## Wayland vs X11 differences
+## Wayland and X11 differences
 
-| Concern                | Wayland (Tao)                       | X11 (fallback)                    |
-|------------------------|-------------------------------------|-----------------------------------|
-| Fractional scaling     | Native, per-output                  | Whole-pixel only                  |
-| Window placement       | Compositor-controlled               | Client can set absolute position  |
-| Global hotkeys         | Compositor-mediated (`xdg-portal`)  | `XGrabKey`                        |
-| Screen capture         | Portal-only                         | Direct                            |
-| Pen pressure           | `wp_tablet_v2`                      | Not exposed                       |
-| Multi-touch gestures   | `pointer-gestures-unstable-v1`      | Limited                           |
+| Concern              | Wayland (Tao)                      | X11 (fallback)                   |
+|----------------------|------------------------------------|----------------------------------|
+| Fractional scaling   | Native, per-output                 | Whole-pixel only                 |
+| Window placement     | Compositor-controlled              | Client can set absolute position |
+| Global hotkeys       | Compositor-mediated (`xdg-portal`) | `XGrabKey`                       |
+| Screen capture       | Portal only                        | Direct                           |
+| Pen pressure         | `wp_tablet_v2`                      | Not exposed                      |
+| Multi-touch gestures | `pointer-gestures-unstable-v1`     | Limited                          |
+
+## Notes
 
 <Callout type="warn">
-**Window placement on Wayland**: you cannot set absolute screen coordinates — the compositor owns placement. `WindowState.position` is honoured by some compositors as a hint, ignored by others (GNOME, in particular, ignores client-requested positions). Build your layout around `Center`, `PlatformDefault`, or remember the last size only.
+On Wayland you cannot set absolute screen coordinates — the compositor owns window placement.
+`WindowState.position` is treated as a hint by some compositors and ignored by others (GNOME ignores
+client-requested positions). Design around `Center` or `PlatformDefault`, and persist the last size
+rather than the last position.
 </Callout>
 
-## Reference
+## API reference
 
-- `Platform.isWayland` — `true` when `WAYLAND_DISPLAY` is set and the session is Wayland.
-- `Platform.Current` — `Linux | Windows | MacOS | Unknown`.
-- `LinuxDesktopEnvironment` and `LinuxDesktopFileDetector` — distinguish GNOME, KDE, Sway, etc.
+- `Platform.isWayland` — `true` on a Linux session when `XDG_SESSION_TYPE` is `wayland` or
+  `WAYLAND_DISPLAY` is set.
+- `Platform.Current` — one of `Linux`, `Windows`, `MacOS`, or `Unknown`.
+- `LinuxDesktopEnvironment.Current` — one of `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate`, or
+  `Unknown`.
 
-See also: [Multi-touch & gestures](/docs/tao/multi-touch), [Pen & stylus](/docs/tao/pen-stylus), [Per-monitor HiDPI](/docs/tao/hidpi).
+## What's next
+
+- [Per-monitor HiDPI](/docs/tao/hidpi) — how fractional scaling maps to Compose density.
+- [Multi-touch and gestures](/docs/tao/multi-touch) — pinch, swipe, and rotate on Wayland.
+- [Pen and stylus](/docs/tao/pen-stylus) — pressure and tilt through `wp_tablet_v2`.

@@ -1,102 +1,136 @@
 ---
 title: Accès natif — la metadata de réflexion résolue automatiquement
-description: Nucleus injecte automatiquement les reflect-config, resource-config et metadata JNI pour chaque module Nucleus et la plupart des libs Kotlin idiomatiques — le build GraalVM marche sans écrire de JSON.
+description: Nucleus génère la metadata de réflexion, de ressources et JNI dont un build GraalVM Native Image a besoin, en la fusionnant depuis plusieurs sources pour que le build compile sans JSON écrit à la main.
 ---
-
-GraalVM Native Image a une taxe célèbre : chaque `Class.forName` réflectif, chaque glob `getResource`, chaque appel JNI doit être déclaré en JSON au build. L'hypothèse du monde fermé rend le binaire minuscule et le cold start instantané — mais écrire la metadata de reachability à la main est le genre de travail qui mange silencieusement une semaine. Nucleus le fait automatiquement.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Nucleus livre **cinq couches de metadata automatique** — config par lib, le Reachability Repository d'Oracle, des entrées spécifiques à la plateforme, l'analyse statique de bytecode, et une baseline générique. Elles se mergent automatiquement au build.
-- Pour chaque module runtime Nucleus, le `reflect-config` / `resource-config` / `jni-config` correspondant est déjà dans le JAR.
-- Résultat : `./gradlew packageGraalvmNative` produit un binaire qui marche sans qu'on écrive une ligne de metadata.
-- Un agent de tracing (`runWithNativeAgent`) est dispo comme filet de sécurité final.
+GraalVM Native Image repose sur un modèle en monde fermé : chaque `Class.forName` réflectif,
+chaque motif `getResource` et chaque appel JNI doit être déclaré en JSON au moment du build.
+Nucleus génère cette metadata pour toi. Il collecte les entrées depuis cinq sources et les passe
+à `native-image`, si bien que `./gradlew packageGraalvmNative` produit un binaire fonctionnel
+sans `reachability-metadata.json` écrit à la main.
 
-## Le problème que ça résout
+## Ajouter la dépendance
 
-Si on a déjà GraalVM-buildé une app Compose Desktop à la main, on connaît la boucle : build, run, crash sur une entrée réflexion manquante, ajouter du JSON, rebuilder. Compose seul demande des centaines d'entrées. Ajoute Skiko, ktor, kotlinx.serialization, SQLite, Coil — on maintient un `reachability-metadata.json` de plusieurs milliers de lignes qui casse à chaque bump de dépendance.
+Les tâches de build viennent du plugin Gradle Nucleus. Ajoute la baseline runtime pour que sa
+metadata embarquée, ses motifs de ressources et ses substitutions AWT soient sur le classpath :
 
-Nucleus remplace cette boucle par de l'automatisation au build.
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.graalvm-runtime:<version>")
+}
+```
 
-## Cinq niveaux de metadata
+## Construire une image native
 
-| Niveau | Couvre | Mécanique |
-|--------|--------|-----------|
-| **L1 — Metadata conditionnelle par lib** | 28 fichiers curés : Compose UI, Skiko, ktor, kotlinx.serialization, SQLite, Coil, JNA, FileKit, … | Livrés dans le plugin. Chaque fichier déclare `matchPackages` — inclus seulement si la lib est sur le classpath. |
-| **L2 — Oracle Reachability Metadata Repository** | SLF4J, Logback, des centaines d'autres libs communautaires | Résolu automatiquement depuis le [repository officiel](https://github.com/oracle/graalvm-reachability-metadata) pour chaque dépendance runtime. |
-| **L3 — Metadata plateforme** | `sun.awt.windows.*`, `sun.lwawt.macosx.*`, `sun.awt.X11.*`, pipelines Java2D, gestionnaires de polices, security providers | Écrit dans le build dir au compile time pour l'OS cible. |
-| **L4 — Analyse statique de bytecode** | `Class.forName`, `MethodHandles.Lookup.findClass`, `getResource[AsStream]`, méthodes natives JNI + chaînes de paramètres, companions `@Serializable` | La tâche `analyzeGraalvmStaticMetadata` scanne chaque classe compilée du classpath runtime. |
-| **L5 — Metadata cross-platform générique** | Compose Desktop, AWT/Swing, Skiko, security providers, gestionnaires de polices (~300+ types) | Livré dans `nucleus.graalvm-runtime`. Récupéré depuis le classpath automatiquement. |
+```shell
+./gradlew packageGraalvmNative
+```
 
-Les cinq sont mergés et passés à `native-image` via `-H:ConfigurationFileDirectories=`.
+La tâche assemble la metadata depuis chacune des sources ci-dessous, passe chaque répertoire à
+`native-image` via `-H:ConfigurationFileDirectories=`, puis empaquette le binaire produit pour
+l'OS courant.
 
-## Inclusion automatique des ressources
+## Comment la metadata est assemblée
 
-Le JAR `graalvm-runtime` enregistre quatre patterns larges :
+Nucleus tire la metadata de reachability de cinq sources et les fusionne au moment du build :
 
-| Pattern | Couvre |
-|---------|--------|
-| `.*\.(svg\|ttf\|otf)` | Toutes les SVG et polices du classpath — Jewel, icônes IntelliJ Platform, ressources Compose, les tiennes |
-| `composeResources/.*` | Chaque ressource Compose Multiplatform chargée via `Res.*` |
-| `nucleus/native/.*` | Chaque bibliothèque partagée JNI Nucleus |
-| `META-INF/services/.*` | Chaque descripteur `ServiceLoader` (moteurs ktor, fetchers coil, providers SLF4J, …) |
+| Source | Ce que ça couvre | Comment ça entre |
+|--------|------------------|------------------|
+| **L1 — Metadata par lib** | 28 fichiers curés : Compose UI, Skiko, ktor, kotlinx.serialization, SQLite, Coil, JNA, FileKit, SLF4J, la baseline JDK/AWT, et d'autres | Livrés dans le JAR du plugin. Les fichiers qui déclarent `matchPackages` ne sont inclus que si la lib correspondante est sur le classpath runtime. |
+| **L2 — Oracle Reachability Metadata Repository** | SLF4J, Logback, et des centaines d'autres libs communautaires | Résolus depuis le [repository officiel](https://github.com/oracle/graalvm-reachability-metadata) pour chaque dépendance runtime. |
+| **L3 — Metadata plateforme** | `sun.awt.windows.*`, `sun.lwawt.macosx.*`, `sun.awt.X11.*`, pipelines Java2D, gestionnaires de polices et security providers | Écrits dans le build dir au moment de la compilation, pour l'OS cible courant. |
+| **L4 — Analyse statique de bytecode** | `Class.forName`, `MethodHandles.Lookup.findClass`, `getResource[AsStream]`, méthodes natives JNI avec leurs chaînes de champs et de paramètres, appels `ServiceLoader` et types `@Serializable` | La tâche `analyzeGraalvmStaticMetadata` scanne chaque classe compilée du classpath runtime. |
+| **L5 — Baseline runtime** | Motifs d'inclusion de ressources, substitutions de chemin de polices AWT, et entrées de sérialisation | Livrée dans `nucleus.graalvm-runtime`. Détectée automatiquement depuis le répertoire `META-INF/native-image` du JAR. |
 
-C'est la raison principale pour laquelle "les icônes s'affichent blanches en image native" n'arrive pas sous Nucleus.
+L1 à L4 et ta propre config manuelle sont chacune passées comme une entrée
+`-H:ConfigurationFileDirectories=`. La baseline `nucleus.graalvm-runtime` (L5) est récupérée
+via la détection standard de GraalVM sur le classpath. `native-image` fusionne l'ensemble.
+
+## Ressources incluses
+
+Le JAR `graalvm-runtime` enregistre quatre motifs d'inclusion de ressources :
+
+| Motif | Couvre |
+|-------|--------|
+| `.*\.(svg\|ttf\|otf)` | Les icônes SVG et les polices du classpath — Jewel, icônes IntelliJ Platform, ressources Compose, et les tiennes |
+| `composeResources/.*` | Les ressources Compose Multiplatform chargées via `Res.*` |
+| `nucleus/.*` | Les bibliothèques partagées JNI de Nucleus et les ressources runtime embarquées |
+| `META-INF/services/.*` | Les descripteurs `ServiceLoader` (moteurs ktor, fetchers Coil, providers SLF4J, …) |
 
 <Callout type="info" title="Compromis sur la taille du binaire">
-Le glob est large exprès. Si on dépend de la lib d'icônes IntelliJ Platform et que la taille du binaire est critique, surcharge avec un `resource-config.json` plus serré.
+Ces motifs sont larges à dessein. Si tu tires la lib d'icônes IntelliJ Platform et que la taille
+du binaire compte, surcharge le glob d'icônes avec un `resource-config.json` plus serré.
 </Callout>
 
 ## Substitutions de polices
 
-`graalvm-runtime` livre des substitutions `@TargetClass` qui corrigent les bords AWT-sur-image-native :
+Le JAR `graalvm-runtime` livre des substitutions `@TargetClass` qui corrigent la gestion des
+polices AWT sous image native :
 
-- `FontCreateFontSubstitution` — bufferise `Font.createFont(int, InputStream)` vers un fichier temp sous Windows.
-- `Win32FontManagerSubstitution` — réimplémentation pure-Java de `Win32FontManager.getFontPath()`, évite `InternalError: platform encoding not initialized`.
-- `FcFontManagerSubstitution` — même fix sur le chemin Fontconfig de Linux.
+- `FontCreateFontSubstitution` — bufferise `Font.createFont(int, InputStream)` vers un fichier
+  temporaire avant de déléguer, ce qui évite `IOException: Problem reading font data` sous
+  Windows et Linux.
+- `Win32FontManagerSubstitution` — remplace la méthode native
+  `sun.awt.Win32FontManager.getFontPath` par une version pure-Java, ce qui évite
+  `InternalError: platform encoding not initialized`.
+- `FcFontManagerSubstitution` — le même correctif pour `sun.awt.FcFontManager.getFontPath` sous
+  Linux.
 
-Aucune config nécessaire — le compilateur native-image les prend en compte.
+Le compilateur `native-image` les prend en compte automatiquement ; aucune config n'est nécessaire.
 
-## L'agent de tracing — filet de sécurité final
+## Collecter la metadata manquante avec l'agent de tracing
 
-Même avec cinq niveaux, des cas-bords existent : réflexion pilotée par des valeurs runtime, classes chargées dynamiquement, patterns de libs inhabituels. Lance l'agent une fois avant chaque release :
+L'analyse statique ne voit pas la réflexion pilotée par des valeurs runtime ni les classes
+chargées dynamiquement. Pour ces cas, lance l'app une fois sous l'agent native-image de GraalVM :
 
-```bash
+```shell
 ./gradlew runWithNativeAgent
 ```
 
-Parcours chaque écran et chaque feature. L'agent enregistre les accès réflexion / JNI / ressources / proxies, puis **merge dédupliqué** dans la config. La plupart du temps il ne trouve rien — c'est le but.
+Parcours chaque écran et chaque fonctionnalité. L'agent enregistre les accès réflexion, JNI,
+ressources et proxies dans un répertoire temporaire, puis fusionne les nouvelles entrées dans ta
+config sans écraser celles que tu as enrichies à la main.
 
-## Nettoyer la metadata manuelle
+## Retirer la metadata manuelle redondante
 
-Si on a accumulé des entrées manuelles que les couches automatiques couvrent maintenant :
+Si tu as accumulé des entrées manuelles que les sources automatiques couvrent maintenant, élague-les :
 
-```bash
+```shell
 ./gradlew cleanupGraalvmMetadata
 ```
 
-La tâche diff les entrées manuelles contre L1+L2+L3+L4 et retire tout ce qui est redondant, en reportant exactement ce qui a changé.
+La tâche compare ton `reachability-metadata.json` à L1, L2, L3 et à la sortie de l'analyse
+statique, retire chaque entrée déjà gérée par Nucleus, et rapporte ce qu'elle a retiré.
 
-## Aller plus loin — écris le propre code natif en Kotlin
+## Quand la metadata automatique ne suffit pas
 
-Si on doit appeler une API plateforme qu'aucun module runtime Nucleus ne couvre (CoreGraphics, IOKit, Win32, GTK4, …), [**NucleusNativeAccess**](https://github.com/NucleusFramework/NucleusNativeAccess) est un plugin séparé qui laisse écrire le côté natif en **Kotlin/Native** et génère le bridge FFM automatiquement. Le plugin émet `reflect-config.json`, `resource-config.json` et `reachability-metadata.json` pour les proxies générés — récupérés transparente­ment par le pipeline GraalVM Nucleus.
+Certaines libs rendent GraalVM impraticable, peu importe la metadata :
 
-L'ID du plugin est `dev.nucleusframeworknativeaccess`, versionné indépendamment de Nucleus. Voir [son repository](https://github.com/NucleusFramework/NucleusNativeAccess) pour la table de mapping complète et des exemples.
-
-## Quand la metadata auto ne suffit pas
-
-Certaines catégories de libs rendent GraalVM impraticable, peu importe la metadata :
-
-- Gros utilisateurs JNA (proxies d'appels de fonctions dynamiques)
+- Gros utilisateurs de JNA (proxies d'appels de fonctions dynamiques)
 - Moteurs de recherche full-text (Lucene, client Elasticsearch)
 - Runtimes de scripting embarqués (Groovy, JRuby, Nashorn)
-- Annotation-processing runtime (Spring)
-- OSGi / classloaders custom
-- Génération de bytecode runtime (ByteBuddy, cglib, mocking ASM)
+- Annotation-processing au runtime (Spring)
+- OSGi et classloaders custom
+- Génération de bytecode au runtime (ByteBuddy, cglib, mocking ASM)
 
-Si on dépend de l'un d'eux, livre plutôt le [build AOT cache](/docs/performance/aot-cache). Pour tout le reste — Compose, ktor, kotlinx.serialization, Coil, SQLite, Jewel, SLF4J, Kotlin idiomatique — Nucleus gère.
+Si tu dépends de l'un d'eux, livre plutôt le [build AOT cache](/docs/performance/aot-cache).
 
-## Référence
+## Écrire du code natif en Kotlin
 
-Voir [GraalVM > Metadata automatique](/docs/performance/graalvm/automatic-metadata) pour le graphe de tâches complet et la [référence des tâches Gradle](/docs/performance/graalvm/tasks-ci).
+Pour appeler une API plateforme qu'aucun module runtime Nucleus ne couvre (CoreGraphics, IOKit,
+Win32, GTK4, …), utilise [NucleusNativeAccess](https://github.com/NucleusFramework/NucleusNativeAccess),
+un plugin séparé qui te laisse écrire le côté natif en Kotlin/Native et génère le bridge FFM pour
+toi. Il émet `reflect-config.json`, `resource-config.json` et `reachability-metadata.json` pour
+les proxies générés, que le pipeline GraalVM de Nucleus récupère de façon transparente.
+
+L'ID du plugin est `dev.nucleusframeworknativeaccess`, versionné indépendamment de Nucleus. Voir
+[son repository](https://github.com/NucleusFramework/NucleusNativeAccess) pour la table de mapping
+complète et des exemples.
+
+## Et ensuite
+
+- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — le graphe de tâches complet derrière ces sources.
+- [Tâches GraalVM et CI](/docs/performance/graalvm/tasks-ci) — la référence des tâches Gradle pour les builds natifs.
+- [AOT cache](/docs/performance/aot-cache) — le repli quand une dépendance exclut l'image native.

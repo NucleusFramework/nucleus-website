@@ -1,30 +1,38 @@
 ---
 title: Publication
-description: Diffuse sur GitHub Releases, S3 ou n'importe quel host HTTP — et sur les grands stores desktop.
+description: Configure Nucleus pour publier tes installateurs signés et leurs métadonnées d'auto-update sur GitHub Releases, S3 ou un host HTTP générique.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Une fois les installateurs signés, il faut un endroit où les poser et un public à atteindre. Nucleus branche trois backends de publication dans le même DSL Gradle — GitHub Releases, S3, HTTP générique — et les métadonnées produites alimentent l'[auto-updater](/docs/packaging/auto-update). Pour les canaux store, cette page rassemble ce qu'attend chacun : Mac App Store, Microsoft Store, Snapcraft, Flathub.
+Dans ce tutoriel, tu vas configurer un backend de publication pour que tes installateurs signés et
+leurs métadonnées d'auto-update arrivent au même endroit — GitHub Releases, un bucket S3 ou
+n'importe quel host HTTP. Tu choisiras un canal et un type de release, tu contrôleras le moment où
+la publication s'exécute, et tu verras ce que chaque store desktop attend pour une soumission. La
+configuration vit dans le même DSL `nucleus { }` que le reste de ton build.
 
-## TL;DR
-- `publish { github / s3 / generic }` configure l'hébergement des installateurs + YAML d'update.
-- `PublishMode.Auto` publie depuis la CI, skip en local — défaut sain.
-- Trois canaux de release (`Latest`, `Beta`, `Alpha`) et trois types (`Release`, `Draft`, `Prerelease`).
-- Soumissions store : chaque écosystème a son portail (Partner Center, App Store Connect, Snapcraft.io, PR Flathub).
+## Avant de commencer
 
-## Installation
-Livré avec le plugin Gradle.
+- Des installateurs fonctionnels pour tes plateformes cibles. Voir
+  [Configuration](/docs/start/configuration) pour le réglage de `targetFormats(...)`.
+- Des builds signés pour les plateformes que tu distribues. Voir
+  [signature de code](/docs/packaging/code-signing).
+- Une cible d'hébergement : un dépôt GitHub, un bucket S3 ou un serveur HTTP que tu contrôles.
 
-## Démarrage rapide
+## Configurer un backend de publication
 
-```kotlin
+Ajoute un bloc `publish { }` dans `nativeDistributions { }` et active un backend. Le bloc génère
+seulement la configuration et le YAML d'update ; l'upload lui-même s'exécute en CI.
+
+<Tabs items={['GitHub Releases', 'S3', 'HTTP générique']}>
+<Tab value="GitHub Releases">
+
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         nativeDistributions {
             publish {
-                publishMode = PublishMode.Auto
-
                 github {
                     enabled = true
                     owner = "myorg"
@@ -39,10 +47,7 @@ nucleus {
 }
 ```
 
-## Comment ça marche
-
-### GitHub Releases (recommandé)
-Une release ressemble à ça, avec les YAML d'auto-update à côté :
+Une release se retrouve avec les installateurs et leur YAML d'auto-update côte à côte :
 
 ```
 v1.0.0 (Release)
@@ -57,12 +62,15 @@ v1.0.0 (Release)
 └── latest-linux.yml
 ```
 
-Le `GITHUB_TOKEN` a besoin de `contents: write` — sur GitHub Actions, mets `permissions: contents: write` sur le job.
+Le token a besoin de la permission `contents: write`. Sur GitHub Actions, mets
+`permissions: contents: write` sur le job.
 
-### S3
-Pour de la distribution auto-hébergée avec un bucket adossé à un CDN :
+</Tab>
+<Tab value="S3">
 
-```kotlin
+Utilise un bucket S3, éventuellement derrière un CDN, pour de la distribution auto-hébergée :
+
+```kotlin title="build.gradle.kts"
 publish {
     s3 {
         enabled = true
@@ -74,12 +82,15 @@ publish {
 }
 ```
 
-Définis `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` dans l'environnement.
+Fournis `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` et `AWS_REGION` dans l'environnement.
 
-### HTTP générique
-N'importe quel host statique (Nginx, Caddy, Cloudflare R2, S3 public). Le plugin génère les métadonnées YAML configurées pour une URL de base ; on upload manuellement.
+</Tab>
+<Tab value="HTTP générique">
 
-```kotlin
+N'importe quel host statique convient — Nginx, Caddy, Cloudflare R2, ou S3 en accès public. Le
+plugin génère les métadonnées YAML pour ton URL de base ; tu uploades les fichiers toi-même :
+
+```kotlin title="build.gradle.kts"
 publish {
     generic {
         enabled = true
@@ -90,39 +101,74 @@ publish {
 }
 ```
 
-### Canaux et types
+`useMultipleRangeRequest` active les téléchargements différentiels et ne fonctionne que si ton
+serveur honore les requêtes HTTP `Range`.
+
+</Tab>
+</Tabs>
+
+## Choisir un canal et un type de release
+
+Le canal sélectionne le fichier YAML que lit l'auto-updater, ainsi que le pattern de tag associé :
+
 | Canal | YAML | Pattern de tag |
 |-------|------|----------------|
 | `ReleaseChannel.Latest` | `latest-*.yml` | `v1.0.0` |
 | `ReleaseChannel.Beta` | `beta-*.yml` | `v1.0.0-beta.1` |
 | `ReleaseChannel.Alpha` | `alpha-*.yml` | `v1.0.0-alpha.1` |
 
+Pour GitHub Releases, le type de release contrôle la visibilité :
+
 | Type | Comportement |
 |------|--------------|
-| `ReleaseType.Release` | Public sur la page releases |
+| `ReleaseType.Release` | Public sur la page des releases |
 | `ReleaseType.Draft` | Masqué jusqu'à publication manuelle |
-| `ReleaseType.Prerelease` | Marqué pre-release |
+| `ReleaseType.Prerelease` | Marqué comme pré-release |
 
-### Modes de publication
-- `PublishMode.Never` — build seulement.
-- `PublishMode.Auto` — publie en CI, skip en local.
-- `PublishMode.Always` — publie toujours.
+## Définir le mode de publication
 
-<Callout type="info" title="`publish { }` ne génère que de la config">
-Le bloc écrit les paramètres publisher d'electron-builder. L'upload réel est fait par le workflow CI (`gh release create` pour GitHub, `aws s3 cp` pour S3, la propre copie pour générique). La [CI de release](/docs/packaging/ci-cd#release) câble le chemin standard.
+`publishMode` décide du moment où la publication s'exécute. Sa valeur par défaut est
+`PublishMode.Never` :
+
+```kotlin title="build.gradle.kts"
+publish {
+    publishMode = PublishMode.Auto
+    // github { ... }
+}
+```
+
+- `PublishMode.Never` — ne publie pas. Les métadonnées `latest-*.yml` sont tout de même générées
+  localement pour chaque format à jour.
+- `PublishMode.Auto` — publie quand le build part d'un tag git.
+- `PublishMode.Always` — publie à chaque build, avec ou sans tag.
+
+<Callout type="info">
+Le bloc `publish { }` écrit les paramètres publisher d'electron-builder ; il n'uploade rien par
+lui-même. L'upload réel s'exécute dans ton workflow CI (`gh release create` pour GitHub,
+`aws s3 cp` pour S3, ta propre étape de copie pour le générique). Voir la
+[CI de release](/docs/packaging/ci-cd#release) pour le chemin standard.
 </Callout>
 
-### Soumissions store
+## Soumettre à un store desktop
 
-**Mac App Store** — soumets le PKG via Transporter ou `xcrun altool`. Les provisioning profiles ([sandboxing](/docs/packaging/sandboxing)) et la catégorie App Store (`appCategory`) sont cuits au build. Apple review ; pas de notarisation pour les builds App Store.
+La distribution en store passe par le portail de chaque éditeur plutôt que par le bloc
+`publish { }`. Construis le format store, puis uploade l'artefact :
 
-**Microsoft Store** — upload le `.msixbundle` sur [Partner Center](https://partner.microsoft.com/). L'identité doit matcher la réservation (`identityName`, `publisher = CN=<GUID>`, `publisherDisplayName`) — voir [cibles Windows](/docs/packaging/windows#appx-msix). `MinVersion` doit être > `10.0.17134.0`.
-
-**Snapcraft** — `snapcraft upload` depuis la CI. Le Snap Store accepte les confinements `strict` et `classic` ; `classic` exige une approbation. Voir `linux.snap { grade = SnapGrade.Stable }`.
-
-**Flathub** — soumets une PR de manifest au [repo Flathub](https://github.com/flathub/flathub). Le bloc `flatpak` de le build produit déjà le bon bundle `.flatpak` ; Flathub build à partir des sources via le manifest.
-
-**GitHub Releases / téléchargement direct** — le défaut. Combine avec l'[auto-update](/docs/packaging/auto-update) pour les apps auto-distribuées.
+- **Mac App Store** — soumets le PKG via Transporter ou `xcrun altool`. Les provisioning profiles
+  ([sandboxing](/docs/packaging/sandboxing)) et la catégorie du store (`appCategory`) sont fixés au
+  build. Apple review le build ; les builds App Store ne sont pas notarisés.
+- **Microsoft Store** — uploade le `.msixbundle` sur
+  [Partner Center](https://partner.microsoft.com/). L'identité doit correspondre à la réservation
+  (`identityName`, `publisher = CN=<GUID>`, `publisherDisplayName`). Voir
+  [cibles Windows](/docs/packaging/windows#appx-msix).
+- **Snapcraft** — lance `snapcraft upload` depuis la CI. Le Snap Store accepte les confinements
+  `strict` et `classic` ; `classic` exige une approbation. Définis le grade avec
+  `linux.snap { grade = SnapGrade.Stable }`.
+- **Flathub** — soumets une pull request de manifest au
+  [dépôt Flathub](https://github.com/flathub/flathub). Ton bloc `flatpak` produit le bundle ;
+  Flathub build à partir des sources via ton manifest.
+- **GitHub Releases / téléchargement direct** — le chemin par défaut. Combine-le avec
+  l'[auto-update](/docs/packaging/auto-update) pour les apps auto-distribuées.
 
 ## Référence
 
@@ -134,10 +180,10 @@ Le bloc écrit les paramètres publisher d'electron-builder. L'upload réel est 
 - `enum class ReleaseChannel { Latest, Beta, Alpha }`
 - `enum class ReleaseType { Release, Draft, Prerelease }`
 
-Référence complète : [référence Gradle DSL](/docs/reference/gradle-dsl).
+Voir la [référence Gradle DSL](/docs/reference/gradle-dsl) pour la surface complète.
 
-## Notes
+## Et ensuite
 
-- Astuce : encode les certs de signature en base64, stocke-les en secrets CI, décode au build. Voir [signature de code](/docs/packaging/code-signing) pour les playbooks macOS et Windows.
-- Le provider générique supporte `useMultipleRangeRequest` pour des downloads différentiels — utile uniquement si le serveur HTTP honore les requêtes `Range`.
-- Pour les pré-releases 2.x, la convention est de cut des tags depuis la branche `nucleus-2.0` avec les patterns `v2.x.y-alpha-*`, `-beta-*` ou `-rc-*`. La CI valide que le tag pointe sur un commit de cette branche.
+- [Auto-update](/docs/packaging/auto-update) — comment le YAML publié pilote les mises à jour in-app.
+- [CI de release](/docs/packaging/ci-cd) — le workflow qui build, signe et uploade.
+- [Signature de code](/docs/packaging/code-signing) — signe tes builds avant de les publier.

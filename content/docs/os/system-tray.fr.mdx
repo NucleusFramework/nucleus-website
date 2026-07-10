@@ -1,24 +1,21 @@
 ---
 title: System tray
-description: Une icône de tray rendue par Compose et un menu contextuel natif sur macOS, Windows et Linux — réactif, compatible GraalVM, sans pipeline d'export d'icônes.
+description: Affiche une icône de tray et un menu contextuel natif depuis Compose sur macOS, Windows et Linux.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Construire une app de tray à la main, c'est jongler avec des fichiers `.ico`, des `NSStatusItem` AppKit, des menus XML AppIndicator, et trois sémantiques de clic différentes. `Tray()` ramène tout ça à un composable : le icône, c'est ce que Compose sait dessiner ; le menu, un DSL Kotlin ; le menu réagit à l'état.
+L'API de tray système dessine une icône de tray et son menu contextuel natif depuis Compose sur
+macOS, Windows et Linux. L'icône est tout ce que Compose sait dessiner, le menu est un DSL Kotlin,
+et les deux réagissent à l'état Compose. `Tray()` est un composable unique qui remet l'icône et
+le menu rendus à l'API de tray native de l'OS courant.
 
 <Callout type="info" title="Dépôt séparé">
-System Tray vient de [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) avec son propre cycle de release. L'artefact est `dev.nucleusframework:composenativetray`.
+Le tray système vient de [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) avec son propre cycle de release. L'artefact est `dev.nucleusframework:composenativetray`.
 </Callout>
 
-## En bref
-- Rends n'importe quel `@Composable`, `ImageVector`, `Painter` ou `DrawableResource` comme icône — net à tout DPI.
-- Réactif : change un `mutableStateOf`, icône et menu suivent.
-- Menus natifs partout : `NSStatusItem` sur macOS, `Shell_NotifyIcon` sur Windows, StatusNotifierItem / AppIndicator sous Linux.
-- Compatible GraalVM Native Image.
-
-## Installation
+## Ajouter la dépendance
 
 ```kotlin
 dependencies {
@@ -26,7 +23,9 @@ dependencies {
 }
 ```
 
-## Démarrage rapide
+## Ajouter une icône de tray
+
+Déclare un composable `Tray()` avec une icône, une infobulle et une lambda de menu :
 
 ```kotlin
 import androidx.compose.material.icons.Icons
@@ -46,34 +45,44 @@ Tray(
 
 ## Fonctionnement
 
-`Tray()` est un composable. Son icône est rastérisée depuis Compose à chaque changement d'état, puis remise à l'API native de tray de l'OS courant. La lambda du menu tourne dans un scope DSL réévalué à chaque recomposition — ajouter, retirer ou renommer un item ne coûte que le travail Compose habituel.
+`Tray()` est un composable. Son icône est rastérisée depuis Compose à chaque changement d'état du
+slot, puis remise à l'API de tray native de l'OS courant. La lambda du menu tourne dans un scope
+DSL réévalué à chaque recomposition : ajouter, retirer ou renommer un item suit les règles de
+recomposition habituelles de Compose.
 
-Résultat : le tray fait partie de le arbre d'état Compose. Pas d'appel rebuild ad hoc, pas de pipeline d'icônes manuel, pas de maintien triple `.ico` / `.png` / `.icns`.
+Le tray fait partie de ton arbre d'état Compose : il se met à jour par recomposition, sans appel
+de rebuild explicite ni fichiers `.ico`/`.png`/`.icns` distincts à maintenir.
+
+Chaque plateforme s'appuie sur son mécanisme de tray natif :
 
 <Tabs items={["macOS", "Windows", "Linux (GNOME)", "Linux (KDE)"]}>
 <Tab value="macOS">
 
-Adossé à `NSStatusItem` dans la barre de menus. Les icônes vectorielles rendent au DPI natif, avec une teinte optionnelle via `tint`.
+Adossé à `NSStatusItem` dans la barre de menus. Les icônes vectorielles rendent au DPI natif, avec une teinte optionnelle via le paramètre `tint`.
 
 </Tab>
 <Tab value="Windows">
 
-Adossé à `Shell_NotifyIcon`. Le vectoriel est rastérisé en `.ico` 32×32 par facteur d'échelle. Passe un `.ico` authoring via `windowsIcon` si l'on veut le contrôle exact.
+Adossé à `Shell_NotifyIcon`. Le vectoriel est rastérisé en `.ico` 32×32 par facteur d'échelle. Passe un `.ico` fait main via `windowsIcon` pour un contrôle exact.
 
 </Tab>
 <Tab value="Linux (GNOME)">
 
-Via StatusNotifierItem (KStatusNotifierItem). Sous GNOME vanilla, ça requiert l'extension AppIndicator ; sous Ubuntu, ça marche out-of-the-box.
+Utilise StatusNotifierItem (KStatusNotifierItem). Sous GNOME standard, cela requiert l'extension AppIndicator ; sous Ubuntu, cela fonctionne directement.
 
 </Tab>
 <Tab value="Linux (KDE)">
 
-StatusNotifierItem est natif à Plasma — tooltips au survol et badges là où Plasma le supporte, sans config.
+StatusNotifierItem est natif à Plasma. Les infobulles au survol et les badges fonctionnent là où Plasma les prend en charge.
 
 </Tab>
 </Tabs>
 
-## Sources d'icônes
+## Définir la source de l'icône
+
+Le paramètre `icon` accepte un `ImageVector`, un `Painter` ou un `DrawableResource` de Compose
+Multiplatform. Pour un contrôle total, utilise `iconContent` afin de dessiner l'icône avec
+n'importe quel composable :
 
 ```kotlin
 // ImageVector
@@ -85,7 +94,7 @@ Tray(icon = painterResource("icon.png"), tooltip = "App") { /* … */ }
 // Compose Multiplatform DrawableResource
 Tray(icon = Res.drawable.app_icon, tooltip = "App") { /* … */ }
 
-// Tout composable
+// Entièrement personnalisé — n'importe quel composable
 Tray(
     iconContent = {
         Box(Modifier.size(24.dp).background(Color.Red, CircleShape)) {
@@ -96,9 +105,9 @@ Tray(
 ) { /* … */ }
 ```
 
-## Icônes spécifiques par plateforme
+## Utiliser des icônes spécifiques par plateforme
 
-Quand on veut un `.ico` natif sous Windows et un vectoriel ailleurs :
+Pour un `.ico` natif sous Windows et un vectoriel ailleurs, renseigne `windowsIcon` et `macLinuxIcon` :
 
 ```kotlin
 Tray(
@@ -109,9 +118,10 @@ Tray(
 ) { /* menu */ }
 ```
 
-## Action primaire
+## Gérer l'action primaire
 
-`primaryAction` se déclenche au clic gauche (macOS / Windows) ou clic simple (Linux, dépend du desktop). Sans elle, le menu s'ouvre à chaque clic.
+`primaryAction` se déclenche au clic gauche (macOS/Windows) ou au clic simple (Linux, selon le
+bureau). Sans elle, le menu s'ouvre à chaque clic.
 
 ```kotlin
 Tray(
@@ -123,7 +133,7 @@ Tray(
 }
 ```
 
-## Pour continuer
+## Et ensuite
 
-- [DSL menu du tray](/docs/os/tray-menu-dsl) — items, cases, sous-menus, séparateurs, composition réactive.
+- [DSL du menu de tray](/docs/os/tray-menu-dsl) — items, cases à cocher, sous-menus, séparateurs et composition réactive.
 - [Tray apps](/docs/os/tray-app) — fais ouvrir une popup Compose par l'icône du tray.

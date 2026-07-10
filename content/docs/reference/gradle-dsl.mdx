@@ -1,9 +1,9 @@
 ---
 title: Gradle DSL reference
-description: The full `nucleus { … }` block — every property, every sub-block.
+description: Every property and sub-block of the nucleus { } Gradle extension, verified against the plugin source.
 ---
 
-The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-level extension: `nucleus`. It mirrors the JetBrains Compose Desktop DSL and extends it with formats, signing surfaces, GraalVM settings, store pipelines, and runtime wiring. This page lists every property in the order it appears in the plugin source.
+The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-level extension, `nucleus`, for configuring packaging, signing, publishing, and GraalVM native builds from Kotlin. It builds on the JetBrains Compose Desktop DSL and adds Nucleus-specific formats, signing surfaces, and GraalVM settings. This page lists every property in the order it appears in the plugin source.
 
 ## Top-level: `nucleus { }`
 
@@ -11,7 +11,7 @@ The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-le
 
 - `val application: JvmApplication` — JVM app configuration (`nucleus { application { … } }`).
 - `val nativeApplication: NativeApplication` — Kotlin/Native macOS targets.
-- `val dependencies: NucleusPlugin.Dependencies` — runtime module coordinates / notations.
+- `val dependencies: NucleusPlugin.Dependencies` — runtime module coordinates and notations.
 
 ## `application { }` — `JvmApplication`
 
@@ -41,7 +41,7 @@ The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-le
 | `var compressionLevel: CompressionLevel?` | — | `Store`, `Normal`, `Maximum` |
 | `val trustedCertificates: ConfigurableFileCollection` | — | CA certificates → bundled JDK `cacerts` (see [trusted certs](/docs/packaging/trusted-certificates)) |
 | `val protocols: MutableList<UrlProtocol>` | — | Deep-link protocols |
-| `targetFormats: ...` | inherited | The 16 formats |
+| `targetFormats: …` | inherited | The 18 [target formats](#targetformat-enum) |
 | `val linux: LinuxPlatformSettings` | — | See [Linux](#linux--linuxplatformsettings) |
 | `val macOS: JvmMacOSPlatformSettings` | — | See [macOS](#macos--jvmmacosplatformsettings) |
 | `val windows: WindowsPlatformSettings` | — | See [Windows](#windows--windowsplatformsettings) |
@@ -54,7 +54,12 @@ Methods:
 - Common (from `AbstractPlatformSettings`): `iconFile`, `packageVersion`, `fileAssociation(...)`
 
 ### `TargetFormat` enum
-`Dmg`, `Pkg`, `Msi`, `Exe`, `Nsis`, `NsisWeb`, `AppX`, `Portable`, `Deb`, `Rpm`, `AppImage`, `Flatpak`, `Snap`, `Zip`, `Tar`, `SevenZip`, plus the intermediate `RawAppImage`.
+
+18 formats, in source order:
+
+`RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
+
+`RawAppImage` is the intermediate jpackage app-image; every other format is produced by electron-builder. `Pkg`, `AppX`, and `Flatpak` are store formats and require sandboxing.
 
 ## `macOS { }` — `JvmMacOSPlatformSettings`
 
@@ -64,10 +69,10 @@ Extends `AbstractMacOSPlatformSettings`. Identification:
 - `dmgPackageVersion`, `dmgPackageBuildVersion`, `pkgPackageVersion`, `pkgPackageBuildVersion`
 - `dockName: String?`, `setDockNameSameAsPackageName: Boolean = true`
 - `bundleID: String?`, `appCategory: String?`, `minimumSystemVersion: String?`
-- `installationPath: String? = "/Applications"`
+- `installationPath: String? = null` — macOS install location; when unset the build defaults it to `/Applications`
 - `iconFile`, `layeredIconDir` (macOS 26+ `.icon` directory)
 
-Signing & sandbox:
+Signing and sandbox:
 
 - `entitlementsFile: RegularFileProperty`, `runtimeEntitlementsFile`
 - `provisioningProfile: RegularFileProperty`, `runtimeProvisioningProfile`
@@ -148,6 +153,7 @@ Three mutually exclusive modes:
 - `startupWMClass: String?`
 - `debMaintainer: String?`, `debPackageVersion`, `debDepends: List<String>`
 - `rpmLicenseType: String?`, `rpmPackageVersion`, `rpmRequires: List<String>`
+- `pacmanPackageVersion: String?`, `pacmanDepends: List<String>` — for the `Pacman` (Arch Linux) target
 - `appImage { … }` — see [AppImage](#linux--appimage--appimagesettings)
 - `snap { … }` — see [Snap](#linux--snap--snapsettings)
 - `flatpak { … }` — see [Flatpak](#linux--flatpak--flatpaksettings)
@@ -160,8 +166,9 @@ GPG-signs DEB/RPM for distribution outside a store. See [Code signing](/docs/pac
 - `keyFile: RegularFileProperty` — ASCII-armored private key, imported into a throwaway keyring (optional if the key is already in the signing keyring)
 - `passphrase: Property<String>`
 - `debMethod: DebSignMethod` (default `Detached`; also `DpkgSig`, `Debsig`)
+- `silentUpdate: Property<Boolean>` (default `false`) — passwordless signature-verified self-update; requires `enabled`. See [passwordless updates](/docs/packaging/auto-update#passwordless-updates-on-linux).
 
-Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signing.{keyId,keyFile,passphrase}`.
+Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signing.{keyId,keyFile,passphrase,silentUpdate}`.
 
 ### `linux.appImage { }` — `AppImageSettings`
 - `category: AppImageCategory?` (`AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility`)
@@ -206,6 +213,10 @@ Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signi
 - `buildArgs: ListProperty<String>`
 - `nativeImageConfigBaseDir: DirectoryProperty`
 - `val macOS: GraalvmMacOSSettings` — `cStubsSrc`, `minimumSystemVersion = "12.0"`, `macOsSdkVersion = "26.0"`
+- `val windows: GraalvmWindowsSettings`:
+  - `bundleCRuntime: Property<Boolean> = true` — copy the MSVC runtime DLLs next to the native `.exe`
+  - `dlls: ListProperty<String>` — defaults: `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`
+  - `sourceDir: DirectoryProperty` — directory the DLLs are copied from (defaults to the GraalVM toolchain `bin`)
 - `val metadataRepository: MetadataRepositorySettings`:
   - `enabled: Boolean = true`
   - `version: String = "0.10.6"`
@@ -238,4 +249,11 @@ Currently macOS Kotlin/Native only.
 
 ## Notes
 
-The plugin injects a `nucleus/nucleus-app.properties` resource into the packaged app containing `app.id`, `app.version`, `app.vendor`, `app.aumid`, `startup.task.id`, etc. The `NucleusApp` runtime object reads these at startup — that's how DSL config flows into library code.
+The plugin injects a `nucleus/nucleus-app.properties` resource into the packaged app containing `app.id`, `app.version`, `app.vendor`, `app.aumid`, `startup.task.id`, and similar keys. The `NucleusApp` runtime object reads these at startup, which is how the DSL configuration reaches the runtime library.
+
+## What's next
+
+- [Configuration](/docs/start/configuration) — the `nucleus { }` DSL in a working build script.
+- [Packaging formats](/docs/packaging) — what each `TargetFormat` produces.
+- [Code signing](/docs/packaging/code-signing) — the macOS, Windows, and Linux signing blocks.
+- [Publishing](/docs/packaging/publishing) — the `publish { }` block and release channels.

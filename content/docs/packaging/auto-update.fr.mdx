@@ -1,67 +1,81 @@
 ---
 title: Auto-update
-description: Check, télécharge, vérifie, installe — sans service tiers.
+description: Vérifie, télécharge, valide et installe les mises à jour de ton application depuis Kotlin, sans service tiers.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-L'auto-update est l'une des rares choses qu'Electron a réussi et que l'écosystème JVM a largement ignoré. Nucleus comble le trou avec une moitié build-time (métadonnées `latest-*.yml` générées à côté des installateurs) et une moitié runtime (`updater-runtime`) — wire-compatible avec le format d'update d'electron-builder, donc tout outil qui le parle déjà fonctionne.
+Le module `updater-runtime` vérifie, télécharge, valide et installe les mises à jour de ton
+application depuis Kotlin. Il a une moitié build-time — les métadonnées `latest-*.yml` générées à
+côté de tes installateurs — et une moitié runtime, la classe `NucleusUpdater`. Le format des
+métadonnées est compatible avec le format de mise à jour d'electron-builder.
 
-## TL;DR
-- Build-time : `latest-mac.yml`, `latest.yml`, `latest-linux.yml` produits à côté des installateurs.
-- Runtime : `NucleusUpdater` check, télécharge avec progression, vérifie SHA-512, installe et relance.
-- Providers : GitHub Releases, S3 (via config publish), ou n'importe quel host HTTP générique.
-- Trois canaux (`latest`, `beta`, `alpha`) détectés depuis le tag de version.
+## Ajouter la dépendance
 
-## Installation
-
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.updater-runtime:2.0.0")
-    // Optionnel mais recommandé sur réseaux d'entreprise :
+    // Optionnel, pour les réseaux d'entreprise avec une CA racine privée :
     implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
 }
 ```
 
-## Démarrage rapide
+## Vérifier et installer une mise à jour
+
+Crée un `NucleusUpdater`, interroge le provider configuré, puis télécharge et installe :
 
 ```kotlin
 import dev.nucleusframework.updater.NucleusUpdater
 import dev.nucleusframework.updater.UpdateResult
 import dev.nucleusframework.updater.provider.GitHubProvider
+import java.io.File
 
 val updater = NucleusUpdater {
     provider = GitHubProvider(owner = "myorg", repo = "myapp")
 }
 
 when (val result = updater.checkForUpdates()) {
-    is UpdateResult.UpdateAvailable -> {
+    is UpdateResult.Available -> {
+        var installer: File? = null
         updater.downloadUpdate(result.info).collect { progress ->
-            println("\${progress.percent.toInt()}%")
+            println("${progress.percent.toInt()}%")
+            progress.file?.let { installer = it }
         }
-        // installAndRestart lance l'installateur, sort, relance
-        updater.installAndRestart(downloadedFile)
+        // installAndRestart lance l'installateur, quitte, puis relance
+        installer?.let(updater::installAndRestart)
     }
-    UpdateResult.NoUpdate -> println("À jour")
-    is UpdateResult.Failed -> println("Erreur : \${result.reason}")
+    UpdateResult.NotAvailable -> println("À jour")
+    is UpdateResult.Error -> println("Erreur : ${result.exception.message}")
 }
 ```
 
-## Comment ça marche
+`checkForUpdates()` est une fonction `suspend` ; appelle-la depuis une coroutine.
 
-### Ce qui peut s'auto-mettre à jour
-| Plateforme | Updatable | Géré par le store (pas besoin d'updater) |
-|------------|-----------|------------------------------------------|
+## Formats pris en charge
+
+Le runtime met à jour les formats installés en place et laisse les formats gérés par un store à
+leur store.
+
+| Plateforme | Mise à jour possible | Géré par le store |
+|------------|----------------------|-------------------|
 | macOS | DMG, ZIP | PKG |
 | Windows | NSIS, NSIS Web, MSI | AppX/MSIX |
 | Linux | DEB, RPM, AppImage | Snap, Flatpak |
 
-<Callout type="warn" title="macOS a besoin du ZIP en plus du DMG">
-L'updater remplace le `.app` silencieusement via le ZIP. Le DMG sert à l'installation initiale. Ajoute `TargetFormat.Zip` à côté de `TargetFormat.Dmg` — les deux vont dans le même release ; `latest-mac.yml` référence les deux.
+<Callout type="warn" title="macOS a besoin d'un ZIP en plus du DMG">
+L'updater remplace le `.app` silencieusement depuis le ZIP ; le DMG ne sert qu'à l'installation
+initiale. Ajoute `TargetFormat.Zip` à côté de `TargetFormat.Dmg` pour que les deux soient dans le
+même release — `latest-mac.yml` référence les deux.
 </Callout>
 
-### Métadonnées YAML
-Le plugin écrit un fichier YAML par plateforme listant chaque installateur avec son SHA-512 et sa taille. Les releases multi-arch / multi-plateforme exigent un seul YAML par plateforme listant toutes les architectures — la CI les fusionne dans le job de release. Exemple `latest-mac.yml` :
+## Fonctionnement
+
+### Métadonnées
+
+Le plugin écrit un fichier YAML par plateforme, listant chaque installateur avec son SHA-512 et sa
+taille. Les releases multi-arch ou multi-plateforme ont besoin d'un seul YAML par plateforme qui
+liste chaque architecture ; la CI les fusionne dans le job de release. Un `latest-mac.yml`
+ressemble à ceci :
 
 ```yaml
 version: 1.2.3
@@ -76,40 +90,34 @@ releaseDate: '2026-03-01T12:00:00.000Z'
 ```
 
 ### Canaux
-Le tag de version pilote le canal : `v1.0.0` → `latest`, `v1.0.0-beta.1` → `beta`, `v1.0.0-alpha.1` → `alpha`. Chacun a son `*-mac.yml` / `*.yml` / `*-linux.yml`. Les utilisateurs sur `beta` voient `latest` + `beta` ; sur `alpha`, ils voient les trois.
+
+Le tag de version pilote le canal : `v1.0.0` correspond à `latest`, `v1.0.0-beta.1` à `beta`, et
+`v1.0.0-alpha.1` à `alpha`. Chaque canal a son propre `*-mac.yml`, `*.yml` et `*-linux.yml`. Les
+utilisateurs sur `beta` voient `latest` et `beta` ; ceux sur `alpha` voient les trois.
 
 ### Hébergement
-Trois options, configurées dans `nativeDistributions.publish { }` (voir [publication](/docs/packaging/publishing)) :
 
-- **GitHub Releases** — le plus simple, le [workflow de release](/docs/packaging/ci-cd#release) gère tout.
-- **S3** — credentials via env vars, le plugin upload à côté des YML.
-- **HTTP générique** — upload manuellement sur n'importe quel host statique ; l'updater fetch `<baseUrl>/latest-*.yml`.
+L'hébergement se configure dans `nativeDistributions.publish { }` (voir
+[publication](/docs/packaging/publishing)) :
 
-Le bloc `publish { … }` ne fait que générer la config electron-builder — il n'upload pas tout seul. La CI s'en charge.
+- **GitHub Releases** — le [workflow de release](/docs/packaging/ci-cd#release) gère tout de bout en bout.
+- **S3** — renseigne les credentials via des variables d'environnement ; le plugin upload à côté du YAML.
+- **HTTP générique** — upload toi-même sur n'importe quel host statique ; l'updater récupère `<baseUrl>/latest-*.yml`.
 
-### API runtime
-`NucleusUpdater` expose :
+Le bloc `publish { }` ne fait que générer la config electron-builder — il n'upload pas. C'est la CI qui upload.
 
-- `suspend fun checkForUpdates(): UpdateResult` — retourne `UpdateAvailable(info)`, `NoUpdate` ou `Failed(reason)`.
-- `fun downloadUpdate(info): Flow<DownloadProgress>` — émet la progression ; l'émission finale a `file != null`.
-- `fun installAndRestart(file)` — lance l'installateur, sort, relance après installation.
-- `fun installAndQuit(file)` — installation silencieuse, pas de relance. La mise à jour s'applique au prochain lancement manuel.
-- `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?` — détection post-update (version précédente, nouvelle, niveau).
+### Détection après mise à jour
 
-`UpdateLevel` indique l'ampleur du saut : `Major`, `Minor`, `Patch`, `PreRelease`. Branche le UI : dialogue forcé pour les majeures, installation silencieuse pour les patches.
+Après `installAndRestart` ou `installAndQuit`, l'updater écrit un fichier marqueur dans le
+répertoire app-data de la plateforme (résolu depuis `NucleusApp.appId`). Au lancement suivant,
+`wasJustUpdated()` retourne `true` et `consumeUpdateEvent()` livre un `UpdateEvent(previousVersion,
+newVersion, updateLevel)` que tu peux utiliser pour une bannière « Quoi de neuf ».
 
-### Commandes d'installation par format
-| OS | Format | Commande |
-|----|--------|----------|
-| Linux | DEB | `sudo dpkg -i <file>` |
-| Linux | RPM | `sudo rpm -U <file>` |
-| Linux | AppImage | Remplacement sur place |
-| macOS | DMG/ZIP | `open <file>` / extraction |
-| Windows | NSIS/EXE | `<file> /S` |
-| Windows | MSI | `msiexec /i <file> /passive` |
+## Configurer les réseaux d'entreprise
 
-### Réseaux d'entreprise
-Si les utilisateurs sont derrière un proxy corporate avec une CA racine privée, le `java.net.http.HttpClient` par défaut échoue au TLS handshake. Injecte un `NativeHttpClient` qui lit le trust store de l'OS :
+Si tes utilisateurs sont derrière un proxy d'entreprise avec une CA racine privée, le
+`java.net.http.HttpClient` par défaut échoue au handshake TLS. Injecte un `NativeHttpClient` qui lit
+le trust store de l'OS :
 
 ```kotlin
 import dev.nucleusframework.nativehttp.NativeHttpClient
@@ -122,18 +130,108 @@ val updater = NucleusUpdater {
 
 Voir [`native-ssl`](/docs/performance/native-ssl) pour les détails du trust manager.
 
-### Marqueur post-update
-Après `installAndRestart` ou `installAndQuit`, l'updater écrit un fichier marqueur dans le répertoire app data de la plateforme (résolu depuis `NucleusApp.appId`). Au lancement suivant, `wasJustUpdated()` retourne true et `consumeUpdateEvent()` livre un `UpdateEvent(previousVersion, newVersion, level)` utilisable pour une bannière "Quoi de neuf".
+## Mettre en place les mises à jour sans mot de passe sur Linux
 
-## Référence
+Par défaut, appliquer une mise à jour DEB ou RPM passe par `pkexec`, qui affiche un dialogue de mot
+de passe PolicyKit. Tu peux laisser l'app installer les mises à jour vérifiées sans mot de passe, en
+conditionnant l'install à une vérification de signature.
 
-- Champs du builder `NucleusUpdater { … }` : `currentVersion`, `channel`, `provider`, `httpClient`, `allowDowngrade`, `allowPrerelease`, `executableType`, en-têtes HTTP custom.
-- Providers : `GitHubProvider(owner, repo, token? = null)`, `GenericProvider(baseUrl)`.
-- Types de résultat : `UpdateResult.UpdateAvailable(info)`, `UpdateResult.NoUpdate`, `UpdateResult.Failed(reason)`.
-- Exceptions : `NetworkException`, `ChecksumException`, `NoMatchingFileException`, `ParseException`.
+Ça s'appuie sur la [signature Linux](/docs/packaging/code-signing#linux--signature-gpg-des-debrpm).
+Active-le sur le bloc signing :
+
+```kotlin title="build.gradle.kts"
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")
+        silentUpdate.set(true)   // nécessite enabled = true
+    }
+}
+```
+
+Le script post-install root du paquet met alors en place les mises à jour sans mot de passe ainsi :
+
+1. Un helper de mise à jour root-owned dans `/opt/<App>/nucleus-update-helper`, et une policy polkit
+   scopée à ce binaire précis (`allow_active=yes`).
+2. Ta clé publique de signature, bundlée dans `/opt/<App>/resources/nucleus-update.pub.asc`.
+3. Au moment de la mise à jour, le runtime télécharge le paquet et sa signature détachée
+   `<file>.asc`, puis lance `pkexec <helper> <file>`.
+4. Le helper vérifie la signature contre la clé bundlée, contrôle que le nom du paquet correspond à
+   l'app installée, et seulement alors lance `dpkg -i` ou `rpm -U`.
+
+<Callout type="warn">
+La règle polkit `allow_active=yes` est scopée au seul binaire helper, et le helper refuse tout
+paquet dont la signature ne valide pas contre la clé bundlée : une install sans mot de passe ne peut
+donc pas installer un paquet arbitraire — il faudrait ta clé privée de signature. Si le helper ou le
+`<file>.asc` est absent, le runtime retombe sur l'install `pkexec` avec prompt de mot de passe.
+L'install sans mot de passe nécessite une session locale active.
+</Callout>
+
+## Référence de l'API
+
+### Méthodes runtime
+
+`NucleusUpdater` expose :
+
+- `suspend fun checkForUpdates(): UpdateResult` — retourne `Available(info, level)`, `NotAvailable`
+  ou `Error(exception)`.
+- `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>` — émet la progression ; l'émission
+  finale a `file != null`.
+- `fun installAndRestart(file: File)` — lance l'installateur, quitte le processus, relance après
+  installation.
+- `fun installAndQuit(file: File)` — installation silencieuse, pas de relance. La mise à jour
+  s'applique au prochain lancement manuel.
+- `fun isUpdateSupported(): Boolean` — indique si le type d'exécutable courant peut s'auto-mettre à jour.
+- `fun wasJustUpdated(): Boolean` et `fun consumeUpdateEvent(): UpdateEvent?` — détection après mise à jour.
+
+### Types de résultat et de niveau
+
+- `UpdateResult.Available(info: UpdateInfo, level: UpdateLevel)`
+- `UpdateResult.NotAvailable`
+- `UpdateResult.Error(exception: UpdateException)`
+
+`UpdateLevel` indique l'ampleur du saut : `MAJOR`, `MINOR`, `PATCH` ou `PRE_RELEASE`. Branche ton UI
+dessus — dialogue forcé pour les bumps majeurs, installation silencieuse pour les patches.
+
+### Champs du builder
+
+`NucleusUpdater { }` configure un `UpdaterConfig` : `currentVersion`, `channel`, `provider`,
+`httpClient`, `allowDowngrade`, `allowPrerelease` et `executableType`.
+
+### Providers
+
+- `GitHubProvider(owner, repo, token? = null)`
+- `GenericProvider(baseUrl)`
+
+Les en-têtes d'authentification personnalisés proviennent de `authHeaders()` du provider, pas de la config.
+
+### Commandes d'installation
+
+| OS | Format | Commande |
+|----|--------|----------|
+| Linux | DEB | `pkexec dpkg -i <file>` |
+| Linux | RPM | `pkexec rpm -U <file>` |
+| Linux | AppImage | remplacement sur place |
+| macOS | DMG/ZIP | `open <file>` / extraction |
+| Windows | NSIS/EXE | `<file> /S` |
+| Windows | MSI | `msiexec /i <file> /passive` |
+
+### Exceptions
+
+`UpdateException` est le type de base. Sous-types : `NetworkException`, `ChecksumException`,
+`NoMatchingFileException`, `ParseException`.
 
 ## Notes
 
 - Les SHA-512 sont vérifiés après téléchargement ; un échec supprime le fichier et remonte une erreur.
-- Les tokens GitHub passent par l'en-tête `Authorization` — jamais dans les URL params.
-- Pour Mac App Store, Microsoft Store, Snapcraft, Flathub : le store gère les mises à jour. Skippe `updater-runtime` entièrement.
+- Les mises à jour Linux sans mot de passe (`signing.silentUpdate`) ajoutent une deuxième
+  vérification, plus forte : une signature GPG validée contre la clé bundlée dans l'app.
+- Les tokens GitHub passent par l'en-tête `Authorization`, jamais dans les paramètres d'URL.
+- Pour le Mac App Store, le Microsoft Store, Snapcraft et Flathub, le store gère les mises à jour ;
+  ignore `updater-runtime` entièrement.
+
+## Et ensuite
+
+- [Publication](/docs/packaging/publishing) — configurer les providers dans `nativeDistributions.publish { }`.
+- [CI/CD](/docs/packaging/ci-cd#release) — le workflow de release qui génère et uploade les métadonnées.
+- [Signature de code](/docs/packaging/code-signing) — signature GPG des DEB/RPM et mises à jour sans mot de passe.

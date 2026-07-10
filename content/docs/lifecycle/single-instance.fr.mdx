@@ -1,40 +1,50 @@
 ---
 title: Une app, un seul process
-description: Garantis une seule instance et redirige les relances (args CLI, deep links) vers elle.
+description: Garantis une seule instance de ton app et transfère les arguments d'un second lancement vers le process principal.
 ---
 
-Double-clique deux fois sur le app et la plupart des utilisateurs s'attendent à ce que le second clic ramène la fenêtre au premier plan, pas qu'il lance un second process. `SingleInstanceManager` en fait le comportement par défaut — et donne un moyen propre de passer des arguments de l'invocation secondaire vers la primaire.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Fourni avec `nucleus-application` — `nucleusApplication { }` acquiert le verrou pour soi par défaut.
-- Ou appelle `SingleInstanceManager.isSingleInstance(...)` à la main si l'on n'utilises pas `nucleusApplication { }`.
-- Basé sur un file-lock : portable macOS / Windows / Linux — pas de LaunchServices / mutex / DBus à câbler.
-- Deux callbacks laissent l'instance secondaire écrire un payload (args CLI, URI deep link) que la primaire lit atomiquement.
-- L'identifiant par défaut vient de `NucleusApp.appId` injecté par le plugin Gradle.
+`SingleInstanceManager` limite ton app à une seule instance en cours d'exécution. Quand un second
+lancement est détecté, il transfère cette invocation — arguments CLI ou URI de deep link — vers le
+process en cours au lieu de démarrer un doublon. Il est fourni par `core-runtime` et utilise le
+même mécanisme sur macOS, Windows et Linux.
 
-## Installation
+## Ajouter la dépendance
 
-Inclus dans `core-runtime`, dont `nucleus-application` dépend déjà.
+`SingleInstanceManager` est fourni par `core-runtime`, dont `nucleus-application` dépend déjà.
+Ne l'ajoute explicitement que si tu l'utilises sans `nucleus-application` :
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
 }
 ```
 
-## Quickstart
+## Garantir une seule instance
 
-Avec `nucleusApplication { }` — activé d'office :
+Quand tu démarres ton app avec `nucleusApplication`, la gestion de l'instance unique est active par
+défaut. Le second lancement se termine immédiatement et la fenêtre principale revient au premier
+plan :
 
 ```kotlin
 import dev.nucleusframework.application.nucleusApplication
 
-fun main(args: Array<String>) = nucleusApplication(args, enableSingleInstance = true) {
+fun main(args: Array<String>) = nucleusApplication(args) {
     DecoratedWindow(onCloseRequest = ::exitApplication) { /* ... */ }
 }
 ```
 
-À la main, quand on câble le propre `application { }` :
+<Callout type="info">
+`enableSingleInstance` vaut `true` par défaut. Si l'app gère aussi les deep links, l'URI de
+l'instance secondaire est transféré au process principal via
+[`DeepLinkHandler`](/docs/lifecycle/deep-links) sans câblage supplémentaire.
+</Callout>
+
+## Câbler manuellement
+
+Quand tu pilotes toi-même le `application { }` de Compose, appelle
+`SingleInstanceManager.isSingleInstance` et quitte quand il renvoie `false` :
 
 ```kotlin
 import dev.nucleusframework.core.runtime.SingleInstanceManager
@@ -42,20 +52,20 @@ import dev.nucleusframework.core.runtime.SingleInstanceManager
 fun main() = application {
     var restoreRequested by remember { mutableStateOf(false) }
 
-    val isSingle = remember {
+    val isPrimary = remember {
         SingleInstanceManager.isSingleInstance(
             onRestoreFileCreated = {
-                // Sur la SECONDE instance — `this` est le chemin du fichier IPC.
-                // Écris ce qu'on veut que la primaire lise.
+                // S'exécute sur la seconde instance. `this` est le Path du fichier de
+                // restore-request ; écris ce que tu veux que la primaire lise.
             },
             onRestoreRequest = {
-                // Sur la PRIMAIRE quand un autre lancement est détecté.
+                // S'exécute sur la primaire quand un autre lancement est détecté.
                 restoreRequested = true
             },
         )
     }
 
-    if (!isSingle) {
+    if (!isPrimary) {
         exitApplication()
         return@application
     }
@@ -63,7 +73,8 @@ fun main() = application {
     Window(onCloseRequest = ::exitApplication) {
         LaunchedEffect(restoreRequested) {
             if (restoreRequested) {
-                window.toFront(); window.requestFocus()
+                window.toFront()
+                window.requestFocus()
                 restoreRequested = false
             }
         }
@@ -71,33 +82,60 @@ fun main() = application {
 }
 ```
 
-## Comment ça marche
+`onRestoreFileCreated` est optionnel. Omets-le quand le second lancement n'a aucune donnée à passer.
 
-Un fichier de verrou vit dans le dossier temp (configurable via `Configuration.lockFilesDir`). L'acquisition passe par `java.nio.channels.FileLock` — atomique, géré par le noyau, libéré automatiquement à la sortie ou au crash de la JVM. Si le verrou est déjà tenu, le secondaire écrit un fichier "restore request" à côté ; le primaire surveille ce chemin et déclenche `onRestoreRequest`.
+## Fonctionnement
 
-Ça t'évite trois API spécifiques à chaque OS : LaunchServices sur macOS (un bundle id, un process), un named mutex Windows, l'ownership d'un nom DBus sur Linux. Un seul mécanisme partagé marche partout, et surtout survit aux crashes JVM — les file locks sont relâchés par l'OS, donc un primaire tué de force ne bloque pas tout le monde.
+`SingleInstanceManager` détient un fichier de verrou dans `Configuration.lockFilesDir` (le dossier
+temporaire du système par défaut) et l'acquiert avec `java.nio.channels.FileLock`. Le verrou est
+géré par le noyau et libéré à la sortie ou au crash de la JVM, donc une primaire tuée de force ne
+bloque pas l'app.
 
-Les deux callbacks portent l'IPC. Ils reçoivent le même `Path` (le fichier restore-request), donc côté secondaire on y écris quelque chose (typiquement un URI deep-link via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links)), côté primaire on le relis. Plus qu'un URI ? Utiliser ce path comme point de rendez-vous pour le format qu'on veut.
+Quand le verrou est déjà tenu, le second lancement écrit un fichier de restore-request à côté du
+verrou. La primaire surveille ce dossier avec un `WatchService` et appelle `onRestoreRequest` quand
+le fichier apparaît. C'est un seul mécanisme pour les trois plateformes — pas de LaunchServices
+macOS, de named mutex Windows ni d'ownership de nom D-Bus Linux à câbler par OS.
 
-## Référence
+Les deux callbacks forment le canal IPC. `onRestoreFileCreated` s'exécute sur la seconde instance
+et reçoit le `Path` du restore-request comme récepteur, donc elle y écrit une charge utile —
+typiquement un URI de deep link via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links).
+`onRestoreRequest` s'exécute sur la primaire avec le même `Path` et le relit.
 
-### `SingleInstanceManager`
+## Référence de l'API
+
+### SingleInstanceManager
 
 | Membre | Signature | Notes |
 |---|---|---|
-| `isSingleInstance(onRestoreFileCreated, onRestoreRequest)` | `(Path.() -> Unit, Path.() -> Unit) -> Boolean` | Renvoie `true` si l'on est la primaire, `false` sinon. |
-| `configuration` | `var Configuration` | Surcharge le dossier / l'identifiant avant le premier appel. |
+| `isSingleInstance` | `(onRestoreFileCreated: (Path.() -> Unit)? = null, onRestoreRequest: Path.() -> Unit): Boolean` | Renvoie `true` sur la primaire, `false` quand une autre instance tient le verrou. `onRestoreFileCreated` s'exécute sur la secondaire ; `onRestoreRequest` sur la primaire. |
+| `configuration` | `var Configuration` | Affecte-la avant le premier appel à `isSingleInstance` ; la modifier ensuite lève une `IllegalStateException`. |
 
-### `Configuration`
+### Configuration
 
-| Propriété | Défaut | Description |
+`Configuration` est une `data class` à deux paramètres de constructeur. Les noms de fichiers et les
+chemins en sont dérivés et sont en lecture seule.
+
+| Propriété | Type / défaut | Description |
 |---|---|---|
-| `lockFilesDir` | `java.io.tmpdir` | Où vivent les fichiers de verrou et de restore-request. |
-| `lockIdentifier` | `NucleusApp.appId` | Identifiant unique — dérive le nom du fichier de verrou. |
-| `lockFileName` / `restoreRequestFileName` | Dérivés | À surcharger uniquement si l'on veut des noms fixes. |
+| `lockFilesDir` | `Path` = `java.io.tmpdir` | Dossier contenant les fichiers de verrou et de restore-request. |
+| `lockIdentifier` | `String` = `AppIdProvider.appId()` | Nom de base servant à dériver les noms de fichiers. Change-le pour isoler le verrou. |
+| `lockFileName` | `String` (dérivé) | `"$lockIdentifier.lock"`. |
+| `restoreRequestFileName` | `String` (dérivé) | `"$lockIdentifier.restore_request"`. |
+| `lockFilePath` / `restoreRequestFilePath` | `Path` (dérivé) | Les deux noms de fichiers résolus sous `lockFilesDir`. |
 
 ## Notes
 
-- `nucleusApplication { enableSingleInstance = false }` désactive le verrou.
-- Combine avec [`DeepLinkHandler`](/docs/lifecycle/deep-links) pour transférer les URL `monapp://...` vers la primaire.
-- Le fichier de verrou est par utilisateur (temp dir), donc deux users distincts peuvent faire tourner l'app en parallèle.
+- Désactive avec `nucleusApplication(args, enableSingleInstance = false)`.
+- Le `lockIdentifier` par défaut est l'ID d'app résolu par `AppIdProvider.appId()` — le même ID que
+  le plugin Gradle injecte via `nucleus.app.id`, donc deux apps ne partagent jamais un verrou.
+- Le fichier de verrou vit dans le dossier temporaire par utilisateur, donc deux utilisateurs
+  différents sur la même machine peuvent chacun lancer l'app.
+- Si le fichier de verrou est périmé ou illisible, `SingleInstanceManager` le supprime et réessaie
+  une fois. S'il n'arrive toujours pas à l'acquérir, il traite le process comme la primaire plutôt
+  que de bloquer l'utilisateur.
+
+## Et ensuite
+
+- [Deep links](/docs/lifecycle/deep-links) — transfère les URL `myapp://...` d'un second lancement vers la primaire.
+- [Métadonnées de l'app](/docs/lifecycle/app-metadata) — d'où vient l'ID d'app qui nomme le verrou.
+- [Vue d'ensemble du cycle de vie](/docs/lifecycle) — le reste des API de cycle de vie du runtime.

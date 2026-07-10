@@ -1,17 +1,15 @@
 ---
 title: Nucleus vs Electron
-description: Chromium and a Node bridge, or native Skia and a single Kotlin process.
+description: How Nucleus and Electron differ in rendering, OS access, window decorations, and packaging.
 ---
 
-Electron got the world to ship desktop apps in JavaScript by paying a tax — a Chromium per app, two runtimes per process, IPC between renderer and main, RAM measured in hundreds of megabytes. Nucleus is the inverse trade: keep the developer ergonomics, drop the Chromium, run one Kotlin process from UI to OS.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- One language vs four. One process vs renderer + main + IPC bridge.
-- Native Skia renderer instead of Chromium — cold start in ~0.5 s, RAM in ~60 MB (GraalVM).
-- Auto-update, code signing, sandboxing, 16 packaging formats — all parity with electron-builder, none of the JS context switch.
-- Loses on hiring pool and ecosystem age. Electron has the deepest desktop JS community.
+Electron renders desktop UI with a bundled Chromium and runs application logic in a
+separate Node process, communicating over IPC. Nucleus renders Compose UI to Skia and runs
+the UI, business logic, and OS access in a single Kotlin process. This page compares the two.
 
-## How they stack up
+## Comparison
 
 | | **Nucleus** | Electron |
 |--|------------|----------|
@@ -23,56 +21,85 @@ Electron got the world to ship desktop apps in JavaScript by paying a tax — a 
 | Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s |
 | RAM idle | 60–150 MB | 200–500 MB |
 | Binary size | 38 MB (GraalVM) · ~120 MB (JVM) | 150–200 MB |
-| Auto-update | Built-in (`updater-runtime`) | electron-updater (mature) |
+| Auto-update | Built-in (`updater-runtime`) | electron-updater |
 | Packaging | 16 formats from one DSL | 5–7 via electron-builder |
 | Ecosystem | JVM (Maven Central, ~500k libs) | npm |
 
-## The Chromium tax
+<Callout type="info">
+Memory and cold-start figures vary widely by app. The Electron ranges above are a typical
+"Hello World plus a small single-page app" envelope from public benchmarks, not fixed values.
+</Callout>
 
-Electron ships an entire browser per app because that's the only way to render web content with the consistency JS devs expect. The cost: every Electron app pays for V8, Blink, Skia, plus a Node runtime, all linked into the process tree. Six Electron apps idle on your machine and you're at 3 GB of RAM before doing anything.
+## Rendering
 
-Nucleus renders Compose UI directly to Skia via the Compose Multiplatform Skiko backend. No Blink, no V8, no Node. The JVM runs your code; Skia GPU paints the pixels. Everything lives in a single process, sharing one heap. The performance ceiling is the JVM's — and on hot paths the JVM matches C++ throughput once HotSpot warms.
+Electron bundles a full browser engine in every app: V8, Blink, and Skia, plus a Node
+runtime, all linked into the process tree. Each running app carries its own copy, so memory
+use adds up across several apps.
 
-## The IPC bridge tax
+Nucleus renders Compose UI to Skia through the Compose Multiplatform Skiko backend. There is
+no Blink, V8, or Node. The JVM runs your code and Skia draws to the GPU, all in a single
+process sharing one heap. After HotSpot warms up, throughput on hot paths is comparable to
+native code.
 
-Electron's renderer can't touch the OS — for that it sends messages over `ipcRenderer` / `ipcMain`. Every read of a file, every system tray click, every notification, crosses a serialization boundary. Type safety stops at the wire. You add layers of `contextBridge` wrappers, you debug across two devtools windows, you maintain two halves of every feature.
+## OS access
 
-In Nucleus, your Compose UI calls `NotificationManager.send(...)`, `GlobalHotKeyManager.register(...)`, or `SystemInfo.cpuInfo()` directly. Same call graph, same coroutine, same debugger.
+Electron's renderer process cannot call the OS directly. It sends messages to the main
+process over `ipcRenderer` and `ipcMain`, so every file read, tray click, and notification
+crosses a serialization boundary. Type safety stops at that boundary, and each feature is
+split across two processes with `contextBridge` wrappers and two sets of devtools.
 
-## Native window decorations
+In Nucleus, your Compose UI calls `NotificationManager.send(...)`,
+`GlobalHotKeyManager.register(...)`, or `SystemInfo.cpuInfo()` directly — same call graph,
+same coroutine, same debugger.
 
-Electron windows look like Chrome. To pass for native, you fight Chromium chrome — custom frames, `vibrancy`, draggable regions encoded as CSS. Nucleus's [decorated window](/docs/window) layer renders the title bar inside Compose with four toolkits:
+## Window decorations
 
-- macOS — Liquid Glass on SDK 26+, automatic via `vtool` patching.
-- Fluent — Windows 11 acrylic, snap-layout hints, mica.
-- Yaru — Ubuntu-native button layout that reacts to GNOME settings live.
+Electron windows render with Chromium's chrome. Matching a native look means replacing the
+frame, applying vibrancy, and encoding draggable regions in CSS. The Nucleus
+[decorated window](/docs/window) layer draws the title bar inside Compose with four toolkits:
+
+- macOS — Liquid Glass on SDK 26+, applied automatically through `vtool` patching.
+- Fluent — Windows 11 acrylic, snap-layout hints, and mica.
+- Yaru — Ubuntu button layout that follows GNOME settings live.
 - Jewel — IntelliJ Platform look.
 
-Bring your own design system on top — Material 2/3 adapters ship out of the box.
+Material 2 and Material 3 adapters ship for use on top.
 
-## Where Electron still wins
+## Where Electron fits better
 
-- **Hiring pool.** Everyone knows JS. Fewer know Kotlin Multiplatform desktop.
-- **Ecosystem age.** Electron has shipped VS Code, Slack, Discord, Figma, Notion. Battle scars accumulated for a decade.
-- **Web reuse.** If your product is already a single-page app, wrapping it in Electron beats rewriting in Compose for v1.
-- **Node libraries.** npm's surface area is larger than any single JVM library category — though the JVM dwarfs npm in numerical library count (~500k Maven Central artifacts).
+- **Hiring pool.** More developers know JavaScript than Kotlin Multiplatform desktop.
+- **Ecosystem age.** Electron ships VS Code, Slack, Discord, Figma, and Notion, with a
+  decade of production use.
+- **Web reuse.** If your product is already a single-page app, wrapping it in Electron is
+  less work than rewriting it in Compose for a first release.
+- **Node libraries.** npm covers a larger surface in some categories, though the JVM has more
+  artifacts overall (~500k on Maven Central).
 
-## Where Nucleus pulls ahead
+## Where Nucleus fits better
 
-- One language, one mindset, one debugger. UI, business logic, OS calls, packaging — all Kotlin, all the same call graph.
-- Native rendering — your app doesn't look like a website pretending to be an app.
-- Two runtimes (GraalVM Native Image · JVM + AOT cache) from the same source — see [performance](/docs/performance/index).
-- 16 packaging formats vs 5–7 — see [packaging comparison](/docs/compare/packaging).
-- The full JVM library catalog runs in-process. Apache Lucene, DuckDB, ONNX Runtime, Tika, Netty, Spark — all `implementation` away, no native bridge.
+- One language across UI, business logic, OS calls, and packaging — one call graph, one debugger.
+- Native rendering rather than a bundled browser.
+- Two runtimes (GraalVM Native Image and JVM + AOT cache) from the same source — see
+  [performance](/docs/performance/index).
+- 16 packaging formats against 5–7 — see [packaging comparison](/docs/compare/packaging).
+- The JVM library catalog runs in-process. Apache Lucene, DuckDB, ONNX Runtime, Tika, Netty,
+  and Spark are an `implementation` dependency away, with no native bridge.
 
-## When to pick Electron
+## When to choose Electron
 
-You're a JS team shipping a v1, your product already exists as a web app, and your RAM/perf budget can absorb the Chromium tax. Or you have an existing Electron codebase and the migration cost outweighs the ongoing tax.
+You have a JavaScript team shipping a first release, your product already exists as a web
+app, and your memory and performance budget can absorb the bundled Chromium. Or you have an
+existing Electron codebase where migration costs more than the ongoing overhead.
 
-## When to pick Nucleus
+## When to choose Nucleus
 
-You want one language end-to-end, native rendering, store-ready packaging, and the JVM ecosystem in-process. You ship to enterprise networks where corporate root CAs matter and `native-ssl` saves you a quarter of incidents. You care about cold start enough to wire GraalVM Native Image.
+You want one language end to end, native rendering, native installers, and the JVM ecosystem
+in-process. You ship to enterprise networks where corporate root CAs matter and `native-ssl`
+handles them. Cold start matters enough to wire up GraalVM Native Image.
 
-## Notes
+## What's next
 
-`[FACT-CHECK NEEDED]` on Electron's exact RAM/cold-start numbers — they vary heavily by app. The 200–500 MB / 2–3 s range is a typical "Hello World + small SPA" envelope from public benchmarks.
+- [Nucleus vs Tauri](/docs/compare/tauri) — another native-shell comparison.
+- [Packaging comparison](/docs/compare/packaging) — formats and signing across frameworks.
+- [Performance](/docs/performance/index) — the GraalVM and JVM runtimes.
+- [Decorated windows](/docs/window) — native title bars and window chrome.

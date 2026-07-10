@@ -1,94 +1,108 @@
 ---
 title: Automatic metadata resolution
-description: Five layers of reflection / resource / JNI metadata merged at build time, so packageGraalvmNative produces a working binary without you writing JSON.
+description: How Nucleus resolves and merges GraalVM reachability metadata at build time so native images compile without hand-written configuration.
 ---
 
-The goal of Nucleus is to make `packageGraalvmNative` produce a working binary without you writing a single line of reflection configuration. To get there, Nucleus combines **five complementary metadata sources**, resolved and merged automatically at build time.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- **L1** — 28 curated per-library metadata files (Compose, Skiko, ktor, kotlinx.serialization, SQLite, Coil, JNA, FileKit, …), conditionally included.
-- **L2** — Oracle GraalVM Reachability Metadata Repository, auto-resolved per dependency.
-- **L3** — Platform-specific metadata (`sun.awt.windows.*`, `sun.lwawt.macosx.*`, `sun.awt.X11.*`, Java2D pipelines, font managers).
-- **L4** — Static bytecode analysis: `Class.forName`, `findClass`, `getResource[AsStream]`, JNI native methods, `@Serializable` companions.
-- **L5** — `graalvm-runtime`'s generic metadata (~300+ types: Compose Desktop, AWT/Swing, Skiko, security providers, font managers).
-- All five merge into one `-H:ConfigurationFileDirectories=` call.
+Nucleus resolves and merges GraalVM reachability metadata at build time, so
+`packageGraalvmNative` produces a working native binary without you writing reflection,
+resource, or JNI configuration by hand. The metadata comes from five sources. Each is
+generated into its own directory and passed to `native-image`, and the module's own metadata
+is discovered from the classpath.
 
-## Level 1 — Per-library conditional metadata
+## Level 1 — per-library metadata
 
-The plugin ships 28 metadata files curated for the Kotlin desktop ecosystem. Each declares a `matchPackages` condition; the file is only included if the corresponding library is on the runtime classpath. ktor, SQLite JDBC, kotlinx.serialization, Coil, JNA, FileKit, and many others Just Work as a result.
+The plugin ships 28 metadata files curated for the Kotlin desktop ecosystem, covering Compose,
+Skiko, ktor, kotlinx.serialization, SQLite JDBC, Coil, JNA, FileKit, SLF4J, Sentry, and others.
+Each file may declare a `matchPackages` condition. The `filterGraalvmLibraryMetadata` task reads
+these files from the plugin JAR and includes a file only when the corresponding packages are on
+the runtime classpath; files without a condition are always included. Libraries in the curated
+set are covered without extra configuration.
 
-## Level 2 — Oracle Reachability Metadata Repository
+## Level 2 — GraalVM Reachability Metadata Repository
 
-Nucleus auto-downloads the [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata) and resolves entries for every dependency on your runtime classpath — SLF4J, Logback, hundreds of others. The resolved directories are passed to `native-image` via `-H:ConfigurationFileDirectories=`.
+The `resolveGraalvmReachabilityMetadata` task resolves entries from the
+[Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
+for each dependency on your runtime classpath. Resolution is enabled by default and uses
+repository version `0.10.6`.
 
-Enabled by default. Customise via the `metadataRepository { }` DSL (see [Configuration](/docs/performance/graalvm/configuration#metadatarepository--)).
+<Callout type="info">
+Configure this source with the `metadataRepository { }` block: `enabled`, `version`,
+`excludedModules`, and `moduleToConfigVersion`. See
+[Configuration](/docs/performance/graalvm/configuration).
+</Callout>
 
-## Level 3 — Platform-specific metadata
+## Level 3 — platform-specific metadata
 
-The plugin generates per-OS metadata at build time for the current target — `sun.awt.windows.*`, `sun.lwawt.macosx.*`, `sun.awt.X11.*`, Java2D pipelines, font managers, security providers. Triggered by the `generateGraalvmPlatformMetadata` task as a dependency of `packageGraalvmNative`. No per-platform configuration in your build script.
+The `generateGraalvmPlatformMetadata` task writes reflection metadata for the current operating
+system: `sun.awt.windows.*` on Windows, `sun.lwawt.macosx.*` on macOS, and `sun.awt.X11.*` on
+Linux, along with Java2D pipelines, font managers, and security providers. It also injects a
+reflection entry for your `main` class. No per-platform configuration is required in your build
+script.
 
-## Level 4 — Static bytecode analysis
+## Level 4 — static bytecode analysis
 
-`analyzeGraalvmStaticMetadata` scans every compiled class on the runtime classpath at build time and detects:
+The `analyzeGraalvmStaticMetadata` task scans every compiled class on the runtime classpath,
+including your own module's classes, and detects:
 
-- **Native methods** and their parameter / return types (JNI metadata).
-- **`Class.forName()` and `MethodHandles.Lookup.findClass()`** calls (reflection metadata).
-- **`getResource()` / `getResourceAsStream()`** calls (resource metadata).
-- **JNI callback parameters** — classes passed to native code that call back into Java.
-- **JNI superclass chains** — parent classes needed for field access from native code.
-- **`@Serializable` classes** — automatically emits the `Companion.serializer()` reflection entry.
+- Native methods and their parameter and return types (JNI metadata).
+- `Class.forName()` and `MethodHandles.Lookup.findClass()` calls with literal class names
+  (reflection metadata).
+- `getResource()` and `getResourceAsStream()` calls with literal paths (resource metadata).
+- JNI callback parameters — classes passed to native code that call back into Java.
+- JNI superclass chains — parent classes needed for field access from native code.
+- `@Serializable` classes — emits the `Companion.serializer()` reflection entry.
 
-Runs transparently as part of `packageGraalvmNative`.
+## Level 5 — bundled runtime metadata
 
-## Level 5 — Generic cross-platform metadata
+The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
 
-`nucleus.graalvm-runtime` ships a `reachability-metadata.json` inside its JAR covering ~300+ cross-platform entries: Compose Desktop, AWT/Swing, Skiko, security providers, font managers. Picked up from the classpath automatically — no configuration.
+- A `reachability-metadata.json` with serialization entries.
+- A `native-image.properties` that registers resource patterns (`.svg`, `.ttf`, `.otf`,
+  `nucleus/.*`, `META-INF/services/.*`, and `composeResources/.*`).
+- SVM substitutions for the AWT font managers, the splash screen, and the X11 window class.
 
-## How they fit together
+`native-image` discovers all of it from the classpath, so no configuration is needed. See
+[Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) for the substitution details.
 
-```
-packageGraalvmNative
-        │
-        ├── L1 — per-library files (28, filtered by classpath)
-        ├── L2 — Oracle Reachability Metadata Repository (resolved)
-        ├── L3 — platform metadata (current OS)
-        ├── L4 — static bytecode analysis (your classpath)
-        └── L5 — graalvm-runtime generic JSON (on classpath)
-                  │
-                  ▼
-        merged into one config directory
-                  │
-                  ▼
-        native-image -H:ConfigurationFileDirectories=…
-                  │
-                  ▼
-              native binary
-```
+## How the sources merge
 
-Most apps compile and run as native images with no manual metadata at all.
+`packageGraalvmNative` runs the generation tasks and then passes each resulting directory to
+`native-image` through repeated `-H:ConfigurationFileDirectories=` arguments — the per-library
+output (Level 1), the resolved repository directories (Level 2), the platform metadata
+(Level 3), and the static-analysis output (Level 4). Any manual entries in your project's own
+config directory are included as well. Level 5 is read from the classpath by `native-image`
+itself. Most apps compile to a native binary without any hand-written metadata.
 
-## The tracing agent — final safety net
+## Fill gaps with the tracing agent
 
-Even five levels can miss edge cases: reflection driven by runtime values, dynamically loaded classes, unusual library patterns. Run the agent once before each release:
+The static sources can miss reflection driven by runtime values, dynamically loaded classes, or
+unusual library patterns. Run the agent once before a release to catch them:
 
-```bash
+```shell
 ./gradlew runWithNativeAgent
 ```
 
-Navigate through every screen and feature. The agent records reflection, JNI, resource, and proxy accesses and **merges** them into your config. Entries already covered by L1–L5 are deduplicated automatically — the agent output stays minimal. In many cases it finds nothing new.
+Exercise every screen and feature. The agent records reflection, JNI, resource, and proxy
+accesses into a temporary directory and merges them into your config without overwriting
+existing entries. In many cases it finds nothing new.
 
-## Cleaning up manual entries
+## Clean up manual entries
 
-If you accumulated manual entries that the automatic levels now cover:
+If you accumulated manual entries that the automatic sources now cover, remove the redundant
+ones:
 
-```bash
+```shell
 ./gradlew cleanupGraalvmMetadata
 ```
 
-The task compares your manual entries against the combined L1+L2+L3+L4 baseline and removes anything redundant, reporting exactly which entries were removed and which remain.
+The task compares your manual `reachability-metadata.json` against the combined baseline of
+Levels 1–4 and removes anything already managed, reporting which entries were removed and which
+remain.
 
-## Related
+## What's next
 
-- [Native access](/docs/performance/native-access) — the higher-level page on the same metadata system, plus resource patterns and font substitutions.
-- [Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — the `graalvm-runtime` module that ships L5.
-- [Tasks & CI](/docs/performance/graalvm/tasks-ci) — the full task graph.
+- [Native access](/docs/performance/native-access) — resource patterns and font substitutions on top of this metadata system.
+- [Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — the `graalvm-runtime` module that ships Level 5.
+- [Tasks & CI](/docs/performance/graalvm/tasks-ci) — the full GraalVM task graph.

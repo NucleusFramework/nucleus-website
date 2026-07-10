@@ -1,24 +1,29 @@
 ---
 title: Building for Linux
-description: DEB, RPM, AppImage, Snap, Flatpak — one build, every distro.
+description: Configure a Nucleus app to build DEB, RPM, AppImage, and pacman packages and publish to the Snap and Flatpak stores.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Linux is the most fragmented desktop target. Different package managers, different sandboxes, different conventions per distro. Nucleus produces every mainstream format from the same `linux { … }` block — including the two store formats (Snap, Flatpak) that ship with their own sandbox.
+In this tutorial, you'll configure a Nucleus app to produce every Linux package
+format — DEB, RPM, AppImage, and pacman for direct distribution, plus Snap and
+Flatpak for the stores — from a single `linux { }` block, then build and inspect
+the output.
 
-## TL;DR
-- `Deb`, `Rpm`, `AppImage` for traditional distribution.
-- `Snap`, `Flatpak` for store channels (Snapcraft, Flathub), each with its own sandbox model.
-- `MimeType` entries in the generated `.desktop` file are auto-derived from `protocol(...)` and `fileAssociation(...)`.
-- `homepage` is **required** for DEB / RPM (electron-builder constraint).
+## Before you start
 
-## Install
-Comes with the Gradle plugin.
+- The Nucleus Gradle plugin is applied to your project. See [Project setup](/docs/start/project-setup).
+- You are on a **Linux build host**. DEB, RPM, AppImage, pacman, Snap, and Flatpak
+  are Linux-only formats and do not cross-build from macOS or Windows.
+- Format-specific tooling is installed as noted in each step (for example `libfuse2`
+  for AppImage, `snapcraft` for Snap, `flatpak-builder` for Flatpak).
 
-## Quickstart
+## Configure the target formats
 
-```kotlin
+In `build.gradle.kts`, list the Linux formats you want in `targetFormats(...)` and
+describe the package in the `linux { }` block:
+
+```kotlin title="build.gradle.kts"
 nucleus {
     application {
         nativeDistributions {
@@ -26,15 +31,16 @@ nucleus {
                 TargetFormat.Deb,
                 TargetFormat.Rpm,
                 TargetFormat.AppImage,
+                TargetFormat.Pacman,
                 TargetFormat.Snap,
                 TargetFormat.Flatpak,
             )
-            homepage = "https://myapp.example.com" // required for DEB / RPM
+            homepage = "https://myapp.example.com"
 
             linux {
                 iconFile.set(project.file("icons/app.png"))
-                shortcut = true
                 packageName = "myapp"
+                shortcut = true
                 appCategory = "Utility"
                 menuGroup = "Development"
 
@@ -43,33 +49,59 @@ nucleus {
 
                 rpmLicenseType = "MIT"
                 rpmRequires = listOf("gtk3", "libX11", "alsa-lib")
+
+                pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
             }
         }
     }
 }
 ```
 
-## How it works
+<Callout type="warn">
+`homepage` is required for DEB and RPM builds. The packaging task fails without it.
+</Callout>
 
-### DEB and RPM — the classic pair
-`packageDeb` invokes `dpkg-deb`; `packageRpm` invokes `rpmbuild` (Linux build host required). The plugin generates a proper `.desktop` entry with the correct `Categories=`, `MimeType=`, `StartupWMClass=`, and `Exec=` lines. Set `startupWMClass` explicitly if your Compose app's main class doesn't match what the window manager sees.
+## Build DEB and RPM packages
 
-```kotlin
+Each format has its own Gradle task named after the `TargetFormat` constant:
+
+```shell
+./gradlew packageDeb
+./gradlew packageRpm
+```
+
+The plugin writes a `.desktop` entry into each package with the correct
+`Categories=`, `MimeType=`, `StartupWMClass=`, and `Exec=` lines. If your app's
+window class doesn't match what the window manager reports, set `startupWMClass`
+explicitly:
+
+```kotlin title="build.gradle.kts"
 linux {
     startupWMClass = "com-example-MyApp"
 }
 ```
 
-### AppImage
-A single portable executable that runs on most distros without installation. Compression dominates startup cost:
+When `startupWMClass` is unset, Nucleus derives it from `mainClass` by replacing
+dots with hyphens.
 
-| Level | Startup | Use for |
-|-------|---------|---------|
-| `Store` | Fastest | Testing |
-| `Normal` (default) | Good | **Production** |
-| `Maximum` | 60s+ | Don't |
+## Build an AppImage
 
-```kotlin
+An AppImage is a single portable executable that runs on most distributions
+without installation:
+
+```shell
+./gradlew packageAppImage
+```
+
+The build host needs `libfuse2`:
+
+```shell
+sudo apt-get install -y libfuse2
+```
+
+Configure the desktop metadata in the `appImage { }` sub-block:
+
+```kotlin title="build.gradle.kts"
 linux {
     appImage {
         category = AppImageCategory.Utility
@@ -80,32 +112,75 @@ linux {
 }
 ```
 
-AppImage needs `libfuse2` on the build host: `sudo apt-get install -y libfuse2`.
+Output size and build time depend on `nativeDistributions.compressionLevel`:
 
-### Snap
-For the [Snap Store](https://snapcraft.io/). Default `plugs` cover desktop integration, audio, network, OpenGL. Override `confinement` if your app needs filesystem access beyond `home`:
+| `CompressionLevel` | Output | Build time |
+|--------------------|--------|------------|
+| `Store`            | Largest | Fastest |
+| `Normal` (default) | Balanced | Moderate |
+| `Maximum`          | Smallest | Slowest |
 
-```kotlin
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    compressionLevel = CompressionLevel.Normal
+}
+```
+
+## Package for Arch Linux
+
+`TargetFormat.Pacman` produces a pacman archive for Arch Linux and derivatives:
+
+```shell
+./gradlew packagePacman
+```
+
+Set Arch-specific dependencies and, if needed, an independent version string:
+
+```kotlin title="build.gradle.kts"
+linux {
+    pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
+    pacmanPackageVersion = "2.0.0"
+}
+```
+
+## Publish to the Snap Store
+
+Snap targets the [Snap Store](https://snapcraft.io/). The default `plugs` cover
+desktop integration, X11 and Wayland, networking, audio playback, and OpenGL.
+Override `confinement` when your app needs filesystem access beyond `home`:
+
+```kotlin title="build.gradle.kts"
 linux {
     snap {
         confinement = SnapConfinement.Strict
         grade = SnapGrade.Stable
         base = "core22"
         plugs = listOf(
-            SnapPlug.Desktop, SnapPlug.Home, SnapPlug.Wayland,
-            SnapPlug.Network, SnapPlug.AudioPlayback,
+            SnapPlug.Desktop,
+            SnapPlug.Home,
+            SnapPlug.Wayland,
+            SnapPlug.Network,
+            SnapPlug.AudioPlayback,
         )
         compression = SnapCompression.Xz
     }
 }
 ```
 
-Build host needs `snapd` and `snapcraft --classic`.
+```shell
+./gradlew packageSnap
+```
 
-### Flatpak
-Sandboxed by default — declare permissions via `finishArgs`:
+The build host needs `snapd` and `snapcraft --classic`.
 
-```kotlin
+## Publish to Flathub with Flatpak
+
+Flatpak is sandboxed. Declare the permissions your app needs through `finishArgs`.
+The defaults are `--share=ipc`, `--socket=x11`, `--socket=wayland`,
+`--socket=pulseaudio`, and `--device=dri`; setting `finishArgs` replaces them, so
+include everything you need:
+
+```kotlin title="build.gradle.kts"
 linux {
     flatpak {
         runtime = "org.freedesktop.Platform"
@@ -124,23 +199,59 @@ linux {
 }
 ```
 
-Flatpak triggers the [sandboxed pipeline](/docs/packaging/sandboxing) — native libs are pre-extracted and JVM args redirected. If `flatpak-builder` or the runtime isn't installed, the packaging task skips gracefully.
+```shell
+./gradlew packageFlatpak
+```
 
-### Deep links and MIME on Linux
-Top-level `protocol(...)` and `fileAssociation(...)` are merged into the `.desktop` file as `MimeType=` entries automatically:
+Flatpak is a store format and runs through the
+[sandboxed pipeline](/docs/packaging/sandboxing): native libraries are
+pre-extracted and JVM arguments are redirected. If `flatpak-builder` or the
+runtime isn't installed, the task is skipped rather than failed.
+
+## Register deep links and file associations
+
+Top-level `protocol(...)` and `fileAssociation(...)` entries are merged into the
+generated `.desktop` file as `MimeType=` values:
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    protocol(name = "MyApp URL", schemes = listOf("myapp"))
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+    )
+}
+```
+
+This produces:
 
 ```ini
 MimeType=x-scheme-handler/myapp;application/x-myapp;
 ```
 
-No manual `desktopEntries` override needed.
+No manual `desktopEntries` override is needed.
 
-## Reference
+## Configuration reference
 
-`linux { }` exposes: `iconFile`, `shortcut`, `packageName`, `packageVersion`, `startupWMClass`, `appRelease`, `appCategory`, `debMaintainer`, `menuGroup`, `rpmLicenseType`, `debPackageVersion`, `rpmPackageVersion`, `debDepends`, `rpmRequires`. Sub-blocks: `appImage { }`, `snap { }`, `flatpak { }`. Full property reference: [Gradle DSL reference](/docs/reference/gradle-dsl).
+`linux { }` exposes `iconFile`, `packageVersion`, `shortcut`, `startupWMClass`,
+`packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
+`debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
+`rpmRequires`, `pacmanPackageVersion`, and `pacmanDepends`. Sub-blocks are
+`appImage { }`, `snap { }`, `flatpak { }`, and `signing { }`.
 
-## Notes
+`appRelease` sets the package release number — the digit after the `-` in DEB and
+RPM versions. Bump it when you re-release without changing `packageVersion`. See
+the full [Gradle DSL reference](/docs/reference/gradle-dsl).
 
-- HiDPI on Linux is detected and applied via the [`linux-hidpi` module](/docs/performance/linux-hidpi). Required for sharp rendering under fractional scaling on Wayland.
-- Snap and Flatpak ignore traditional `.desktop` install paths — they layer their own desktop files into the user environment.
-- `appRelease` increments the package release number (the digit after the `-` in DEB/RPM versions). Bump it when you re-release without changing `packageVersion`.
+<Callout type="info">
+Snap and Flatpak layer their own desktop files into the user environment and
+ignore the traditional `.desktop` install paths used by DEB and RPM.
+</Callout>
+
+## What's next
+
+- [Code signing](/docs/packaging/code-signing) — sign DEB and RPM packages with GPG.
+- [Sandboxing](/docs/packaging/sandboxing) — how the Flatpak pipeline repackages your app.
+- [Publishing](/docs/packaging/publishing) — release built artifacts to GitHub, S3, or a generic server.
+- [Gradle DSL reference](/docs/reference/gradle-dsl) — every `linux { }` property.

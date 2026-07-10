@@ -1,23 +1,34 @@
 ---
 title: Métadonnées de l'app au runtime
-description: Lis l'id, la version, le vendeur et l'AUMID de le app depuis ce qu'on a configuré dans le plugin Gradle.
+description: Lis l'id, la version, le vendeur, le nom d'affichage et l'AUMID Windows de ton app depuis Kotlin, au runtime.
 ---
 
-La boîte "À propos" veut `1.2.3`. Le crash reporter veut `com.example.monapp`. L'updater veut le vendeur. Rien de tout ça ne devrait être hardcodé — ni relu sur disque au runtime. `NucleusApp` expose ce que le plugin Gradle a injecté au build, avec des fallbacks sensés pour `./gradlew run`.
+import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- Le singleton `NucleusApp` expose `appId`, `version`, `vendor`, `description`, `appName`, `aumid`, `startupTaskId`, `isConfigured`.
-- Injecté par le plugin via system properties (en `run`) et une resource classpath (`nucleus/nucleus-app.properties`, builds packagés).
-- Toutes les valeurs sont `String?` sauf `appId` (qui tombe sur le nom de la main class) et `isConfigured`.
-- Plusieurs modules Nucleus le lisent implicitement — `SingleInstanceManager`, `taskbar-progress`, `autolaunch`, `updater-runtime`.
+`NucleusApp` te permet de lire les métadonnées de ton application — id, version, vendeur, nom
+d'affichage et AUMID Windows — depuis Kotlin, au runtime. Les valeurs proviennent de ce que tu
+configures dans le plugin Gradle Nucleus et sont injectées au build : tu n'as ni à les coder en dur
+ni à les relire sur disque.
 
-## Installation
+## Ajouter la dépendance
 
-Fourni avec `core-runtime`.
+`NucleusApp` vit dans le module `core-runtime`, que le plugin Gradle Nucleus embarque déjà. N'ajoute
+la coordonnée explicitement que si tu lis les métadonnées depuis un module qui n'en dépend pas :
 
-## Quickstart
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+## Lire les métadonnées
+
+`NucleusApp` est un objet. Lis ses propriétés directement :
 
 ```kotlin
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
 import dev.nucleusframework.core.runtime.NucleusApp
 
 @Composable
@@ -28,40 +39,69 @@ fun AboutDialog() {
         NucleusApp.vendor?.let { Text("par $it") }
     }
 }
+```
 
+Chaque propriété est résolue une seule fois puis mise en cache : la relire plusieurs fois coûte peu.
+
+Utilise `isConfigured` pour distinguer une app packagée d'une session `./gradlew run` :
+
+```kotlin
 if (NucleusApp.isConfigured) {
     // App packagée
     initAutoUpdater()
 }
 ```
 
-## Comment ça marche
+<Callout type="info">
+Branche l'auto-update, la télémétrie ou tout ce que tu ne veux pas voir partir en développement sur
+`NucleusApp.isConfigured`. Il ne vaut `true` que si le plugin a injecté les métadonnées.
+</Callout>
 
-Le plugin donne à `NucleusApp` deux canaux d'injection :
+## Fonctionnement
 
-1. **System properties** pendant `./gradlew run` : `-Dnucleus.app.id=MyApp`, `-Dnucleus.app.version=...`, etc.
-2. **Resource classpath** en build packagé : `nucleus/nucleus-app.properties` embarqué dans le jar de l'app.
+Le plugin Gradle fournit les métadonnées à `NucleusApp` par deux canaux. Chaque propriété les résout
+dans l'ordre, et la première valeur non vide l'emporte :
 
-La résolution est first-non-null-wins : system property, puis resource, puis fallback hérité pour `appId` (main class via `sun.java.command`, sinon `"NucleusApp"`).
+1. **System properties** pendant `./gradlew run` — `-Dnucleus.app.id=...`, `-Dnucleus.app.version=...`,
+   etc.
+2. **Une resource du classpath** dans les builds packagés — `nucleus/nucleus-app.properties`,
+   embarquée dans le jar de l'application.
 
-C'est la couture qui fait qu'une ligne dans `build.gradle.kts` se propage à tous les modules runtime sans câblage manuel. L'identifiant du verrou single-instance, l'AUMID utilisé par Windows pour les badges, le `WM_CLASS` GraalVM sur Linux, le dossier des marqueurs d'update — tout passe par `NucleusApp` et reprend ce qu'on a déclaré dans le plugin.
+Pour `appId` uniquement, une troisième étape s'applique : si aucune des deux sources ne fournit de
+valeur, `appId` est dérivé du nom de la main class via `AppIdProvider`, avec un dernier repli sur
+`NucleusApp`.
 
-## Référence
+Un seul bloc dans `build.gradle.kts` se propage ainsi à tous les modules runtime sans câblage
+manuel. Les mêmes valeurs alimentent l'identifiant du verrou single-instance, l'AUMID Windows
+utilisé pour les notifications toast et les badges, et le startup task id MSIX — tout passe par
+`NucleusApp`.
 
-### `NucleusApp`
+## Référence de l'API
 
-| Propriété | Type | Source |
+### NucleusApp
+
+Un objet qui expose les métadonnées injectées sous forme de propriétés en lecture seule.
+
+| Propriété | Type | Valeur |
 |---|---|---|
-| `appId` | `String` | `packageName` du plugin. Fallback sur main class ou `"NucleusApp"`. |
-| `appName` | `String?` | Nom d'affichage. |
-| `version` | `String?` | `packageVersion` du plugin. |
-| `vendor` | `String?` | `vendor` du plugin. |
-| `description` | `String?` | `description` du plugin. |
-| `aumid` | `String?` | Application User Model ID (Windows). |
-| `startupTaskId` | `String?` | Task id MSIX utilisé par [`autolaunch`](/docs/lifecycle/auto-launch). |
-| `isConfigured` | `Boolean` | `true` si au moins une source a fourni des valeurs. |
+| `appId` | `String` | Id de l'application. Correspond au `packageName` du plugin. Fallback sur le nom de la main class. |
+| `appName` | `String?` | Nom d'affichage, ou `null` si non configuré. |
+| `version` | `String?` | Version de l'application, ou `null` si non configuré. |
+| `vendor` | `String?` | Vendeur de l'application, ou `null` si non configuré. |
+| `description` | `String?` | Description de l'application, ou `null` si non configuré. |
+| `aumid` | `String` | Application User Model ID (Windows). Fallback sur `appId` s'il n'est pas défini. |
+| `startupTaskId` | `String?` | Startup task id MSIX, injecté quand `appx { addAutoLaunchExtension = true }`. Utilisé par [Auto-launch](/docs/lifecycle/auto-launch). `null` sinon. |
+| `isConfigured` | `Boolean` | `true` quand le plugin a injecté des métadonnées via la system property `nucleus.app.id` ou la resource du classpath. |
 
 ## Notes
 
-- Pattern fréquent : brancher sur `NucleusApp.isConfigured` pour gater l'auto-update, la télémétrie, tout ce qu'on ne veux pas voir partir en dev.
-- Voir [`ExecutableRuntime`](/docs/lifecycle/executable-type) quand il faut distinguer DMG vs Flatpak vs `./gradlew run` — c'est un autre sujet.
+- `appId` et `aumid` sont non nuls ; toutes les autres valeurs sont nullables. Protège les lectures
+  nullables ou fournis ton propre fallback.
+- `isConfigured` vérifie la system property `nucleus.app.id` et la resource du classpath, pas les
+  autres propriétés individuelles.
+
+## Et ensuite
+
+- [Auto-launch](/docs/lifecycle/auto-launch) — lance ton app à l'ouverture de session grâce à `startupTaskId`.
+- [Type d'exécutable](/docs/lifecycle/executable-type) — distingue un DMG, un Flatpak ou `./gradlew run` au runtime.
+- [Instance unique](/docs/lifecycle/single-instance) — le verrou single-instance basé sur l'id de ton app.

@@ -1,19 +1,24 @@
 ---
 title: Migrating from JetBrains Compose Desktop
-description: Nucleus extends the official Compose Desktop plugin — keep what works, gain ten more formats, auto-update, GraalVM, store pipeline, native window decorations.
+description: Add Nucleus to an existing JetBrains Compose Desktop project and move its build configuration to the Nucleus DSL.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Nucleus is a drop-in extension of `org.jetbrains.compose` Desktop. All existing configuration is preserved — Nucleus only adds new capabilities. If you can build and ship today with the JetBrains plugin, you can switch in an afternoon.
+In this tutorial, you'll migrate a project that uses the JetBrains Compose Desktop plugin to
+Nucleus. Nucleus extends `org.jetbrains.compose` rather than replacing it, so your existing
+configuration keeps working: you add the Nucleus plugin alongside it, move the application block
+to the Nucleus DSL, and optionally enable the packaging and runtime features Nucleus adds.
 
-## TL;DR
-- Add `id("dev.nucleusframework")` next to the JetBrains plugin (don't remove it).
-- Move `compose.desktop.application { … }` to `nucleus.application { … }` and update DSL imports.
-- All your existing settings (`mainClass`, `nativeDistributions`, `buildTypes`, `modules`) work unchanged.
-- Set `homepage` on `nativeDistributions` — required by electron-builder for DEB.
+## Before you start
 
-## Step 1 — Add the plugin
+You need an existing project that applies the `org.jetbrains.compose` plugin and builds with
+JDK 17 or later.
+
+## Add the plugin
+
+Apply the Nucleus plugin next to the JetBrains Compose plugin. Do not remove the JetBrains plugin —
+Nucleus extends it.
 
 ```diff
  plugins {
@@ -24,9 +29,7 @@ Nucleus is a drop-in extension of `org.jetbrains.compose` Desktop. All existing 
  }
 ```
 
-The official `org.jetbrains.compose` plugin remains — Nucleus extends it, not replaces it.
-
-## Step 2 — Update imports
+## Update the imports
 
 Replace the JetBrains Compose DSL imports with the Nucleus equivalents:
 
@@ -35,11 +38,12 @@ Replace the JetBrains Compose DSL imports with the Nucleus equivalents:
 +import dev.nucleusframework.desktop.application.dsl.TargetFormat
 ```
 
-Same for `CompressionLevel`, `SigningAlgorithm`, etc.
+The same applies to `CompressionLevel`, `SigningAlgorithm`, and the other DSL types.
 
-## Step 3 — Use the Nucleus DSL
+## Move to the Nucleus DSL
 
-Move the application block:
+Rename the `compose.desktop.application { }` block to `nucleus.application { }`. Every setting
+inside it stays the same:
 
 ```diff
 -compose.desktop.application {
@@ -68,12 +72,16 @@ Move the application block:
 ```
 
 <Callout type="info" title="Compose Hot Reload">
-Nucleus auto-propagates `nucleus.application.mainClass` to `compose.desktop.application.mainClass`, so [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) tasks (`hotRun`, `hotSnapshotMain`) resolve the entry point with no extra config. On macOS with `decorated-window-tao`, `-XstartOnFirstThread` is injected into Hot Reload's `JavaExec` tasks automatically.
+Nucleus propagates `nucleus.application.mainClass` to `compose.desktop.application.mainClass`, so
+[Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) tasks
+(`hotRun`, `hotSnapshotMain`) resolve the entry point without extra configuration. On macOS with
+`decorated-window-tao`, `-XstartOnFirstThread` is injected into Hot Reload's `JavaExec` tasks
+automatically.
 </Callout>
 
-## Step 4 — Add Nucleus features (optional)
+## Enable Nucleus features
 
-Everything below is opt-in. Add as needed:
+The following settings are opt-in. Add the ones you need:
 
 ```kotlin
 nucleus.application {
@@ -121,7 +129,9 @@ nucleus.application {
 }
 ```
 
-## Step 5 — Add runtime libraries (optional)
+## Add the runtime libraries
+
+The runtime libraries are also opt-in. Add the ones matching the features you enabled:
 
 ```kotlin
 dependencies {
@@ -129,13 +139,35 @@ dependencies {
 
     implementation("dev.nucleusframework:nucleus.core-runtime:2.0.0")
     implementation("dev.nucleusframework:nucleus.aot-runtime:2.0.0")           // if enableAotCache
-    implementation("dev.nucleusframework:nucleus.updater-runtime:2.0.0")        // if publishing
+    implementation("dev.nucleusframework:nucleus.updater-runtime:2.0.0")       // if publishing
     implementation("dev.nucleusframework:nucleus.taskbar-progress:2.0.0")
-    implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")    // for nucleusApplication { }
+    implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")   // for nucleusApplication { }
 }
 ```
 
-If you want the unified `nucleusApplication { }` entry point with automatic single-instance, deep links, and AOT wiring, see the [Nucleus 1.x → 2.0 guide](/docs/migrate/from-1.x) — the same `application { } → nucleusApplication { }` swap applies whether you're coming from 1.x or vanilla CMP.
+To use the unified `nucleusApplication { }` entry point with single-instance handling, deep links,
+and AOT wiring, see the [Nucleus 1.x to 2.0 guide](/docs/migrate/from-1.x). The same
+`application { } → nucleusApplication { }` swap applies whether you come from 1.x or vanilla
+Compose Multiplatform.
+
+## Set the homepage for DEB packages
+
+Nucleus packages with electron-builder rather than jpackage, and electron-builder requires
+`homepage` for DEB. Without it, the build fails:
+
+```
+Please specify project homepage, see https://electron.build/configuration
+```
+
+Set it on `nativeDistributions`:
+
+```kotlin
+nativeDistributions {
+    homepage = "https://myapp.example.com"
+}
+```
+
+This also applies to GraalVM Native Image DEB packaging (`packageGraalvmDeb`).
 
 ## What changes
 
@@ -153,42 +185,26 @@ If you want the unified `nucleusApplication { }` entry point with automatic sing
 | AppX config | Not available | Full `appx { }` DSL |
 | Snap config | Not available | Full `snap { }` DSL |
 | Flatpak config | Not available | Full `flatpak { }` DSL |
-| Store pipeline | Not available | Automatic sandboxed pipeline for PKG, AppX, Flatpak |
+| Store pipeline | Not available | Sandboxed pipeline for PKG, AppX, Flatpak |
 | Auto-update | Not available | Built-in with YAML metadata |
 | Code signing | macOS only | + Windows PFX / Azure Artifact Signing |
 | DMG appearance | Not customizable | Full `dmg { }` DSL ([details](/docs/packaging/macos#dmg-appearance)) |
 | Artifact naming | Fixed | Template with `artifactName` |
 
-## Important: `homepage` is required for DEB
-
-Unlike Compose Desktop (which uses jpackage), Nucleus uses electron-builder for packaging — electron-builder requires `homepage` for DEB. Without it the build fails with:
-
-```
-Please specify project homepage, see https://electron.build/configuration
-```
-
-```kotlin
-nativeDistributions {
-    homepage = "https://myapp.example.com"
-}
-```
-
-Also applies to GraalVM Native Image DEB packaging (`packageGraalvmDeb`).
-
 ## What stays the same
 
 - `mainClass`, `jvmArgs`.
-- `nativeDistributions` block (metadata, icons, resources).
+- The `nativeDistributions` block (metadata, icons, resources).
 - `buildTypes` / ProGuard.
 - `modules()` / `includeAllModules`.
-- All existing Gradle tasks (`run`, `packageDmg`, `packageDeb`, …).
-- `compose.desktop.currentOs` dependency.
+- All existing Gradle tasks (`run`, `packageDmg`, `packageDeb`, and so on).
+- The `compose.desktop.currentOs` dependency.
 - Source set configuration.
-- [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) — works out of the box.
+- [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) — works without extra configuration.
 
-## Next steps
+## What's next
 
-- Want native window decorations and the Tao backend? See [windowing](/docs/window) and [Tao](/docs/tao).
-- Want auto-update? See [auto-update](/docs/packaging/auto-update).
-- Want GraalVM Native Image? See [GraalVM](/docs/performance/graalvm).
-- Migrating an entire 1.x codebase? See [from 1.x](/docs/migrate/from-1.x) — same plugin swap plus a `nucleusApplication` upgrade.
+- [Windowing](/docs/window) and [Tao](/docs/tao) — native window decorations and the Tao backend.
+- [Auto-update](/docs/packaging/auto-update) — ship updates with YAML metadata.
+- [GraalVM](/docs/performance/graalvm) — GraalVM Native Image packaging.
+- [From 1.x](/docs/migrate/from-1.x) — migrate a full 1.x codebase with the same plugin swap.

@@ -1,20 +1,16 @@
 ---
 title: The Tao backend
-description: A Rust-native window backend that unlocks Wayland, multi-touch, pen input and a 60 MB resident footprint — without AWT.
+description: Tao is a Rust-native window backend that runs Compose Desktop without AWT and adds native Wayland, multi-touch, and pen input.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Tao is the Rust windowing crate underpinning Tauri 2. Nucleus 2.0 wraps it as a first-class backend so Compose Desktop runs on a native window — no AWT, no Swing event-dispatch thread, no XWayland fallback. It is the default for new Nucleus apps, and the only path to modern desktop primitives the JetBrains Runtime can't reach.
+Tao is the Rust windowing crate that also underpins Tauri 2. Nucleus wraps it as a window
+backend: Compose Desktop renders into a native OS window instead of an AWT frame, so there
+is no Swing event-dispatch thread and no XWayland fallback. Tao is the default backend for
+new Nucleus apps, and the AWT backends stay available in the same release.
 
-## TL;DR
-- No AWT at runtime — Compose draws into a native window via Tao + Skiko.
-- Native Wayland, multi-touch, pen and stylus, per-monitor HiDPI on every OS.
-- ~60 MB resident on a GraalVM native-image build.
-- Same `DecoratedWindow` Composable as the AWT backends — pick the backend in Gradle, not in your UI code.
-- Escape hatch via `nucleusWindow.unsafe.taoWindow` when you need the raw handle.
-
-## Install
+## Add the dependency
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -23,7 +19,8 @@ dependencies {
 }
 ```
 
-The Nucleus Gradle plugin auto-detects `decorated-window-tao` on the classpath and selects the Tao backend at runtime. To force it:
+The Nucleus Gradle plugin detects `decorated-window-tao` on the classpath and selects the
+Tao backend at runtime. To select it explicitly, pass `NucleusBackend.Tao`:
 
 ```kotlin
 nucleusApplication(backend = NucleusBackend.Tao) {
@@ -31,12 +28,15 @@ nucleusApplication(backend = NucleusBackend.Tao) {
 }
 ```
 
-## Quickstart
+## Create a window
 
 ```kotlin
-import dev.nucleusframework.application.*
-import dev.nucleusframework.window.core.*
-import androidx.compose.ui.unit.*
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.TitleBar
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
 
 fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
@@ -51,39 +51,61 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 }
 ```
 
+`DecoratedWindow` and `TitleBar` are the same Composables the AWT backends expose, so your
+UI code does not change when you switch backends.
+
 ## How it works
 
-Tao opens a native OS window directly — `NSWindow` on macOS, an HWND on Windows, a `wl_surface` (or X11 window) on Linux. Compose renders into that surface through Skiko: Metal on macOS, WGL on Windows, EGL on Linux. Nothing routes through Swing's event-dispatch thread.
+Tao opens a native OS window directly: an `NSWindow` on macOS, an `HWND` on Windows, and a
+`wl_surface` (or an X11 window) on Linux. Compose renders into that surface through Skiko —
+Metal on macOS, WGL on Windows, EGL on Linux. Nothing routes through Swing's event-dispatch
+thread.
 
-Because the OS event loop runs on the process main thread, the macOS launcher needs `-XstartOnFirstThread`. The Nucleus Gradle plugin injects it automatically for `run`, packaged distributions and Compose Hot Reload. GraalVM native-image builds start on the main thread by default.
+The OS event loop runs on the process main thread, so the macOS launcher needs
+`-XstartOnFirstThread`. The Nucleus Gradle plugin adds it automatically for `run`, packaged
+distributions, and Compose Hot Reload. GraalVM native-image builds start on the main thread
+by default.
 
-The unified `nucleusApplication { }` entry point hides the backend choice from your UI code. The Tao backend exposes the same `DecoratedWindow`, `DecoratedDialog` and `TitleBar` Composables as the AWT backends — but underneath you get a `TaoWindow` you can reach through `nucleusWindow.unsafe.taoWindow` when you need to call into the native crate directly.
+The `nucleusApplication { }` entry point hides the backend choice from UI code. On the Tao
+backend the same window exposes an imperative `TaoWindow` handle underneath, which you reach
+through `nucleusWindow.unsafe.taoWindow` when you need to call into the native crate directly.
 
-## Coverage matrix
+## Tao and the AWT backends
 
-| Feature                       | JBR / JNI (AWT)        | Tao                       |
-|-------------------------------|------------------------|---------------------------|
-| Compose Desktop rendering     | Yes (AWT + Skiko)      | Yes (native + Skiko)      |
-| AWT / Swing interop           | Yes                    | No                        |
-| Wayland (native, no XWayland) | No (X11 fallback)      | Yes                       |
-| Multi-touch & gestures        | Limited                | Yes (pinch, swipe, rotate)|
-| Pen / stylus (pressure, tilt) | No                     | Yes                       |
-| Per-monitor HiDPI             | Partial                | Yes                       |
-| Embedded native views         | No                     | Yes (`NativeView`)        |
-| GraalVM native-image friendly | Partial                | Yes (no AWT surface)      |
-| Resident memory (Hello World) | ~120 MB                | ~60 MB                    |
+| Feature                       | JBR / JNI (AWT)   | Tao                        |
+|-------------------------------|-------------------|----------------------------|
+| Compose Desktop rendering     | Yes (AWT + Skiko) | Yes (native + Skiko)       |
+| AWT / Swing interop           | Yes               | No                         |
+| Wayland (native, no XWayland) | No (X11 fallback) | Yes                        |
+| Multi-touch and gestures      | Limited           | Yes (pinch, swipe, rotate) |
+| Pen / stylus (pressure, tilt) | No                | Yes                        |
+| Per-monitor HiDPI             | Partial           | Yes                        |
+| Embedded native views         | No                | Yes (`NativeView`)         |
+| GraalVM native-image          | Partial           | Yes (no AWT surface)       |
 
-## Reference
+## API reference
 
-The Tao API surface lives in `dev.nucleusframework.window.tao.*`:
+The Tao-specific API lives in `dev.nucleusframework.window.tao`:
 
-- `taoApplication { }` — direct entry point (use `nucleusApplication` instead for portability).
-- `TaoWindow` — imperative window handle. Reach it via `LocalTaoWindow` or `nucleusWindow.unsafe.taoWindow`.
-- `NativeView` — embed SwiftUI, WebView2 or GTK widgets in Compose.
-- `MacOSStyle.Liquid` — opt into macOS 26 Liquid Glass.
-- `TaoCursorIcon`, `TaoTrackpadGesture`, `TaoTrackpadPhase`, `TaoMouseButton`, `TaoEventCode` — input constants.
+- `taoApplication { }` — direct entry point. Prefer `nucleusApplication` for backend portability.
+- `TaoWindow` — imperative window handle. Reach it through `LocalTaoWindow` or
+  `nucleusWindow.unsafe.taoWindow`.
+- `NativeView` — embed a SwiftUI, WebView2, or GTK view in Compose.
+- `MacOSStyle` — window chrome on macOS: `Auto` (modern Tahoe chrome on macOS 26+, classic
+  chrome otherwise), `Classic` (the default), or `Modern`.
+- `TaoCursorIcon`, `TaoTrackpadGesture`, `TaoTrackpadPhase`, `TaoMouseButton`, `TaoEventCode` —
+  input constants.
 - `TaoDeepLinkBridge.setSink { uri -> … }` — deep link delivery.
 
 <Callout type="info">
-Tao is the default in 2.0 but the AWT backends ship in the same release. Keep `decorated-window-jbr` or `decorated-window-jni` on the classpath when you need legacy Swing / AWT interop — see [migration from JBR](/docs/tao/migration-from-jbr).
+Keep `decorated-window-jbr` or `decorated-window-jni` on the classpath when you still need
+Swing / AWT interop, and select the backend with `NucleusBackend.Awt`. See
+[migration from JBR](/docs/tao/migration-from-jbr).
 </Callout>
+
+## What's next
+
+- [The decorated window](/docs/tao/decorated-window) — the `DecoratedWindow` and `TitleBar` Composables on Tao.
+- [Multi-touch and gestures](/docs/tao/multi-touch) — trackpad and touch events from `TaoWindow`.
+- [Wayland](/docs/tao/wayland) — native Wayland behavior and detection.
+- [Quickstart](/docs/start/quickstart) — build and run your first Nucleus app.

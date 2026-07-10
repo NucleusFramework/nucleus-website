@@ -1,176 +1,171 @@
 ---
 title: Troubleshooting
-description: The gotchas that bite once and then again — symptom, cause, fix.
+description: Common build, packaging, signing, and runtime problems in Nucleus, with the cause and fix for each.
 ---
 
-Most Nucleus pipelines work the first time. The ones below are the recurring incidents: notarization, Microsoft Store identity, corporate CAs, GraalVM reflection, Wayland-on-NVIDIA. Each entry follows the same shape.
+This page lists recurring problems when building, packaging, signing, and shipping a
+Nucleus app. Entries are grouped by area, and each one states the symptom, the cause, and
+the fix.
 
-## macOS notarization fails with "The signature does not include a secure timestamp"
+## macOS signing and notarization
 
-**Symptom.** `xcrun notarytool submit` returns `Invalid` with a status detail mentioning a missing or invalid timestamp.
+### Notarization fails: "does not include a secure timestamp"
 
-**Cause.** Code signing ran without `--timestamp`, or your machine couldn't reach Apple's timestamp server at sign time.
+**Symptom.** `xcrun notarytool submit` returns `Invalid` with a status detail about a
+missing or invalid timestamp.
 
-**Fix.** Nucleus signs with `--options runtime --timestamp` by default. If you wrote a custom `codesign` step (e.g. for `lipo`-merged universal binaries outside the `build-macos-universal` action), add `--timestamp` and re-sign. Check `xcrun codesign -dv --verbose=4 <Your.app>` and look for `Timestamp=…`.
+**Cause.** Code signing ran without `--timestamp`, or the machine could not reach Apple's
+timestamp server at sign time.
 
-## macOS notarization fails with "The signature does not include a hardened runtime"
+**Fix.** Nucleus signs with `--options runtime --timestamp` by default. If you added a
+custom `codesign` step (for example, to sign `lipo`-merged universal binaries outside the
+`build-macos-universal` action), pass `--timestamp` and re-sign. Verify with
+`codesign -dv --verbose=4 <Your.app>` and check for a `Timestamp=` entry.
 
-**Symptom.** `Status: Invalid`, log mentions hardened runtime.
+### Notarization fails: "does not include a hardened runtime"
 
-**Cause.** Custom `codesign` step missing `--options runtime`.
+**Symptom.** `Status: Invalid`, with the log referencing the hardened runtime.
 
-**Fix.** Add `--options runtime` to every `codesign` invocation. The default Nucleus pipeline does this — only custom CI scripts trip here.
+**Cause.** A custom `codesign` step is missing `--options runtime`.
 
-## Microsoft Store: "MinVersion &lt;= 10.0.17134.0"
+**Fix.** Add `--options runtime` to every `codesign` invocation. The default Nucleus
+pipeline already does this, so only custom CI scripts hit this error.
+
+## Microsoft Store
+
+### Upload rejected: "MinVersion &lt;= 10.0.17134.0"
 
 **Symptom.** Partner Center rejects the upload:
 
-> Package acceptance validation error: bundle is not valid. You can't upload msix/msixbundle/msixupload packages that target Windows with a MinVersion &lt;= 10.0.17134.0.
+> Package acceptance validation error: bundle is not valid. You can't upload
+> msix/msixbundle/msixupload packages that target Windows with a
+> MinVersion &lt;= 10.0.17134.0.
 
-**Cause.** No explicit `minVersion` set in `appx { }`. The default falls back to `10.0.14316.0`, which is below the Store's floor.
+**Cause.** No explicit `minVersion` is set in `appx { }`. The default is `10.0.14316.0`,
+which is below the Store's floor.
 
-**Fix.**
+**Fix.** Set a `minVersion` at or above the Store's floor:
 
-```kotlin
+```kotlin title="build.gradle.kts"
 appx {
     minVersion = "10.0.17763.0"        // Windows 10 1809
     maxVersionTested = "10.0.22621.0"  // Windows 11 22H2
 }
 ```
 
-## Microsoft Store rejects publisher / identity
+### Upload rejected: publisher or identity mismatch
 
 **Symptom.** Upload validation fails with an identity mismatch.
 
-**Cause.** `identityName`, `publisher`, or `publisherDisplayName` don't match Partner Center's reservation.
+**Cause.** `identityName`, `publisher`, or `publisherDisplayName` do not match the Partner
+Center reservation.
 
-**Fix.** Copy the exact values from Partner Center → Product identity. `publisher` is `CN=<GUID>` issued by the Store, not your local signing cert's CN. See [Windows targets](/docs/packaging/windows#appx-msix).
+**Fix.** Copy the exact values from Partner Center under Product identity. `publisher` is
+the `CN=<GUID>` issued by the Store, not the CN of your local signing certificate. See
+[Windows targets](/docs/packaging/windows).
 
-## SSLHandshakeException on a corporate network
+## Networking
 
-**Symptom.** HTTPS calls from the app fail with `SSLHandshakeException: PKIX path building failed`.
+### SSLHandshakeException on a corporate network
 
-**Cause.** A corporate proxy / VPN gateway is MITM-ing TLS with a private root CA the JDK trust store doesn't know.
+**Symptom.** HTTPS calls from the app fail with
+`SSLHandshakeException: PKIX path building failed`.
 
-**Fix.** Two options, complementary:
+**Cause.** A corporate proxy or VPN gateway intercepts TLS with a private root CA that the
+bundled JDK trust store does not know.
 
-1. **Build time** — ship the CA inside the bundled JDK's `cacerts`:
+**Fix.** Use either approach, or both.
 
-   ```kotlin
-   nativeDistributions {
-       trustedCertificates.from(files("certs/corp-ca.pem"))
-   }
-   ```
+Ship the CA inside the bundled JDK's `cacerts` at build time:
 
-   See [trusted certificates](/docs/packaging/trusted-certificates).
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    trustedCertificates.from(files("certs/corp-ca.pem"))
+}
+```
 
-2. **Runtime** — use the OS-native trust store via `native-ssl`:
+See [trusted certificates](/docs/packaging/trusted-certificates).
 
-   ```kotlin
-   implementation("dev.nucleusframework:nucleus.native-ssl:2.0.0")
-   implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
-   ```
+Or route HTTPS through the OS trust store at runtime with `native-ssl` and `native-http`:
 
-   Inject `NativeHttpClient.create()` into your HTTP client (works with `java.net.http`, OkHttp, Ktor).
+```kotlin title="build.gradle.kts"
+implementation("dev.nucleusframework:nucleus.native-ssl:2.0.0")
+implementation("dev.nucleusframework:nucleus.native-http:2.0.0")
+```
 
-## Auto-update fails: "no matching file" on macOS
+`NativeHttpClient.create()` returns a `java.net.http.HttpClient` backed by the OS trust
+store. For OkHttp or Ktor, use the `nucleus.native-http-okhttp` and
+`nucleus.native-http-ktor` integrations.
 
-**Symptom.** `UpdateResult.Failed(NoMatchingFileException)` on macOS after a check.
+## Auto-update
 
-**Cause.** The release only contains a `.dmg`. macOS auto-update uses ZIP.
+### "no matching file" on macOS
 
-**Fix.** Add `TargetFormat.Zip` next to `TargetFormat.Dmg`. Both go in the same release; `latest-mac.yml` references both. See the callout in [auto-update](/docs/packaging/auto-update).
+**Symptom.** A check returns `UpdateResult.Error` wrapping a `NoMatchingFileException` on
+macOS.
 
-## GraalVM Native Image: ClassNotFound / NoSuchMethod at runtime
+**Cause.** The release contains only a `.dmg`. Auto-update on macOS downloads a ZIP.
 
-**Symptom.** App runs fine on JVM but crashes under `native-image` with reflection errors or missing methods.
+**Fix.** Add `TargetFormat.Zip` alongside `TargetFormat.Dmg`. Both belong in the same
+release, and `latest-mac.yml` references both. See [auto-update](/docs/packaging/auto-update).
 
-**Cause.** GraalVM is closed-world. Reflection, resources, dynamic proxies need to be registered ahead of time.
+## GraalVM native image
 
-**Fix.** The Nucleus plugin ships GraalVM Reachability Metadata for itself plus FileKit and other common libraries (see [automatic metadata](/docs/performance/graalvm/automatic-metadata)). For your own code:
+### ClassNotFoundException or NoSuchMethodError at runtime
 
-1. Run with `-agentlib:native-image-agent=config-output-dir=...` on a representative workload.
-2. Commit the generated `reachability-metadata.json` next to `META-INF/native-image/...`.
+**Symptom.** The app runs on the JVM but crashes under `native-image` with reflection
+errors or missing methods.
+
+**Cause.** GraalVM uses closed-world analysis. Reflection, resources, and dynamic proxies
+must be registered ahead of time.
+
+**Fix.** The Nucleus plugin ships GraalVM reachability metadata for itself, FileKit, and
+other common libraries (see [automatic metadata](/docs/performance/graalvm/automatic-metadata)).
+For your own code:
+
+1. Run with `-agentlib:native-image-agent=config-output-dir=...` on a representative
+   workload.
+2. Commit the generated `reachability-metadata.json` next to `META-INF/native-image/`.
 
 For unsupported libraries, see [GraalVM configuration](/docs/performance/graalvm/configuration).
 
-## AppImage: 60-second cold start
+## Linux packaging
 
-**Symptom.** App opens fine in dev but takes a full minute when packaged as AppImage.
+### AppImage takes about 60 seconds to start
 
-**Cause.** `compressionLevel = CompressionLevel.Maximum`. AppImage uses squashfs; max compression triggers FUSE decompression on every launch.
+**Symptom.** The app opens quickly in development but takes about a minute when packaged
+as an AppImage.
 
-**Fix.** Use `CompressionLevel.Normal` (default) for production. `Maximum` is for archival.
+**Cause.** `compressionLevel = CompressionLevel.Maximum`. AppImage uses squashfs, and
+maximum compression triggers FUSE decompression on every launch.
 
-## DEB / RPM packaging fails: "Please specify project homepage"
+**Fix.** Use `CompressionLevel.Normal` (the default) for production builds. `Maximum` is
+for archival.
+
+### DEB or RPM fails: "Please specify project homepage"
 
 **Symptom.** `packageDeb` or `packageGraalvmDeb` fails immediately.
 
 **Cause.** Unlike jpackage, electron-builder requires `homepage` for DEB.
 
-**Fix.**
+**Fix.** Set the homepage on the distribution:
 
-```kotlin
+```kotlin title="build.gradle.kts"
 nativeDistributions {
     homepage = "https://myapp.example.com"
 }
 ```
 
-## Wayland on NVIDIA: black window, garbled rendering
-
-**Symptom.** Compose UI renders incorrectly under Wayland on NVIDIA drivers.
-
-**Cause.** NVIDIA's GBM / EGLstream history with Wayland is rocky; Compose Desktop on AWT/JBR fights it.
-
-**Fix.** Switch to the [Tao backend](/docs/tao) — `decorated-window-tao` renders via native Skia surfaces on Wayland without going through AWT. If you must stay on AWT, set `WLR_NO_HARDWARE_CURSORS=1` or run under XWayland.
-
-## `Unresolved reference 'JewelDecoratedWindow'` after migrating to 2.0
-
-**Symptom.** Import is correct, IDE shows the function, but compilation fails.
-
-**Cause.** In 2.0 the composable is an extension on `NucleusApplicationScope`. A wrapper composable you wrote in 1.x doesn't propagate the receiver.
-
-**Fix.** Make your wrapper an extension too:
-
-```kotlin
-fun NucleusApplicationScope.MyOnboardingWindow(...) {
-    JewelDecoratedWindow(...) { /* content */ }
-}
-```
-
-See [migrate from 1.x → Step 4](/docs/migrate/from-1.x#step-4--replace-window--with-decoratedwindow-).
-
-## `NoClassDefFoundError: DecoratedDialogKt` on Tao
-
-**Symptom.** Dialog crashes on Tao but works on AWT.
-
-**Cause.** You're calling the AWT-only `JewelDecoratedDialog` (no receiver) under `NucleusBackend.Tao`.
-
-**Fix.** Switch the host composable to an extension on `NucleusApplicationScope` so the call resolves to `NucleusApplicationScope.JewelDecoratedDialog`, which dispatches per backend.
-
-## `Dependency resolution is looking for a library compatible with JVM runtime version 11`
-
-**Symptom.** Gradle fails on the Jewel artifact.
-
-**Cause.** Toolchain not bumped to 25.
-
-**Fix.**
-
-```kotlin
-kotlin { jvmToolchain(25) }
-```
-
-See [migrate from 1.x → Prerequisites](/docs/migrate/from-1.x#prerequisites).
-
-## Flatpak packaging task silently skips
+### Flatpak task skips silently
 
 **Symptom.** `packageFlatpak` reports "skipped" with no error.
 
-**Cause.** `flatpak-builder` or the `org.freedesktop.Platform//23.08` runtime is missing on the build host.
+**Cause.** `flatpak-builder` or the `org.freedesktop.Platform//23.08` runtime is missing
+on the build host.
 
-**Fix.**
+**Fix.** Install the tooling and runtime:
 
-```bash
+```shell
 sudo apt-get install -y flatpak flatpak-builder
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install -y flathub org.freedesktop.Platform//23.08
@@ -179,25 +174,81 @@ flatpak install -y flathub org.freedesktop.Sdk//23.08
 
 In CI, use `setup-nucleus` with `flatpak: 'true'`.
 
-## Snap packaging fails with `snapcraft: command not found`
+### Snap fails: "snapcraft: command not found"
 
 **Symptom.** `packageSnap` fails before producing anything.
 
-**Cause.** Missing `snapd` / `snapcraft` on the build host.
+**Cause.** `snapd` or `snapcraft` is missing on the build host.
 
-**Fix.**
+**Fix.** Install both:
 
-```bash
+```shell
 sudo apt-get install -y snapd
 sudo snap install snapcraft --classic
 ```
 
-Or in CI, `setup-nucleus` with `snap: 'true'`.
+In CI, use `setup-nucleus` with `snap: 'true'`.
 
-## Need more?
+## Rendering
 
-If you hit something not listed here, check:
+### Wayland on NVIDIA: black window or garbled output
 
-- [Packaging cluster](/docs/packaging) for per-OS specifics.
-- [Performance cluster](/docs/performance) for GraalVM and AOT details.
-- The [migration guides](/docs/migrate/from-1.x) for namespace/scope errors after upgrading.
+**Symptom.** The Compose UI renders incorrectly under Wayland on NVIDIA drivers.
+
+**Cause.** NVIDIA's GBM and EGLStream support for Wayland is inconsistent, and Compose
+Desktop on the AWT/JBR backend does not handle it reliably.
+
+**Fix.** Switch to the [Tao backend](/docs/tao). `decorated-window-tao` renders through
+native Skia surfaces on Wayland without going through AWT. To stay on AWT, set
+`WLR_NO_HARDWARE_CURSORS=1` or run under XWayland.
+
+## Migration to 2.0
+
+### Unresolved reference 'JewelDecoratedWindow'
+
+**Symptom.** The import is correct and the IDE resolves the function, but compilation
+fails.
+
+**Cause.** In 2.0, the composable is an extension on `NucleusApplicationScope`. A wrapper
+composable written for 1.x does not propagate the receiver.
+
+**Fix.** Make your wrapper an extension as well:
+
+```kotlin
+fun NucleusApplicationScope.MyOnboardingWindow() {
+    JewelDecoratedWindow(/* ... */) { /* content */ }
+}
+```
+
+See [migrate from 1.x](/docs/migrate/from-1.x).
+
+### NoClassDefFoundError: DecoratedDialogKt on Tao
+
+**Symptom.** The dialog crashes on Tao but works on AWT.
+
+**Cause.** The code calls the AWT-only `JewelDecoratedDialog` (no receiver) under
+`NucleusBackend.Tao`.
+
+**Fix.** Make the host composable an extension on `NucleusApplicationScope` so the call
+resolves to `NucleusApplicationScope.JewelDecoratedDialog`, which dispatches per backend.
+
+### Dependency requires JVM runtime version 11
+
+**Symptom.** Gradle fails to resolve the Jewel artifact with a message about JVM runtime
+version 11.
+
+**Cause.** The toolchain is not set to 25.
+
+**Fix.** Set the Kotlin JVM toolchain:
+
+```kotlin title="build.gradle.kts"
+kotlin { jvmToolchain(25) }
+```
+
+See [migrate from 1.x](/docs/migrate/from-1.x).
+
+## What's next
+
+- [Packaging](/docs/packaging) — per-OS packaging, signing, and store targets.
+- [Performance](/docs/performance) — GraalVM native image and AOT details.
+- [Migrate from 1.x](/docs/migrate/from-1.x) — namespace and scope changes after upgrading.

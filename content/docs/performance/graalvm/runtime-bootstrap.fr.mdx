@@ -1,32 +1,34 @@
 ---
-title: Bootstrap runtime
-description: graalvm-runtime — l'appel d'une ligne GraalVmInitializer.initialize() qui prépare la JVM pour native-image, plus les substitutions SVM et les patterns de ressources qu'il embarque.
+title: Runtime bootstrap
+description: Le module graalvm-runtime prépare une app Compose Desktop à démarrer sous un build GraalVM native-image via un unique appel à GraalVmInitializer.initialize().
 ---
-
-`nucleus.graalvm-runtime` est la lib de support runtime pour les builds native-image. Elle gère la demi-douzaine de propriétés JVM, le préchargement de fontmanager et les substitutions SVM dont native-image a besoin pour amener une app Compose Desktop au premier frame. Un appel depuis `main()` et le reste est implicite.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-## TL;DR
-- `GraalVmInitializer.initialize()` comme **première ligne** de `main()`.
-- Met Metal L&F, `java.home`, `java.library.path`, init des charsets, précharge fontmanager, applique HiDPI Linux.
-- Embarque les substitutions SVM `@TargetClass` pour les bords des font managers AWT.
-- Embarque un `native-image.properties` qui inclut automatiquement les SVGs, polices, ressources Compose, libs JNI et `META-INF/services`.
+`nucleus.graalvm-runtime` prépare une app Compose Desktop à s'exécuter sous un build GraalVM
+native-image. Un seul appel à `GraalVmInitializer.initialize()` depuis `main()` définit les
+propriétés JVM, précharge le gestionnaire de polices et installe les substitutions de plateforme
+dont native-image a besoin pour atteindre le premier frame.
 
-## Install
+## Ajouter la dépendance
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:<version>")
 }
 ```
 
-Si on utilise `nucleus.nucleus-application`, il est tiré transitivement et `GraalVmInitializer.initialize()` tourne dans `nucleusApplication { … }` — pas besoin de l'appeler manuellement.
+Si tu dépends de `nucleus.nucleus-application`, ce module est tiré transitivement et
+`GraalVmInitializer.initialize()` s'exécute dans `nucleusApplication { … }`. Tu n'as pas besoin
+de l'appeler toi-même.
 
-## Quickstart
+## Initialiser le runtime
+
+Appelle `initialize()` comme première instruction de `main()`, avant tout code AWT ou Compose :
 
 ```kotlin
 import dev.nucleusframework.graalvm.GraalVmInitializer
+import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 
 fun main() {
@@ -40,63 +42,84 @@ fun main() {
 }
 ```
 
-L'initializer est sûr à appeler sur une JVM classique — la plupart de son travail est gardé par `org.graalvm.nativeimage.imagecode`. La détection d'échelle HiDPI Linux tourne inconditionnellement (no-op sous macOS/Windows).
+L'appel est sans danger sur une JVM classique. Tout ce qui est spécifique à native-image est
+conditionné par la propriété système `org.graalvm.nativeimage.imagecode` ; sur une JVM standard,
+seule la détection d'échelle HiDPI Linux s'exécute, et c'est un no-op sous macOS et Windows.
 
-## Ce que fait `GraalVmInitializer.initialize()`
+Pour sauter du code qui n'a de sens que sur la JVM, branche sur
+`GraalVmInitializer.isNativeImage`.
 
-| Concern | Action |
-|---------|--------|
-| **L&F Swing** | Met `swing.defaultlaf` à Metal pour éviter les modules de L&F natifs que native-image ne livre pas. |
-| **`java.home`** | Pointe vers le répertoire de l'exécutable pour que Skiko trouve `jawt`. |
-| **`java.library.path`** | Met `execDir` et `execDir/bin` pour que fontmanager / freetype / awt soient découvrables. |
-| **Init des charsets** | Force un `Charset.defaultCharset()` tôt pour éviter `InternalError: platform encoding not initialized`. |
-| **Préchargement fontmanager** | Appelle `System.loadLibrary("fontmanager")` tôt pour éviter les crashs dans `Font.createFont()`. |
-| **HiDPI Linux** | Détecte et applique le facteur d'échelle natif via [`linux-hidpi`](/docs/performance/linux-hidpi). |
+## Fonctionnement
 
-Il est possible de aussi brancher sur `GraalVmInitializer.isNativeImage` pour sauter du code qui n'a de sens que sur la JVM.
+Sous une native image, `initialize()` met en place l'environnement qu'un lanceur préparerait
+normalement avant `main()` :
+
+| Aspect | Action |
+|--------|--------|
+| Look and feel Swing | Met `swing.defaultlaf` à Metal pour éviter les modules de look-and-feel natifs que native-image ne livre pas. |
+| `java.home` | Pointe vers le répertoire de l'exécutable pour que Skiko trouve `jawt`. |
+| `java.library.path` | Met `execDir` et `execDir/bin` pour que `fontmanager`, `freetype` et `awt` soient trouvables, puis vide le cache de chemins du `ClassLoader`. |
+| Init des charsets | Appelle `Charset.defaultCharset()` tôt pour éviter `InternalError: platform encoding not initialized`. |
+| Locale macOS | Lit la langue d'interface préférée depuis CoreFoundation et l'applique à `Locale.getDefault()`, car SubstrateVM reste sinon sur la locale POSIX `C`. |
+| Préchargement du gestionnaire de polices | Appelle `System.loadLibrary("fontmanager")` pour éviter les crashs dans `Font.createFont()`. |
+| HiDPI Linux | Détecte et applique le facteur d'échelle natif via [linux-hidpi](/docs/performance/linux-hidpi). Cette étape s'exécute sur chaque JVM, pas seulement les native images. |
+
+native-image exécute le code Java deux fois : une fois au build, pendant la construction de
+l'image, puis à nouveau au runtime, au démarrage du binaire. Les initializers statiques
+s'exécutent au build sauf s'ils sont explicitement différés. Nucleus organise ses modules
+runtime pour que les données pures (catalogues d'icônes, registres d'interfaces sealed, schémas
+JSON) s'initialisent au build, sans coût au démarrage, tandis que tout ce qui touche l'OS
+(système de fichiers, APIs OS, bibliothèques natives) est différé au runtime via la metadata
+`RuntimeClassInitialization` ou l'initialisation paresseuse d'un `object`.
+
+Si tu as un initializer statique qui touche l'OS, déclare-le sous `RuntimeClassInitialization`
+dans ton `nativeImageConfigBaseDir`. Le Oracle Reachability Repository couvre déjà les cas
+courants comme SLF4J et Logback.
 
 ## Substitutions SVM
 
-Le module livre des substitutions `@TargetClass` qui patchent les font managers AWT sous native-image :
+Le module livre des substitutions `@TargetClass` qui patchent les internes d'AWT sous
+native-image. Le compilateur native-image les prend en compte automatiquement, sans flag DSL :
 
-- **`FontCreateFontSubstitution`** — bufferise `Font.createFont(int, InputStream)` vers un fichier temp sous Windows ; contourne les streams sans mark/reset.
-- **`Win32FontManagerSubstitution`** — réimplémentation pure-Java de `Win32FontManager.getFontPath()`, corrige `InternalError: platform encoding not initialized`.
-- **`FcFontManagerSubstitution`** — même fix sur le chemin Fontconfig de Linux.
-
-Elles sont prises en compte par le compilateur native-image automatiquement — pas de flag DSL.
+- `FontCreateFontSubstitution` — bufferise `Font.createFont(int, InputStream)` vers un fichier
+  temporaire sous Windows et Linux, pour contourner les streams sans support de mark/reset.
+- `Win32FontManagerSubstitution` — une réimplémentation pure-Java de
+  `Win32FontManager.getFontPath()` sous Windows, qui évite
+  `InternalError: platform encoding not initialized`.
+- `FcFontManagerSubstitution` — l'équivalent Fontconfig sous Linux, avec un repli sur
+  `/usr/share/fonts`.
+- `SplashScreenSubstitution` — fait renvoyer `null` à `java.awt.SplashScreen.getSplashScreen()`,
+  car le splash screen est une fonction du lanceur sans backing JNI sous native-image.
+- `XToolkitAppNameSubstitution` — remplace `XToolkit.getAWTAppClassName()` sous Linux pour que le
+  `WM_CLASS` X11 reflète le vrai nom de l'application plutôt qu'un frame interne de SubstrateVM.
 
 ## Inclusion automatique des ressources
 
-Un `native-image.properties` livré avec le JAR enregistre quatre globs de ressources au build :
+Un fichier `native-image.properties` livré avec le JAR enregistre quatre globs de ressources au
+build, aux côtés des options `-H:+UnlockExperimentalVMOptions -H:+SharedArenaSupport` :
 
 | Pattern | Couvre |
 |---------|--------|
-| `.*\.(svg\|ttf\|otf)` | Toutes les SVG et polices du classpath — Jewel, IntelliJ Platform, ressources Compose, les tiennes |
-| `composeResources/.*` | Toutes les ressources Compose Multiplatform chargées via `Res.*` |
-| `nucleus/native/.*` | Toutes les libs partagées JNI Nucleus |
-| `META-INF/services/.*` | Tous les descripteurs `ServiceLoader` (moteurs ktor, fetchers coil, providers SLF4J, …) |
+| `.*\.(svg\|ttf\|otf)` | Icônes SVG et polices du classpath : Jewel, IntelliJ Platform, ressources Compose, et les tiennes |
+| `composeResources/.*` | Ressources Compose Multiplatform chargées via `Res.*` |
+| `nucleus/.*` | Ressources natives Nucleus, y compris les bibliothèques partagées JNI |
+| `META-INF/services/.*` | Descripteurs `ServiceLoader`, comme les moteurs Ktor, les fetchers Coil et les providers SLF4J |
 
-C'est la raison pour laquelle « les icônes s'affichent comme des carrés vides sous native-image » n'arrive pas sous Nucleus.
+Grâce à cela, les icônes ne s'affichent pas comme des carrés vides sous native-image.
 
-<Callout type="info" title="Compromis de taille du binaire">
-Le glob `.*\.(svg|ttf|otf)` est large exprès. Si on livre la lib d'icônes IntelliJ Platform et tiens à chaque mégaoctet, surcharge avec un `resource-config.json` plus serré.
+<Callout type="info" title="Compromis sur la taille du binaire">
+Le glob `.*\.(svg|ttf|otf)` est large à dessein. Si tu livres la bibliothèque d'icônes IntelliJ
+Platform et que tu tiens à chaque mégaoctet, remplace-le par un `resource-config.json` plus
+étroit.
 </Callout>
 
-## Initialisation au build vs au runtime
+## Notes
 
-native-image exécute du code Java au **build time** pendant la construction de l'image, puis encore au **runtime** quand le binaire démarre. Les initializers statiques sont normalement exécutés au build sauf indication contraire. Nucleus arrange ses modules runtime pour que :
+Utilise le module [decorated-window-jni](/docs/window) sous native-image. Il ne dépend pas de
+JetBrains Runtime. Réserve `decorated-window-jbr` aux builds JVM.
 
-- Les pures données (catalogues d'icônes, registres d'interfaces sealed, schémas JSON) s'initialisent au build — zéro coût au démarrage.
-- Tout ce qui touche l'OS (système de fichiers, APIs OS, libs natives) est différé au runtime, soit par des annotations `RuntimeClassInitialization` dans la metadata par module, soit par initialisation paresseuse d'`object`.
+## Et ensuite
 
-Si on a un initializer statique custom qui touche l'OS, déclare-le sous `RuntimeClassInitialization` dans le `nativeImageConfigBaseDir`. Le Reachability Repository d'Oracle couvre les contrevenants connus (SLF4J, Logback, …).
-
-## Decorated window
-
-Le module [`decorated-window-jni`](/docs/window) est celui à utiliser sous native-image — il ne dépend pas de JetBrains Runtime. Utilise `decorated-window-jbr` uniquement sous les builds JVM.
-
-## Liens
-
-- [HiDPI Linux](/docs/performance/linux-hidpi) — utilisé en interne par `GraalVmInitializer`.
 - [Configuration](/docs/performance/graalvm/configuration) — le bloc DSL `graalvm { }`.
-- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — quelle metadata de reachability est livrée par-dessus ce module.
+- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — la metadata de reachability livrée par-dessus ce module.
+- [HiDPI Linux](/docs/performance/linux-hidpi) — la détection d'échelle utilisée par `GraalVmInitializer`.

@@ -1,22 +1,21 @@
 ---
-title: DecoratedWindow
-description: One Compose Composable for every desktop window — title bar slot, OS chrome, drag regions, multi-window — backend-agnostic.
+title: Window & toolkits
+description: How Nucleus opens native desktop windows from Compose through the DecoratedWindow composable, the TitleBar slot, and the toolkit modules that restyle them.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-`DecoratedWindow` is the door between your Compose UI and the OS window manager. It draws an OS-native frame, exposes a `TitleBar` slot you fill with arbitrary Compose content, and gives you a `NucleusWindow` handle that works the same whether you ran on Tao, JBR or JNI underneath.
+Nucleus opens native desktop windows from Compose through a single composable, `DecoratedWindow`.
+It draws the OS window frame, gives you a `TitleBar` slot you fill with Compose content, and hands
+back a `NucleusWindow` handle that behaves the same whether the Tao, JBR, or JNI backend runs
+underneath.
 
-## TL;DR
-- Call `DecoratedWindow` from inside `nucleusApplication { }` — that's the whole surface.
-- The `TitleBar { state -> … }` slot is a full Compose composable. Buttons, search, segmented controls — anything.
-- `nucleusWindow` is your backend-agnostic handle: focus, minimise / maximise / fullscreen, icon, close.
-- For multi-window apps, just call `DecoratedWindow` multiple times. Each call gets its own `NucleusWindow`.
-- Swap the visual style by adding a toolkit module — same Composable, different look. See [Toolkits](/docs/window/toolkits).
+This section covers the windowing entry point and the toolkit modules that change how it looks.
 
-## Install
+## The DecoratedWindow composable
 
-`nucleus-application` plus one backend module. Use Tao for new code:
+`DecoratedWindow` lives in `nucleus-application`. You pair it with one backend module and call it
+from inside `nucleusApplication { }`:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -25,16 +24,17 @@ dependencies {
 }
 ```
 
-## Quickstart
-
 ```kotlin
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.*
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
-import dev.nucleusframework.application.*
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
 
 fun main() = nucleusApplication {
     val state = rememberWindowState(size = DpSize(1100.dp, 720.dp))
@@ -53,93 +53,49 @@ fun main() = nucleusApplication {
 }
 ```
 
-## How it works
+Each call to `DecoratedWindow` manages its own state, handle, and close request, so you open a
+second window by calling it again from the same `nucleusApplication` block.
 
-`nucleusApplication { }` is the umbrella entry point. It detects the active backend (Tao if `decorated-window-tao` is on the classpath, otherwise AWT), primes platform integrations (GraalVM init, single-instance lock, deep links), and exposes a `NucleusApplicationScope` containing `DecoratedWindow` and `DecoratedDialog`.
+## The title bar slot
 
-Inside the content lambda you get a `NucleusDecoratedWindowScope`. It carries a `NucleusWindow` — a backend-agnostic handle for the window's lifecycle. Most apps never touch the raw `ComposeWindow` / `TaoWindow`; they read `isFocused`, observe `focusFlow`, and call `setMaximized` / `setMinimumSize`. When you need to drop down to the native handle, `nucleusWindow.unsafe.awtWindow` or `nucleusWindow.unsafe.taoWindow` is the escape hatch.
-
-The visual style — title bar height, colours, button icons — lives in `TitleBarStyle` / `DecoratedWindowStyle` from `decorated-window-core`. Wrap your app in `NucleusDecoratedWindowTheme` to apply it. Adding one of the toolkit modules (`-jewel`, `-material2`, `-material3`, and the upcoming macOS / Fluent / Yaru style packs) gives you a ready-made theme.
-
-## Multi-window apps
-
-Open multiple windows by calling `DecoratedWindow` more than once. Each call manages its own state and close request.
+Inside the content lambda, `TitleBar` is a Compose composable rather than a native widget. Its
+content lambda receives the current `DecoratedWindowState`, so you can react to focus and maximized
+state, and place buttons, a search field, or any other content across the bar:
 
 ```kotlin
-fun main() = nucleusApplication {
-    var showInspector by remember { mutableStateOf(false) }
+TitleBar { state ->
+    Text(if (state.isActive) "My App" else "My App (inactive)")
+}
+```
 
-    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Main") {
-        TitleBar { _ -> /* … */ }
-        Button(onClick = { showInspector = true }) { Text("Open inspector") }
-    }
+`DecoratedDialog` is the dialog counterpart and pairs with `DialogTitleBar` for modal or detached
+panels.
 
-    if (showInspector) {
-        DecoratedWindow(
-            onCloseRequest = { showInspector = false },
-            title = "Inspector",
-        ) {
-            TitleBar { _ -> Text("Inspector") }
-            InspectorContent()
-        }
+## The window handle
+
+The content lambda runs in a `NucleusDecoratedWindowScope`, which carries a `nucleusWindow` handle.
+Use it to read window state, observe changes, and drive the window without touching the native
+object:
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, title = "Editor") {
+    TitleBar { _ -> Text("Editor") }
+
+    val focused by nucleusWindow.focusFlow.collectAsState()
+
+    Button(onClick = { nucleusWindow.setMaximized(true) }) {
+        Text(if (focused) "Maximize" else "(unfocused)")
     }
 }
 ```
 
-## Reference
+`NucleusWindow` exposes the intersection of `ComposeWindow` (AWT) and `TaoWindow` (Tao): the boolean
+properties `isFocused`, `isMinimized`, `isMaximized`, and `isFullscreen`; a matching `StateFlow` for
+each; `boundsOnScreen()`; and imperative calls such as `setMaximized`, `setMinimumSize`, `toFront`,
+and `close`. The same handle is available anywhere in the tree through `LocalNucleusWindow`.
 
-### `DecoratedWindow`
-
-```kotlin
-@Composable
-fun NucleusApplicationScope.DecoratedWindow(
-    onCloseRequest: () -> Unit,
-    state: WindowState = rememberWindowState(),
-    visible: Boolean = true,
-    title: String = "",
-    icon: Painter? = null,
-    resizable: Boolean = true,
-    enabled: Boolean = true,
-    focusable: Boolean = true,
-    alwaysOnTop: Boolean = false,
-    minimumSize: DpSize? = null,
-    onPreviewKeyEvent: (KeyEvent) -> Boolean = { false },
-    onKeyEvent: (KeyEvent) -> Boolean = { false },
-    content: @Composable NucleusDecoratedWindowScope.() -> Unit,
-)
-```
-
-### `NucleusWindow`
-
-```kotlin
-interface NucleusWindow {
-    val isFocused: Boolean
-    val isMinimized: Boolean
-    val isMaximized: Boolean
-    val isFullscreen: Boolean
-
-    val focusFlow: StateFlow<Boolean>
-    val minimizedFlow: StateFlow<Boolean>
-    val maximizedFlow: StateFlow<Boolean>
-    val fullscreenFlow: StateFlow<Boolean>
-
-    fun show()
-    fun hide()
-    fun toFront()
-    fun requestFocus()
-    fun setMinimized(value: Boolean)
-    fun setMaximized(value: Boolean)
-    fun setFullscreen(value: Boolean)
-    fun setAlwaysOnTop(value: Boolean)
-    fun setMinimumSize(size: DpSize?)
-    fun setIcon(painter: Painter?)
-    fun close()
-
-    val unsafe: NucleusWindowUnsafe
-}
-```
-
-### `NucleusWindowUnsafe`
+When you need the underlying native object, `nucleusWindow.unsafe` is the escape hatch. The accessor
+matching the active backend returns a value; the others return `null`:
 
 ```kotlin
 interface NucleusWindowUnsafe {
@@ -150,18 +106,30 @@ interface NucleusWindowUnsafe {
 }
 ```
 
-### Composition locals
+## Styling and toolkits
 
-- `LocalNucleusWindow` — the current `NucleusWindow`.
-- `LocalNucleusBackend` — `Awt` or `Tao`.
-- `LocalTitleBarStyle`, `LocalDecoratedWindowStyle`, `LocalIsDarkTheme`, `LocalContentColor`.
+The visual style — title bar height, colors, button icons — lives in `TitleBarStyle` and
+`DecoratedWindowStyle` in `decorated-window-core`. Wrap your app in `NucleusDecoratedWindowTheme`
+to apply a style directly, or add a toolkit module for a ready-made native look. The composable you
+call stays the same; only the theme changes.
 
-<Callout type="tip">
-Need a dialog? `DecoratedDialog` mirrors `DecoratedWindow` with `DialogTitleBar`. Use it for modal or detached panels.
+Nucleus ships toolkits for macOS, Fluent (Windows), Yaru (GNOME), and Jewel, plus Material 2 and
+Material 3 fallbacks. See [Toolkits](/docs/window/toolkits) for the full list and how to apply one.
+
+## Backends
+
+`nucleusApplication { }` detects the active backend — Tao when `decorated-window-tao` is on the
+classpath, AWT otherwise — and sets up the platform integrations before running your windows.
+`LocalNucleusBackend` reports the resolved value, one of `NucleusBackend.Auto`, `.Awt`, or `.Tao`.
+Because `nucleusWindow` mirrors both backends, the same window code runs on either.
+
+<Callout type="info">
+`nucleusApplication` acquires a single-instance lock by default. Pass `enableSingleInstance = false`
+to allow multiple processes.
 </Callout>
 
-## Notes
+## What's next
 
-- `nucleusApplication` acquires a single-instance lock by default. Pass `enableSingleInstance = false` if you need multiple processes.
-- Deep links land on `onDeepLink { uri -> … }` inside the scope.
-- For a dive into the four native looks, see [Toolkits](/docs/window/toolkits).
+- [Toolkits](/docs/window/toolkits) — change the window's look with a prebuilt native theme.
+- [The Tao backend](/docs/tao/decorated-window) — the no-AWT windowing backend in detail.
+- [Backends](/docs/concepts/backends) — how Nucleus picks between Tao and AWT.

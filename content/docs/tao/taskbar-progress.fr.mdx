@@ -1,0 +1,136 @@
+---
+title: Progression dans la barre des tâches
+description: Affiche une progression déterminée, indéterminée ou en erreur dans la barre des tâches ou le dock depuis une fenêtre Tao.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`taskbar-progress-tao` relie l'API neutre `TaskbarProgress` au backend Tao pour qu'une `TaoWindow` puisse piloter son bouton dans la barre des tâches (Windows), son icône dans le dock (macOS) ou son entrée de lanceur (Linux). Le module ajoute un handle composable lié à la fenêtre Tao courante ainsi qu'une façade indépendante du backend, qui fonctionne que ton application tourne sur le backend Tao ou AWT.
+
+Utilise ce module quand tu compiles sur le backend Tao et que tu veux refléter une opération longue — un téléchargement, un export, un build — dans la barre des tâches du système.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:<version>")
+}
+```
+
+Le module dépend de `taskbar-progress` et de `decorated-window-tao`, qui sont donc tirés de façon transitive.
+
+## Afficher la progression depuis un composable
+
+Dans le contenu d'une `DecoratedWindow` Tao, appelle `rememberTaoTaskbarProgress()` pour obtenir un handle lié à la fenêtre courante, puis pilote-le depuis ton état :
+
+```kotlin
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.nucleusframework.taskbarprogress.tao.rememberTaoTaskbarProgress
+
+// À l'intérieur de DecoratedWindow { ... }
+var progress by remember { mutableStateOf(0.0) }
+val taskbar = rememberTaoTaskbarProgress()
+
+LaunchedEffect(progress) {
+    taskbar?.showProgress(progress)
+    if (progress >= 1.0) taskbar?.hideProgress()
+}
+```
+
+`rememberTaoTaskbarProgress()` renvoie un `TaoTaskbarProgressScope?`. Il vaut `null` en dehors d'une `DecoratedWindow` Tao : protège donc les appels avec `?.`. La `value` passée à `showProgress` et `setProgress` est une fraction dans l'intervalle `0.0..1.0`.
+
+<Callout type="info">
+La progression est un indice visuel. `isAvailable()` renvoie `false` sur les plateformes ou environnements sans prise en charge de la progression dans la barre des tâches (par exemple un bureau Linux qui n'expose aucun fichier `.desktop` correspondant), et les appels deviennent alors sans effet.
+</Callout>
+
+## Fonctionnement
+
+`TaoTaskbarProgress` résout le handle natif de la fenêtre à partir de la `TaoWindow` avant chaque appel. Sur Windows, il lit le HWND depuis `TaoWindow.nativeHandle`. Sur macOS l'icône du dock est propre à l'application, et sur Linux l'entrée de lanceur est identifiée par le nom de fichier `.desktop` : l'argument de fenêtre n'est donc pas utilisé sur ces plateformes et l'appel est délégué directement à la branche correspondante.
+
+`rememberTaoTaskbarProgress()` lit `LocalTaoWindow` et mémorise un `TaoTaskbarProgressScope` associé à cette fenêtre. Le scope est une fine enveloppe : chacune de ses méthodes relaie vers `TaoTaskbarProgress` avec la fenêtre liée, ce qui t'évite de passer la fenêtre à chaque fois.
+
+`NucleusTaskbarProgress` est le point d'entrée indépendant du backend. Il prend une `NucleusWindow` et redirige vers le `TaskbarProgress` AWT ou vers `TaoTaskbarProgress` selon le backend de la fenêtre, ce qui permet à un projet de changer de backend sans toucher aux appels. Chaque appel est déporté sur un thread démon dédié, car l'API Windows sous-jacente peut bloquer l'appelant si elle est invoquée pendant l'arrêt de la boucle d'événements propriétaire. Le `Boolean` renvoyé indique donc une dispatch au mieux (mise en file d'attente ou impossible), pas l'achèvement de l'opération.
+
+## Référence de l'API
+
+### Vérifier la disponibilité
+
+```kotlin
+TaoTaskbarProgress.isAvailable(): Boolean
+```
+
+Renvoie `true` quand la plateforme courante prend en charge la progression dans la barre des tâches. Vérifie-le une fois avant de câbler la progression si tu veux ignorer complètement ce travail sur les systèmes non pris en charge.
+
+### Afficher une progression déterminée
+
+Depuis un `TaoTaskbarProgressScope` :
+
+```kotlin
+scope.showProgress(value: Double)   // passe à l'état NORMAL, puis applique la valeur
+scope.setProgress(value: Double)    // met à jour uniquement la valeur
+scope.setState(state: TaskbarProgress.State)
+```
+
+`showProgress` fixe l'état à `NORMAL` et applique la fraction en un seul appel. Utilise `setProgress` pour mettre à jour la valeur en gardant le même état. `TaskbarProgress.State` propose `NO_PROGRESS`, `INDETERMINATE`, `NORMAL`, `ERROR` et `PAUSED`.
+
+### Signaler une progression indéterminée, une erreur ou une pause
+
+```kotlin
+scope.showIndeterminate()           // barre pulsante, sans valeur fixe
+scope.showError(value: Double = 1.0)
+scope.showPaused(value: Double = 1.0)
+```
+
+`showIndeterminate` affiche une barre pulsante pour un travail sans fraction mesurable. `showError` et `showPaused` fixent l'état correspondant et une barre pleine par défaut ; passe une `value` pour conserver la fraction courante.
+
+### Effacer la progression
+
+```kotlin
+scope.hideProgress()                // passe à l'état NO_PROGRESS
+```
+
+Appelle-la quand l'opération se termine pour retirer l'indicateur.
+
+### Attirer l'attention de l'utilisateur
+
+```kotlin
+scope.requestAttention(type: TaskbarProgress.AttentionType = TaskbarProgress.AttentionType.INFORMATIONAL)
+scope.stopAttention()
+```
+
+`requestAttention` fait clignoter le bouton de la barre des tâches sur Windows ou rebondir l'icône du dock sur macOS. `AttentionType` vaut `INFORMATIONAL` (un bref clignotement ou un seul rebond) ou `CRITICAL` (clignotement ou rebond jusqu'à ce que l'application reçoive le focus). `stopAttention` annule une demande en cours.
+
+### Piloter la progression sans composable
+
+Quand tu détiens directement une `TaoWindow`, appelle l'objet `TaoTaskbarProgress` en passant la fenêtre :
+
+```kotlin
+TaoTaskbarProgress.showProgress(window, 0.5)
+TaoTaskbarProgress.hideProgress(window)
+```
+
+L'objet expose les mêmes opérations que le scope : `setProgress`, `setState`, `showProgress`, `showError`, `showIndeterminate`, `showPaused`, `hideProgress`, `requestAttention` et `stopAttention`.
+
+### Rester indépendant du backend
+
+Si ton code manipule une `NucleusWindow` et doit tourner sur l'un ou l'autre backend, utilise `NucleusTaskbarProgress` ou ses extensions sur `NucleusWindow` :
+
+```kotlin
+import dev.nucleusframework.taskbarprogress.tao.showTaskbarProgress
+import dev.nucleusframework.taskbarprogress.tao.hideTaskbarProgress
+
+nucleusWindow.showTaskbarProgress(0.5)
+nucleusWindow.hideTaskbarProgress()
+```
+
+Les extensions reprennent le scope : `setTaskbarProgress`, `setTaskbarState`, `showTaskbarProgress`, `showTaskbarError`, `showTaskbarIndeterminate`, `showTaskbarPaused`, `hideTaskbarProgress`, `requestTaskbarAttention` et `stopTaskbarAttention`. Chacune renvoie un `Boolean` indiquant une dispatch au mieux, pas l'achèvement de l'opération.
+
+## Et ensuite
+
+- [Progression dans la barre des tâches (AWT)](/docs/lifecycle/taskbar-progress) — l'API neutre `TaskbarProgress` et le backend AWT.
+- [Le backend Tao](/docs/tao) — le backend de fenêtrage Rust sans AWT et son modèle de fenêtre.
+- [Fenêtres décorées sur Tao](/docs/tao/decorated-window) — la `DecoratedWindow` qui fournit `LocalTaoWindow`.

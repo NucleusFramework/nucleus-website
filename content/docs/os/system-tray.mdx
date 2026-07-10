@@ -1,24 +1,21 @@
 ---
 title: System tray
-description: A Compose-rendered tray icon and native context menu on macOS, Windows, and Linux — reactive, GraalVM-ready, no icon-export pipeline.
+description: Render a tray icon and a native context menu from Compose on macOS, Windows, and Linux.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Building a tray app the traditional way means juggling `.ico` files, AppKit status items, AppIndicator XML menus, and reconciling three different click semantics. `Tray()` collapses all of that into a single composable: your icon is anything Compose can draw, your menu is a Kotlin DSL, your menu reacts to state.
+The system tray API draws a tray icon and its native context menu from Compose on macOS,
+Windows, and Linux. The icon is anything Compose can draw, the menu is a Kotlin DSL, and both
+react to Compose state. `Tray()` is a single composable that hands the rendered icon and menu
+to the native tray API of the current OS.
 
 <Callout type="info" title="Separate repository">
-System Tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) with its own release cycle. The artifact is `dev.nucleusframework:composenativetray`.
+System tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) with its own release cycle. The artifact is `dev.nucleusframework:composenativetray`.
 </Callout>
 
-## TL;DR
-- Render any `@Composable`, `ImageVector`, `Painter`, or `DrawableResource` as the tray icon — pixel-perfect at every DPI.
-- Reactive: change a `mutableStateOf`, the icon and menu update.
-- Native menus on every platform: macOS NSStatusItem, Windows Shell_NotifyIcon, Linux StatusNotifierItem / AppIndicator.
-- GraalVM Native Image compatible.
-
-## Install
+## Add the dependency
 
 ```kotlin
 dependencies {
@@ -26,7 +23,9 @@ dependencies {
 }
 ```
 
-## Quickstart
+## Add a tray icon
+
+Declare a `Tray()` composable with an icon, a tooltip, and a menu lambda:
 
 ```kotlin
 import androidx.compose.material.icons.Icons
@@ -46,9 +45,15 @@ Tray(
 
 ## How it works
 
-`Tray()` is a composable. Its icon is rasterised from Compose every time the slot's state changes, then handed to the native tray API of the current OS. The menu lambda runs inside a DSL scope that re-evaluates on recomposition — adding, removing, or relabelling items costs nothing more than the usual Compose work.
+`Tray()` is a composable. Its icon is rasterised from Compose whenever the slot's state
+changes, then handed to the native tray API of the current OS. The menu lambda runs inside a
+DSL scope that re-evaluates on recomposition, so adding, removing, or relabelling items follows
+the usual Compose recomposition rules.
 
-The end result: the tray is a first-class participant in your Compose state tree. No ad hoc rebuild calls, no manual icon pipelines, no `.ico`/`.png`/`.icns` triple-maintenance.
+The tray participates in your Compose state tree: it updates through recomposition, without
+explicit rebuild calls or separate `.ico`/`.png`/`.icns` files to maintain.
+
+Each platform maps to its native tray mechanism:
 
 <Tabs items={["macOS", "Windows", "Linux (GNOME)", "Linux (KDE)"]}>
 <Tab value="macOS">
@@ -58,7 +63,7 @@ Backed by `NSStatusItem` in the menu bar. Vector icons render at native DPI, wit
 </Tab>
 <Tab value="Windows">
 
-Backed by `Shell_NotifyIcon`. Vector input gets rasterised to a 32×32 `.ico` per scale factor. You can pass a hand-authored `.ico` via `windowsIcon` if you want exact control.
+Backed by `Shell_NotifyIcon`. Vector input is rasterised to a 32×32 `.ico` per scale factor. Pass a hand-authored `.ico` via `windowsIcon` for exact control.
 
 </Tab>
 <Tab value="Linux (GNOME)">
@@ -68,12 +73,15 @@ Uses StatusNotifierItem (KStatusNotifierItem). On stock GNOME this requires the 
 </Tab>
 <Tab value="Linux (KDE)">
 
-StatusNotifierItem is native to Plasma — everything Just Works including hover tooltips and badges where Plasma supports them.
+StatusNotifierItem is native to Plasma. Hover tooltips and badges work where Plasma supports them.
 
 </Tab>
 </Tabs>
 
-## Icon sources
+## Set the icon source
+
+The `icon` parameter accepts an `ImageVector`, a `Painter`, or a Compose Multiplatform
+`DrawableResource`. For full control, use `iconContent` to draw the icon with any composable:
 
 ```kotlin
 // ImageVector
@@ -96,9 +104,9 @@ Tray(
 ) { /* … */ }
 ```
 
-## Platform-specific icons
+## Use platform-specific icons
 
-When you want a native `.ico` on Windows and a vector elsewhere:
+To use a native `.ico` on Windows and a vector elsewhere, set `windowsIcon` and `macLinuxIcon`:
 
 ```kotlin
 Tray(
@@ -109,9 +117,10 @@ Tray(
 ) { /* menu */ }
 ```
 
-## Primary action
+## Handle the primary action
 
-`primaryAction` fires on left-click (macOS/Windows) or single click (Linux, desktop-dependent). Without it, the menu opens on every click.
+`primaryAction` fires on left-click (macOS/Windows) or single click (Linux, desktop-dependent).
+Without it, the menu opens on every click.
 
 ```kotlin
 Tray(
@@ -123,7 +132,7 @@ Tray(
 }
 ```
 
-## Where to next
+## What's next
 
-- [Tray menu DSL](/docs/os/tray-menu-dsl) — items, checkables, submenus, dividers, reactive composition.
+- [Tray menu DSL](/docs/os/tray-menu-dsl) — items, checkables, submenus, dividers, and reactive composition.
 - [Tray apps](/docs/os/tray-app) — make the tray icon open a Compose popup window.
