@@ -27,7 +27,7 @@ const NUCLEUS_FEATURES = [
   {
     label: 'Distribution',
     items: [
-      { name: '16 packaging formats' },
+      { name: '18 packaging formats' },
       { name: 'Code signing + notarization' },
       { name: 'Auto-Update' },
       { name: 'Deep Links' },

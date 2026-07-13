@@ -154,7 +154,7 @@ export const kmpT = {
   desktopUi: { en: 'macOS · Fluent · Yaru in Compose + native overlay', fr: 'macOS · Fluent · Yaru en Compose + overlay natif' } as Bi<string>,
   desktopInput: { en: 'Mouse · keyboard · multi-touch · pen · Wayland gestures', fr: 'Souris · clavier · multi-touch · stylet · gestes Wayland' } as Bi<string>,
   desktopOpt: { en: 'GraalVM closed-world · JIT + AOT cache · native-lib stripping', fr: 'GraalVM closed-world · cache JIT + AOT · stripping des libs natives' } as Bi<string>,
-  desktopPkg: { en: '16 formats, signed + notarized', fr: '16 formats, signés + notarisés' } as Bi<string>,
+  desktopPkg: { en: '18 formats, signed + notarized', fr: '18 formats, signés + notarisés' } as Bi<string>,
   desktopDist: { en: 'MS Store · App Store · Snap · GitHub · auto-update', fr: 'MS Store · App Store · Snap · GitHub · mise à jour auto' } as Bi<string>,
 };
 

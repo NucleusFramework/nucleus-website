@@ -76,7 +76,7 @@ curl -fsSL https://nucleusframework.dev/install-linux.sh | bash
       <div className="section-inner">
         <SectionHeading
           eyebrow="Quick start"
-          title={<>One Gradle DSL.<br />Sixteen installer formats.</>}
+          title={<>One Gradle DSL.<br />Eighteen installer formats.</>}
           subtitle="Add a plugin, declare your distributions, and ship to every desktop. No CMake, no native build scripts, no platform-specific maintainers."
         />
         <div className="code-section-grid">
@@ -90,7 +90,7 @@ curl -fsSL https://nucleusframework.dev/install-linux.sh | bash
             />
           </div>
           <div className="code-section-aside">
-            <CodeFeature label="16 packaging formats" desc="DMG, PKG, NSIS, MSI, AppX, Portable, DEB, RPM, AppImage, Snap, Flatpak, ZIP, TAR, 7Z." />
+            <CodeFeature label="18 packaging formats" desc="DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX, DEB, RPM, AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z." />
             <CodeFeature label="Store-ready" desc="Mac App Store, Microsoft Store, Snapcraft, Flathub — one build, every store." />
             <CodeFeature label="Code signing + notarization" desc="Built into the build pipeline for Windows and macOS." />
             <CodeFeature label="Auto-update" desc="Check, download, verify, install — without third-party services." />

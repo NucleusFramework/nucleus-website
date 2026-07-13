@@ -63,7 +63,7 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
             </div>
             <div className="hero-atom-label hero-label-br">
               <span className="hero-label-key">{pick(heroT.formats, lang)}</span>
-              <span className="hero-label-val">16</span>
+              <span className="hero-label-val">18</span>
             </div>
           </div>
         </div>

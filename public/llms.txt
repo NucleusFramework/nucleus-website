@@ -1,757 +1,145 @@
 # Nucleus
 
-> Nucleus is the all-in-one toolkit for shipping JVM desktop applications. It combines a Gradle plugin, runtime libraries, and GitHub Actions to handle performance (AOT), distribution (16 packaging formats), native look & feel (decorated windows, dark mode, system colors), and GraalVM Native Image support. Compatible with any JVM application, optimized for Compose Desktop.
+> Nucleus is a Kotlin framework for building native cross-platform desktop apps on top of Compose Multiplatform. It combines a Gradle plugin, runtime libraries, and GitHub Actions to handle OS integration (30+ runtime modules), packaging (18 distribution formats), performance (GraalVM Native Image and JVM AOT cache), and native window decorations (Tao backend).
 
-- Docs: https://nucleus.kdroidfilter.com
+- Docs: https://nucleusframework.dev/docs
 - GitHub: https://github.com/NucleusFramework/Nucleus
 - Gradle Plugin Portal: https://plugins.gradle.org/plugin/dev.nucleusframework
 - Maven Central: https://central.sonatype.com/search?q=dev.nucleusframework
-- License: MIT
-
-**Nucleus is the Kotlin framework for native desktop apps.** Combined with Compose Multiplatform, it forms the most complete, most performant, and most deeply integrated desktop application stack ever built — on any language, any runtime, any platform.
-
-Every technology eventually finds its mature form. Java evolved into **Kotlin**. JavaScript evolved into **TypeScript**. Desktop development is going through the same shift: Electron was the pioneer — it proved that cross-platform desktop apps could work. **Kotlin + Compose + Nucleus** is what comes next.
-
-Not an alternative. An evolution.
-
-Electron gave developers reach but asked them to accept a browser as a runtime, a DOM as a UI layer, and hundreds of megabytes as a baseline. Nucleus builds on **Kotlin** and **Compose Multiplatform** — running on the battle-tested JVM — to deliver desktop applications that are natively integrated, natively fast, and natively lightweight.
-
-## Why Nucleus
-
-### Native on every OS
-
-Your app doesn't emulate native — it *is* native. Window decorations, notifications, taskbar badges, dock menus, dark mode, accent colors, global hotkeys, [system tray](runtime/system-tray/index.md) — everything behaves exactly as users expect on their OS. Not a web view wearing a disguise. A real desktop citizen, on every platform, on every screen.
-
-And Nucleus doesn't just expose native APIs — it **makes them simpler than the originals**. Windows Toast Notifications, macOS UserNotifications, Linux D-Bus StatusNotifierItem, Win32 ITaskbarList3, Unity LauncherEntry — each of these is a complex, platform-specific API with its own conventions, threading model, and pitfalls. Nucleus wraps every single one behind a clean, intuitive Kotlin API that feels the same everywhere. The result is paradoxical: a **cross-platform framework that makes native APIs easier to use than native development itself**. Writing a notification, managing a system tray, or showing taskbar progress takes a few lines of Kotlin — not pages of platform documentation. No compromise on capability. No lowest-common-denominator abstraction. Every platform feature, exposed in full, but through an API that any Kotlin developer can pick up in minutes.
-
-### Performance that rivals C++ — with the simplicity of Kotlin
-
-The HotSpot JVM is the most advanced JIT compiler ever built. It optimizes your hot paths at runtime with decades of engineering behind it — delivering performance approaching C++ and Rust levels, but with the expressiveness of Kotlin. And unlike Electron's single-threaded event loop, the JVM gives you **true parallelism**: real threads, real cores, coroutines for structured concurrency, virtual threads for massive I/O.
-
-For maximum lightness, [GraalVM native image](graalvm/index.md) compiles your entire app into a standalone binary — **~0.5s cold start**, **100–150 MB RAM**, tiny bundle, no JRE needed. Compare that to **500 MB–1.5 GB** for a typical Electron app.
-
-### The most advanced desktop UI stack
-
-Compose Multiplatform is not "React Native for desktop". It is a **compiled, type-safe, GPU-accelerated UI toolkit** with hardware-accelerated Skia rendering, a reactive state model, and shared code across Android, iOS, desktop, and web.
-
-No frontend/backend split. No REST API between your UI and your logic. No serialization layer. Your UI calls your business logic directly, in the same language, in the same process. Separate your concerns with **modules**, not with network boundaries.
-
-And on top of Compose sits **[Jewel](https://github.com/JetBrains/intellij-community/tree/master/platform/jewel#readme)** — the most advanced desktop UI framework in the world. Not a web framework adapted for desktop. A desktop framework, period. Jewel carries behind it the entire experience of JetBrains and its IDEs — IntelliJ IDEA, Android Studio, WebStorm — applications used daily by millions of developers, built with desktop in mind from day one. Nucleus integrates deeply with both Jewel and Material 2/3, plus native window controls and OS-level hooks.
-
-## What Nucleus provides
-
-### Ship everywhere
-
-- **16 packaging formats** — DMG, PKG, NSIS, MSI, AppX, Portable, DEB, RPM, AppImage, Snap, Flatpak, ZIP, TAR, 7Z
-- **Store-ready** — Mac App Store, Microsoft Store, Snapcraft, Flathub — one build, all stores
-- **Code signing & notarization** — Windows and macOS, built into the build pipeline
-- **Auto-update** — Your app checks for updates, downloads them, verifies integrity, and installs — all built-in
-- **Deep links & file associations** — Protocol handlers and file type registration on all platforms
-
-### Go deeper when you need to
-
-Nucleus meets you where you are:
-
-- **Just ship an app?** — One Gradle DSL, one command. Done.
-- **Need OS integration?** — 30+ runtime modules with intuitive Kotlin APIs: notifications, launchers, dark mode, system colors, taskbar progress, energy management, and more.
-- **Need a platform API no library covers?** — [Native Access](native-access/index.md) lets you write Kotlin/Native and call it from the JVM. No C, no boilerplate, no build scripts.
-- **Need maximum lightness?** — [GraalVM native image](graalvm/index.md) compiles your app into a standalone binary. Nucleus resolves all reflection metadata transparently.
-- **CI/CD ready** — Reusable GitHub Actions, multi-platform matrix builds, universal macOS binaries, MSIX bundles.
-
-## Quick start
-
-```kotlin
-plugins {
-    id("dev.nucleusframework") version "<version>"
-}
-
-nucleus.application {
-    mainClass = "com.example.MainKt"
-
-    nativeDistributions {
-        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)
-        packageName = "MyApp"
-        packageVersion = "1.0.0"
-    }
-}
-```
-
-```bash
-./gradlew run                           # Run locally
-./gradlew packageDistributionForCurrentOS  # Build installer for current OS
-```
-
-## Try the demo
-
-A pre-built demo is available on the [GitHub Releases page](https://github.com/NucleusFramework/Nucleus/releases).
-
-### macOS
-    ```bash
-    curl -fsSL https://nucleusframework.dev/install.sh | bash
-    ```
-    Detects your architecture (Apple Silicon or Intel), downloads, installs to `/Applications`, and launches.
-
-### Linux
-    ```bash
-    curl -fsSL https://nucleusframework.dev/install-linux.sh | bash
-    ```
-    Detects your architecture and package manager, downloads and installs the appropriate `.deb` or `.rpm`.
-
-### Windows
-    Download the installer from the [releases page](https://github.com/NucleusFramework/Nucleus/releases).
-
-What you'll see:
-
-- **Instant startup** — Near-instant cold boot powered by JDK 25+ AOT cache
-- **Decorated Window** — Custom title bar with native window controls, Material 3 themed
-- **Dark Mode Detection** — Toggle your OS theme and watch the app switch in real time
-- **Auto-Update** — Checks for updates on launch, downloads with progress tracking, installs & restarts in one click
-
-**Test auto-update:** Download an **older release**, install it, and launch. It will detect the newer version and offer to update — automatically.
-The demo source code is in the [`example/`](https://github.com/NucleusFramework/Nucleus/tree/main/example) directory.
-
-## Requirements
-
-| Requirement | Version | Note |
-|-------------|---------|------|
-| JDK | 17+ (25+ for AOT cache) | JBR 25 recommended |
-| Gradle | 8.0+ | |
-| Kotlin | 2.0+ | |
-
-## License
-
-MIT — See [LICENSE](https://github.com/NucleusFramework/Nucleus/blob/main/LICENSE).
-
----
-
-# Getting Started
-
-## Prerequisites
-
-Nucleus uses [electron-builder](https://www.electron.build/) under the hood to produce platform-specific installers (DMG, NSIS, DEB, RPM, AppImage, etc.). This requires **Node.js 18+** and **npm** installed on your build machine.
-
-```bash
-# Verify your installation
-node --version   # v18.0.0 or later
-npm --version
-```
-
-**CI/CD:** The `setup-nucleus` composite action installs Node.js automatically. See [CI/CD](ci-cd.md) for details.
-## Installation
-
-Add the Nucleus plugin to your `build.gradle.kts`:
-
-```kotlin
-plugins {
-    id("dev.nucleusframework") version "<version>"
-}
-```
-
-The plugin is available on the [Gradle Plugin Portal](https://plugins.gradle.org/plugin/dev.nucleusframework). No additional repository configuration is needed.
-
-### Runtime Libraries (Optional)
-
-Runtime libraries are published on Maven Central:
-
-```kotlin
-dependencies {
-    implementation(compose.desktop.currentOs)
-
-    // Executable type detection + single instance + deep links
-    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
-
-    // AOT cache runtime detection (includes core-runtime)
-    implementation("dev.nucleusframework:nucleus.aot-runtime:<version>")
-
-    // Auto-update library (includes core-runtime)
-    implementation("dev.nucleusframework:nucleus.updater-runtime:<version>")
-
-    // Native taskbar/dock progress bar
-    implementation("dev.nucleusframework:nucleus.taskbar-progress:<version>")
-
-    // Custom decorated window with native title bar
-    implementation("dev.nucleusframework:nucleus.decorated-window:<version>")
-}
-```
-
-## Minimal Configuration
-
-```kotlin
-nucleus.application {
-    mainClass = "com.example.MainKt"
-
-    nativeDistributions {
-        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)
-        packageName = "MyApp"
-        packageVersion = "1.0.0"
-    }
-}
-```
-
-## Gradle Tasks
-
-### Development
-
-| Task | Description |
-|------|-------------|
-| `run` | Run the application from the IDE/terminal |
-| `runDistributable` | Run the packaged application image |
-
-#### Compose Hot Reload
-
-Nucleus is fully compatible with [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html). Since Nucleus extends the Compose plugin (not replaces it), Hot Reload works out of the box.
-
-The `mainClass` set in `nucleus.application` is automatically propagated to `compose.desktop.application.mainClass`, so `hotRun` and `hotSnapshotMain` resolve the entry point with no extra configuration. You can still override it from the command line:
-
-```bash
-./gradlew hotRun -PmainClass=com.example.MainKt
-```
-
-**Tao backend on macOS:** When the project depends on `decorated-window-tao`, the plugin automatically injects `-XstartOnFirstThread` into Hot Reload's `JavaExec` tasks on macOS. This is required because Tao runs the OS event loop on the process main thread — without the flag, `hotRun` launches but no window appears.
-### Packaging
-
-| Task | Description |
-|------|-------------|
-| `packageDistributionForCurrentOS` | Build all configured formats for the current OS |
-| `package<Format>` | Build a specific format (e.g., `packageDmg`, `packageNsis`, `packageDeb`) |
-| `packageReleaseDistributionForCurrentOS` | Same as above with ProGuard release build |
-| `createDistributable` | Create the application image without an installer |
-| `createReleaseDistributable` | Same with ProGuard |
-
-### Utility
-
-| Task | Description |
-|------|-------------|
-| `suggestModules` | Suggest JDK modules required by your dependencies |
-| `packageUberJarForCurrentOS` | Create a single fat JAR with all dependencies |
-
-### Running a Specific Task
-
-```bash
-# Build a DMG on macOS
-./gradlew packageDmg
-
-# Build NSIS installer on Windows
-./gradlew packageNsis
-
-# Build DEB package on Linux
-./gradlew packageDeb
-
-# Build all formats for current OS
-./gradlew packageDistributionForCurrentOS
-
-# Release build (with ProGuard)
-./gradlew packageReleaseDistributionForCurrentOS
-```
-
-## Output Location
-
-Build artifacts are generated in:
-
-```
-build/compose/binaries/main/<format>/
-build/compose/binaries/main-release/<format>/   # Release builds
-```
-
-Override with:
-
-```kotlin
-nativeDistributions {
-    outputBaseDir.set(project.layout.buildDirectory.dir("custom-output"))
-}
-```
-
-## JDK Modules
-
-The plugin does not automatically detect required JDK modules. Use `suggestModules` to identify them:
-
-```bash
-./gradlew suggestModules
-```
-
-Then declare them in the DSL:
-
-```kotlin
-nativeDistributions {
-    modules("java.sql", "java.net.http", "jdk.accessibility")
-}
-```
-
-Or include everything (larger binary):
-
-```kotlin
-nativeDistributions {
-    includeAllModules = true
-}
-```
-
-## Application Icons
-
-Provide platform-specific icon files:
-
-```kotlin
-nativeDistributions {
-    macOS {
-        iconFile.set(project.file("icons/app.icns"))
-    }
-    windows {
-        iconFile.set(project.file("icons/app.ico"))
-    }
-    linux {
-        iconFile.set(project.file("icons/app.png"))
-    }
-}
-```
-
-| Platform | Format | Recommended Size |
-|----------|--------|------------------|
-| macOS | `.icns` | 1024x1024 |
-| Windows | `.ico` | 256x256 |
-| Linux | `.png` | 512x512 |
-
-## Application Resources
-
-Include extra files in the installation directory via `appResourcesRootDir`:
-
-```kotlin
-nativeDistributions {
-    appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
-}
-```
-
-Resource directory structure:
-
-```
-resources/
-  common/          # Included on all platforms
-  macos/           # macOS only
-  macos-arm64/     # macOS Apple Silicon only
-  macos-x64/       # macOS Intel only
-  windows/         # Windows only
-  linux/           # Linux only
-```
-
-Access at runtime:
-
-```kotlin
-val resourcesDir = File(System.getProperty("compose.application.resources.dir"))
-```
-
-## Next Steps
-
-- [Configuration](configuration.md) — Full DSL reference
-- [macOS](targets/macos.md) / [Windows](targets/windows.md) / [Linux](targets/linux.md) — Platform-specific options
-- [CI/CD](ci-cd.md) — Automate builds with GitHub Actions
-
----
-
-# Runtime APIs
-
-Nucleus provides runtime libraries for use in your application code. All are published on Maven Central.
-
-## Libraries
-
-| Library | Artifact | Description |
-|---------|----------|-------------|
-| Core Runtime | `dev.nucleusframework:nucleus.core-runtime` | Executable type detection, single instance, deep links, app metadata (`NucleusApp`) |
-| AOT Runtime | `dev.nucleusframework:nucleus.aot-runtime` | AOT cache detection (includes core-runtime via `api`) |
-| Updater Runtime | `dev.nucleusframework:nucleus.updater-runtime` | Auto-update library with update level detection and post-update events (includes core-runtime) |
-| Taskbar Progress | `dev.nucleusframework:nucleus.taskbar-progress` | Native taskbar/dock progress bar and attention requests (Windows, macOS, Linux) |
-| Notification (macOS) | `dev.nucleusframework:nucleus.notification-macos` | macOS UserNotifications API — local notifications, actions, badges via JNI |
-| Notification (Windows) | `dev.nucleusframework:nucleus.notification-windows` | Windows Toast Notifications API — rich toasts, buttons, progress bars via JNI (WinRT) |
-| Launcher (Windows) | `dev.nucleusframework:nucleus.launcher-windows` | Windows Launcher API — badge notifications, jump lists, overlay icons, and thumbnail toolbar (ITaskbarList3) via JNI |
-| Notification (Linux) | `dev.nucleusframework:nucleus.notification-linux` | Freedesktop Desktop Notifications API via JNI (D-Bus) |
-| Launcher (Linux) | `dev.nucleusframework:nucleus.launcher-linux` | Unity Launcher API — badge, progress, urgency, quicklist via JNI (D-Bus) |
-| Launcher (macOS) | `dev.nucleusframework:nucleus.launcher-macos` | macOS dock context menu — custom items, submenus, click callbacks via JNI |
-| Media Control | `dev.nucleusframework:nucleus.media-control` | OS media controls (play/pause, metadata, seek) — MPRIS D-Bus on Linux, MPNowPlayingInfoCenter on macOS, SystemMediaTransportControls on Windows via JNI |
-| Menu (macOS) | `dev.nucleusframework:nucleus.menu-macos` | Complete NSMenu mapping — application menu bar, items, badges, delegates, SF Symbols via JNI |
-| SF Symbols | `dev.nucleusframework:nucleus.sf-symbols` | Type-safe Apple SF Symbols constants (6 195 symbols, 21 categories) |
-| Freedesktop Icons | `dev.nucleusframework:nucleus.freedesktop-icons` | Type-safe freedesktop Icon Naming Specification constants |
-| Decorated Window | `dev.nucleusframework:nucleus.decorated-window` | Custom window decorations with native title bar |
-| Decorated Window — Jewel | `dev.nucleusframework:nucleus.decorated-window-jewel` | Jewel (IntelliJ theme) color mapping for decorated windows |
-| Decorated Window — Material 2 | `dev.nucleusframework:nucleus.decorated-window-material2` | Material 2 color mapping for decorated windows |
-| Decorated Window — Material 3 | `dev.nucleusframework:nucleus.decorated-window-material3` | Material 3 color mapping for decorated windows |
-| Dark Mode Detector | `dev.nucleusframework:nucleus.darkmode-detector` | Reactive OS dark mode detection via JNI |
-| System Color | `dev.nucleusframework:nucleus.system-color` | Reactive system accent color and high contrast detection via JNI |
-| Energy Manager | `dev.nucleusframework:nucleus.energy-manager` | Process-level and thread-level energy efficiency mode and screen-awake (caffeine) API for Windows, macOS, and Linux |
-| Native SSL | `dev.nucleusframework:nucleus.native-ssl` | OS trust store integration — merges native certs with JVM defaults |
-| Native HTTP | `dev.nucleusframework:nucleus.native-http` | `java.net.http.HttpClient` pre-configured with native OS trust |
-| Native HTTP — OkHttp | `dev.nucleusframework:nucleus.native-http-okhttp` | OkHttp client pre-configured with native OS trust |
-| Native HTTP — Ktor | `dev.nucleusframework:nucleus.native-http-ktor` | Ktor `HttpClient` extension for native OS trust (all engines) |
-| Linux HiDPI | `dev.nucleusframework:nucleus.linux-hidpi` | Native HiDPI scale factor detection on Linux |
-| Scheduler | `dev.nucleusframework:nucleus.scheduler` | Background task scheduling — periodic, calendar, and on-boot tasks via OS-native schedulers (launchd, systemd, Task Scheduler) |
-| Service Management (macOS) | `dev.nucleusframework:nucleus.service-management-macos` | macOS SMAppService binding — login items, launch agents, launch daemons (macOS 13+) |
-| Auto-Launch | `dev.nucleusframework:nucleus.autolaunch` | Cross-platform start-at-login — MSIX `StartupTask`, Win32 `HKCU\...\Run`, `SMAppService`, systemd user units, Flatpak portal |
-| GraalVM Runtime | `dev.nucleusframework:nucleus.graalvm-runtime` | GraalVM native-image bootstrap + font substitutions (includes linux-hidpi) |
-
-```kotlin
-dependencies {
-    // Pick what you need:
-    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
-    implementation("dev.nucleusframework:nucleus.aot-runtime:<version>")
-    implementation("dev.nucleusframework:nucleus.updater-runtime:<version>")
-    implementation("dev.nucleusframework:nucleus.taskbar-progress:<version>")
-    implementation("dev.nucleusframework:nucleus.notification-macos:<version>")
-    implementation("dev.nucleusframework:nucleus.notification-windows:<version>")
-    implementation("dev.nucleusframework:nucleus.launcher-windows:<version>")
-    implementation("dev.nucleusframework:nucleus.notification-linux:<version>")
-    implementation("dev.nucleusframework:nucleus.launcher-linux:<version>")
-    implementation("dev.nucleusframework:nucleus.launcher-macos:<version>")
-    implementation("dev.nucleusframework:nucleus.media-control:<version>")
-    implementation("dev.nucleusframework:nucleus.menu-macos:<version>")
-    implementation("dev.nucleusframework:nucleus.sf-symbols:<version>")
-    implementation("dev.nucleusframework:nucleus.freedesktop-icons:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window-jewel:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
-    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
-    implementation("dev.nucleusframework:nucleus.system-color:<version>")
-    implementation("dev.nucleusframework:nucleus.energy-manager:<version>")
-    implementation("dev.nucleusframework:nucleus.native-ssl:<version>")
-    implementation("dev.nucleusframework:nucleus.native-http:<version>")
-    implementation("dev.nucleusframework:nucleus.native-http-okhttp:<version>")
-    implementation("dev.nucleusframework:nucleus.native-http-ktor:<version>")
-    implementation("dev.nucleusframework:nucleus.linux-hidpi:<version>")
-    implementation("dev.nucleusframework:nucleus.scheduler:<version>")
-    implementation("dev.nucleusframework:nucleus.service-management-macos:<version>")
-    implementation("dev.nucleusframework:nucleus.autolaunch:<version>")
-    implementation("dev.nucleusframework:nucleus.graalvm-runtime:<version>")
-}
-```
-
-## ProGuard
-
-When ProGuard is enabled in a release build, the Nucleus Gradle plugin **automatically includes** the required rules for all Nucleus runtime libraries (`default-compose-desktop-rules.pro`). No manual configuration is needed.
-
-Libraries that use JNI (`decorated-window`, `darkmode-detector`, `system-color`, `energy-manager`, `native-ssl`, `notification-macos`, `notification-windows`, `notification-linux`, `launcher-windows`, `launcher-linux`) require `-keep` rules for their native bridge classes — these are handled by the plugin automatically.
-
-### Overriding the ProGuard configuration
-
-> **Warning:** `configurationFiles.from(...)` **replaces** the plugin's auto-injected rules entirely — it does not append to them. If you supply your own configuration file, the Nucleus JNI keep rules will no longer be applied automatically and you must copy them into your file manually.
-
-```kotlin
-nucleus.application {
-    buildTypes {
-        release {
-            proguard {
-                isEnabled = true
-                // ⚠ This replaces the auto-injected rules — see below for required manual rules.
-                configurationFiles.from(project.file("proguard-rules.pro"))
-            }
-        }
-    }
-}
-```
-
-When using a custom `configurationFiles`, add the following rules to your file to preserve all Nucleus JNI bridges:
-
-```proguard
-# Nucleus decorated-window JNI (macOS)
--keep class dev.nucleusframework.window.utils.macos.NativeMacBridge {
-    native <methods>;
-}
--keep class dev.nucleusframework.window.** { *; }
-
-# Nucleus darkmode-detector JNI (macOS)
--keep class dev.nucleusframework.darkmodedetector.mac.NativeDarkModeBridge {
-    native <methods>;
-    static void onThemeChanged(boolean);
-}
-
-# Nucleus darkmode-detector JNI (Linux)
--keep class dev.nucleusframework.darkmodedetector.linux.NativeLinuxBridge {
-    native <methods>;
-    static void onThemeChanged(boolean);
-}
-
-# Nucleus darkmode-detector JNI (Windows)
--keep class dev.nucleusframework.darkmodedetector.windows.NativeWindowsBridge {
-    native <methods>;
-}
--keep class dev.nucleusframework.darkmodedetector.** { *; }
-
-# Nucleus native-ssl JNI (macOS)
--keep class dev.nucleusframework.nativessl.mac.NativeSslBridge {
-    native <methods>;
-}
-
-# Nucleus native-ssl JNI (Windows)
--keep class dev.nucleusframework.nativessl.windows.WindowsSslBridge {
-    native <methods>;
-}
-```
-
-Omitting these rules will cause `UnsatisfiedLinkError` or `ClassNotFoundException` at runtime in release builds.
-
----
-
-# Migration from org.jetbrains.compose
-
-Nucleus is a drop-in extension of the official JetBrains Compose Desktop plugin. All existing configuration is preserved — Nucleus only adds new capabilities.
-
-## Step 1: Add the Plugin
-
-```diff
- plugins {
-     id("org.jetbrains.kotlin.jvm") version "2.3.10"
-     id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
-     id("org.jetbrains.compose") version "1.10.1"
-+    id("dev.nucleusframework") version "1.0.0"
- }
-```
-
-> The official `org.jetbrains.compose` plugin remains — Nucleus extends it, not replaces it.
-
-## Step 2: Update Imports
-
-Replace the JetBrains Compose DSL imports with the Nucleus equivalents:
-
-```diff
--import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-+import dev.nucleusframework.desktop.application.dsl.TargetFormat
-```
-
-This applies to all DSL types used in your `build.gradle.kts` (e.g. `TargetFormat`, `CompressionLevel`, `SigningAlgorithm`, etc.).
-
-## Step 3: Use the Nucleus DSL
-
-Replace the `compose.desktop.application` block with `nucleus.application` for packaging and distribution:
-
-```diff
--compose.desktop.application {
-+nucleus.application {
-     mainClass = "com.example.MainKt"
-
-     nativeDistributions {
-         targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-         packageName = "MyApp"
-         packageVersion = "1.0.0"
-
-         macOS {
-             bundleID = "com.example.myapp"
-             iconFile.set(project.file("icons/app.icns"))
-         }
-
-         windows {
-             iconFile.set(project.file("icons/app.ico"))
-         }
-
-         linux {
-             iconFile.set(project.file("icons/app.png"))
-         }
-     }
- }
-```
-
-**Using Compose Hot Reload?:** Nucleus automatically propagates `nucleus.application.mainClass` to `compose.desktop.application.mainClass`, so [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) tasks (`hotRun`, `hotSnapshotMain`) resolve the entry point with no extra configuration. You can still override it from the command line if needed:
-    ```bash
-    ./gradlew hotRun -PmainClass=com.example.MainKt
-    ```
-
-    On macOS with the `decorated-window-tao` backend, the plugin also auto-injects `-XstartOnFirstThread` into Hot Reload's `JavaExec` tasks so the Tao event loop has the main thread it requires.
-
-## Step 4: Add Nucleus Features (Optional)
-
-Enable the features you need. All are opt-in:
-
-```kotlin
-nucleus.application {
-    mainClass = "com.example.MainKt"
-
-    nativeDistributions {
-        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)
-        packageName = "MyApp"
-        packageVersion = "1.0.0"
-
-        // --- New Nucleus features ---
-        cleanupNativeLibs = true
-        enableAotCache = true
-        splashImage = "splash.png"
-        compressionLevel = CompressionLevel.Maximum
-        artifactName = "${name}-${version}-${os}-${arch}.${ext}"
-
-        // Deep links
-        protocol("MyApp", "myapp")
-
-        // File associations
-        fileAssociation(
-            mimeType = "application/x-myapp",
-            extension = "myapp",
-            description = "MyApp Document",
-        )
-
-        // New Linux targets
-        targetFormats(
-            TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb,
-            TargetFormat.AppImage, TargetFormat.Snap, TargetFormat.Flatpak, // NEW
-        )
-
-        // Publishing
-        publish {
-            github {
-                enabled = true
-                owner = "myorg"
-                repo = "myapp"
-            }
-        }
-
-        // NSIS customization
-        windows {
-            nsis {
-                oneClick = false
-                allowToChangeInstallationDirectory = true
-                createDesktopShortcut = true
-            }
-        }
-    }
-}
-```
-
-## Step 5: Add Runtime Libraries (Optional)
-
-```kotlin
-dependencies {
-    implementation(compose.desktop.currentOs)
-
-    // Executable type detection
-    implementation("dev.nucleusframework:nucleus.core-runtime:1.0.0")
-
-    // AOT cache runtime (if using enableAotCache)
-    implementation("dev.nucleusframework:nucleus.aot-runtime:1.0.0")
-
-    // Auto-update (if using publish)
-    implementation("dev.nucleusframework:nucleus.updater-runtime:1.0.0")
-
-    // Native taskbar/dock progress bar
-    implementation("dev.nucleusframework:nucleus.taskbar-progress:1.0.0")
-}
-```
-
-## What Changes
-
-| Feature | Before (compose) | After (nucleus)                                                                                                                       |
-|---------|-------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| DSL entry point | `compose.desktop.application` | `nucleus.application`                                                                                                                 |
-| DSL imports | `org.jetbrains.compose.desktop.application.dsl.*` | `dev.nucleusframework.desktop.application.dsl.*`                                                                            |
-| Target formats | DMG, PKG, MSI, EXE, DEB, RPM | + NSIS, AppX, Portable, AppImage, Snap, Flatpak, archives                                                                             |
-| Native lib cleanup | Manual | `cleanupNativeLibs = true`                                                                                                            |
-| AOT cache | Not available | `enableAotCache = true`                                                                                                               |
-| Splash screen | Manual | `splashImage = "splash.png"`                                                                                                          |
-| Deep links | Manual (macOS only via Info.plist) | Cross-platform `protocol("name", "scheme")`                                                                                           |
-| File associations | Limited | Cross-platform `fileAssociation()`                                                                                                    |
-| NSIS config | Not available | Full `nsis { }` DSL                                                                                                                   |
-| AppX config | Not available | Full `appx { }` DSL                                                                                                                   |
-| Snap config | Not available | Full `snap { }` DSL                                                                                                                   |
-| Flatpak config | Not available | Full `flatpak { }` DSL                                                                                                                |
-| Store pipeline | Not available | Automatic dual pipeline for store formats (PKG, AppX, Flatpak) with sandboxing for PKG and Flatpak                                    |
-| Auto-update | Not available | Built-in with YML metadata                                                                                                            |
-| Code signing | macOS only | + Windows PFX / Azure Artifact Signing                                                                                                |
-| DMG appearance | Not customizable (jpackage defaults) | Full `dmg { }` DSL: background, icon size, window layout, content positioning, format ([details](targets/macos.md#dmg-customization)) |
-| Artifact naming | Fixed | Template with `artifactName`                                                                                                          |
-
-## Important Differences from Compose Desktop
-
-### `homepage` is Required for Linux DEB
-
-Unlike Compose Desktop (which uses jpackage), Nucleus uses electron-builder for packaging. Electron-builder **requires** the `homepage` property when building DEB packages. Without it, the build will fail with:
-
-```
-Please specify project homepage, see https://electron.build/configuration
-```
-
-Make sure to set it in your `nativeDistributions` block:
-
-```kotlin
-nativeDistributions {
-    homepage = "https://myapp.example.com"
-}
-```
-
-This also applies to GraalVM native image packaging (`packageGraalvmDeb`).
-
-## What Stays the Same
-
-Everything from the official plugin works unchanged:
-
-- `mainClass`, `jvmArgs`
-- `nativeDistributions` block (metadata, icons, resources)
-- `buildTypes` / ProGuard configuration
-- `modules()` / `includeAllModules`
-- All existing Gradle tasks (`run`, `packageDmg`, `packageDeb`, etc.)
-- `compose.desktop.currentOs` dependency
-- Source set configuration
-- [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) — works out of the box since Nucleus extends the Compose plugin. `mainClass` set on `nucleus.application` is propagated automatically; `decorated-window-tao` projects also get `-XstartOnFirstThread` injected on macOS
-
----
+- License: Apache 2.0 / MIT
 
 ## Documentation
+- [Welcome to Nucleus 2.0](https://nucleusframework.dev/docs): Nucleus is a Kotlin framework for building native cross-platform desktop apps on top of Compose Multiplatform.
+- [Why Nucleus](https://nucleusframework.dev/docs/why-nucleus): Nucleus provides native desktop platform integrations and packaging for Compose Multiplatform apps written in Kotlin.
 
-- [Getting Started](https://nucleus.kdroidfilter.com/getting-started/)
-- [Configuration](https://nucleus.kdroidfilter.com/configuration/)
-- [macOS Targets](https://nucleus.kdroidfilter.com/targets/macos/)
-- [Windows Targets](https://nucleus.kdroidfilter.com/targets/windows/)
-- [Linux Targets](https://nucleus.kdroidfilter.com/targets/linux/)
-- [Sandboxing](https://nucleus.kdroidfilter.com/sandboxing/)
-- [Code Signing](https://nucleus.kdroidfilter.com/code-signing/)
-- [Auto Update](https://nucleus.kdroidfilter.com/auto-update/)
-- [Publishing](https://nucleus.kdroidfilter.com/publishing/)
-- [Trusted CA Certificates](https://nucleus.kdroidfilter.com/trusted-certificates/)
-- [AOT Cache](https://nucleus.kdroidfilter.com/runtime/aot-cache/)
-- [GraalVM Native Image](https://nucleus.kdroidfilter.com/graalvm/index/)
-- [Configuration](https://nucleus.kdroidfilter.com/graalvm/configuration/)
-- [Automatic Metadata Resolution](https://nucleus.kdroidfilter.com/graalvm/automatic-metadata/)
-- [Runtime Bootstrap](https://nucleus.kdroidfilter.com/graalvm/runtime-bootstrap/)
-- [Tasks & CI/CD](https://nucleus.kdroidfilter.com/graalvm/tasks-ci/)
-- [Nucleus Native Access](https://nucleus.kdroidfilter.com/native-access/index/)
-- [Supported Types](https://nucleus.kdroidfilter.com/native-access/types/)
-- [Usage & Patterns](https://nucleus.kdroidfilter.com/native-access/usage/)
-- [CI/CD](https://nucleus.kdroidfilter.com/ci-cd/)
-- [Runtime APIs](https://nucleus.kdroidfilter.com/runtime/index/)
-- [App Metadata (`NucleusApp`)](https://nucleus.kdroidfilter.com/runtime/app-metadata/)
-- [Executable Type Detection](https://nucleus.kdroidfilter.com/runtime/executable-type/)
-- [Single Instance](https://nucleus.kdroidfilter.com/runtime/single-instance/)
-- [Deep Links](https://nucleus.kdroidfilter.com/runtime/deep-links/)
-- [Decorated Window](https://nucleus.kdroidfilter.com/runtime/decorated-window/)
-- [Nucleus Application](https://nucleus.kdroidfilter.com/runtime/nucleus-application/)
-- [Decorated Window — Tao backend](https://nucleus.kdroidfilter.com/runtime/decorated-window-tao/)
-- [Decorated Window — Jewel](https://nucleus.kdroidfilter.com/runtime/decorated-window-jewel/)
-- [Decorated Window — Material 2](https://nucleus.kdroidfilter.com/runtime/decorated-window-material2/)
-- [Decorated Window — Material 3](https://nucleus.kdroidfilter.com/runtime/decorated-window-material3/)
-- [System Tray](https://nucleus.kdroidfilter.com/runtime/system-tray/index/)
-- [Tray API](https://nucleus.kdroidfilter.com/runtime/system-tray/tray-api/)
-- [Menu DSL](https://nucleus.kdroidfilter.com/runtime/system-tray/menu-dsl/)
-- [TrayApp](https://nucleus.kdroidfilter.com/runtime/system-tray/tray-app/)
-- [Utilities](https://nucleus.kdroidfilter.com/runtime/system-tray/utilities/)
-- [Notification (Common)](https://nucleus.kdroidfilter.com/runtime/notification-common/)
-- [Notification (macOS)](https://nucleus.kdroidfilter.com/runtime/notification-macos/)
-- [Notification (Windows)](https://nucleus.kdroidfilter.com/runtime/notification-windows/)
-- [Notification (Linux)](https://nucleus.kdroidfilter.com/runtime/notification-linux/)
-- [Launcher (macOS)](https://nucleus.kdroidfilter.com/runtime/launcher-macos/)
-- [Launcher (Windows)](https://nucleus.kdroidfilter.com/runtime/launcher-windows/)
-- [Launcher (Linux)](https://nucleus.kdroidfilter.com/runtime/launcher-linux/)
-- [Media Control](https://nucleus.kdroidfilter.com/runtime/media-control/)
-- [Dark Mode Detector](https://nucleus.kdroidfilter.com/runtime/darkmode-detector/)
-- [System Color](https://nucleus.kdroidfilter.com/runtime/system-color/)
-- [System Info](https://nucleus.kdroidfilter.com/runtime/system-info/)
-- [Energy Manager](https://nucleus.kdroidfilter.com/runtime/energy-manager/)
-- [Linux HiDPI](https://nucleus.kdroidfilter.com/runtime/linux-hidpi/)
-- [Taskbar Progress](https://nucleus.kdroidfilter.com/runtime/taskbar-progress/)
-- [Global Hotkey](https://nucleus.kdroidfilter.com/runtime/global-hotkey/)
-- [Menu (macOS)](https://nucleus.kdroidfilter.com/runtime/menu-macos/)
-- [Freedesktop Icons](https://nucleus.kdroidfilter.com/runtime/freedesktop-icons/)
-- [Scheduler](https://nucleus.kdroidfilter.com/runtime/scheduler/)
-- [Service Management (macOS)](https://nucleus.kdroidfilter.com/runtime/service-management-macos/)
-- [Auto-Launch](https://nucleus.kdroidfilter.com/runtime/autolaunch/)
-- [Native SSL](https://nucleus.kdroidfilter.com/runtime/native-ssl/)
-- [Native HTTP](https://nucleus.kdroidfilter.com/runtime/native-http/)
-- [Packaging](https://nucleus.kdroidfilter.com/comparison/packaging/)
-- [File Dialog](https://nucleus.kdroidfilter.com/ecosystem/file-dialog/)
-- [Spell Check](https://nucleus.kdroidfilter.com/ecosystem/spell-check/)
-- [Migration from org.jetbrains.compose](https://nucleus.kdroidfilter.com/migration/)
-- [Roadmap](https://nucleus.kdroidfilter.com/roadmap/)
+### Get started
 
-## Full LLM Documentation
+  - [Install](https://nucleusframework.dev/docs/start/install): Add the Nucleus Gradle plugin to a Kotlin project to build for macOS, Linux, and Windows from a single build.
+  - [Quickstart](https://nucleusframework.dev/docs/start/quickstart): Build and run your first Nucleus desktop app, then package it as a native installer.
+  - [Project setup](https://nucleusframework.dev/docs/start/project-setup): Configure repositories, the Nucleus plugin, runtime modules, a JDK toolchain, and a multi-module Gradle layout.
+  - [Configuration](https://nucleusframework.dev/docs/start/configuration): Configure the nucleus { } Gradle DSL — application metadata, packaging formats, per-OS options, GraalVM native image, AOT cache, deep links, file associations, and trusted CA injection.
 
-- [llms-full.txt](https://nucleus.kdroidfilter.com/llms-full.txt): Complete documentation in a single file
+### Concepts
 
+  - [Architecture](https://nucleusframework.dev/docs/concepts/architecture): The four layers that make up a Nucleus application and how they fit together.
+  - [Runtimes](https://nucleusframework.dev/docs/concepts/runtimes): Nucleus can run your packaged app as a GraalVM native image or on the JVM with an AOT cache, selected from the Gradle build.
+  - [Backends](https://nucleusframework.dev/docs/concepts/backends): Nucleus draws every window through the Tao backend behind the DecoratedWindow API. The legacy AWT backend is deprecated.
+  - [Modules](https://nucleusframework.dev/docs/concepts/modules): How Nucleus splits its runtime into independently versioned Gradle modules and how to add the ones you need.
+
+### Tao backend
+
+  - [The Tao backend](https://nucleusframework.dev/docs/tao): Tao is a Rust-native window backend that runs Compose Desktop without AWT and adds native Wayland, multi-touch, and pen input.
+  - [DecoratedWindow on Tao](https://nucleusframework.dev/docs/tao/decorated-window): Open a Compose Desktop window on the Tao backend with a custom title bar slot and native window controls, without AWT.
+  - [Native views on Tao](https://nucleusframework.dev/docs/tao/native-views): Embed a platform-native view — AppKit/SwiftUI, WebView2, or GTK — inside a Compose layout on the Tao backend.
+  - [Multi-touch & gestures](https://nucleusframework.dev/docs/tao/multi-touch): Read trackpad and touch gestures on the Tao backend through Compose pointer events, or the raw gesture stream.
+  - [Pen & stylus input](https://nucleusframework.dev/docs/tao/pen-stylus): Read pen and touchscreen pressure from Compose pointer events on the Tao backend.
+  - [Drag and drop](https://nucleusframework.dev/docs/tao/drag-and-drop): Receive dropped files on the Tao backend through the standard Compose dragAndDropTarget API.
+  - [Accessibility](https://nucleusframework.dev/docs/tao/accessibility): The Tao accessibility bridge projects your Compose semantics tree onto the native accessibility API of each operating system.
+  - [Native Wayland](https://nucleusframework.dev/docs/tao/wayland): The Tao backend renders Compose Desktop apps directly on Wayland and falls back to X11 automatically.
+  - [Per-monitor HiDPI](https://nucleusframework.dev/docs/tao/hidpi): The Tao backend tracks a per-window scale factor so Compose layouts stay in Dp while rendering matches each display's pixel density.
+  - [Taskbar progress](https://nucleusframework.dev/docs/tao/taskbar-progress): Show determinate, indeterminate, and error progress on the taskbar or dock from a Tao window.
+  - [Migrate from JBR to Tao](https://nucleusframework.dev/docs/tao/migration-from-jbr): Switch an existing Nucleus app from the AWT backend to the Tao backend and retest the platform integrations that change.
+
+### Window & toolkits
+
+  - [Window & toolkits](https://nucleusframework.dev/docs/window): How Nucleus opens native desktop windows from Compose through the DecoratedWindow composable, the TitleBar slot, and the toolkit modules that restyle them.
+  - [Four native looks](https://nucleusframework.dev/docs/window/toolkits): Nucleus toolkit modules restyle the same DecoratedWindow to match each desktop's design language.
+  - [Jewel — IntelliJ Platform](https://nucleusframework.dev/docs/window/toolkit-jewel): Style a DecoratedWindow with Jewel colors and metrics so the title bar and chrome match the IntelliJ Platform look.
+  - [Material 2 & Material 3](https://nucleusframework.dev/docs/window/toolkit-material): Theme a Nucleus DecoratedWindow from a Compose MaterialTheme, using either the Material 2 or Material 3 adapter.
+
+### OS integration
+
+  - [OS integration](https://nucleusframework.dev/docs/os): Kotlin modules that expose native macOS, Windows, and Linux desktop capabilities such as notifications, system tray, global hotkeys, media controls, dark mode, and system colors.
+  - [Cross-platform notifications](https://nucleusframework.dev/docs/os/notifications): Send desktop notifications on macOS, Windows, and Linux from a single Kotlin API.
+  - [Notifications on macOS](https://nucleusframework.dev/docs/os/notification-macos): Kotlin bindings for Apple's UserNotifications framework, covering authorization, categories, attachments, text input, schedules, and interruption levels.
+  - [Notifications on Windows](https://nucleusframework.dev/docs/os/notification-windows): Send Windows toast notifications from Kotlin with adaptive layouts, images, buttons, text input, and progress bars.
+  - [Notifications on Linux](https://nucleusframework.dev/docs/os/notification-linux): Send freedesktop desktop notifications over D-Bus from Kotlin, with urgency, hints, sounds, and action callbacks.
+  - [System tray](https://nucleusframework.dev/docs/os/system-tray): Render a tray icon and a native context menu from Compose on macOS, Windows, and Linux.
+  - [Tray menu DSL](https://nucleusframework.dev/docs/os/tray-menu-dsl): Build the tray context menu from Kotlin with items, checkable items, submenus, dividers, and conditional content.
+  - [Tray-anchored apps](https://nucleusframework.dev/docs/os/tray-app): TrayApp anchors a Compose popup window to a system tray icon so you can build menu bar apps in Kotlin.
+  - [Global hotkeys](https://nucleusframework.dev/docs/os/global-hotkey): Register OS-wide keyboard shortcuts that fire even when your app does not have focus.
+  - [Media controls](https://nucleusframework.dev/docs/os/media-control): Publish now-playing metadata to the system media center and handle playback commands on macOS, Windows, and Linux from Kotlin.
+  - [Dark mode detector](https://nucleusframework.dev/docs/os/dark-mode): Detect the operating system's dark mode from Kotlin and recompose your Compose UI when the theme changes.
+  - [System accent colour](https://nucleusframework.dev/docs/os/system-color): Read the user's OS accent colour and high-contrast setting as reactive Compose state.
+  - [System info](https://nucleusframework.dev/docs/os/system-info): Read host details — OS, CPU, memory, disks, GPUs, batteries, network, processes, and users — through the SystemInfo object.
+  - [macOS menu bar](https://nucleusframework.dev/docs/os/menu-macos): Build the native macOS menu bar from Compose, with items, keyboard shortcuts, icons, badges, and submenus that react to state.
+  - [SF Symbols](https://nucleusframework.dev/docs/os/sf-symbols): Type-safe Kotlin constants for Apple SF Symbol names used by macOS APIs.
+  - [FreeDesktop icon names](https://nucleusframework.dev/docs/os/freedesktop-icons): Typed Kotlin constants for the names defined by the FreeDesktop Icon Naming Specification.
+
+### Lifecycle
+
+  - [App lifecycle, from cold launch to sleep](https://nucleusframework.dev/docs/lifecycle): The lifecycle modules connect a Nucleus app to the OS events and services that outlive any single window.
+  - [One app, one process](https://nucleusframework.dev/docs/lifecycle/single-instance): Enforce a single running instance of your app and forward a second launch's arguments to the primary process.
+  - [Deep links and URL schemes](https://nucleusframework.dev/docs/lifecycle/deep-links): Register a custom URL scheme at packaging time and receive the incoming deep-link URI in your Nucleus app at runtime.
+  - [App metadata at runtime](https://nucleusframework.dev/docs/lifecycle/app-metadata): Read your app's id, version, vendor, display name, and Windows AUMID from Kotlin at runtime.
+  - [How was I launched?](https://nucleusframework.dev/docs/lifecycle/executable-type): Detect at runtime how the app was packaged and launched, from a DMG or Snap to a plain ./gradlew run.
+  - [Launcher (macOS)](https://nucleusframework.dev/docs/lifecycle/launcher-macos): Populate the Dock right-click menu of a macOS app with items, submenus, and separators, and handle clicks from Kotlin.
+  - [Launcher (Windows)](https://nucleusframework.dev/docs/lifecycle/launcher-windows): Drive the Windows taskbar from Kotlin with overlay icons, jump lists, thumbnail toolbar buttons, and badges.
+  - [Launcher (Linux)](https://nucleusframework.dev/docs/lifecycle/launcher-linux): Set count badges, progress bars, urgency flags, and right-click quicklist menus on the Linux launcher from Kotlin.
+  - [Launch at login](https://nucleusframework.dev/docs/lifecycle/auto-launch): Enable, disable, and query start-at-login from Kotlin with a single API that resolves the backend for the current packaging format.
+  - [Scheduler — cron jobs that survive reboots](https://nucleusframework.dev/docs/lifecycle/scheduler): Run periodic, calendar, and on-boot background tasks from Kotlin that the OS fires on schedule even when your app is closed.
+  - [Scheduler testing](https://nucleusframework.dev/docs/lifecycle/scheduler-testing): Test doubles for the scheduler that run background tasks in memory, with virtual time and controllable constraints.
+  - [Service Management (macOS)](https://nucleusframework.dev/docs/lifecycle/service-management): Register login items, launch agents, and launch daemons through the macOS SMAppService API from Kotlin.
+  - [Energy manager](https://nucleusframework.dev/docs/lifecycle/energy-manager): Lower your app's OS scheduling priority and keep the display awake from Kotlin.
+  - [Taskbar progress](https://nucleusframework.dev/docs/lifecycle/taskbar-progress): Draw progress bars and attention requests on the dock, taskbar button, or Unity launcher entry from Kotlin.
+  - [Filesystem watcher](https://nucleusframework.dev/docs/lifecycle/fs-watcher): Watch files and directories for changes from Kotlin and receive create, modify, remove, and move events as a coroutine Flow.
+
+### Performance & native
+
+  - [Performance and native runtimes](https://nucleusframework.dev/docs/performance): Nucleus builds the same Kotlin source into two runtimes — a GraalVM native image or a JDK 25 image with an AOT cache — selected from one Gradle DSL.
+
+#### GraalVM Native Image
+
+    - [GraalVM Native Image](https://nucleusframework.dev/docs/performance/graalvm): GraalVM Native Image compiles a Nucleus app ahead of time into a self-contained native binary, with reflection, resource, and JNI metadata generated for every Nucleus module.
+    - [Configuration](https://nucleusframework.dev/docs/performance/graalvm/configuration): Reference for the graalvm { } DSL block that configures GraalVM native-image builds, including toolchain, image name, build arguments, metadata repository, and per-OS settings.
+    - [Automatic metadata resolution](https://nucleusframework.dev/docs/performance/graalvm/automatic-metadata): How Nucleus resolves and merges GraalVM reachability metadata at build time so native images compile without hand-written configuration.
+    - [Runtime bootstrap](https://nucleusframework.dev/docs/performance/graalvm/runtime-bootstrap): The graalvm-runtime module prepares a Compose Desktop app to start under a GraalVM native-image build through a single GraalVmInitializer.initialize() call.
+    - [Tasks & CI](https://nucleusframework.dev/docs/performance/graalvm/tasks-ci): The Gradle tasks the Nucleus plugin adds for GraalVM native image, where their output lands, and how to run them on each OS in CI.
+  - [AOT cache](https://nucleusframework.dev/docs/performance/aot-cache): Generate a Project Leyden AOT cache at build time and bundle it with your installer to skip JVM warmup at launch.
+  - [Native access — reflection metadata, resolved for you](https://nucleusframework.dev/docs/performance/native-access): Nucleus generates the reflection, resource, and JNI metadata a GraalVM Native Image build needs, merging it from several sources so the build compiles without hand-written JSON.
+  - [Native HTTP — the OS trust store, pre-wired](https://nucleusframework.dev/docs/performance/native-http): Preconfigure java.net.http.HttpClient, OkHttp, or Ktor with the operating system trust store through NativeTrustManager.
+  - [Native SSL](https://nucleusframework.dev/docs/performance/native-ssl): Read trusted certificates from the operating system store and merge them with the JVM defaults into a single trust manager.
+  - [Linux HiDPI — native scale detection for AWT/JBR](https://nucleusframework.dev/docs/performance/linux-hidpi): linux-hidpi reads the Linux display scale factor through a JNI bridge and applies it before AWT initializes.
+
+### Packaging & distribution
+
+  - [One DSL, eighteen installers](https://nucleusframework.dev/docs/packaging): Declare the desktop distribution formats you need in the Gradle plugin's DSL and build each one the host operating system supports.
+  - [Building for macOS](https://nucleusframework.dev/docs/packaging/macos): Package a Nucleus app for macOS as a DMG or a Mac App Store PKG, then sign and notarize the build.
+  - [Building for Windows](https://nucleusframework.dev/docs/packaging/windows): Package a Nucleus app for Windows as an NSIS, MSI, MSIX/AppX, or Portable build and sign it for distribution.
+  - [Building for Linux](https://nucleusframework.dev/docs/packaging/linux): Configure a Nucleus app to build DEB, RPM, AppImage, and pacman packages and publish to the Snap and Flatpak stores.
+  - [Code signing](https://nucleusframework.dev/docs/packaging/code-signing): Sign and notarize your app's installers on macOS, sign with a PFX certificate or Azure Artifact Signing on Windows, and GPG-sign DEB/RPM packages on Linux.
+  - [Trusted CA certificates](https://nucleusframework.dev/docs/packaging/trusted-certificates): Import private root CA certificates into the JDK bundled with your packaged app so its HTTPS calls trust them.
+  - [Sandboxing](https://nucleusframework.dev/docs/packaging/sandboxing): How Nucleus builds sandboxed distributions for the App Store, Flatpak, and MSIX store formats.
+  - [Auto-update](https://nucleusframework.dev/docs/packaging/auto-update): Check for, download, verify, and install application updates from Kotlin, without a third-party service.
+  - [Publishing](https://nucleusframework.dev/docs/packaging/publishing): Configure Nucleus to publish signed installers and auto-update metadata to GitHub Releases, S3, or a generic HTTP host.
+  - [CI/CD](https://nucleusframework.dev/docs/packaging/ci-cd): Build, sign, and publish a Nucleus desktop app across macOS, Windows, and Linux with the composite GitHub Actions shipped in the Nucleus repository.
+
+### Compare
+
+  - [Why Nucleus](https://nucleusframework.dev/docs/compare): How Nucleus compares with Electron, Tauri, and vanilla Compose Multiplatform for building desktop apps in Kotlin.
+  - [Packaging — Nucleus vs the rest](https://nucleusframework.dev/docs/compare/packaging): How Nucleus compares with jpackage, Compose Multiplatform, Conveyor, install4j, and other JVM packaging tools across formats, auto-update, signing, CI, and store distribution.
+  - [Nucleus vs Electron](https://nucleusframework.dev/docs/compare/electron): How Nucleus and Electron differ in rendering, OS access, window decorations, and packaging.
+  - [Nucleus vs Tauri](https://nucleusframework.dev/docs/compare/tauri): Compare Nucleus and Tauri across language, rendering, process model, and packaging.
+  - [Nucleus vs vanilla Compose Multiplatform](https://nucleusframework.dev/docs/compare/cmp-default): What Nucleus adds on top of JetBrains' default Compose Desktop packaging plugin.
+
+### Ecosystem
+
+  - [Thirty years of mature libraries, native to your app](https://nucleusframework.dev/docs/ecosystem): Nucleus apps run on the JVM, so any library on Maven Central is a Gradle dependency away; this page groups the common desktop choices by task.
+  - [Native file dialogs](https://nucleusframework.dev/docs/ecosystem/file-dialog): Use FileKit for native open, save, and folder pickers, with GraalVM metadata bundled by the Nucleus plugin.
+  - [Native spell check](https://nucleusframework.dev/docs/ecosystem/spell-check): Check spelling in a Kotlin desktop app with PlatformSpellCheckerKt, a wrapper over each operating system's native spell-check engine.
+
+### Migrate
+
+  - [Migrating from Nucleus 1.x to 2.0](https://nucleusframework.dev/docs/migrate/from-1.x): Port a Nucleus 1.x desktop app to 2.0 by renaming the project namespace and moving bootstrap into nucleusApplication.
+  - [Migrating from JetBrains Compose Desktop](https://nucleusframework.dev/docs/migrate/from-jb-compose): Add Nucleus to an existing JetBrains Compose Desktop project and move its build configuration to the Nucleus DSL.
+
+### Reference
+
+  - [Gradle DSL reference](https://nucleusframework.dev/docs/reference/gradle-dsl): Every property and sub-block of the nucleus { } Gradle extension, verified against the plugin source.
+  - [Troubleshooting](https://nucleusframework.dev/docs/reference/troubleshooting): Common build, packaging, signing, and runtime problems in Nucleus, with the cause and fix for each.
+- [Roadmap](https://nucleusframework.dev/docs/roadmap): What shipped in Nucleus 2.0, the modules planned for 2.1 and 2.2, and features under consideration.
+- [Changelog](https://nucleusframework.dev/docs/changelog): Release notes for every Nucleus release, newest first.
+
+## Full documentation
+
+- [llms-full.txt](https://nucleusframework.dev/llms-full.txt): the complete documentation in a single file
