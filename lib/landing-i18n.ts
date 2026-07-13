@@ -244,7 +244,7 @@ export const toolkitsT = {
     en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, or IntelliJ Jewel. Each toolkit ships with a matching DecoratedWindow. macOS and Yaru are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
     fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS, Windows 11 Fluent, Ubuntu Yaru ou IntelliJ Jewel. Chaque toolkit embarque un DecoratedWindow assorti. macOS et Yaru sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
   } as Bi<string>,
-  isNew: { en: 'New · 2.0', fr: 'Nouveau · 2.0' } as Bi<string>,
+  isNew: { en: 'Coming soon', fr: 'Prochainement' } as Bi<string>,
   macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,
   fluentOs: { en: 'Windows 11', fr: 'Windows 11' } as Bi<string>,
   yaruStyle: { en: 'GTK · LibAdwaita', fr: 'GTK · LibAdwaita' } as Bi<string>,
