@@ -9,10 +9,10 @@ export function RuntimeChoice() {
   const isGraal = mode === 'graal';
 
   // numbers driven by mode
-  const cold = isGraal ? '0.05' : '1.2';
-  const peak = isGraal ? '85' : '98';
-  const ram = isGraal ? '60' : '180';
-  const bin = isGraal ? '38' : '55';
+  const cold = isGraal ? '0.5' : '1.0';
+  const peak = isGraal ? '82' : '96';
+  const ram = isGraal ? '60' : '150';
+  const bin = isGraal ? '38' : '120';
 
   return (
     <section className="rc" id="runtime-choice">
@@ -54,7 +54,7 @@ export function RuntimeChoice() {
               <div className="rc-num-k">Cold start</div>
               <div className="rc-num-v">{cold}<span>s</span></div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '6%' : '85%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '45%' : '90%' }}/>
               </div>
             </div>
             <div className="rc-num">
@@ -69,7 +69,7 @@ export function RuntimeChoice() {
               <div className="rc-num-k">RAM at idle</div>
               <div className="rc-num-v">{ram}<span>MB</span></div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '15%' : '45%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '36%' : '90%' }}/>
               </div>
             </div>
             <div className="rc-num">
@@ -77,7 +77,7 @@ export function RuntimeChoice() {
               <div className="rc-num-v">{bin}<span>MB</span></div>
               <div className="rc-num-sub">{isGraal ? 'Self-contained, no JRE' : 'Pre-baked AOT cache included'}</div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '20%' : '28%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '29%' : '90%' }}/>
               </div>
             </div>
           </div>
@@ -89,7 +89,7 @@ export function RuntimeChoice() {
                   <span className="rc-pro-dot"/>
                   <div>
                     <div className="rc-pro-h">Instant. Really instant.</div>
-                    <div className="rc-pro-d">~50&nbsp;ms from <code>./MyApp</code> to first frame — feels like opening a config file.</div>
+                    <div className="rc-pro-d">~0.5&nbsp;s from <code>./MyApp</code> to first frame — feels like opening a config file.</div>
                   </div>
                 </div>
                 <div className="rc-pro">

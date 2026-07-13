@@ -135,7 +135,7 @@ export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
         tagline={pick(rmodeT.nativeTagline, lang)}
         desc={pick(rmodeT.nativeDesc, lang)}
         stats={[
-          { label: coldStart, value: 0.48, fmt: (n) => n.toFixed(2), unit: 's' },
+          { label: coldStart, value: 0.5,  fmt: (n) => n.toFixed(1), unit: 's' },
           { label: ram,       value: 60,   fmt: (n) => Math.round(n), unit: 'MB' },
           { label: binary,    value: 38,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
@@ -162,9 +162,9 @@ export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
         tagline={pick(rmodeT.aotTagline, lang)}
         desc={pick(rmodeT.aotDesc, lang)}
         stats={[
-          { label: coldStart, value: 1.5,  fmt: (n) => n.toFixed(1), unit: 's' },
-          { label: ram,       value: 180,  fmt: (n) => Math.round(n), unit: 'MB' },
-          { label: binary,    value: 55,   fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: coldStart, value: 1.0,  fmt: (n) => n.toFixed(1), unit: 's' },
+          { label: ram,       value: 150,  fmt: (n) => Math.round(n), unit: 'MB' },
+          { label: binary,    value: 120,  fmt: (n) => Math.round(n), unit: 'MB' },
         ]}
         throughputLabel={pick(rmodeT.aotThruLabel, lang)}
         throughputPct={96}

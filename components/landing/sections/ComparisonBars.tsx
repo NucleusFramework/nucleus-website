@@ -10,9 +10,9 @@ interface Row {
 }
 
 const ROWS: Row[] = [
-  { key: 'Cold start', electron: { v: 1800, label: '~1.8 s' }, nucleus: { v: 500, label: '~0.5 s' } },
-  { key: 'RAM at idle', electron: { v: 600, label: '~600 MB' }, nucleus: { v: 60, label: '~60 MB' } },
-  { key: 'Installer size', electron: { v: 180, label: '~180 MB' }, nucleus: { v: 38, label: '~38 MB' } },
+  { key: 'Cold start', electron: { v: 2500, label: '~2.5 s' }, nucleus: { v: 500, label: '~0.5 s' } },
+  { key: 'RAM at idle', electron: { v: 350, label: '~350 MB' }, nucleus: { v: 60, label: '~60 MB' } },
+  { key: 'Binary size', electron: { v: 180, label: '~180 MB' }, nucleus: { v: 38, label: '~38 MB' } },
 ];
 
 export function ComparisonBars() {
