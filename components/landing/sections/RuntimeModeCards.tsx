@@ -135,7 +135,7 @@ export function RuntimeModeCards({ lang }: RuntimeModeCardsProps) {
         tagline={pick(rmodeT.nativeTagline, lang)}
         desc={pick(rmodeT.nativeDesc, lang)}
         stats={[
-          { label: coldStart, value: 0.5,  fmt: (n) => n.toFixed(1), unit: 's' },
+          { label: coldStart, value: 0.2,  fmt: (n) => n.toFixed(1), unit: 's' },
           { label: ram,       value: 35,   fmt: (n) => Math.round(n), unit: 'MB' },
           { label: binary,    value: 40,   fmt: (n) => Math.round(n), unit: 'MB' },
         ]}

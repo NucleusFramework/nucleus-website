@@ -51,7 +51,7 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
           <div className="hero-atom-labels" aria-hidden="true">
             <div className="hero-atom-label hero-label-tl">
               <span className="hero-label-key">{pick(heroT.coldStart, lang)}</span>
-              <span className="hero-label-val">~0.5<span className="hero-label-unit">s</span></span>
+              <span className="hero-label-val">~0.2<span className="hero-label-unit">s</span></span>
             </div>
             <div className="hero-atom-label hero-label-tr">
               <span className="hero-label-key">{pick(heroT.ram, lang)}</span>
