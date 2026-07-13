@@ -6,9 +6,10 @@ description: Tao is a Rust-native window backend that runs Compose Desktop witho
 import { Callout } from 'fumadocs-ui/components/callout';
 
 Tao is the Rust windowing crate that also underpins Tauri 2. Nucleus wraps it as a window
-backend: Compose Desktop renders into a native OS window instead of an AWT frame, so there
-is no Swing event-dispatch thread and no XWayland fallback. Tao is the default backend for
-new Nucleus apps, and the AWT backends stay available in the same release.
+backend: Compose Desktop renders into a native OS window, so there is no Swing event-dispatch
+thread and no XWayland fallback. Tao is the backend for new Nucleus apps. The legacy AWT
+backend is deprecated and will be removed in a future release — see
+[migration from JBR](/docs/tao/migration-from-jbr).
 
 ## Add the dependency
 
@@ -51,8 +52,8 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 }
 ```
 
-`DecoratedWindow` and `TitleBar` are the same Composables the AWT backends expose, so your
-UI code does not change when you switch backends.
+`DecoratedWindow` and `TitleBar` are the same Composables across backends, so your UI code
+does not change when you switch backends.
 
 ## How it works
 
@@ -69,19 +70,6 @@ by default.
 The `nucleusApplication { }` entry point hides the backend choice from UI code. On the Tao
 backend the same window exposes an imperative `TaoWindow` handle underneath, which you reach
 through `nucleusWindow.unsafe.taoWindow` when you need to call into the native crate directly.
-
-## Tao and the AWT backends
-
-| Feature                       | JBR / JNI (AWT)   | Tao                        |
-|-------------------------------|-------------------|----------------------------|
-| Compose Desktop rendering     | Yes (AWT + Skiko) | Yes (native + Skiko)       |
-| AWT / Swing interop           | Yes               | No                         |
-| Wayland (native, no XWayland) | No (X11 fallback) | Yes                        |
-| Multi-touch and gestures      | Limited           | Yes (pinch, swipe, rotate) |
-| Pen / stylus (pressure, tilt) | No                | Yes                        |
-| Per-monitor HiDPI             | Partial           | Yes                        |
-| Embedded native views         | No                | Yes (`NativeView`)         |
-| GraalVM native-image          | Partial           | Yes (no AWT surface)       |
 
 ## API reference
 
