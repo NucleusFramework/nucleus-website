@@ -115,9 +115,44 @@ fonctionne que la dépendance soit `-tao`, `-jbr` ou `-jni`.
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Flags de fenêtre standard. |
 | `undecorated` | `Boolean` | Fenêtre sans cadre ni contrôles. Pris en compte par Tao ; ignoré par AWT. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao uniquement : attache la fenêtre comme popup superposée à une autre. |
+| `hiddenFromDock` | `Boolean` | Défaut `false`. Masque la fenêtre de la barre des tâches / du Dock de l'OS. Pris en compte par Tao ; ignoré par AWT. |
 | `minimumSize` | `DpSize?` | Appliqué après la première passe de layout. |
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Renvoie `true` pour consommer l'événement. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Slot barre de titre plus ton UI. |
+
+### Masquer de la barre des tâches / du Dock
+
+`hiddenFromDock` garde la fenêtre visible et focusable tout en la retirant de la liste des
+fenêtres au niveau OS — utile pour les HUD, les overlays et les fenêtres utilitaires en
+arrière-plan qui ne doivent pas encombrer la barre des tâches ou le sélecteur d'apps :
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    hiddenFromDock = true,
+) {
+    // ...
+}
+```
+
+Le mécanisme diffère selon la plateforme :
+
+- **macOS** — bascule la `NSApplication` partagée vers la politique d'activation accessoire (pas
+  d'icône dans le Dock, pas de barre de menu). C'est à l'échelle de l'app, pas par fenêtre : la
+  dernière fenêtre qui applique le flag l'emporte.
+- **Windows** — positionne `WS_EX_TOOLWINDOW` sur la fenêtre, ce qui supprime son bouton dans la
+  barre des tâches et son entrée dans Alt+Tab. Par fenêtre.
+- **Linux** — positionne les hints GTK skip-taskbar/skip-pager (`_NET_WM_STATE_SKIP_TASKBAR`).
+  Par fenêtre, et effectif uniquement sous X11 ou XWayland.
+
+<Callout type="warn">
+Sous Wayland natif, `hiddenFromDock` n'a aucun effet — Wayland n'a pas de protocole
+client-side pour skip-taskbar (`xdg-shell`, `gtk_shell1` et les extensions layer-shell en staging
+n'en ont pas, et Mutter rejette `wlr-layer-shell`). Nucleus journalise un avertissement plutôt que
+d'échouer silencieusement. Force XWayland avec `NUCLEUS_TAO_LINUX_RENDERER=x11` si tu as besoin que
+la fenêtre soit réellement masquée sur une session Wayland — voir
+[Wayland natif](/docs/tao/wayland).
+</Callout>
 
 ### Membres de scope
 
@@ -143,7 +178,7 @@ interface NucleusWindow {
 
 ### Modifiers de barre de titre
 
-- `Modifier.macOSLargeCornerRadius()` — active les coins arrondis de macOS 11+.
+- `Modifier.macOSLargeCornerRadius()` — active les coins arrondis de macOS 26+.
 - `Modifier.newFullscreenControls()` — réagence les boutons de la barre de titre en plein écran.
 
 <Callout type="tip">

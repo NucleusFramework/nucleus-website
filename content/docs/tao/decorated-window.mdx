@@ -113,9 +113,42 @@ provides them through composition locals. The same theme works whether the depen
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Standard window flags. |
 | `undecorated` | `Boolean` | Borderless window with no controls. Honored by Tao; ignored by AWT. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. |
+| `hiddenFromDock` | `Boolean` | Default `false`. Hide this window from the OS taskbar/Dock. Honored by Tao; ignored by AWT. |
 | `minimumSize` | `DpSize?` | Enforced after the first layout pass. |
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Return `true` to consume the event. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot plus your UI. |
+
+### Hiding from the taskbar/Dock
+
+`hiddenFromDock` keeps the window visible and focusable while removing it from the OS-level
+window list — useful for HUDs, overlays, and background utility windows that should not clutter
+the taskbar or app switcher:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    hiddenFromDock = true,
+) {
+    // ...
+}
+```
+
+The mechanism differs per platform:
+
+- **macOS** — switches the shared `NSApplication` to the accessory activation policy (no Dock
+  icon, no menu bar). This is app-wide, not per-window: the last window to apply the flag wins.
+- **Windows** — sets `WS_EX_TOOLWINDOW` on the window, which drops its taskbar button and its
+  Alt+Tab entry. Per-window.
+- **Linux** — sets the GTK skip-taskbar/skip-pager hints (`_NET_WM_STATE_SKIP_TASKBAR`).
+  Per-window, and only effective on X11 or XWayland.
+
+<Callout type="warn">
+On native Wayland, `hiddenFromDock` has no effect — Wayland has no client-side skip-taskbar
+protocol (`xdg-shell`, `gtk_shell1`, and the staging layer-shell extensions all lack it, and Mutter
+rejects `wlr-layer-shell`). Nucleus logs a warning rather than failing silently. Force XWayland with
+`NUCLEUS_TAO_LINUX_RENDERER=x11` if you need the window actually hidden on a Wayland session — see
+[Native Wayland](/docs/tao/wayland).
+</Callout>
 
 ### Scope members
 
@@ -141,7 +174,7 @@ interface NucleusWindow {
 
 ### Title bar modifiers
 
-- `Modifier.macOSLargeCornerRadius()` — opt into macOS 11+ rounded corners.
+- `Modifier.macOSLargeCornerRadius()` — opt into macOS 26+ rounded corners.
 - `Modifier.newFullscreenControls()` — relayout the title bar buttons for fullscreen.
 
 <Callout type="tip">

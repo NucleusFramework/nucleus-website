@@ -55,11 +55,11 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
             </div>
             <div className="hero-atom-label hero-label-tr">
               <span className="hero-label-key">{pick(heroT.ram, lang)}</span>
-              <span className="hero-label-val">60<span className="hero-label-unit">MB</span></span>
+              <span className="hero-label-val">35<span className="hero-label-unit">MB</span></span>
             </div>
             <div className="hero-atom-label hero-label-bl">
               <span className="hero-label-key">{pick(heroT.modules, lang)}</span>
-              <span className="hero-label-val">30<span className="hero-label-unit">+</span></span>
+              <span className="hero-label-val">40<span className="hero-label-unit">+</span></span>
             </div>
             <div className="hero-atom-label hero-label-br">
               <span className="hero-label-key">{pick(heroT.formats, lang)}</span>

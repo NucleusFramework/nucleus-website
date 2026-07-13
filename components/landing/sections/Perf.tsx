@@ -17,6 +17,7 @@ export function Perf({ lang }: PerfProps) {
           subtitle={pick(perfT.subtitle, lang)}
         />
         <RuntimeModeCards lang={lang}/>
+        <p className="perf-footnote">{pick(perfT.footnote, lang)}</p>
       </div>
     </section>
   );

@@ -49,7 +49,7 @@ export function Features() {
       <div className="section-inner">
         <SectionHeading
           eyebrow="Runtime"
-          title={<>30+ modules. <br/>Every OS feature, <span className="hero-grad">first-class</span>.</>}
+          title={<>40+ modules. <br/>Every OS feature, <span className="hero-grad">first-class</span>.</>}
           subtitle="Nucleus doesn't just expose native APIs — it makes them simpler than the originals. A clean Kotlin API per platform feature, same shape everywhere."
         />
         <div className="feat-grid">

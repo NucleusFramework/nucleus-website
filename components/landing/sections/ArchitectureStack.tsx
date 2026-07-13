@@ -63,7 +63,7 @@ export function ArchitectureStack() {
             <div className="stack-nucleus-name">Nucleus 2.0</div>
           </div>
           <div className="stack-nucleus-meta">
-            <span className="stack-nucleus-meta-v">30<small>+</small></span>
+            <span className="stack-nucleus-meta-v">40<small>+</small></span>
             <span className="stack-nucleus-meta-k">runtime modules</span>
           </div>
         </div>

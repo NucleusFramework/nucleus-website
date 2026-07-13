@@ -11,8 +11,8 @@ export function RuntimeChoice() {
   // numbers driven by mode
   const cold = isGraal ? '0.5' : '1.0';
   const peak = isGraal ? '82' : '96';
-  const ram = isGraal ? '60' : '150';
-  const bin = isGraal ? '38' : '120';
+  const ram = isGraal ? '35' : '120';
+  const bin = isGraal ? '40' : '60';
 
   return (
     <section className="rc" id="runtime-choice">
@@ -69,7 +69,7 @@ export function RuntimeChoice() {
               <div className="rc-num-k">RAM at idle</div>
               <div className="rc-num-v">{ram}<span>MB</span></div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '36%' : '90%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '26%' : '90%' }}/>
               </div>
             </div>
             <div className="rc-num">
@@ -77,7 +77,7 @@ export function RuntimeChoice() {
               <div className="rc-num-v">{bin}<span>MB</span></div>
               <div className="rc-num-sub">{isGraal ? 'Self-contained, no JRE' : 'Pre-baked AOT cache included'}</div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '29%' : '90%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '60%' : '90%' }}/>
               </div>
             </div>
           </div>

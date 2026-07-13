@@ -150,7 +150,7 @@ export const kmpT = {
   webDist: { en: 'Push to any CDN', fr: 'Push sur n\'importe quel CDN' } as Bi<string>,
 
   // Desktop
-  desktopApis: { en: '30+ Kotlin modules · Native Access via Kotlin/Native', fr: '30+ modules Kotlin · accès natif via Kotlin/Native' } as Bi<string>,
+  desktopApis: { en: '40+ Kotlin modules · Native Access via Kotlin/Native', fr: '40+ modules Kotlin · accès natif via Kotlin/Native' } as Bi<string>,
   desktopUi: { en: 'macOS · Fluent · Yaru in Compose + native overlay', fr: 'macOS · Fluent · Yaru en Compose + overlay natif' } as Bi<string>,
   desktopInput: { en: 'Mouse · keyboard · multi-touch · pen · Wayland gestures', fr: 'Souris · clavier · multi-touch · stylet · gestes Wayland' } as Bi<string>,
   desktopOpt: { en: 'GraalVM closed-world · JIT + AOT cache · native-lib stripping', fr: 'GraalVM closed-world · cache JIT + AOT · stripping des libs natives' } as Bi<string>,
@@ -304,6 +304,10 @@ export const perfT = {
   subtitle: {
     en: "Same Kotlin code, two runtimes: a GraalVM native image for instant cold start and a tiny resident set, or a modern JDK with AOT cache where HotSpot's JIT gets close to C++ and Rust on hot paths. Same source. Same build.",
     fr: "Le même code Kotlin, deux runtimes : une image native GraalVM pour un démarrage à froid instantané et une empreinte minuscule, ou un JDK moderne avec cache AOT où le JIT de HotSpot s'approche du C++ et de Rust sur les chemins chauds. Même source. Même build.",
+  } as Bi<string>,
+  footnote: {
+    en: '* Cold start and RAM measured on Windows 11 with a Hello World build. Binary size is the NSIS installer with maximum compression.',
+    fr: '* Démarrage à froid et RAM mesurés sur Windows 11 avec un build Hello World. La taille du binaire correspond à l’installateur NSIS avec compression maximale.',
   } as Bi<string>,
 };
 

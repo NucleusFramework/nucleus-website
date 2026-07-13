@@ -19,7 +19,7 @@ Nucleus is a Kotlin framework for building cross-platform native desktop applica
 - **One language across platforms.** Share Kotlin code with your Android, iOS, and web apps, with Compose UI on top.
 - **Tao backend (new in 2.0).** Rust-based native windowing with Wayland support, multi-touch, and pen input.
 - **Two runtimes, one DSL.** Run as a GraalVM Native Image, or on the JVM with an AOT cache (JDK 25+).
-- **Over 30 OS integration modules.** Notifications, system tray, dock menus, dark mode, global hotkeys, and taskbar integration, each added as an opt-in dependency.
+- **Over 40 OS integration modules.** Notifications, system tray, dock menus, dark mode, global hotkeys, and taskbar integration, each added as an opt-in dependency.
 - **18 packaging formats.** DMG, PKG, MSI, AppX, DEB, RPM, AppImage, Snap, and Flatpak among them, with code signing and notarization.
 
 ## Install
@@ -87,12 +87,13 @@ underlying APIs remain accessible when you need them.
 
 - **Native decorated window** — a `DecoratedWindow` that follows macOS/Windows/Linux title-bar
   conventions, backed by the [Tao backend](/docs/concepts/backends).
-- **Runtime modules** — more than 30 modules covering notifications, system tray, global
+- **Runtime modules** — more than 40 modules covering notifications, system tray, global
   hotkeys, taskbar progress, dark mode, accent colour, dock menus, jump lists, media controls,
   auto-launch, scheduler, auto-update, system info, and file dialogs. Each is optional and
   written in Kotlin.
-- **Two runtimes** — GraalVM Native Image produces a self-contained binary (around 38 MB,
-  starting in about 0.5 s); JVM with an AOT cache runs on HotSpot for long-running workloads.
+- **Two runtimes** — GraalVM Native Image produces a self-contained binary (around 40 MB as an
+  NSIS installer with maximum compression, starting in about 0.5 s); JVM with an AOT cache runs
+  on HotSpot for long-running workloads.
   Switch between them with one Gradle setting.
 - **18 packaging formats** — DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX/MSIX, DEB, RPM,
   AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, and 7Z, with signing and notarization.
@@ -799,7 +800,7 @@ class CounterViewModel {
 
 ### The Nucleus runtime
 
-More than 30 runtime modules, grouped by intent:
+More than 40 runtime modules, grouped by intent:
 
 - **OS integration** — decorated windows (Tao backend), notifications, system tray, dock and
   launcher menus, dark-mode detection, global hotkeys, media controls, and system colors.
@@ -1262,8 +1263,9 @@ The Tao-specific API lives in `dev.nucleusframework.window.tao`:
   input constants.
 - `TaoDeepLinkBridge.setSink { uri -> … }` — deep link delivery.
 
-Keep `decorated-window-jbr` or `decorated-window-jni` on the classpath when you still need
-Swing / AWT interop, and select the backend with `NucleusBackend.Awt`. See
+`decorated-window-jbr` and `decorated-window-jni` are deprecated and will be removed in a
+future Nucleus release. Keep one on the classpath and select the backend with
+`NucleusBackend.Awt` only if you still need Swing / AWT interop during migration. See
 [migration from JBR](/docs/tao/migration-from-jbr).
 
 ## What's next
@@ -1389,9 +1391,40 @@ provides them through composition locals. The same theme works whether the depen
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Standard window flags. |
 | `undecorated` | `Boolean` | Borderless window with no controls. Honored by Tao; ignored by AWT. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. |
+| `hiddenFromDock` | `Boolean` | Default `false`. Hide this window from the OS taskbar/Dock. Honored by Tao; ignored by AWT. |
 | `minimumSize` | `DpSize?` | Enforced after the first layout pass. |
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Return `true` to consume the event. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot plus your UI. |
+
+### Hiding from the taskbar/Dock
+
+`hiddenFromDock` keeps the window visible and focusable while removing it from the OS-level
+window list — useful for HUDs, overlays, and background utility windows that should not clutter
+the taskbar or app switcher:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    hiddenFromDock = true,
+) {
+    // ...
+}
+```
+
+The mechanism differs per platform:
+
+- **macOS** — switches the shared `NSApplication` to the accessory activation policy (no Dock
+  icon, no menu bar). This is app-wide, not per-window: the last window to apply the flag wins.
+- **Windows** — sets `WS_EX_TOOLWINDOW` on the window, which drops its taskbar button and its
+  Alt+Tab entry. Per-window.
+- **Linux** — sets the GTK skip-taskbar/skip-pager hints (`_NET_WM_STATE_SKIP_TASKBAR`).
+  Per-window, and only effective on X11 or XWayland.
+
+On native Wayland, `hiddenFromDock` has no effect — Wayland has no client-side skip-taskbar
+protocol (`xdg-shell`, `gtk_shell1`, and the staging layer-shell extensions all lack it, and Mutter
+rejects `wlr-layer-shell`). Nucleus logs a warning rather than failing silently. Force XWayland with
+`NUCLEUS_TAO_LINUX_RENDERER=x11` if you need the window actually hidden on a Wayland session — see
+[Native Wayland](/docs/tao/wayland).
 
 ### Scope members
 
@@ -1417,7 +1450,7 @@ interface NucleusWindow {
 
 ### Title bar modifiers
 
-- `Modifier.macOSLargeCornerRadius()` — opt into macOS 11+ rounded corners.
+- `Modifier.macOSLargeCornerRadius()` — opt into macOS 26+ rounded corners.
 - `Modifier.newFullscreenControls()` — relayout the title bar buttons for fullscreen.
 
 `TitleBar` is a single extension on `DecoratedWindowScope`. The `nucleusApplication` scope
@@ -2366,11 +2399,11 @@ The result: a `Modifier.size(48.dp)` occupies 48 device pixels on a 1.0 display,
 
 ## linux-hidpi and the AWT backends
 
-The [`linux-hidpi`](/docs/performance/linux-hidpi) module reads a single global scale from the desktop environment (GSettings, Mutter, `GDK_SCALE`, or `Xft.dpi`) and applies it to JVM properties before AWT initializes, through `applyLinuxHiDpiScale()`. It sets one scale at startup and does not react to per-window changes.
+The `linux-hidpi` module reads a single global scale from the desktop environment (GSettings, Mutter, `GDK_SCALE`, or `Xft.dpi`) and applies it to JVM properties before AWT initializes, through `applyLinuxHiDpiScale()`. It sets one scale at startup and does not react to per-window changes.
 
 The Tao backend does not use that helper — it observes per-window scale changes at runtime. When you migrate from the AWT backends to Tao on Linux, you can drop the `linux-hidpi` dependency.
 
-Keep `linux-hidpi` only for sessions where you still run the AWT (JBR or JNI) backends. See [linux-hidpi](/docs/performance/linux-hidpi).
+Keep `linux-hidpi` only for sessions where you still run the AWT (JBR or JNI) backends.
 
 ## API reference
 
@@ -2388,7 +2421,6 @@ Keep `linux-hidpi` only for sessions where you still run the AWT (JBR or JNI) ba
 
 - [Tao backend](/docs/tao) — the no-AWT native windowing backend.
 - [Wayland](/docs/tao/wayland) — session detection and Wayland-specific behavior.
-- [linux-hidpi](/docs/performance/linux-hidpi) — global scale detection for the AWT backends.
 - [Decorated window](/docs/tao/decorated-window) — the window you render your UI into.
 
 ---
@@ -7757,8 +7789,6 @@ The native builds rely on a few modules that supply platform metadata and OS int
 - [Native HTTP](/docs/performance/native-http) — `HttpClient`, OkHttp, and Ktor wired to the OS
   trust store.
 - [Native SSL](/docs/performance/native-ssl) — the OS keychain as the trust-anchor source.
-- [Linux HiDPI](/docs/performance/linux-hidpi) — scaling fixes for the UI under a native image on
-  Linux.
 
 ## What's next
 
@@ -7797,7 +7827,7 @@ Most idiomatic Kotlin libraries — Ktor, kotlinx.serialization, Coil, SQLite, J
 
 ### BellSoft Liberica NIK 25
 
-GraalVM native-image compilation requires the **full** [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/) distribution. The Gradle plugin downloads it through the Java Toolchain when you set `jvmVendor = JvmVendorSpec.BELLSOFT`.
+GraalVM native-image compilation requires the **full** [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/) distribution. Download it yourself and install it locally — Gradle's automatic toolchain provisioning does not fetch the NIK variant.
 
 Oracle GraalVM, GraalVM CE, and Liberica NIK Lite lack the AWT/Swing native-image support that desktop apps need. Use the full Liberica NIK distribution.
 
@@ -7824,7 +7854,6 @@ nucleus.application {
         isEnabled = true
         imageName = "my-app"
         javaLanguageVersion = 25
-        jvmVendor = JvmVendorSpec.BELLSOFT
     }
 }
 ```
@@ -7835,7 +7864,6 @@ nucleus.application {
 
 - [Configuration](/docs/performance/graalvm/configuration) — the full `graalvm { }` DSL and recommended build arguments.
 - [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — how reflection, resources, and JNI are resolved for you.
-- [Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — the `graalvm-runtime` module, font fixes, and resource patterns.
 - [Tasks and CI](/docs/performance/graalvm/tasks-ci) — Gradle tasks, output locations, and the GitHub Actions matrix.
 
 ---
@@ -7864,10 +7892,10 @@ nucleus.application {
         isEnabled = true
         imageName = "myapp"
 
-        // Gradle's Java Toolchain downloads Liberica NIK 25 locally.
+        // Download the full BellSoft Liberica NIK 25 yourself and install it locally —
+        // Gradle's toolchain auto-provisioning does not fetch the NIK variant.
         // In CI, set up the JDK with graalvm/setup-graalvm@v1 first.
         javaLanguageVersion = 25
-        jvmVendor = JvmVendorSpec.BELLSOFT
 
         buildArgs.addAll(
             "-H:+AddAllCharsets",
@@ -7891,7 +7919,6 @@ nucleus.application {
 |----------|------|---------|-------|
 | `isEnabled` | `Property<Boolean>` | `false` | Master switch for the native-image build. |
 | `javaLanguageVersion` | `Property<Int>` | `25` | Toolchain language version; triggers Gradle's toolchain download. |
-| `jvmVendor` | `Property<JvmVendorSpec>` | — | Set to `JvmVendorSpec.BELLSOFT` to provision Liberica NIK. |
 | `imageName` | `Property<String>` | package name | Output binary name. |
 | `march` | `Property<String>` | `"native"` | `native` targets the current CPU; `compatibility` targets older CPUs. |
 | `buildArgs` | `ListProperty<String>` | empty | Extra arguments passed to `native-image`. |
@@ -8053,8 +8080,7 @@ The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
   `nucleus/.*`, `META-INF/services/.*`, and `composeResources/.*`).
 - SVM substitutions for the AWT font managers, the splash screen, and the X11 window class.
 
-`native-image` discovers all of it from the classpath, so no configuration is needed. See
-[Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) for the substitution details.
+`native-image` discovers all of it from the classpath, so no configuration is needed.
 
 ## How the sources merge
 
@@ -8094,130 +8120,7 @@ remain.
 ## What's next
 
 - [Native access](/docs/performance/native-access) — resource patterns and font substitutions on top of this metadata system.
-- [Runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — the `graalvm-runtime` module that ships Level 5.
 - [Tasks & CI](/docs/performance/graalvm/tasks-ci) — the full GraalVM task graph.
-
----
-
-# Runtime bootstrap
-
-URL: https://nucleusframework.dev/docs/performance/graalvm/runtime-bootstrap
-
-The graalvm-runtime module prepares a Compose Desktop app to start under a GraalVM native-image build through a single GraalVmInitializer.initialize() call.
-
-`nucleus.graalvm-runtime` prepares a Compose Desktop app to run under a GraalVM native-image
-build. A single call to `GraalVmInitializer.initialize()` from `main()` sets the JVM
-properties, preloads the font manager, and installs the platform substitutions that
-native-image needs to reach the first frame.
-
-## Add the dependency
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.graalvm-runtime:<version>")
-}
-```
-
-If you depend on `nucleus.nucleus-application`, this module is pulled in transitively and
-`GraalVmInitializer.initialize()` runs inside `nucleusApplication { … }`. You do not need to
-call it yourself.
-
-## Initialize the runtime
-
-Call `initialize()` as the first statement in `main()`, before any AWT or Compose code runs:
-
-```kotlin
-import dev.nucleusframework.graalvm.GraalVmInitializer
-import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.application
-
-fun main() {
-    GraalVmInitializer.initialize()
-
-    application {
-        Window(onCloseRequest = ::exitApplication, title = "MyApp") {
-            App()
-        }
-    }
-}
-```
-
-The initializer is safe to call on a regular JVM. Everything specific to native-image is gated
-on the `org.graalvm.nativeimage.imagecode` system property, so on a standard JVM only the Linux
-HiDPI scale detection runs, which is a no-op on macOS and Windows.
-
-To skip code that only makes sense on the JVM, branch on `GraalVmInitializer.isNativeImage`.
-
-## How it works
-
-Under a native image, `initialize()` sets up the environment that a launcher would normally
-prepare before `main()`:
-
-| Concern | Action |
-|---------|--------|
-| Swing look and feel | Sets `swing.defaultlaf` to Metal to avoid native look-and-feel modules that native-image does not ship. |
-| `java.home` | Points to the executable directory so Skiko can find `jawt`. |
-| `java.library.path` | Sets `execDir` and `execDir/bin` so `fontmanager`, `freetype`, and `awt` are discoverable, then flushes the `ClassLoader` path cache. |
-| Charset init | Calls `Charset.defaultCharset()` early to avoid `InternalError: platform encoding not initialized`. |
-| macOS locale | Reads the preferred UI language from CoreFoundation and applies it to `Locale.getDefault()`, since SubstrateVM otherwise stays on the POSIX `C` locale. |
-| Font manager preload | Calls `System.loadLibrary("fontmanager")` to avoid crashes in `Font.createFont()`. |
-| Linux HiDPI | Detects and applies the native scale factor via [linux-hidpi](/docs/performance/linux-hidpi). This step runs on every JVM, not only native images. |
-
-native-image runs Java code twice: once at build time while it constructs the image, and again
-at runtime once the binary starts. Static initializers run at build time unless explicitly
-deferred. Nucleus arranges its runtime modules so that pure data (icon catalogs, sealed
-interface registries, JSON schemas) initializes at build time with no startup cost, while
-anything touching the OS (file system, OS APIs, native libraries) is deferred to runtime through
-`RuntimeClassInitialization` metadata or lazy `object` initialization.
-
-If you have a static initializer that touches the OS, declare it under
-`RuntimeClassInitialization` in your `nativeImageConfigBaseDir`. The Oracle Reachability
-Repository already covers common cases such as SLF4J and Logback.
-
-## SVM substitutions
-
-The module ships `@TargetClass` substitutions that patch AWT internals under native-image. The
-native-image compiler picks them up automatically, with no DSL flag:
-
-- `FontCreateFontSubstitution` — buffers `Font.createFont(int, InputStream)` to a temp file on
-  Windows and Linux, working around streams that lack mark/reset support.
-- `Win32FontManagerSubstitution` — a pure-Java reimplementation of
-  `Win32FontManager.getFontPath()` on Windows that avoids
-  `InternalError: platform encoding not initialized`.
-- `FcFontManagerSubstitution` — the Fontconfig equivalent on Linux, with a `/usr/share/fonts`
-  fallback.
-- `SplashScreenSubstitution` — makes `java.awt.SplashScreen.getSplashScreen()` return `null`,
-  since the splash screen is a launcher feature with no native-image JNI backing.
-- `XToolkitAppNameSubstitution` — replaces `XToolkit.getAWTAppClassName()` on Linux so the X11
-  `WM_CLASS` reflects the real application name instead of an internal SubstrateVM frame.
-
-## Automatic resource inclusion
-
-A `native-image.properties` file shipped with the JAR registers four resource globs at build
-time, alongside the `-H:+UnlockExperimentalVMOptions -H:+SharedArenaSupport` options:
-
-| Pattern | Covers |
-|---------|--------|
-| `.*\.(svg\|ttf\|otf)` | SVG icons and fonts on the classpath: Jewel, IntelliJ Platform, Compose resources, and your own |
-| `composeResources/.*` | Compose Multiplatform resources loaded through `Res.*` |
-| `nucleus/.*` | Nucleus native resources, including the JNI shared libraries |
-| `META-INF/services/.*` | `ServiceLoader` descriptors, such as Ktor engines, Coil fetchers, and SLF4J providers |
-
-Because of this, icons do not render as empty squares under native-image.
-
-The `.*\.(svg|ttf|otf)` glob is wide on purpose. If you ship the IntelliJ Platform icons library
-and need to trim every megabyte, override it with a narrower `resource-config.json` of your own.
-
-## Notes
-
-Use the [decorated-window-jni](/docs/window) module under native-image. It does not depend on
-JetBrains Runtime. Reserve `decorated-window-jbr` for JVM builds.
-
-## What's next
-
-- [Configuration](/docs/performance/graalvm/configuration) — the `graalvm { }` DSL block.
-- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — the reachability metadata shipped on top of this module.
-- [Linux HiDPI](/docs/performance/linux-hidpi) — the scale detection used by `GraalVmInitializer`.
 
 ---
 
@@ -8983,141 +8886,7 @@ allowNucleusRuntimeLogging = true
 ## What's next
 
 - [Native HTTP](/docs/performance/native-http) — wire the native trust manager into `java.net.http`, OkHttp, and Ktor.
-- [Linux HiDPI](/docs/performance/linux-hidpi) — another native-backed performance module.
 - [Modules](/docs/concepts/modules) — the full list of Nucleus modules and what each one provides.
-
----
-
-# Linux HiDPI — native scale detection for AWT/JBR
-
-URL: https://nucleusframework.dev/docs/performance/linux-hidpi
-
-linux-hidpi reads the Linux display scale factor through a JNI bridge and applies it before AWT initializes.
-
-`linux-hidpi` detects the native display scale factor on Linux and applies it to the AWT
-rendering pipeline. Stock OpenJDK ignores the desktop scale factor, so a Compose Desktop
-window renders at 1x on a HiDPI screen. The module mirrors the detection logic of JetBrains
-Runtime (`systemScale.c`) in a JNI bridge, so any JVM — including a GraalVM native image —
-resolves the correct scale.
-
-JetBrains Runtime handles per-monitor scaling on its own. `linux-hidpi` is for stock OpenJDK
-and GraalVM native image, where JBR is not available.
-
-## Add the dependency
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.linux-hidpi:<version>")
-}
-```
-
-You can omit this dependency when you already depend on
-[`graalvm-runtime`](/docs/performance/graalvm/runtime-bootstrap): it brings `linux-hidpi` in
-transitively, and `GraalVmInitializer` calls `applyLinuxHiDpiScale()` for you.
-
-## Apply the scale factor
-
-Call `applyLinuxHiDpiScale()` before AWT initializes — that is, before `application {}`:
-
-```kotlin
-import androidx.compose.ui.window.application
-import dev.nucleusframework.hidpi.applyLinuxHiDpiScale
-
-fun main() {
-    applyLinuxHiDpiScale()
-    application {
-        // your Compose Desktop app
-    }
-}
-```
-
-The function is a no-op on non-Linux platforms, so you can leave the call in place on macOS
-and Windows.
-
-To read the value yourself — for example to log it or feed it into another subsystem — call
-`getLinuxNativeScaleFactor()` and set the property manually:
-
-```kotlin
-import androidx.compose.ui.window.application
-import dev.nucleusframework.hidpi.getLinuxNativeScaleFactor
-
-fun main() {
-    if (System.getProperty("sun.java2d.uiScale") == null) {
-        val scale = getLinuxNativeScaleFactor()
-        if (scale > 0.0) {
-            System.setProperty("sun.java2d.uiScale", scale.toString())
-        }
-    }
-
-    application {
-        // your Compose Desktop app
-    }
-}
-```
-
-## How it works
-
-`getLinuxNativeScaleFactor()` consults six detection sources in priority order and returns
-the first positive value it finds:
-
-| Priority | Source | Description |
-|----------|--------|-------------|
-| 1 | `J2D_UISCALE` | Explicit JVM override (env var) |
-| 2 | GSettings | GNOME `org.gnome.desktop.interface` → `scaling-factor` |
-| 3 | Mutter DBus | GNOME fractional scale via `org.gnome.Mutter.DisplayConfig` |
-| 4 | `GDK_SCALE` | GTK / GNOME session variable |
-| 5 | `GDK_DPI_SCALE` | GTK fractional DPI multiplier |
-| 6 | `Xft.dpi` | X Resource Manager (KDE, legacy GNOME, …) |
-
-Detection runs in native code loaded through the `HiDpiLinuxBridge` JNI object. If the native
-library fails to load — for example on a musl-only container without glibc — the function
-falls back to parsing the `J2D_UISCALE`, `GDK_SCALE`, and `GDK_DPI_SCALE` environment
-variables in pure Kotlin. When no source yields a value, it returns `0.0` and lets the JVM
-decide.
-
-`applyLinuxHiDpiScale()` runs when the detected scale is positive and `sun.java2d.uiScale` is
-not already set. It first sets `GDK_SCALE` in the process environment through the native
-bridge, which routes both rendering and mouse-coordinate scaling through the JDK's own
-`X11GraphicsDevice` detection path — the same path JBR uses. As a fallback it also sets
-`sun.java2d.uiScale.enabled` and `sun.java2d.uiScale`, so rendering is still scaled on JDKs
-that do not read `GDK_SCALE`.
-
-AWT rounds to the nearest integer scale, so GNOME fractional scaling (125%, 150%) is
-approximate. For per-monitor and fractional scaling on Linux, use the
-[Tao backend](/docs/tao/hidpi), which talks to the compositor directly.
-
-## API reference
-
-| API | Description |
-|-----|-------------|
-| `fun getLinuxNativeScaleFactor(): Double` | Resolved scale factor (for example `1.0`, `1.25`, `2.0`). Returns `0.0` when detection fails or the platform is not Linux. |
-| `fun applyLinuxHiDpiScale()` | Sets `sun.java2d.uiScale` (and `GDK_SCALE` via the native bridge) when the property is unset and the detected scale is greater than `0`. No-op on non-Linux platforms. |
-
-Both functions live in the `dev.nucleusframework.hidpi` package.
-
-## Notes
-
-### Native binaries
-
-The module ships pre-built shared libraries inside the JAR for Linux x64 and aarch64, both
-named `libnucleus_linux_hidpi_jni.so`. `NativeLibraryLoader` from `core-runtime` extracts the
-matching binary on first use.
-
-### ProGuard
-
-The Nucleus Gradle plugin adds this rule automatically:
-
-```proguard
--keep class dev.nucleusframework.hidpi.HiDpiLinuxBridge {
-    native <methods>;
-}
-```
-
-## What's next
-
-- [GraalVM runtime bootstrap](/docs/performance/graalvm/runtime-bootstrap) — how `GraalVmInitializer` wires this in.
-- [Tao HiDPI](/docs/tao/hidpi) — per-monitor and fractional scaling through the compositor.
-- [Native access](/docs/performance/native-access) — the native-image metadata pipeline.
 
 ---
 
@@ -11059,12 +10828,12 @@ This page compares that approach with Electron, Tauri, and vanilla Compose Multi
 |--|------------|----------|-------|-------------|
 | Language(s) | Kotlin | JS + Node (+ C++ for natives) | JS + Rust | Kotlin |
 | UI tech | Compose + Skia GPU | Chromium (Blink + V8) | OS WebView | Compose + Skia GPU |
-| OS APIs | 30+ Kotlin modules, single process | Node `child_process` / native modules | Rust commands over IPC | Limited (`Tray`, `Notification`, no decorated window) |
+| OS APIs | 40+ Kotlin modules, single process | Node `child_process` / native modules | Rust commands over IPC | Limited (`Tray`, `Notification`, no decorated window) |
 | Packaging formats | **18** (DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX, DEB, RPM, AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z) | 5–7 via electron-builder | 5 via tauri-bundler | 6 (DMG, PKG, MSI, EXE, DEB, RPM) |
 | Auto-update | Built-in (`updater-runtime`) | electron-updater | Tauri Updater plugin | None |
 | Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
-| RAM idle | 60–150 MB | 200–500 MB | 50–80 MB | 200 MB |
-| Binary size | 38 MB (GraalVM) · ~120 MB (JVM) | 150–200 MB | 5–20 MB | 80–120 MB |
+| RAM idle | 35–120 MB* | 200–500 MB | 50–80 MB | 200 MB |
+| Binary size | 40 MB (GraalVM) · 60 MB (JVM)* | 150–200 MB | 5–20 MB | 80–120 MB |
 | Native window decorations | Yes — Liquid Glass, Fluent, Yaru, Jewel | Limited (Chromium chrome) | Yes (OS chrome) | Limited |
 | Model | One language end-to-end | Two runtimes, IPC bridge | Web frontend + Rust backend | One language, fewer built-ins |
 
@@ -11086,12 +10855,12 @@ When you need to drop down to a platform — embed a SwiftUI view, call into Win
 The performance numbers above are typical for a Hello-World class app. Real-world cold start and RAM scale with what your app loads. Nucleus has two runtime targets: GraalVM native image for cold start and binary size, and JVM + AOT cache for throughput. See [performance](/docs/performance) for details.
 
 The Electron and Tauri figures are drawn from public benchmarks, not measured in this repository.
+*Nucleus RAM was measured on Windows 11 with a Hello World build; binary size is the NSIS
+installer with maximum compression.
 
 ## What's next
 
 - [Packaging — 18 formats vs the rest](/docs/compare/packaging) — how the packaging pipeline compares.
-- [Nucleus vs Electron](/docs/compare/electron) — a detailed comparison with Electron.
-- [Nucleus vs Tauri](/docs/compare/tauri) — a detailed comparison with Tauri.
 - [Nucleus vs vanilla Compose Multiplatform](/docs/compare/cmp-default) — what Nucleus adds on top of CMP.
 
 ---
@@ -11170,8 +10939,9 @@ Every compared tool signs and notarizes macOS builds. Windows signing differs:
 ## GraalVM Native Image packaging
 
 Nucleus packages GraalVM Native Image output end to end, producing DMG, NSIS, and DEB for the
-resulting binary. A packaged binary starts in about 0.5 s, uses about 60 MB of RAM, and is
-about 38 MB in size. See [performance / GraalVM](/docs/performance/graalvm). Other tools route
+resulting binary. A packaged binary starts in about 0.5 s, uses about 35 MB of RAM (measured
+on Windows 11 with a Hello World build), and is about 40 MB in size as an NSIS installer with
+maximum compression. See [performance / GraalVM](/docs/performance/graalvm). Other tools route
 Native Image binaries through generic packaging pipelines that do not account for the JDK-less
 output.
 
@@ -11204,193 +10974,6 @@ and younger than Conveyor and install4j.
 - [Code signing](/docs/packaging/code-signing) — sign and notarize builds per OS.
 - [CI/CD](/docs/packaging/ci-cd) — the composite GitHub Actions for building and publishing.
 - [GraalVM Native Image](/docs/performance/graalvm) — package a JDK-less native binary.
-
----
-
-# Nucleus vs Electron
-
-URL: https://nucleusframework.dev/docs/compare/electron
-
-How Nucleus and Electron differ in rendering, OS access, window decorations, and packaging.
-
-Electron renders desktop UI with a bundled Chromium and runs application logic in a
-separate Node process, communicating over IPC. Nucleus renders Compose UI to Skia and runs
-the UI, business logic, and OS access in a single Kotlin process. This page compares the two.
-
-## Comparison
-
-| | **Nucleus** | Electron |
-|--|------------|----------|
-| Languages | Kotlin | JS + Node + native modules |
-| Renderer | Compose UI + Skia GPU | Chromium (Blink + V8) |
-| Process model | Single process | Renderer + main + IPC |
-| Native APIs | 30+ Kotlin modules, in-process | Node `child_process` / native modules |
-| OS chrome | Decorated windows: Liquid Glass, Fluent, Yaru, Jewel | Chromium-style chrome |
-| Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s |
-| RAM idle | 60–150 MB | 200–500 MB |
-| Binary size | 38 MB (GraalVM) · ~120 MB (JVM) | 150–200 MB |
-| Auto-update | Built-in (`updater-runtime`) | electron-updater |
-| Packaging | 18 formats from one DSL | 5–7 via electron-builder |
-| Ecosystem | JVM (Maven Central, ~500k libs) | npm |
-
-Memory and cold-start figures vary widely by app. The Electron ranges above are a typical
-"Hello World plus a small single-page app" envelope from public benchmarks, not fixed values.
-
-## Rendering
-
-Electron bundles a full browser engine in every app: V8, Blink, and Skia, plus a Node
-runtime, all linked into the process tree. Each running app carries its own copy, so memory
-use adds up across several apps.
-
-Nucleus renders Compose UI to Skia through the Compose Multiplatform Skiko backend. There is
-no Blink, V8, or Node. The JVM runs your code and Skia draws to the GPU, all in a single
-process sharing one heap. After HotSpot warms up, throughput on hot paths is comparable to
-native code.
-
-## OS access
-
-Electron's renderer process cannot call the OS directly. It sends messages to the main
-process over `ipcRenderer` and `ipcMain`, so every file read, tray click, and notification
-crosses a serialization boundary. Type safety stops at that boundary, and each feature is
-split across two processes with `contextBridge` wrappers and two sets of devtools.
-
-In Nucleus, your Compose UI calls `NotificationManager.send(...)`,
-`GlobalHotKeyManager.register(...)`, or `SystemInfo.cpuInfo()` directly — same call graph,
-same coroutine, same debugger.
-
-## Window decorations
-
-Electron windows render with Chromium's chrome. Matching a native look means replacing the
-frame, applying vibrancy, and encoding draggable regions in CSS. The Nucleus
-[decorated window](/docs/window) layer draws the title bar inside Compose with four toolkits:
-
-- macOS — Liquid Glass on SDK 26+, applied automatically through `vtool` patching.
-- Fluent — Windows 11 acrylic, snap-layout hints, and mica.
-- Yaru — Ubuntu button layout that follows GNOME settings live.
-- Jewel — IntelliJ Platform look.
-
-Material 2 and Material 3 adapters ship for use on top.
-
-## Where Electron fits better
-
-- **Hiring pool.** More developers know JavaScript than Kotlin Multiplatform desktop.
-- **Ecosystem age.** Electron ships VS Code, Slack, Discord, Figma, and Notion, with a
-  decade of production use.
-- **Web reuse.** If your product is already a single-page app, wrapping it in Electron is
-  less work than rewriting it in Compose for a first release.
-- **Node libraries.** npm covers a larger surface in some categories, though the JVM has more
-  artifacts overall (~500k on Maven Central).
-
-## Where Nucleus fits better
-
-- One language across UI, business logic, OS calls, and packaging — one call graph, one debugger.
-- Native rendering rather than a bundled browser.
-- Two runtimes (GraalVM Native Image and JVM + AOT cache) from the same source — see
-  [performance](/docs/performance/index).
-- 18 packaging formats against 5–7 — see [packaging comparison](/docs/compare/packaging).
-- The JVM library catalog runs in-process. Apache Lucene, DuckDB, ONNX Runtime, Tika, Netty,
-  and Spark are an `implementation` dependency away, with no native bridge.
-
-## When to choose Electron
-
-You have a JavaScript team shipping a first release, your product already exists as a web
-app, and your memory and performance budget can absorb the bundled Chromium. Or you have an
-existing Electron codebase where migration costs more than the ongoing overhead.
-
-## When to choose Nucleus
-
-You want one language end to end, native rendering, native installers, and the JVM ecosystem
-in-process. You ship to enterprise networks where corporate root CAs matter and `native-ssl`
-handles them. Cold start matters enough to wire up GraalVM Native Image.
-
-## What's next
-
-- [Nucleus vs Tauri](/docs/compare/tauri) — another native-shell comparison.
-- [Packaging comparison](/docs/compare/packaging) — formats and signing across frameworks.
-- [Performance](/docs/performance/index) — the GraalVM and JVM runtimes.
-- [Decorated windows](/docs/window) — native title bars and window chrome.
-
----
-
-# Nucleus vs Tauri
-
-URL: https://nucleusframework.dev/docs/compare/tauri
-
-Compare Nucleus and Tauri across language, rendering, process model, and packaging.
-
-Tauri and Nucleus share a foundation: both use the OS-native WebView or renderer instead of bundling Chromium, and both build on the Rust [`tao`](https://github.com/tauri-apps/tao) windowing crate, so both ship small binaries with fast cold start. They diverge on language and rendering. Tauri pairs a JavaScript frontend with a Rust backend over IPC. Nucleus runs a single Kotlin process from the UI down to the native windowing layer.
-
-## How they compare
-
-| | **Nucleus** | Tauri |
-|--|------------|-------|
-| Languages | Kotlin | JS + Rust |
-| UI tech | Compose UI + Skia GPU | OS WebView |
-| Windowing | Tao (via JNI) | Tao (native Rust) |
-| Process model | Single process | Webview process + main, IPC |
-| OS APIs | 30+ Kotlin modules in-process | Rust `command`s called from JS |
-| Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | &lt; 1 s |
-| RAM idle | 60–150 MB | 50–80 MB |
-| Binary size | 38 MB (GraalVM) · ~120 MB (JVM) | 5–20 MB |
-| Multi-touch / pen | Yes — `TaoTouchEvent`, pressure, tilt | Limited — WebView pointer events |
-| Native chrome | Compose-rendered Liquid Glass / Fluent / Yaru / Jewel | OS chrome |
-| Packaging | 18 formats | 5 (DMG, MSI, NSIS, DEB, AppImage) |
-
-## Shared Tao foundation
-
-Tauri's windowing crate `tao` is a fork of `winit` extended for desktop needs — menus, system tray, native popups, drag-and-drop. Nucleus vendors `tao` inside the `decorated-window-tao` module, binds it through JNI, and exposes it to Kotlin:
-
-- `taoApplication { … }` replaces Compose Desktop's `application { }`.
-- `DecoratedWindow(…)` renders into a native OS window — native Wayland on Linux, multi-touch, pen pressure and tilt, native popups, and drag-and-drop with diagnostics.
-- `NativeView` embeds SwiftUI, WebView2, or GTK widgets inline in Compose.
-
-Tauri uses `tao` to render an OS WebView and route JS calls back through Rust. Nucleus uses `tao` to render Compose UI with Skia, with no WebView in the loop.
-
-## Language model
-
-Tauri splits the stack by language: Rust on the backend, JavaScript on the frontend, and a serialization boundary between them. That means two toolchains and, in practice, often two teams.
-
-Nucleus stays in Kotlin throughout. UI components, the same `ViewModel` you ship on Android, OS calls, and the packaging DSL are one language and one call graph. For teams already working in Kotlin, that removes the frontend/backend split.
-
-## Rendering
-
-Tauri renders through the OS WebView: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux. This keeps binaries small and uses hardware acceleration the OS already tunes, at the cost of per-OS rendering differences, CSS for native widgets, and animation smoothness tied to the WebView's compositor.
-
-Nucleus renders Compose UI to Skia via Skiko — Metal on macOS, OpenGL or Direct3D elsewhere — so the renderer is the same on every OS. Pen and trackpad gestures arrive as typed events, and the [Tao backend](/docs/tao) adds native Wayland support on Linux.
-
-## Native window decorations
-
-Tauri's window chrome is whatever the OS WebView renders; custom title bars require CSS that approximates native behavior.
-
-Nucleus ships four [toolkit](/docs/window/toolkits) themes for decorated windows — Liquid Glass (macOS 26+), Fluent (Windows), Yaru (Ubuntu), and Jewel (IntelliJ Platform). Each renders in Compose, is backed by native title-bar geometry, and can be themed from your design system.
-
-## Where Tauri fits
-
-- Binary size: 5–20 MB, smaller than Nucleus at 38 MB (GraalVM) or 120 MB (JVM+AOT).
-- JavaScript-first teams that want to keep a web frontend with a Rust backend.
-- Access to the Rust crate ecosystem on the backend. Nucleus draws on the JVM ecosystem instead.
-
-## Where Nucleus fits
-
-- One language end-to-end: UI, business logic, OS calls, and packaging in Kotlin.
-- Native rendering with Compose and Skia and per-OS window decoration toolkits, with no WebView.
-- Multi-touch, pen pressure and tilt, and native Wayland on Linux through the Tao backend.
-- The JVM library ecosystem in-process — Lucene, DuckDB, ONNX Runtime, Apache Tika — added as an `implementation` dependency.
-- 18 packaging formats against 5 — see the [packaging comparison](/docs/compare/packaging).
-
-## When to choose Tauri
-
-Choose Tauri when you want the smallest possible binary, you're comfortable splitting work across JavaScript and Rust, and your UI is web-shaped so the WebView is a good fit.
-
-## When to choose Nucleus
-
-Choose Nucleus when you want one language end-to-end, native rendering, multi-touch, pen, and Wayland support, and the JVM library ecosystem in-process — especially if you already ship Kotlin to Android, iOS, or the web and want desktop to match.
-
-## What's next
-
-- [Tao backend](/docs/tao) — the windowing layer, multi-touch, and drag-and-drop API that Nucleus shares with Tauri.
-- [Packaging comparison](/docs/compare/packaging) — the 18 packaging formats in detail.
-- [Nucleus vs Electron](/docs/compare/electron) — the other WebView-free comparison.
 
 ---
 
@@ -11442,7 +11025,7 @@ PKG, AppX, and Flatpak trigger a parallel [sandboxed pipeline](/docs/packaging/s
 
 ### GraalVM Native Image
 
-The plugin can compile your Compose Desktop app to a GraalVM Native Image and package the resulting binary as DMG, NSIS, or DEB. Cold start is around 0.5 s and RAM around 60 MB. The default CMP plugin does not handle Native Image.
+The plugin can compile your Compose Desktop app to a GraalVM Native Image and package the resulting binary as DMG, NSIS, or DEB. Cold start is around 0.5 s and RAM around 35 MB (measured on Windows 11 with a Hello World build). The default CMP plugin does not handle Native Image.
 
 ### AOT cache
 
@@ -11496,7 +11079,7 @@ Without `homepage`, `packageDeb` and `packageGraalvmDeb` fail with `Please speci
 - You want packaging for store channels (Mac App Store PKG, Microsoft Store MSIX, Snapcraft, Flathub).
 - You want auto-update or GraalVM Native Image.
 - You want native window decorations with the Tao backend's multi-touch, pen, and native Wayland support.
-- You want the 30+ OS integration modules without building them yourself.
+- You want the 40+ OS integration modules without building them yourself.
 
 ## What's next
 
@@ -12845,9 +12428,9 @@ and what is still speculative.
 - Tao backend — Wayland-native, multi-touch, pen pressure + tilt, native popups, embedded `NativeView`, drag-and-drop with diagnostics.
 - 18 packaging formats from one Gradle DSL.
 - `updater-runtime` — electron-builder-compatible auto-update, channels, post-update detection.
-- GraalVM Native Image, alpha — end-to-end packaging pipeline (DMG, NSIS, DEB), static bytecode reflection analyzer, per-library reachability metadata.
+- GraalVM Native Image — end-to-end packaging pipeline (DMG, NSIS, DEB), static bytecode reflection analyzer, per-library reachability metadata.
 - macOS Liquid Glass on SDK 26 — `vtool` patching means any JDK works.
-- 30+ runtime modules: notifications, system tray, global hotkeys, media controls, taskbar progress, energy manager, system info, scheduler, autolaunch, dark mode, system color, native SSL, native HTTP, decorated windows with four toolkits.
+- 40+ runtime modules: notifications, system tray, global hotkeys, media controls, taskbar progress, energy manager, system info, scheduler, autolaunch, dark mode, system color, native SSL, native HTTP, filesystem watcher, decorated windows with four toolkits.
 
 ## Coming in 2.1
 
@@ -12866,7 +12449,6 @@ OS-level events and IO:
 |--------|-------------|-------|---------|-------|
 | `share-sheet` | OS share sheet (URL, file, text) | `NSSharingService` | Windows `DataTransferManager` | xdg-desktop-portal `Share` |
 | `power-events` | Sleep / wake / lock / unlock / screen-off / battery state | `NSWorkspace` notifications | `WM_POWERBROADCAST` / `WTSRegisterSessionNotification` | `org.freedesktop.login1` D-Bus signals |
-| `fs-watcher` | Native filesystem watcher (replaces slow `WatchService`) | `FSEvents` | `ReadDirectoryChangesW` | `inotify` |
 
 ## Under consideration
 
