@@ -15,20 +15,41 @@ de lignes de bootstrap d'un `main()` typique.
 
 Nucleus 2.0 demande deux changements de build avant de toucher au code applicatif.
 
-### Régler la toolchain JDK sur 25
+### Régler la toolchain JDK sur 25 (uniquement si vous utilisez Jewel)
 
-Les artefacts 2.0 ciblent JDK 17 (`nucleus-application`) et JDK 25 (la stack Jewel, via
-`decorated-window-jewel`). Réglez la toolchain sur chaque module Kotlin qui dépend de Nucleus :
+Les artefacts 2.0 principaux — `core-runtime`, `nucleus-application`, `decorated-window-core`,
+`decorated-window-material3`, `decorated-window-tao` — ciblent un socle JDK 17. La stack **Jewel**
+fait exception : `decorated-window-jewel` et les bibliothèques de la plateforme IntelliJ qu'elle
+tire sont publiées pour **JDK 25**. Le bump de toolchain est donc une exigence de Jewel, pas de
+Nucleus en général.
+
+Si votre app utilise `JewelDecoratedWindow` / `JewelDecoratedDialog`, réglez la toolchain sur
+**chaque** module qui tire la stack Jewel :
 
 ```kotlin title="build.gradle.kts"
 kotlin { jvmToolchain(25) }
 ```
 
 <Callout type="warn">
-Si vous l'oubliez, la résolution de dépendances échoue avec : `Dependency resolution is looking for
-a library compatible with JVM runtime version 11, but
-'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible with JVM runtime version
-25 or newer.`
+Le module qui échoue est celui où Jewel est sur le classpath — souvent un module UI partagé, pas
+seulement l'app desktop. Dans un projet Kotlin Multiplatform, la cible `jvm()` prend par défaut le
+JDK de Gradle (souvent 21), donc réglez aussi la toolchain dans le module `shared` :
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    jvmToolchain(25)     // la cible jvm() en a besoin ; la cible Android garde son propre niveau de bytecode
+    // ...
+}
+```
+</Callout>
+
+<Callout type="warn">
+Si vous l'oubliez, la résolution de dépendances échoue avec (la version est celle de votre
+toolchain actuelle — souvent 21) : `Dependency resolution is looking for a library compatible with
+JVM runtime version 21, but 'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible
+with JVM runtime version 25 or newer.`
+
+Si vous n'utilisez pas Jewel, vous pouvez rester sur votre toolchain actuelle (JDK 17 ou plus).
 </Callout>
 
 ### Ajouter le dépôt snapshots IntelliJ
@@ -198,6 +219,23 @@ voulez pour un chemin de contournement.
 5. La résolution du backend : `NucleusBackend.Auto` choisit AWT ou Tao.
 6. La boucle application Compose.
 
+<Callout type="warn">
+**N'initialisez pas COM sur le thread principal avant `nucleusApplication` (Tao / Windows).** Le
+backend Tao exécute la boucle de messages Win32 comme un apartment COM mono-thread (STA) sur le
+thread principal. Si quelque chose a déjà mis ce thread dans un apartment multi-thread (MTA) — un
+coupable fréquent est l'appel manuel à `WindowsNotificationCenter.initialize()` dans `main()` — le
+`OleInitialize` de Tao échoue et le process s'arrête nativement :
+
+```
+thread '<unnamed>' panicked at tao/.../windows/window.rs:
+OleInitialize failed! Result was: `RPC_E_CHANGED_MODE`.
+```
+
+Le bootstrap amorce déjà l'AUMID et le centre de notifications sur le bon thread, donc retirez
+l'appel manuel du chemin GUI. Si un chemin de contournement headless (une invocation du scheduler)
+en a encore besoin, gardez cet appel là — il n'a pas de fenêtre Tao avec laquelle entrer en conflit.
+</Callout>
+
 ## Remplacer Window par DecoratedWindow
 
 Choisissez la variante qui correspond à votre design system :
@@ -239,10 +277,42 @@ Le call site dans `nucleusApplication { … }` ne change pas — le receiver est
 
 | Receiver | Support backend |
 |---|---|
-| `JewelDecoratedDialog(…)` (sans receiver) | AWT seulement. Crash sur Tao avec `NoClassDefFoundError`. |
+| `JewelDecoratedDialog(…)` (sans receiver) | AWT seulement. Son module d'implémentation n'est pas sur le classpath Tao : échec au rendu avec `ClassNotFoundException: dev.nucleusframework.window.DecoratedDialogKt`. |
 | `NucleusApplicationScope.JewelDecoratedDialog(…)` | Indépendant du backend. Dispatche vers AWT ou Tao. |
 
-Utilisez la variante scopée pour tout ce qui est composé dans `nucleusApplication { … }`.
+Les deux overloads existent, donc l'appel simple **compile** quand même — il n'échoue qu'à
+l'exécution sur Tao. Utilisez la variante scopée pour tout ce qui est composé dans
+`nucleusApplication { … }`.
+
+Le piège : les dialogues sont généralement ouverts profondément dans l'arbre UI (un éditeur
+d'événement, une feuille de réglages), loin du receiver `NucleusApplicationScope`. Plutôt que de
+faire transiter le scope dans chaque signature, exposez-le via un `CompositionLocal` :
+
+```kotlin
+// 1. Déclarez-le une fois.
+val LocalNucleusApplicationScope = staticCompositionLocalOf<NucleusApplicationScope> {
+    error("LocalNucleusApplicationScope non fourni")
+}
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    val nucleusScope = this
+    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        // 2. Fournissez-le dans le contenu de la fenêtre.
+        CompositionLocalProvider(LocalNucleusApplicationScope provides nucleusScope) {
+            App()
+        }
+    }
+}
+
+// 3. Lisez-le au call site du dialogue. Le receiver explicite désambiguïse aussi les deux overloads.
+@Composable
+fun SettingsDialog(/* ... */) {
+    LocalNucleusApplicationScope.current.JewelDecoratedDialog(onCloseRequest = { /* ... */ }) {
+        // JewelDialogTitleBar et les autres extensions DecoratedDialogScope fonctionnent ici :
+        // NucleusDecoratedDialogScope étend DecoratedDialogScope.
+    }
+}
+```
 
 ### Les CompositionLocals se propagent à travers la scène Tao
 
@@ -359,12 +429,18 @@ restauration avec un `LaunchedEffect` pour ramener la fenêtre.
   `DecoratedWindow`. Passez à une variante `DecoratedWindow`.
 - **`Unresolved reference 'JewelDecoratedWindow'`.** Le composable est devenu une extension de scope.
   Propagez le receiver — voir [Remplacer Window par DecoratedWindow](#remplacer-window-par-decoratedwindow).
-- **`NoClassDefFoundError: …DecoratedDialogKt` sur Tao.** Vous appelez le dialogue réservé à AWT. Utilisez
-  `NucleusApplicationScope.JewelDecoratedDialog`.
+- **`ClassNotFoundException: …DecoratedDialogKt` au rendu sur Tao.** Vous appelez le dialogue réservé
+  à AWT (il compile, mais son module d'impl n'est pas sur le classpath Tao). Utilisez
+  `NucleusApplicationScope.JewelDecoratedDialog` — voir [Les dialogues suivent la même règle](#les-dialogues-suivent-la-même-règle).
+- **Arrêt natif `OleInitialize failed! RPC_E_CHANGED_MODE` / code de sortie `0xC0000409` sur Windows.**
+  Quelque chose a initialisé COM en MTA sur le thread principal avant Tao. N'appelez pas
+  `WindowsNotificationCenter.initialize()` (ni d'autre setup COM) dans le chemin GUI de `main()` — le
+  bootstrap s'en charge. Voir le callout dans [Ce que nucleusApplication exécute, dans l'ordre](#ce-que-nucleusapplication-exécute-dans-lordre).
 - **`Could not find org.jetbrains.jewel:jewel-foundation:0.37.…`** Le dépôt snapshots IntelliJ est
   manquant. Voir [Avant de commencer](#avant-de-commencer).
-- **`Dependency resolution is looking for a library compatible with JVM runtime version 11`.** Réglez la
-  toolchain sur 25.
+- **`Dependency resolution is looking for a library compatible with JVM runtime version 21` (ou similaire).**
+  Un module qui tire la stack Jewel n'est pas sur la toolchain JDK 25 (vérifiez les modules UI/partagés
+  et la cible KMP `jvm()`). Voir [Régler la toolchain JDK sur 25](#régler-la-toolchain-jdk-sur-25-uniquement-si-vous-utilisez-jewel).
 
 ## Et ensuite
 
