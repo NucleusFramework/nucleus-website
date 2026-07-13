@@ -188,6 +188,39 @@ function JewelPreview({ lang }: { lang: Lang }) {
   );
 }
 
+/* ---- Material 3 (Expressive) ---- */
+function Material3Preview({ lang }: { lang: Lang }) {
+  return (
+    <div className="tk-pv tk-pv-m3">
+      <div className="tk-chrome tk-chrome-m3">
+        <span className="tk-m3-back">←</span>
+        <span className="tk-chrome-title">{pick(toolkitsT.pv_settings, lang)}</span>
+        <span className="tk-m3-avatar"/>
+      </div>
+      <div className="tk-body tk-body-m3">
+        <div className="tk-m3-card">
+          <div className="tk-m3-row">
+            <span className="tk-m3-icon" style={{ background: '#EADDFF', color: '#6750A4' }}>◐</span>
+            <div>
+              <div className="tk-m3-row-title">{pick(toolkitsT.pv_darkMode, lang)}</div>
+              <div className="tk-m3-row-sub">{pick(toolkitsT.pv_followSystem, lang)}</div>
+            </div>
+            <span className="tk-m3-switch is-on"><i/></span>
+          </div>
+        </div>
+        <div className="tk-m3-chips">
+          <span className="is-on">{pick(toolkitsT.pv_dynamic, lang)}</span>
+          <span>{pick(toolkitsT.pv_accent, lang)}</span>
+        </div>
+        <button className="tk-m3-btn">
+          {pick(toolkitsT.pv_continue, lang)}
+          <span className="tk-m3-btn-arrow">→</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface ToolkitsProps {
   lang: Lang;
 }
@@ -259,6 +292,19 @@ export function Toolkits({ lang }: ToolkitsProps) {
             hovered={hovered}
           >
             <JewelPreview lang={lang}/>
+          </ToolkitCard>
+
+          <ToolkitCard
+            id="material3"
+            name="Material 3"
+            style={pick(toolkitsT.m3Style, lang)}
+            os={pick(toolkitsT.m3Os, lang)}
+            module="decorated-window-material3"
+            newLabel={newLabel}
+            onHover={setHovered}
+            hovered={hovered}
+          >
+            <Material3Preview lang={lang}/>
           </ToolkitCard>
         </div>
 

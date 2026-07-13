@@ -229,7 +229,7 @@ export const accessibilityT = {
 // Toolkits
 // =====================================================================
 export const toolkitsT = {
-  eyebrow: { en: 'Four native looks', fr: 'Quatre looks natifs' } as Bi<string>,
+  eyebrow: { en: 'Five native looks', fr: 'Cinq looks natifs' } as Bi<string>,
   title: {
     en: React.createElement(React.Fragment, null,
       'Match every desktop, ',
@@ -241,8 +241,8 @@ export const toolkitsT = {
     ),
   } as Bi,
   subtitle: {
-    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, or IntelliJ Jewel. Each toolkit ships with a matching DecoratedWindow. macOS and Yaru are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
-    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS, Windows 11 Fluent, Ubuntu Yaru ou IntelliJ Jewel. Chaque toolkit embarque un DecoratedWindow assorti. macOS et Yaru sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
+    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel, or cross-platform Material 3. Each toolkit ships with a matching DecoratedWindow. macOS, Yaru and Material 3 are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
+    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel ou Material 3 multiplateforme. Chaque toolkit embarque un DecoratedWindow assorti. macOS, Yaru et Material 3 sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
   } as Bi<string>,
   isNew: { en: 'Coming soon', fr: 'Prochainement' } as Bi<string>,
   macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,
@@ -251,6 +251,8 @@ export const toolkitsT = {
   yaruOs: { en: 'Ubuntu · GNOME', fr: 'Ubuntu · GNOME' } as Bi<string>,
   jewelStyle: { en: 'IntelliJ Platform', fr: 'IntelliJ Platform' } as Bi<string>,
   jewelOs: { en: 'Cross-platform tooling', fr: 'Outils multiplateformes' } as Bi<string>,
+  m3Style: { en: 'Material You', fr: 'Material You' } as Bi<string>,
+  m3Os: { en: 'Cross-platform', fr: 'Multiplateforme' } as Bi<string>,
   footnote: {
     en: React.createElement(React.Fragment, null,
       'Pick one per OS. Or mix freely — every toolkit works on every platform, so you can ship a Fluent build on macOS while you prototype its native look. Your ',
@@ -270,6 +272,7 @@ export const toolkitsT = {
   pv_appearance: { en: 'Appearance', fr: 'Apparence' } as Bi<string>,
   pv_network: { en: 'Network', fr: 'Réseau' } as Bi<string>,
   pv_darkMode: { en: 'Dark mode', fr: 'Mode sombre' } as Bi<string>,
+  pv_dynamic: { en: 'Dynamic color', fr: 'Couleur dynamique' } as Bi<string>,
   pv_continue: { en: 'Continue', fr: 'Continuer' } as Bi<string>,
   pv_system: { en: 'System', fr: 'Système' } as Bi<string>,
   pv_followSystem: { en: 'Follow system', fr: 'Suivre le système' } as Bi<string>,
