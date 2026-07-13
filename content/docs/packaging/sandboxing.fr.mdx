@@ -5,11 +5,11 @@ description: Comment Nucleus construit des distributions sandboxées pour les fo
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Trois formats store exigent un build sandboxé : `Pkg` (macOS App Sandbox), `Flatpak` (Linux) et `AppX` (Windows MSIX). Une app sandboxée ne peut pas extraire de bibliothèques natives dans un répertoire temporaire au runtime, ni charger du code arbitraire. Nucleus exécute donc un second pipeline de build pour ces formats. Cette page décrit ce que fait ce pipeline et comment configurer les parties qui demandent des valeurs propres à ton projet.
+Trois formats store exigent un build sandboxé : `Pkg` (macOS App Sandbox), `Flatpak` (Linux) et `AppX` (Windows MSIX). Une app sandboxée ne peut pas extraire de bibliothèques natives dans un répertoire temporaire au runtime, ni charger du code arbitraire. Nucleus exécute donc un second pipeline de build pour ces formats. Cette page décrit ce que fait ce pipeline et comment configurer les parties qui demandent des valeurs propres à votre projet.
 
 ## Demander un format store
 
-Ajoute un format store à `targetFormats`. Le pipeline sandboxé s'active automatiquement dès qu'au moins un format store est présent.
+Ajoutez un format store à `targetFormats`. Le pipeline sandboxé s'active automatiquement dès qu'au moins un format store est présent.
 
 ```kotlin title="build.gradle.kts"
 nucleus {
@@ -30,7 +30,7 @@ nucleus {
 }
 ```
 
-Lance la tâche de packaging habituelle. Les deux pipelines s'exécutent dans la même invocation :
+Lancez la tâche de packaging habituelle. Les deux pipelines s'exécutent dans la même invocation :
 
 ```shell
 ./gradlew packageDistributionForCurrentOS
@@ -48,7 +48,7 @@ Quand au moins un format store est configuré, Nucleus enregistre des tâches Gr
 
 1. Parcourent les JARs de dépendances pour y trouver les fichiers `.dylib`, `.jnilib`, `.so` et `.dll`, puis les extraient — dans `Contents/Frameworks/` sur macOS, et dans `resources/` sur Windows et Linux.
 2. Réécrivent les JARs sans ces entrées natives pour éviter de les dupliquer.
-3. Fusionnent tes `appResources` avec les bibliothèques extraites.
+3. Fusionnent vos `appResources` avec les bibliothèques extraites.
 4. Injectent des arguments JVM pour que `java.library.path`, `jna.library.path` et `jna.boot.library.path` pointent vers le répertoire d'extraction signé. JNA reçoit aussi `nounpack=true` et `nosys=true`.
 5. Signent chaque binaire natif de `Contents/Frameworks/` individuellement avec `codesign` (macOS).
 6. Reconnectent Skiko et `icudtl.dat` vers ce même répertoire.
@@ -86,7 +86,7 @@ Builds sandboxés (`Pkg`) :
 <key>com.apple.security.files.user-selected.read-write</key>      <true/>
 ```
 
-Les runtime entitlements appliquées aux binaires JVM livrés sont plus strictes : pas de réseau, pas d'accès fichier. Seul le code de ton app déclare des capacités. Tu peux surcharger l'un ou l'autre jeu par build :
+Les runtime entitlements appliquées aux binaires JVM livrés sont plus strictes : pas de réseau, pas d'accès fichier. Seul le code de votre app déclare des capacités. Vous pouvez surcharger l'un ou l'autre jeu par build :
 
 ```kotlin title="build.gradle.kts"
 macOS {

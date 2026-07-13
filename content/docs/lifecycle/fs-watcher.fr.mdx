@@ -1,12 +1,12 @@
 ---
 title: Filesystem watcher
-description: Surveille les fichiers et dossiers depuis Kotlin et reçois les événements de création, modification, suppression et déplacement sous forme de Flow de coroutines.
+description: Surveillez les fichiers et dossiers depuis Kotlin et recevez les événements de création, modification, suppression et déplacement sous forme de Flow de coroutines.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Le module fs-watcher te permet de surveiller les fichiers et les dossiers depuis Kotlin. Tu crées
-un watcher, tu enregistres les chemins qui t'intéressent, puis tu collectes les événements de
+Le module fs-watcher vous permet de surveiller les fichiers et les dossiers depuis Kotlin. Vous créez
+un watcher, vous enregistrez les chemins qui vous intéressent, puis vous collectez les événements de
 création, de modification, de suppression et de déplacement depuis un `Flow` de coroutines. Le
 watcher s'appuie sur un pont natif sous macOS, Windows et Linux, avec un repli par scrutation en
 option.
@@ -20,11 +20,11 @@ dependencies {
 ```
 
 Le module expose `kotlinx-coroutines-core` de façon transitive : `Flow` et ses opérateurs sont
-donc disponibles sans que tu aies à ajouter les coroutines toi-même.
+donc disponibles sans que vous ayez à ajouter les coroutines vous-même.
 
 ## Surveiller un dossier
 
-Vérifie la prise en charge, crée un watcher, commence à collecter, puis enregistre un chemin.
+Vérifiez la prise en charge, créez un watcher, commencez à collecter, puis enregistrez un chemin.
 `FsWatchers` et les types d'événements vivent dans `dev.nucleusframework.fswatcher`.
 
 ```kotlin
@@ -39,7 +39,7 @@ suspend fun watchDownloads() = coroutineScope {
 
     val watcher = FsWatchers.create()
 
-    // Commence à collecter avant d'enregistrer, pour ne manquer aucun événement initial.
+    // Commencez à collecter avant d'enregistrer, pour ne manquer aucun événement initial.
     launch {
         watcher.events.collect { event ->
             when (event) {
@@ -58,12 +58,12 @@ suspend fun watchDownloads() = coroutineScope {
 }
 ```
 
-`watch` renvoie un `FsWatchRegistration` que tu peux fermer pour arrêter de surveiller un seul
+`watch` renvoie un `FsWatchRegistration` que vous pouvez fermer pour arrêter de surveiller un seul
 chemin. Fermer le `FsWatcher` ferme tous les enregistrements et libère le watcher natif.
 
 <Callout type="info">
-`events` et `errors` sont des flows chauds, sans rejeu. Collecte-les avant d'appeler `watch`,
-sinon tu risques de manquer les changements survenus entre l'enregistrement et l'abonnement du
+`events` et `errors` sont des flows chauds, sans rejeu. Collectez-les avant d'appeler `watch`,
+sinon vous risquez de manquer les changements survenus entre l'enregistrement et l'abonnement du
 premier collecteur.
 </Callout>
 
@@ -71,20 +71,20 @@ premier collecteur.
 
 Chaque `FsWatcher` détient un handle de watcher natif. macOS utilise FSEvents, Windows utilise
 `ReadDirectoryChangesW` et Linux utilise inotify, tous atteints via un unique pont JNI. Quand
-aucun backend natif n'est disponible — ou quand tu choisis `FsWatchBackendStrategy.Polling` — le
+aucun backend natif n'est disponible — ou quand vous choisissez `FsWatchBackendStrategy.Polling` — le
 watcher scrute les chemins enregistrés à intervalle régulier.
 
-Les enregistrements sont fusionnés. Si tu surveilles un dossier de façon récursive puis un
+Les enregistrements sont fusionnés. Si vous surveillez un dossier de façon récursive puis un
 fichier déjà situé à l'intérieur, les deux partagent une seule surveillance native ; les
 événements sont malgré tout routés vers chaque enregistrement logique et rapportés avec sa
-`FsWatchSource`. Les chemins sont rapportés relativement à la racine que tu as enregistrée : une
-racine symbolique ou résolue expose donc bien le chemin que tu as demandé.
+`FsWatchSource`. Les chemins sont rapportés relativement à la racine que vous avez enregistrée : une
+racine symbolique ou résolue expose donc bien le chemin que vous avez demandé.
 
 Les événements passent par un tampon borné (`eventBufferCapacity`, 64 par défaut) et les erreurs
 par un tampon distinct (`errorBufferCapacity`, 32 par défaut). Quand un tampon se remplit — ou
 que le backend natif signale des notifications perdues — le watcher émet `FsWatchEvent.Overflow`
-avec `needsRescan = true`, ton signal pour relister l'arborescence concernée au lieu de te fier au
-flux. Par défaut, les événements sont temporisés sur une fenêtre de 150 ms ; passe à
+avec `needsRescan = true`, votre signal pour relister l'arborescence concernée au lieu de vous fier au
+flux. Par défaut, les événements sont temporisés sur une fenêtre de 150 ms ; passez à
 `FsWatchDeliveryMode.Raw` pour recevoir chaque notification native sans fusion.
 
 ## Référence de l'API
@@ -96,7 +96,7 @@ flux. Par défaut, les événements sont temporisés sur une fenêtre de 150 ms 
 | Membre | Renvoie | Description |
 |---|---|---|
 | `create(config)` | `FsWatcher` | Construit un watcher. `config` vaut `FsWatcherConfig()` par défaut. Lève `FsWatchException` si aucun backend n'est disponible pour la config. |
-| `isSupported(config)` | `Boolean` | Indique si un backend est disponible pour la config donnée. Appelle-la avant `create`. |
+| `isSupported(config)` | `Boolean` | Indique si un backend est disponible pour la config donnée. Appelez-la avant `create`. |
 
 ### Surveiller et collecter
 
@@ -130,7 +130,7 @@ FsWatchSource`, `active: Boolean` et `close()` pour arrêter de surveiller ce se
 - `FsWatchBackendStrategy.Auto` — utilise le backend natif quand il est disponible.
 - `FsWatchBackendStrategy.NativeOnly` — exige le backend natif.
 - `FsWatchBackendStrategy.Polling(interval, compareContents)` — scrute à intervalle régulier
-  (2 s par défaut) ; mets `compareContents = true` pour détecter les changements par contenu
+  (2 s par défaut) ; mettez `compareContents = true` pour détecter les changements par contenu
   plutôt que par métadonnées.
 
 `FsWatchDeliveryMode` est une sealed interface :
@@ -164,14 +164,14 @@ enregistrement échoue.
 ## Notes
 
 - `events` et `errors` n'ont pas de rejeu. Un collecteur tardif ne voit que les événements émis
-  après son abonnement : commence donc à collecter avant d'enregistrer des chemins.
-- Considère `FsWatchEvent.Overflow` comme un signal pour réanalyser le dossier concerné ; le flux
+  après son abonnement : commencez donc à collecter avant d'enregistrer des chemins.
+- Considérez `FsWatchEvent.Overflow` comme un signal pour réanalyser le dossier concerné ; le flux
   n'est pas un journal garanti complet.
-- `FsWatcher` et `FsWatchRegistration` sont `AutoCloseable`. Ferme les enregistrements dont tu
-  n'as plus besoin, et ferme le watcher à l'extinction pour libérer le handle natif.
+- `FsWatcher` et `FsWatchRegistration` sont `AutoCloseable`. Fermez les enregistrements dont vous
+  n'avez plus besoin, et fermez le watcher à l'extinction pour libérer le handle natif.
 
 ## Et ensuite
 
 - [System info](/docs/os/system-info) — interroge l'état de la plateforme et du matériel depuis le même runtime.
-- [Single instance](/docs/lifecycle/single-instance) — coordonne une seule copie en cours d'exécution de ton application.
+- [Single instance](/docs/lifecycle/single-instance) — coordonne une seule copie en cours d'exécution de votre application.
 - [Scheduler](/docs/lifecycle/scheduler) — exécute des tâches en arrière-plan sur un planning, même application fermée.

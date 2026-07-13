@@ -1,17 +1,17 @@
 ---
 title: AOT cache
-description: Génère un AOT cache Project Leyden au build et embarque-le dans ton installateur pour éviter le warmup de la JVM au lancement.
+description: Générez un AOT cache Project Leyden au build et embarquez-le dans votre installateur pour éviter le warmup de la JVM au lancement.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Nucleus peut générer un AOT cache [Project Leyden](https://openjdk.org/projects/leyden/) pendant qu'il build ton application, puis embarquer ce cache dans chaque installateur. Au lancement, la JVM rejoue le chargement de classes et les profils JIT pré-enregistrés au lieu de repartir à froid, donc l'application atteint plus vite une UI réactive. HotSpot C2 reste le JIT — le cache supprime le warmup, pas le compilateur.
+Nucleus peut générer un AOT cache [Project Leyden](https://openjdk.org/projects/leyden/) pendant qu'il build votre application, puis embarquer ce cache dans chaque installateur. Au lancement, la JVM rejoue le chargement de classes et les profils JIT pré-enregistrés au lieu de repartir à froid, donc l'application atteint plus vite une UI réactive. HotSpot C2 reste le JIT — le cache supprime le warmup, pas le compilateur.
 
 Cette page couvre l'activation du cache, l'écriture d'un run de training, et les contraintes de plateforme qui s'appliquent.
 
 ## Ajouter la dépendance
 
-`nucleus.aot-runtime` est tiré transitivement par [`nucleus.nucleus-application`](/docs/start/project-setup). Ajoute-le explicitement uniquement si tu n'utilises pas l'artefact umbrella :
+`nucleus.aot-runtime` est tiré transitivement par [`nucleus.nucleus-application`](/docs/start/project-setup). Ajoutez-le explicitement uniquement si vous n'utilisez pas l'artefact umbrella :
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -21,7 +21,7 @@ dependencies {
 
 ## Activer le cache
 
-Active un seul flag dans le bloc `nativeDistributions` :
+Activez un seul flag dans le bloc `nativeDistributions` :
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
@@ -38,14 +38,14 @@ La génération de l'AOT cache exige JDK 25 ou supérieur. Les toolchains plus a
 
 C'est tout le paramétrage côté build. Quand le flag est actif, le plugin :
 
-1. Lance ton application en mode training après `createDistributable`.
+1. Lance votre application en mode training après `createDistributable`.
 2. Enregistre le chargement de classes et la compilation JIT dans `app.aot` avec `-XX:AOTCacheOutput`.
 3. Injecte `-XX:AOTCache=$APPDIR/app.aot` dans la configuration du launcher.
 4. Embarque le cache dans chaque installateur (`.dmg`, `.msi`, `.deb`, etc.).
 
 ## Écrire un run de training
 
-Pendant le training, la JVM observe un vrai run de ton application et écrit le cache quand le processus se termine. Ton code doit sortir proprement, sinon le build attend jusqu'à ce que le timeout de sécurité de 300 s force l'arrêt. Avec `nucleusApplication { … }`, tu armes le timer d'auto-sortie en une ligne :
+Pendant le training, la JVM observe un vrai run de votre application et écrit le cache quand le processus se termine. Votre code doit sortir proprement, sinon le build attend jusqu'à ce que le timeout de sécurité de 300 s force l'arrêt. Avec `nucleusApplication { … }`, vous armez le timer d'auto-sortie en une ligne :
 
 ```kotlin
 import dev.nucleusframework.application.aotTraining
@@ -59,7 +59,7 @@ fun main(args: Array<String>) = nucleusApplication(args) {
 
     if (isAotTraining) {
         // Plus le run de training touche d'écrans réels, plus de méthodes
-        // sont profilées. Parcours le graphe de navigation et précharge les assets.
+        // sont profilées. Parcourez le graphe de navigation et préchargez les assets.
         preloadNavigationScreens()
         preloadFontsAndImages()
     }
@@ -70,7 +70,7 @@ fun main(args: Array<String>) = nucleusApplication(args) {
 }
 ```
 
-Si tu appelles directement `application { … }` de Compose, lis le mode et pilote le timer toi-même :
+Si vous appelez directement `application { … }` de Compose, lisez le mode et pilotez le timer vous-même :
 
 ```kotlin
 import androidx.compose.ui.window.application
@@ -138,12 +138,12 @@ Disponible à l'intérieur d'un bloc `nucleusApplication { … }`.
 
 ### Mesurer le cold start
 
-Mesure depuis le spawn du processus au niveau de l'OS (`time ./MyApp` sous Linux et macOS, `Measure-Command` sous Windows) jusqu'au premier frame visible. Compare un build avec `enableAotCache = false` à un build où il est actif, en utilisant le même JDK et un run de training représentatif.
+Mesurez depuis le spawn du processus au niveau de l'OS (`time ./MyApp` sous Linux et macOS, `Measure-Command` sous Windows) jusqu'au premier frame visible. Comparez un build avec `enableAotCache = false` à un build où il est actif, en utilisant le même JDK et un run de training représentatif.
 
 ## Notes
 
-- Le cache est par binaire — chaque release en embarque un neuf. Ne partage pas les caches entre versions.
-- Si tu veux une empreinte résidente plus petite ou un cold start plus court, utilise plutôt la voie [GraalVM native image](/docs/performance/graalvm). L'AOT cache conserve le débit de HotSpot ; GraalVM échange un peu de débit contre le temps de démarrage et la taille.
+- Le cache est par binaire — chaque release en embarque un neuf. Ne partagez pas les caches entre versions.
+- Si vous voulez une empreinte résidente plus petite ou un cold start plus court, utilisez plutôt la voie [GraalVM native image](/docs/performance/graalvm). L'AOT cache conserve le débit de HotSpot ; GraalVM échange un peu de débit contre le temps de démarrage et la taille.
 
 ## Et ensuite
 

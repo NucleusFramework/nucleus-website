@@ -1,15 +1,15 @@
 ---
 title: Démarrage au login
-description: Active, désactive et interroge le démarrage au login depuis Kotlin avec une API unique qui choisit le backend adapté au format de packaging courant.
+description: Activez, désactivez et interrogez le démarrage au login depuis Kotlin avec une API unique qui choisit le backend adapté au format de packaging courant.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Le module `autolaunch` te permet d'activer, de désactiver et d'interroger le démarrage au login
+Le module `autolaunch` vous permet d'activer, de désactiver et d'interroger le démarrage au login
 depuis Kotlin, sans écrire de code spécifique à chaque OS. Il choisit le backend selon le format de
 packaging courant au runtime — startup tasks MSIX, registre Win32, `SMAppService` macOS, service
 utilisateur systemd Linux et portail Flatpak — et respecte les états que l'utilisateur a réglés en
-dehors de ton app.
+dehors de votre app.
 
 ## Ajouter la dépendance
 
@@ -19,12 +19,12 @@ dependencies {
 }
 ```
 
-Sur macOS, le bridge JNI de `nucleus.service-management-macos` est tiré transitivement : tu n'as
+Sur macOS, le bridge JNI de `nucleus.service-management-macos` est tiré transitivement : vous n'avez
 rien à déclarer en plus.
 
 ## Vérifier et basculer le démarrage au login
 
-Lis l'état courant avec `AutoLaunch.state()` et branche dessus. Appelle `enable()` ou `disable()`
+Lisez l'état courant avec `AutoLaunch.state()` et branchez-vous dessus. Appelez `enable()` ou `disable()`
 pour le changer, et `openSystemSettings()` quand l'utilisateur doit agir dans l'interface système :
 
 ```kotlin
@@ -41,12 +41,12 @@ when (AutoLaunch.state()) {
 ```
 
 <Callout type="warn">
-Ne boucle jamais sur `BLOCKED_BY_USER`. Quand l'utilisateur a désactivé l'app via le Task Manager
+Ne bouclez jamais sur `BLOCKED_BY_USER`. Quand l'utilisateur a désactivé l'app via le Task Manager
 ou les Réglages, `enable()` renvoie `BLOCKED_BY_USER` et continuera de refuser tant qu'il ne
-réactive pas lui-même. Redirige-le vers `openSystemSettings()`.
+réactive pas lui-même. Redirigez-le vers `openSystemSettings()`.
 </Callout>
 
-Pour câbler un interrupteur en Compose, pilote-le depuis `state()` :
+Pour câbler un interrupteur en Compose, pilotez-le depuis `state()` :
 
 ```kotlin
 Switch(
@@ -61,7 +61,7 @@ Switch(
 ## Détecter un lancement au login
 
 `wasStartedAtLogin(args)` indique si le process courant a été lancé par le mécanisme de login plutôt
-que démarré à la main. Teste-le au point d'entrée de ton `main()` pour sauter un splash screen ou
+que démarré à la main. Testez-le au point d'entrée de votre `main()` pour sauter un splash screen ou
 démarrer en fenêtre réduite :
 
 ```kotlin
@@ -76,13 +76,13 @@ fun main(args: Array<String>) {
 <Callout type="info">
 Sur macOS, l'AppleEvent de login arrive après le démarrage de `NSApplication.run()`, donc le premier
 appel depuis `main()` renvoie généralement `false`. La méthode met en cache les résultats positifs :
-tu peux donc l'interroger depuis un `LaunchedEffect` une fois la boucle Compose lancée.
+vous pouvez donc l'interroger depuis un `LaunchedEffect` une fois la boucle Compose lancée.
 </Callout>
 
 ## Fonctionnement
 
 Le runtime choisit un backend à partir du système d'exploitation et du type d'exécutable détecté —
-aucun code conditionnel par OS de ton côté :
+aucun code conditionnel par OS de votre côté :
 
 | Packaging | Backend |
 |---|---|
@@ -92,7 +92,7 @@ aucun code conditionnel par OS de ton côté :
 | Linux (hôte : deb / rpm / AppImage) | service utilisateur systemd sous `~/.config/systemd/user/`. |
 | Linux (Flatpak) | XDG Desktop Portal `org.freedesktop.portal.Background`. |
 
-Trois invariants imposés par le module, que tu ne dois pas contourner :
+Trois invariants imposés par le module, que vous ne devez pas contourner :
 
 1. **Les choix de l'utilisateur sont définitifs.** Dès qu'il désactive le démarrage au login via
    l'interface système, l'état passe à `DISABLED_BY_USER` et `enable()` renvoie `BLOCKED_BY_USER`
@@ -100,7 +100,7 @@ Trois invariants imposés par le module, que tu ne dois pas contourner :
 2. **Les mises à jour silencieuses ne réinitialisent pas l'état.** Le backend Win32 n'écrit dans
    `Run` qu'à un `enable()` et ne touche à `StartupApproved` qu'à un `disable()`.
 3. **MSIX exige l'extension du manifeste.** Sans `<uap5:StartupTask>` dans `Package.appxmanifest`,
-   l'API renvoie `UNSUPPORTED`. Mets `addAutoLaunchExtension = true` dans le bloc plugin et il s'en
+   l'API renvoie `UNSUPPORTED`. Mettez `addAutoLaunchExtension = true` dans le bloc plugin et il s'en
    occupe.
 
 ## Référence de l'API
@@ -119,7 +119,7 @@ Trois invariants imposés par le module, que tu ne dois pas contourner :
 | `isEnabled()` | `Boolean` | `true` pour `ENABLED` ou `ENABLED_BY_POLICY`. |
 | `isUserLocked()` | `Boolean` | `true` quand l'état est `DISABLED_BY_USER`. |
 | `diagnostic()` | `String` | Trace lisible du backend, pour les tickets support. |
-| `preload()` | `Unit` | Résout le backend et charge sa bibliothèque JNI en avance. Appelle-la depuis un thread en arrière-plan pour éviter un blocage au premier appel sur macOS. |
+| `preload()` | `Unit` | Résout le backend et charge sa bibliothèque JNI en avance. Appelez-la depuis un thread en arrière-plan pour éviter un blocage au premier appel sur macOS. |
 
 ### AutoLaunchState
 
