@@ -175,6 +175,35 @@ export const oneLangT = {
 };
 
 // =====================================================================
+// PdfReaderStrip — "one component, every platform" example
+// =====================================================================
+export const pdfT = {
+  eyebrow: { en: 'Batteries included', fr: 'Piles incluses' } as Bi<string>,
+  title: {
+    en: React.createElement(React.Fragment, null,
+      'And it ships components too — like a ',
+      React.createElement('span', { className: 'hero-grad' }, 'PDF reader'),
+      ', one API on every platform.',
+    ),
+    fr: React.createElement(React.Fragment, null,
+      'Et il livre aussi des composants — comme un ',
+      React.createElement('span', { className: 'hero-grad' }, 'lecteur PDF'),
+      ', une seule API sur chaque plateforme.',
+    ),
+  } as Bi,
+  themTag: { en: 'Without Nucleus', fr: 'Sans Nucleus' } as Bi<string>,
+  themCap: {
+    en: 'Four platforms, four native PDF engines — four integrations to write, test, and keep in sync.',
+    fr: 'Quatre plateformes, quatre moteurs PDF natifs — quatre intégrations à écrire, tester et garder synchronisées.',
+  } as Bi<string>,
+  usTag: { en: 'With Nucleus', fr: 'Avec Nucleus' } as Bi<string>,
+  usCap: {
+    en: 'One Compose composable. Render, text selection, search, links, and thumbnails — identical on Android, iOS, web, and desktop.',
+    fr: 'Un seul composable Compose. Rendu, sélection de texte, recherche, liens et vignettes — identiques sur Android, iOS, web et desktop.',
+  } as Bi<string>,
+};
+
+// =====================================================================
 // Accessibility
 // =====================================================================
 export const accessibilityT = {

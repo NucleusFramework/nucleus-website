@@ -1,0 +1,100 @@
+---
+title: PDF reader
+description: Render PDFs, extract text, and select or copy content from Compose, with one API across Android, iOS, web, and desktop.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The PDF reader is a Kotlin Multiplatform library that renders PDF pages, extracts text, and drives selection, search, links, and thumbnails from Compose. The public API is the same on every target: you write against `PdfReaderState` and `PdfPage` once, and the library binds to the native PDF stack of each platform underneath.
+
+<Callout type="info" title="Separate repository">
+The PDF reader ships from its own repository with its own release cycle, like the [system tray](/docs/os/system-tray). The artifact is `dev.nucleusframework:pdfium`, published to Maven Central.
+</Callout>
+
+## One API instead of one per platform
+
+Each platform has its own PDF engine, with its own API, threading model, and coordinate conventions:
+
+| Platform | Native PDF stack |
+| -------- | ---------------- |
+| Android  | `PdfRenderer` (`android.graphics.pdf`) |
+| iOS      | PDFKit (`PDFView`, `PDFDocument`) |
+| Web      | PDF.js |
+| Desktop  | PDFBox and other JVM libraries |
+
+Without a shared layer, a multiplatform app integrates and maintains four of these. The PDF reader replaces them with a single Compose surface backed by [PDFium](https://pdfium.googlesource.com/pdfium/) on all four, so rendering, text extraction, and selection behave identically everywhere.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("dev.nucleusframework:pdfium:<version>")
+        }
+    }
+}
+```
+
+The `:pdfium` module uses a JVM toolchain of 17. PDFium binaries are fetched at build time from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries); no manual native setup is required.
+
+## Show a PDF
+
+Hoist a `PdfReaderState`, open the document bytes, and drop `PdfReader` into your layout:
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.pdfium.PdfReader
+import dev.nucleusframework.pdfium.rememberPdfReaderState
+
+@Composable
+fun HelloPdf(bytes: ByteArray) {
+    val reader = rememberPdfReaderState()
+    LaunchedEffect(bytes) { reader.open(bytes) }
+    PdfReader(state = reader, modifier = Modifier.fillMaxSize())
+}
+```
+
+`PdfReader` stacks every page in a `LazyColumn`. `rememberPdfReaderState` disposes the native handles automatically when it leaves composition.
+
+## Supported targets
+
+| Target  | Backend                                         |
+| ------- | ----------------------------------------------- |
+| JVM     | JNI + Skia (Skiko)                              |
+| Android | JNI (NDK `AndroidBitmap_*`)                     |
+| iOS     | Kotlin/Native cinterop + Skia (Skiko)           |
+| Web     | `pdfium.wasm` in a Web Worker + Skiko           |
+
+JVM covers linux-x64/arm64, macos-x64/arm64, and win-x64/arm64. Android covers arm64-v8a, armeabi-v7a, x86, and x86_64. Web covers Kotlin/WasmJS and Kotlin/JS (IR).
+
+## How it works
+
+`commonMain` holds the whole public API — `PdfReaderState`, `PdfPage`, `PdfThumbnail`, and `PdfReader` — over an `expect class PdfDocument`. Each source set provides the `actual`: JNI glue on JVM and Android, a Kotlin/Native cinterop on iOS, and a `pdfium.wasm` worker on the web.
+
+Rendering uses a zero-copy path where the platform allows it. On JVM and iOS, PDFium writes pixels straight into a Skia bitmap's memory; on Android it locks the `android.graphics.Bitmap`; on the web the worker's pixel `ArrayBuffer` is written into Skia's wasm heap without an intermediate Kotlin `ByteArray`.
+
+PDFium is single-threaded per document — it relies on FreeType's non-thread-safe `FT_Library` — so each `PdfDocument` runs on its own single-threaded dispatcher. Rendering is serialised inside a document.
+
+## What the library covers
+
+- Compose composables: drop `PdfReader`, `PdfPage`, or `PdfThumbnail` into any Compose UI.
+- Progressive rendering (preview to full) with a debounced size flow.
+- A two-tier LRU cache for reader bitmaps and thumbnails, with off-screen prefetch.
+- Text extraction: per-page UTF-8 text, line-level rectangles, and per-character boxes.
+- A selectable-text overlay driven by PDFium's per-character boxes.
+- Clickable links: URI and internal GoTo annotations, plus URLs and e-mail addresses detected in the page text.
+- Password-protected documents through `PdfError.PasswordRequired`.
+
+<Callout type="warn" title="Licensing">
+PDFium is dual-licensed BSD-3-Clause / Apache-2.0, and bblanchon's binaries carry that license forward. If you ship an app built on this library, include the upstream PDFium notices.
+</Callout>
+
+## What's next
+
+- [Getting started](/docs/pdf/getting-started) — load bytes, handle loading state, enable selection, links, thumbnails, and zoom.
+- [API reference](/docs/pdf/api-reference) — every public type, its parameters, and defaults.
+- [System tray](/docs/os/system-tray) — another Nucleus component shipped from its own repository.
