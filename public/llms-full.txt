@@ -6,7 +6,7 @@ Source: https://nucleusframework.dev/docs
 
 ---
 
-# Welcome to Nucleus 2.0
+# 
 
 URL: https://nucleusframework.dev/docs
 
@@ -22,25 +22,7 @@ Nucleus is a Kotlin framework for building cross-platform native desktop applica
 - **Over 40 OS integration modules.** Notifications, system tray, dock menus, dark mode, global hotkeys, and taskbar integration, each added as an opt-in dependency.
 - **18 packaging formats.** DMG, PKG, MSI, AppX, DEB, RPM, AppImage, Snap, and Flatpak among them, with code signing and notarization.
 
-## Install
-
-**macOS**
-
-```shell
-curl -fsSL https://nucleusframework.dev/install.sh | bash
-```
-
-**Linux**
-
-```shell
-curl -fsSL https://nucleusframework.dev/install-linux.sh | bash
-```
-
-**Windows**
-
-Download the installer from [GitHub Releases](https://github.com/NucleusFramework/Nucleus/releases).
-
-To build an app from scratch instead, follow the [quickstart](/docs/start/quickstart).
+To build your first app, follow the [quickstart](/docs/start/quickstart).
 
 ## What's new in 2.0
 
@@ -56,10 +38,11 @@ To build an app from scratch instead, follow the [quickstart](/docs/start/quicks
 - [Quickstart](/docs/start/quickstart) — build and run your first Nucleus desktop app.
 - [Architecture](/docs/concepts/architecture) — the layered model behind the framework.
 - [Runtimes](/docs/concepts/runtimes) — GraalVM Native Image and JVM + AOT cache.
+- [PDF reader](/docs/pdf) — render PDFs and extract text with one Compose API across Android, iOS, web, and desktop.
 
 ---
 
-# Why Nucleus
+# why-nucleus
 
 URL: https://nucleusframework.dev/docs/why-nucleus
 
@@ -92,7 +75,7 @@ underlying APIs remain accessible when you need them.
   auto-launch, scheduler, auto-update, system info, and file dialogs. Each is optional and
   written in Kotlin.
 - **Two runtimes** — GraalVM Native Image produces a self-contained binary (around 40 MB as an
-  NSIS installer with maximum compression, starting in about 0.5 s); JVM with an AOT cache runs
+  NSIS installer with maximum compression, starting in about 0.2 s); JVM with an AOT cache runs
   on HotSpot for long-running workloads.
   Switch between them with one Gradle setting.
 - **18 packaging formats** — DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX/MSIX, DEB, RPM,
@@ -124,7 +107,7 @@ calls, and packaging, running in a single process.
 
 ---
 
-# Install
+# start/install
 
 URL: https://nucleusframework.dev/docs/start/install
 
@@ -141,8 +124,10 @@ Nucleus builds on Compose Multiplatform and requires:
 - **Kotlin 2.0 or later** — Compose Multiplatform requires Kotlin 2.x.
 - **Gradle 8.0 or later**. The Gradle wrapper bundled with new projects is sufficient.
 
+
 JDK 25 or later is required only to generate the AOT cache (`enableAotCache` in `nativeDistributions`).
 Any JDK 17+ works for development.
+
 
 ## Apply the plugin
 
@@ -171,9 +156,6 @@ repositories {
 }
 ```
 
-`google()` is needed only when you resolve Compose Multiplatform artifacts from there or share
-modules with Android.
-
 ## Verify the plugin is applied
 
 Applying the plugin registers a `nucleus` task group. List its tasks to confirm the plugin loaded:
@@ -192,7 +174,7 @@ If the command prints the group's tasks, the plugin is applied and you can start
 
 ---
 
-# Quickstart
+# start/quickstart
 
 URL: https://nucleusframework.dev/docs/start/quickstart
 
@@ -244,6 +226,20 @@ nucleus.application {
 }
 ```
 
+Already have a Compose Desktop app? Nucleus extends `org.jetbrains.compose`, so switching is a
+rename — drop the vanilla `compose.desktop.application { }` block and point it at Nucleus:
+
+```diff
+-compose.desktop.application {
++nucleus.application {
+     mainClass = "com.example.MainKt"
+     // nativeDistributions { ... } stays the same
+ }
+```
+
+The entry point in `main` follows the same swap: `application { Window(...) }` becomes
+`nucleusApplication { DecoratedWindow(...) }`. See [Migrating from Compose Desktop](/docs/migrate/from-jb-compose).
+
 ## Write the application
 
 Create `src/main/kotlin/com/example/Main.kt`:
@@ -274,9 +270,11 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 The `nucleusApplication` entry point starts the Nucleus runtime and opens a `DecoratedWindow` —
 a Compose window with a native title bar.
 
+
 `NucleusBackend.Auto` (the default) picks Tao when `decorated-window-tao` is on the classpath,
 and falls back to the deprecated AWT backend otherwise. Force a backend with `NucleusBackend.Tao`.
 See [Backends](/docs/concepts/backends).
+
 
 ## Run the app
 
@@ -305,7 +303,7 @@ See [Configuration](/docs/start/configuration).
 
 ---
 
-# Project setup
+# start/project-setup
 
 URL: https://nucleusframework.dev/docs/start/project-setup
 
@@ -345,9 +343,6 @@ dependencyResolutionManagement {
 }
 ```
 
-Add `google()` only when you pull Compose Multiplatform from there or share modules with
-Android.
-
 ## Apply the plugin
 
 Apply the Nucleus plugin in the module that holds your `main` function:
@@ -360,9 +355,11 @@ plugins {
 }
 ```
 
+
 Nucleus extends the Compose plugin rather than replacing it, so Compose Hot Reload works
 without extra setup. The `mainClass` you set in `nucleus.application` is propagated to
 `compose.desktop.application.mainClass`, so the `hotRun` task resolves the entry point.
+
 
 ## Add the runtime modules
 
@@ -460,7 +457,7 @@ targets.
 
 ---
 
-# Configuration
+# start/configuration
 
 URL: https://nucleusframework.dev/docs/start/configuration
 
@@ -509,7 +506,11 @@ To configure a Kotlin/Native application instead, use `nucleus.nativeApplication
 
 Nucleus can ship your app as a bundled JVM, a GraalVM native image, or a JVM with an AOT cache.
 
+
+
 **Bundled JVM**
+
+
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
@@ -525,7 +526,11 @@ nucleus.application {
 
 Bundles a JRE alongside your app. This is the default and requires the least configuration.
 
+
+
 **GraalVM native image**
+
+
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
@@ -547,7 +552,11 @@ nucleus.application {
 
 Compiles the app to a self-contained native binary. Reachability metadata for Nucleus modules is injected automatically.
 
+
+
 **JVM with AOT cache**
+
+
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
@@ -562,6 +571,9 @@ nucleus.application {
 ```
 
 Requires JDK 25 or later. The build generates an AOT cache and ships it with the launcher, so classes and profiles are pre-warmed at startup.
+
+
+
 
 ## `application { }` reference
 
@@ -613,7 +625,9 @@ nativeDistributions {
 }
 ```
 
+
 `Pkg`, `AppX`, and `Flatpak` are the store formats. See [Packaging](/docs/packaging) for per-format details.
+
 
 ## Set per-OS options
 
@@ -756,7 +770,9 @@ buildTypes {
 
 Release tasks are suffixed `Release`, for example `packageReleaseDmg`.
 
+
 `CompressionLevel.Maximum` with AppImage causes very slow startup due to squashfs/FUSE decompression. Use `Normal` or `Store` for AppImage targets.
+
 
 ## What's next
 
@@ -766,7 +782,7 @@ Release tasks are suffixed `Release`, for example `packageReleaseDmg`.
 
 ---
 
-# Architecture
+# concepts/architecture
 
 URL: https://nucleusframework.dev/docs/concepts/architecture
 
@@ -844,8 +860,10 @@ A Nucleus application runs on one of three runtimes:
 
 Switching runtimes is a one-line DSL change — see [Runtimes](/docs/concepts/runtimes).
 
+
 A Nucleus application requires JDK 17 or later. The runtime modules themselves compile to Java 11
 bytecode, so code that embeds them stays compatible with older toolchains.
+
 
 ## How a frame is drawn
 
@@ -868,7 +886,7 @@ Your code stays in Kotlin the whole way down.
 
 ---
 
-# Runtimes
+# concepts/runtimes
 
 URL: https://nucleusframework.dev/docs/concepts/runtimes
 
@@ -895,9 +913,11 @@ nucleus.application {
 }
 ```
 
+
 A native image is closed-world: reflection, dynamic class loading, and JNI must be known at
 build time. Nucleus provides reachability metadata for its own modules. For third-party
 libraries, see [GraalVM](/docs/performance/graalvm).
+
 
 Because there is no JVM warmup, a native image reaches its first frame quickly. The tradeoff is
 the closed-world constraint: no runtime class loading, no Java agents, no JFR, and no dynamic
@@ -978,7 +998,7 @@ for the `RUNTIME` and `TRAINING` modes.
 
 ---
 
-# Backends
+# concepts/backends
 
 URL: https://nucleusframework.dev/docs/concepts/backends
 
@@ -988,9 +1008,11 @@ Every Nucleus window is a Compose composable. The backend is the layer beneath i
 OS event loop, owns the native window handle, and presents Skia's GPU surface on screen. Nucleus
 2.0 uses Tao as its backend behind the same `DecoratedWindow` API.
 
+
 The legacy AWT backend (`decorated-window-jbr` / `decorated-window-jni`) is deprecated and will
 be removed in a future Nucleus release. New and existing projects should move to Tao — see
 [Migrating from JBR to Tao](/docs/tao/migration-from-jbr).
+
 
 ## The Tao backend
 
@@ -1039,9 +1061,11 @@ call, reach the underlying handle through the window's escape hatches:
 
 Each returns `null` on the other backend.
 
+
 When `decorated-window-tao` is on the classpath, the Gradle plugin injects `-XstartOnFirstThread`
 into Hot Reload's `JavaExec` tasks on macOS, because Tao runs the OS event loop on the process main
 thread.
+
 
 ## What's next
 
@@ -1051,7 +1075,7 @@ thread.
 
 ---
 
-# Modules
+# concepts/modules
 
 URL: https://nucleusframework.dev/docs/concepts/modules
 
@@ -1152,7 +1176,9 @@ dependencies {
 }
 ```
 
+
 Pin every `nucleus.*` artifact to the same version. The modules release together.
+
 
 ## How modules compose
 
@@ -1177,7 +1203,7 @@ so there is no reflection config to maintain by hand.
 
 ---
 
-# The Tao backend
+# tao
 
 URL: https://nucleusframework.dev/docs/tao
 
@@ -1240,6 +1266,13 @@ Tao opens a native OS window directly: an `NSWindow` on macOS, an `HWND` on Wind
 Metal on macOS, WGL on Windows, EGL on Linux. Nothing routes through Swing's event-dispatch
 thread.
 
+
+Compose Desktop's `SwingPanel` does not work on the Tao backend and crashes the app at
+runtime. It requires an AWT/Swing window hierarchy that Tao never creates. Embed native
+content with [`NativeView`](/docs/tao/native-views) instead, or keep the AWT backend for
+windows that still need Swing interop.
+
+
 The OS event loop runs on the process main thread, so the macOS launcher needs
 `-XstartOnFirstThread`. The Nucleus Gradle plugin adds it automatically for `run`, packaged
 distributions, and Compose Hot Reload. GraalVM native-image builds start on the main thread
@@ -1263,10 +1296,12 @@ The Tao-specific API lives in `dev.nucleusframework.window.tao`:
   input constants.
 - `TaoDeepLinkBridge.setSink { uri -> … }` — deep link delivery.
 
+
 `decorated-window-jbr` and `decorated-window-jni` are deprecated and will be removed in a
 future Nucleus release. Keep one on the classpath and select the backend with
 `NucleusBackend.Awt` only if you still need Swing / AWT interop during migration. See
 [migration from JBR](/docs/tao/migration-from-jbr).
+
 
 ## What's next
 
@@ -1277,7 +1312,7 @@ future Nucleus release. Keep one on the classpath and select the backend with
 
 ---
 
-# DecoratedWindow on Tao
+# tao/decorated-window
 
 URL: https://nucleusframework.dev/docs/tao/decorated-window
 
@@ -1420,11 +1455,13 @@ The mechanism differs per platform:
 - **Linux** — sets the GTK skip-taskbar/skip-pager hints (`_NET_WM_STATE_SKIP_TASKBAR`).
   Per-window, and only effective on X11 or XWayland.
 
+
 On native Wayland, `hiddenFromDock` has no effect — Wayland has no client-side skip-taskbar
 protocol (`xdg-shell`, `gtk_shell1`, and the staging layer-shell extensions all lack it, and Mutter
 rejects `wlr-layer-shell`). Nucleus logs a warning rather than failing silently. Force XWayland with
 `NUCLEUS_TAO_LINUX_RENDERER=x11` if you need the window actually hidden on a Wayland session — see
 [Native Wayland](/docs/tao/wayland).
+
 
 ### Scope members
 
@@ -1453,10 +1490,12 @@ interface NucleusWindow {
 - `Modifier.macOSLargeCornerRadius()` — opt into macOS 26+ rounded corners.
 - `Modifier.newFullscreenControls()` — relayout the title bar buttons for fullscreen.
 
+
 `TitleBar` is a single extension on `DecoratedWindowScope`. The `nucleusApplication` scope
 (`NucleusDecoratedWindowScope`) and the Tao-native `taoApplication` scope
 (`TaoDecoratedWindowScope`) both implement it, so the same `TitleBar` call works whichever
 entry point you start from.
+
 
 ## Notes
 
@@ -1473,7 +1512,7 @@ entry point you start from.
 
 ---
 
-# Native views on Tao
+# tao/native-views
 
 URL: https://nucleusframework.dev/docs/tao/native-views
 
@@ -1536,9 +1575,11 @@ fun BrowserPane(url: String) {
 Nucleus calls `dispose()` when `NativeView` leaves the composition. The native view
 tracks the layout slot's position and size automatically — you don't set frames yourself.
 
+
 Nucleus does not create the native view for you. `createNativeWebView` above is a
 placeholder for your own interop code that returns the platform handle (an `NSView*` on
 macOS, an `HWND` or WebView2 controller on Windows, a `GtkWidget*` on Linux) as a `Long`.
+
 
 ## How it works
 
@@ -1631,8 +1672,10 @@ NativeView(
 For text-input fields, pass a cursor so the whole region shows the I-beam:
 `consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
 
+
 The `content` overlay is supported on macOS and Windows only. On Linux the `GtkWidget`
 variant ignores the `content` lambda.
+
 
 ### Clip to rounded corners
 
@@ -1658,7 +1701,7 @@ Pass `Dp.Infinity` to clip fully circular regardless of size. The default,
 
 ---
 
-# Multi-touch & gestures
+# tao/multi-touch
 
 URL: https://nucleusframework.dev/docs/tao/multi-touch
 
@@ -1754,8 +1797,10 @@ The callback receives fixed-point integers: `xFixed` and `yFixed` are view-relat
 pixels multiplied by 1024, and `valueFixed` is the delta multiplied by 10000 (a ratio for
 magnify, degrees for rotate).
 
+
 `onTrackpadGesture` replaces the previously registered listener rather than adding one.
 Register a single listener per window.
+
 
 ## How it works
 
@@ -1825,7 +1870,7 @@ val scrollDelta: Offset       // scroll wheel and trackpad scroll
 
 ---
 
-# Pen & stylus input
+# tao/pen-stylus
 
 URL: https://nucleusframework.dev/docs/tao/pen-stylus
 
@@ -1935,8 +1980,10 @@ val position: Offset = change.position
 
 ## Notes
 
+
 A contact reports `pressure = 1f` both at full pressure and when the digitizer exposes no
 pressure at all. Treat `1f` as "maximal or unavailable", not strictly maximal.
+
 
 ## What's next
 
@@ -1946,7 +1993,7 @@ pressure at all. Treat `1f` as "maximal or unavailable", not strictly maximal.
 
 ---
 
-# Drag and drop
+# tao/drag-and-drop
 
 URL: https://nucleusframework.dev/docs/tao/drag-and-drop
 
@@ -1958,7 +2005,9 @@ The Tao backend routes native drag-and-drop into Compose through the standard
 paths, and `event.awtTransferable` resolves the same data through the usual
 `DataFlavor` path — without initializing the AWT toolkit.
 
+
 Inbound drops carry files only. Text, HTML, and URL payloads are not delivered yet.
+
 
 ## Add the dependency
 
@@ -2076,7 +2125,7 @@ fun DnDStatus() {
 
 ---
 
-# Accessibility
+# tao/accessibility
 
 URL: https://nucleusframework.dev/docs/tao/accessibility
 
@@ -2135,8 +2184,10 @@ The `Button` is projected as a `TaoA11yRole.Button` node that advertises the
 `TaoA11yAction.CLICK` action; the `Image` becomes a `TaoA11yRole.Image` node with its
 `contentDescription` as the label. A screen reader reads these directly with no extra wiring.
 
+
 Nodes marked `InvisibleToUser` or `HideFromAccessibility` in Compose are pruned before
 projection, so they never reach the OS accessibility tree.
+
 
 ## How it works
 
@@ -2279,7 +2330,7 @@ if (node.actions and TaoA11yAction.CLICK != 0) { /* the element can be activated
 
 ---
 
-# Native Wayland
+# tao/wayland
 
 URL: https://nucleusframework.dev/docs/tao/wayland
 
@@ -2342,10 +2393,12 @@ automatically. The Compose code does not change.
 
 ## Notes
 
+
 On Wayland you cannot set absolute screen coordinates — the compositor owns window placement.
 `WindowState.position` is treated as a hint by some compositors and ignored by others (GNOME ignores
 client-requested positions). Design around `Center` or `PlatformDefault`, and persist the last size
 rather than the last position.
+
 
 ## API reference
 
@@ -2363,7 +2416,7 @@ rather than the last position.
 
 ---
 
-# Per-monitor HiDPI
+# tao/hidpi
 
 URL: https://nucleusframework.dev/docs/tao/hidpi
 
@@ -2403,7 +2456,9 @@ The `linux-hidpi` module reads a single global scale from the desktop environmen
 
 The Tao backend does not use that helper — it observes per-window scale changes at runtime. When you migrate from the AWT backends to Tao on Linux, you can drop the `linux-hidpi` dependency.
 
+
 Keep `linux-hidpi` only for sessions where you still run the AWT (JBR or JNI) backends.
+
 
 ## API reference
 
@@ -2425,7 +2480,7 @@ Keep `linux-hidpi` only for sessions where you still run the AWT (JBR or JNI) ba
 
 ---
 
-# Taskbar progress
+# tao/taskbar-progress
 
 URL: https://nucleusframework.dev/docs/tao/taskbar-progress
 
@@ -2469,7 +2524,9 @@ LaunchedEffect(progress) {
 
 `rememberTaoTaskbarProgress()` returns a `TaoTaskbarProgressScope?`. It is `null` when called outside a Tao `DecoratedWindow`, so guard the calls with `?.`. The `value` passed to `showProgress` and `setProgress` is a fraction in the `0.0..1.0` range.
 
+
 Progress is a visual hint. `isAvailable()` reports `false` on platforms or environments without taskbar-progress support (for example, a Linux desktop that exposes no matching `.desktop` file), and the calls become no-ops.
+
 
 ## How it works
 
@@ -2561,7 +2618,7 @@ The extensions mirror the scope: `setTaskbarProgress`, `setTaskbarState`, `showT
 
 ---
 
-# Migrate from JBR to Tao
+# tao/migration-from-jbr
 
 URL: https://nucleusframework.dev/docs/tao/migration-from-jbr
 
@@ -2572,6 +2629,18 @@ In this tutorial, you'll move an existing Nucleus app from the AWT backend
 (`decorated-window-tao`). The `DecoratedWindow` and `TitleBar` APIs are identical on both
 backends, so the move is a dependency swap and a backend flag. The rest of the tutorial
 covers the integrations you need to retest afterward.
+
+
+On the same machine, running the same app as a GraalVM native image, moving from the AWT
+backend to Tao measurably cuts both startup time and memory:
+
+- **Startup** (launch → first window): **~0.7 s → ~0.12 s**, roughly **6× faster**.
+- **RAM** (private working set, idle with window open): **~155 MB → ~100 MB**, about **35% lower**.
+
+Tao drops the AWT/Swing window hierarchy and its native libraries entirely — that is what
+removes the startup and memory overhead. Figures are from an internal Nucleus app; your
+results vary with app size and platform.
+
 
 ## Before you start
 
@@ -2586,7 +2655,11 @@ covers the integrations you need to retest afterward.
 Replace the AWT window runtime with `decorated-window-tao`. Keep the
 `nucleus.nucleus-application` entry point unchanged.
 
+
+
 **Before (AWT)**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -2595,7 +2668,11 @@ dependencies {
 }
 ```
 
+
+
 **After (Tao)**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -2604,12 +2681,19 @@ dependencies {
 }
 ```
 
+
+
+
 ## Switch the backend flag
 
 Pass `backend = NucleusBackend.Tao` to `nucleusApplication`. The window content stays
 identical.
 
+
+
 **Before (AWT)**
+
+
 
 ```kotlin
 nucleusApplication {
@@ -2620,7 +2704,11 @@ nucleusApplication {
 }
 ```
 
+
+
 **After (Tao)**
+
+
 
 ```kotlin
 nucleusApplication(backend = NucleusBackend.Tao) {
@@ -2631,9 +2719,14 @@ nucleusApplication(backend = NucleusBackend.Tao) {
 }
 ```
 
+
+
+
+
 `NucleusBackend.Auto` (the default) picks Tao when `decorated-window-tao` is on the
 classpath and falls back to the AWT backend otherwise. Set the flag explicitly to pin the
 choice per build.
+
 
 ## Retest the platform integrations
 
@@ -2647,8 +2740,10 @@ each of these after the swap:
 - **File dialogs.** Tao has no AWT, so any direct `JFileChooser` call stops working. Switch
   to a native file dialog library such as FileKit — see
   [Native file dialogs](/docs/ecosystem/file-dialog), which runs on both backends.
-- **Native views.** Embedded AWT `Canvas` instances no longer work under Tao. Embed native
-  content with `NativeView` instead.
+- **Native views.** Embedded AWT `Canvas` instances no longer work under Tao. Compose
+  Desktop's `SwingPanel` also stops working and crashes the app at runtime, since Tao never
+  creates the AWT/Swing window hierarchy it needs. Embed native content with `NativeView`
+  instead.
 - **Window placement on Linux.** Wayland compositors may ignore absolute positions. See
   [Wayland](/docs/tao/wayland).
 - **Multi-window flows.** These are unchanged: one `nucleusApplication { }` block with one
@@ -2658,6 +2753,8 @@ each of these after the swap:
 
 | Concern                | AWT (JBR / JNI)                     | Tao                                   |
 |------------------------|-------------------------------------|---------------------------------------|
+| Startup (native image) | ~0.7 s to first window              | ~0.12 s to first window (~6× faster)  |
+| RAM (idle, window open)| ~155 MB private working set         | ~100 MB private working set (~35% lower) |
 | Underlying window      | `ComposeWindow` (extends `JFrame`)  | `TaoWindow` (native handle)           |
 | Event dispatch         | AWT EDT                             | Tao event loop on the main thread     |
 | `unsafe` accessor      | `unsafe.awtWindow`                  | `unsafe.taoWindow`                    |
@@ -2689,7 +2786,7 @@ backend per build with `NucleusBackend.Awt` or `NucleusBackend.Tao`.
 
 ---
 
-# Window & toolkits
+# window
 
 URL: https://nucleusframework.dev/docs/window
 
@@ -2815,8 +2912,10 @@ running your windows. `LocalNucleusBackend` reports the resolved value, one of
 `NucleusBackend.Auto`, `.Awt`, or `.Tao`. Because `nucleusWindow` mirrors both backends, the same
 window code runs on either.
 
+
 `nucleusApplication` acquires a single-instance lock by default. Pass `enableSingleInstance = false`
 to allow multiple processes.
+
 
 ## What's next
 
@@ -2826,7 +2925,7 @@ to allow multiple processes.
 
 ---
 
-# Four native looks
+# window/toolkits
 
 URL: https://nucleusframework.dev/docs/window/toolkits
 
@@ -2847,16 +2946,22 @@ desktop design language. You pick the look by adding a module, not by changing y
 | Material 2 | Fallback       | `nucleus.decorated-window-material2`| Available    |
 | Material 3 | Fallback       | `nucleus.decorated-window-material3`| Available    |
 
+
 The macOS, Fluent, and Yaru packs are coming soon and are not published yet. The artifact ids
 above are provisional and may change at release. Jewel, Material 2, and Material 3 are available
 today.
+
 
 ## Choose a toolkit
 
 Add the toolkit module alongside `nucleus-application` and a backend, then wrap your content in
 the toolkit's `DecoratedWindow`.
 
+
+
 **Jewel**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -2879,7 +2984,11 @@ fun main() = nucleusApplication {
 }
 ```
 
+
+
 **Material 3**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -2902,7 +3011,11 @@ fun main() = nucleusApplication {
 }
 ```
 
+
+
 **Material 2**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -2924,6 +3037,9 @@ fun main() = nucleusApplication {
     }
 }
 ```
+
+
+
 
 The Material 3 module lives in the `dev.nucleusframework.window.material` package, not
 `window.material3`. To change toolkits, swap the dependency and the `import`. The window content
@@ -2953,8 +3069,10 @@ of truth. Jewel exposes `rememberJewelWindowStyle()` and `rememberJewelTitleBarS
 exposes `rememberMaterialWindowStyle(colorScheme)` and `rememberMaterialTitleBarStyle(colorScheme)`.
 Material 2 maps its `Colors` internally.
 
+
 Toolkits style the window chrome. The widgets inside — buttons, lists, text fields — are whatever
 you choose: Material 3, Jewel, or your own design system.
+
 
 ## What's next
 
@@ -2964,7 +3082,7 @@ you choose: Material 3, Jewel, or your own design system.
 
 ---
 
-# Jewel — IntelliJ Platform
+# window/toolkit-jewel
 
 URL: https://nucleusframework.dev/docs/window/toolkit-jewel
 
@@ -3023,8 +3141,10 @@ fun main() = nucleusApplication {
 The window reads the current Jewel theme and derives its title bar and chrome from it, so
 switching `isDark` flips the whole window between the light and dark IntelliJ palettes.
 
+
 `JewelDecoratedWindow` reads `JewelTheme.globalColors`, so you must call it inside a Jewel
 theme such as `IntUiTheme`. Without one, the composable has no colors to derive its style from.
+
 
 ## How it works
 
@@ -3072,7 +3192,7 @@ switches between Jewel and another toolkit at runtime.
 
 ---
 
-# Material 2 & Material 3
+# window/toolkit-material
 
 URL: https://nucleusframework.dev/docs/window/toolkit-material
 
@@ -3088,7 +3208,11 @@ adapters: `decorated-window-material2` for `androidx.compose.material` and
 Add the Nucleus runtime, a backend, and the Material adapter that matches the Compose Material
 version you use. Pair it with `decorated-window-tao` for the Tao backend.
 
+
+
 **Material 3**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -3099,7 +3223,11 @@ dependencies {
 }
 ```
 
+
+
 **Material 2**
+
+
 
 ```kotlin title="build.gradle.kts"
 dependencies {
@@ -3110,16 +3238,25 @@ dependencies {
 }
 ```
 
+
+
+
+
 The Material 3 artifact is `nucleus.decorated-window-material3`, but its Kotlin package is
 `dev.nucleusframework.window.material` — with no `3`. Material 2 lives in
 `dev.nucleusframework.window.material2`.
+
 
 ## Create a Material window
 
 Wrap `MaterialDecoratedWindow` in a `MaterialTheme`. The window inherits the theme's colors, and
 `MaterialTitleBar` draws a title bar styled to match.
 
+
+
 **Material 3**
+
+
 
 ```kotlin
 import androidx.compose.foundation.layout.fillMaxSize
@@ -3142,7 +3279,11 @@ fun main() = nucleusApplication {
 }
 ```
 
+
+
 **Material 2**
+
+
 
 ```kotlin
 import androidx.compose.foundation.layout.fillMaxSize
@@ -3164,6 +3305,9 @@ fun main() = nucleusApplication {
     }
 }
 ```
+
+
+
 
 Swap `lightColorScheme()` / `lightColors()` for the dark variant to switch the whole window,
 chrome included. To follow the operating system, drive the color scheme from `isSystemInDarkMode()`
@@ -3206,8 +3350,10 @@ derives the same styles internally, but those helpers are `internal` and not par
 - `DecoratedWindowScope.MaterialTitleBar(...)`
 - `DecoratedDialogScope.MaterialDialogTitleBar(...)`
 
+
 The Material adapters run on every backend. Pair them with `decorated-window-tao` for the Tao
 backend, or with the deprecated `-jbr` / `-jni` AWT modules.
+
 
 ## What's next
 
@@ -3217,7 +3363,448 @@ backend, or with the deprecated `-jbr` / `-jni` AWT modules.
 
 ---
 
-# OS integration
+# pdf
+
+URL: https://nucleusframework.dev/docs/pdf
+
+Render PDFs, extract text, and select or copy content from Compose, with one API across Android, iOS, web, and desktop.
+
+The PDF reader is a Kotlin Multiplatform library that renders PDF pages, extracts text, and drives selection, search, links, and thumbnails from Compose. The public API is the same on every target: you write against `PdfReaderState` and `PdfPage` once, and the library binds to the native PDF stack of each platform underneath.
+
+
+The PDF reader ships from its own repository with its own release cycle, like the [system tray](/docs/os/system-tray). The artifact is `dev.nucleusframework:pdfium`, published to Maven Central.
+
+
+## One API instead of one per platform
+
+Each platform has its own PDF engine, with its own API, threading model, and coordinate conventions:
+
+| Platform | Native PDF stack |
+| -------- | ---------------- |
+| Android  | `PdfRenderer` (`android.graphics.pdf`) |
+| iOS      | PDFKit (`PDFView`, `PDFDocument`) |
+| Web      | PDF.js |
+| Desktop  | PDFBox and other JVM libraries |
+
+Without a shared layer, a multiplatform app integrates and maintains four of these. The PDF reader replaces them with a single Compose surface backed by [PDFium](https://pdfium.googlesource.com/pdfium/) on all four, so rendering, text extraction, and selection behave identically everywhere.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("dev.nucleusframework:pdfium:<version>")
+        }
+    }
+}
+```
+
+The `:pdfium` module uses a JVM toolchain of 17. PDFium binaries are fetched at build time from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries); no manual native setup is required.
+
+## Show a PDF
+
+Hoist a `PdfReaderState`, open the document bytes, and drop `PdfReader` into your layout:
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.pdfium.PdfReader
+import dev.nucleusframework.pdfium.rememberPdfReaderState
+
+@Composable
+fun HelloPdf(bytes: ByteArray) {
+    val reader = rememberPdfReaderState()
+    LaunchedEffect(bytes) { reader.open(bytes) }
+    PdfReader(state = reader, modifier = Modifier.fillMaxSize())
+}
+```
+
+`PdfReader` stacks every page in a `LazyColumn`. `rememberPdfReaderState` disposes the native handles automatically when it leaves composition.
+
+## Supported targets
+
+| Target  | Backend                                         |
+| ------- | ----------------------------------------------- |
+| JVM     | JNI + Skia (Skiko)                              |
+| Android | JNI (NDK `AndroidBitmap_*`)                     |
+| iOS     | Kotlin/Native cinterop + Skia (Skiko)           |
+| Web     | `pdfium.wasm` in a Web Worker + Skiko           |
+
+JVM covers linux-x64/arm64, macos-x64/arm64, and win-x64/arm64. Android covers arm64-v8a, armeabi-v7a, x86, and x86_64. Web covers Kotlin/WasmJS and Kotlin/JS (IR).
+
+## How it works
+
+`commonMain` holds the whole public API — `PdfReaderState`, `PdfPage`, `PdfThumbnail`, and `PdfReader` — over an `expect class PdfDocument`. Each source set provides the `actual`: JNI glue on JVM and Android, a Kotlin/Native cinterop on iOS, and a `pdfium.wasm` worker on the web.
+
+Rendering uses a zero-copy path where the platform allows it. On JVM and iOS, PDFium writes pixels straight into a Skia bitmap's memory; on Android it locks the `android.graphics.Bitmap`; on the web the worker's pixel `ArrayBuffer` is written into Skia's wasm heap without an intermediate Kotlin `ByteArray`.
+
+PDFium is single-threaded per document — it relies on FreeType's non-thread-safe `FT_Library` — so each `PdfDocument` runs on its own single-threaded dispatcher. Rendering is serialised inside a document.
+
+## What the library covers
+
+- Compose composables: drop `PdfReader`, `PdfPage`, or `PdfThumbnail` into any Compose UI.
+- Progressive rendering (preview to full) with a debounced size flow.
+- A two-tier LRU cache for reader bitmaps and thumbnails, with off-screen prefetch.
+- Text extraction: per-page UTF-8 text, line-level rectangles, and per-character boxes.
+- A selectable-text overlay driven by PDFium's per-character boxes.
+- Clickable links: URI and internal GoTo annotations, plus URLs and e-mail addresses detected in the page text.
+- Password-protected documents through `PdfError.PasswordRequired`.
+
+
+PDFium is dual-licensed BSD-3-Clause / Apache-2.0, and bblanchon's binaries carry that license forward. If you ship an app built on this library, include the upstream PDFium notices.
+
+
+## What's next
+
+- [Getting started](/docs/pdf/getting-started) — load bytes, handle loading state, enable selection, links, thumbnails, and zoom.
+- [API reference](/docs/pdf/api-reference) — every public type, its parameters, and defaults.
+- [System tray](/docs/os/system-tray) — another Nucleus component shipped from its own repository.
+
+---
+
+# pdf/getting-started
+
+URL: https://nucleusframework.dev/docs/pdf/getting-started
+
+Load PDF bytes, react to loading state, and enable text selection, links, thumbnails, and zoom.
+
+In this tutorial, you'll open a PDF from a file picker, react to its loading state, and turn on text selection, links, a thumbnail sidebar, and zoom. Every snippet drops into a Compose Multiplatform `commonMain` source set.
+
+## Before you start
+
+Add the dependency described in the [PDF reader overview](/docs/pdf):
+
+```kotlin title="build.gradle.kts"
+commonMain.dependencies {
+    implementation("dev.nucleusframework:pdfium:<version>")
+}
+```
+
+## Load the PDF bytes
+
+`PdfReaderState.open` takes a `ByteArray` — how you obtain it is up to you. To pick a file with a native dialog, use [FileKit](/docs/ecosystem/file-dialog):
+
+```kotlin
+@Composable
+fun PdfPicker() {
+    val reader = rememberPdfReaderState()
+    val scope = rememberCoroutineScope()
+    val picker = rememberFilePickerLauncher(
+        type = FileKitType.File(extensions = listOf("pdf")),
+    ) { file ->
+        if (file != null) scope.launch { reader.open(file.readBytes()) }
+    }
+    Column(Modifier.fillMaxSize()) {
+        Button(onClick = { picker.launch() }) { Text("Open PDF…") }
+        if (reader.pageCount > 0) {
+            PdfReader(state = reader, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+```
+
+To load from a URL, pass the bytes from any HTTP client:
+
+```kotlin
+val client = remember { HttpClient() }
+LaunchedEffect(url) { reader.open(client.get(url).readRawBytes()) }
+```
+
+## React to loading state and errors
+
+`PdfReaderState` exposes snapshot state you can read in any composable — `isLoading`, `error`, `metadata`, and `pageCount`:
+
+```kotlin
+Box(Modifier.fillMaxSize()) {
+    when {
+        reader.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+        reader.error is PdfError.PasswordRequired -> PasswordPrompt { password ->
+            scope.launch { reader.open(bytes, password) }
+        }
+        reader.error is PdfError.InvalidFormat -> Text("Not a valid PDF")
+        reader.error != null -> Text("Couldn't open: ${reader.error?.message}")
+
+        reader.pageCount > 0 -> {
+            Column {
+                Text(reader.metadata.title ?: "Untitled")
+                PdfReader(state = reader, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+```
+
+## Enable text selection
+
+Set `selectableText = true` on `PdfPage`. Drag on desktop, long-press on mobile, and copy with Ctrl/Cmd+C:
+
+```kotlin
+PdfPage(
+    state = reader,
+    pageIndex = pageIndex,
+    modifier = Modifier.fillMaxWidth(),
+    selectableText = true,
+)
+```
+
+Hit-testing uses PDFium's per-character boxes (`FPDFText_GetCharBox`), so selection tracks the rendered glyphs rather than Compose's own font metrics.
+
+## Handle links
+
+Links are enabled by default on `PdfPage` and `PdfReader`. Link annotations and URLs or e-mail addresses detected in the page text become clickable regions. External URIs open through `LocalUriHandler`; inside `PdfReader`, internal GoTo links scroll to the destination page.
+
+Intercept clicks with `onLinkClick` — return `true` to consume the click and skip the default handling:
+
+```kotlin
+PdfReader(
+    state = reader,
+    onLinkClick = { link ->
+        if (link.uri?.startsWith("mailto:") == true) {
+            openCustomComposer(link.uri)
+            true
+        } else {
+            false
+        }
+    },
+)
+```
+
+## Add a thumbnail sidebar
+
+`PdfThumbnail` renders at `RenderQuality.PREVIEW` and keeps its own LRU, so scrolling a long strip never evicts the reader's full-quality bitmaps:
+
+```kotlin
+Row(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.width(160.dp).fillMaxHeight()) {
+        items(reader.pageCount) { i ->
+            PdfThumbnail(state = reader, pageIndex = i, modifier = Modifier.clickable { /* jumpToPage(i) */ })
+        }
+    }
+    PdfReader(state = reader, modifier = Modifier.weight(1f).fillMaxHeight())
+}
+```
+
+## Zoom and fit-to-width
+
+`PdfReaderState.renderScale` is a plain `Float` that every `PdfPage` observes. `1.0` is fit-to-width; change it to re-render the visible pages at the new size:
+
+```kotlin
+var scale by remember { mutableStateOf(1f) }
+LaunchedEffect(scale) { reader.renderScale = scale }
+
+Slider(value = scale, onValueChange = { scale = it }, valueRange = 0.5f..3f)
+```
+
+## Extract text programmatically
+
+`pageText` returns the Unicode of a single page; `pageTextLayout` returns line-level rectangles for search and highlighting:
+
+```kotlin
+scope.launch {
+    val text = reader.pageText(pageIndex = 0)
+    println(text)
+}
+```
+
+
+The library's sample app wires a picker, sidebar, zoom, and selection into a full reader screen. See the repository's `:example` module for a complete reference.
+
+
+## What's next
+
+- [API reference](/docs/pdf/api-reference) — every public type, its parameters, and defaults.
+- [PDF reader overview](/docs/pdf) — supported targets and how the render path works.
+- [Native file dialogs](/docs/ecosystem/file-dialog) — the FileKit picker used above.
+
+---
+
+# pdf/api-reference
+
+URL: https://nucleusframework.dev/docs/pdf/api-reference
+
+PdfReaderState, PdfPage, PdfThumbnail, PdfReader, and the supporting data types.
+
+The public API lives under `dev.nucleusframework.pdfium`. Coordinates in text-layout results are in PDF page points (1 pt = 1/72 inch), with the origin at the bottom-left of the page.
+
+## PdfReaderState
+
+The state holder tied to a single document. Hoist it with `rememberPdfReaderState()`.
+
+```kotlin
+@Stable
+class PdfReaderState {
+    // Snapshot state
+    val pageCount: Int        // 0 until a document is open
+    val isLoading: Boolean    // true during open()
+    val error: PdfError?      // last open() error, if any
+    val metadata: PdfMetadata
+    var renderScale: Float    // 1.0 = fit-to-width
+
+    // Intents
+    suspend fun open(bytes: ByteArray, password: String? = null)
+    suspend fun pageSize(pageIndex: Int): PageSize?
+    suspend fun pageText(pageIndex: Int): String
+    suspend fun pageTextLayout(pageIndex: Int): PageTextLayout?
+
+    // Render ahead-of-display; best-effort, populates the cache
+    fun prefetch(pageIndex: Int, widthPx: Int, quality: RenderQuality = RenderQuality.FULL)
+
+    // Release native handles + cached bitmaps (called by rememberPdfReaderState)
+    fun dispose()
+
+    companion object {
+        const val DEFAULT_CACHE_BYTES: Long = 64L * 1024 * 1024
+        const val DEFAULT_THUMBNAIL_CACHE_BYTES: Long = 12L * 1024 * 1024
+    }
+}
+
+@Composable
+fun rememberPdfReaderState(
+    cacheBytes: Long = PdfReaderState.DEFAULT_CACHE_BYTES,
+    thumbnailCacheBytes: Long = PdfReaderState.DEFAULT_THUMBNAIL_CACHE_BYTES,
+): PdfReaderState
+```
+
+Bitmaps are keyed by `(pageIndex, quantized_width)`. Both cache budgets are tunable on `rememberPdfReaderState(...)`.
+
+## PdfPage
+
+Renders a single page. Handles progressive rendering (low-res preview to full quality on settle) and debounces size changes internally.
+
+```kotlin
+@Composable
+fun PdfPage(
+    state: PdfReaderState,
+    pageIndex: Int,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    background: Color = Color.White,
+    selectableText: Boolean = false,
+    linksEnabled: Boolean = true,
+    onLinkClick: ((PdfLink) -> Boolean)? = null,
+)
+```
+
+- `modifier` controls the layout width; the composable derives the aspect ratio from the PDF page and sets its own height.
+- `selectableText = true` enables the pointer-driven selection overlay.
+- A standalone `PdfPage` has no list to scroll, so internal GoTo links are only actionable through `onLinkClick`.
+
+## PdfThumbnail
+
+A low-resolution preview of a single page. Renders at `RenderQuality.PREVIEW`, shares the `PdfReaderState` cache, and sizes itself to the modifier-provided width.
+
+```kotlin
+@Composable
+fun PdfThumbnail(
+    state: PdfReaderState,
+    pageIndex: Int,
+    modifier: Modifier = Modifier,
+    background: Color = Color.White,
+)
+```
+
+## PdfReader
+
+A convenience composable — a vertical `LazyColumn` that stacks every page of the document.
+
+```kotlin
+@Composable
+fun PdfReader(
+    state: PdfReaderState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(12.dp),
+    pageSpacing: Dp = 16.dp,
+)
+```
+
+## RenderQuality
+
+```kotlin
+enum class RenderQuality {
+    // No annotations, no LCD text. Used for thumbnails and progressive previews.
+    PREVIEW,
+
+    // Annotations on, no LCD text. Balanced default for on-screen viewing.
+    FULL,
+}
+```
+
+## PageSize, PdfMetadata, PdfError
+
+```kotlin
+data class PageSize(val widthPoints: Float, val heightPoints: Float) {
+    val aspectRatio: Float // widthPoints / heightPoints, or 1f for degenerate pages
+}
+
+data class PdfMetadata(
+    val title: String? = null,
+    val author: String? = null,
+    val subject: String? = null,
+    val keywords: String? = null,
+    val creator: String? = null,
+    val producer: String? = null,
+)
+
+sealed class PdfError(open val message: String, open val cause: Throwable? = null) {
+    data class InvalidFormat(...) : PdfError(...)
+    data class PasswordRequired(...) : PdfError(...)
+    data class NativeFailure(...) : PdfError(...)
+    data class Io(...) : PdfError(...)
+}
+```
+
+## PageTextLayout
+
+Returned by `PdfReaderState.pageTextLayout(...)` for building custom text overlays and highlighting tools.
+
+```kotlin
+@Immutable
+class PageTextLayout {
+    val pageIndex: Int
+    val pageSize: PageSize
+    val rectCount: Int
+    val charCount: Int
+
+    // Rect-level (line-level runs from FPDFText_GetRect)
+    fun left(i: Int): Float       // in PDF points, origin bottom-left
+    fun bottom(i: Int): Float
+    fun right(i: Int): Float
+    fun top(i: Int): Float
+    fun text(i: Int): String      // UTF-8 Unicode
+
+    // Char-level (FPDFText_GetCharBox / FPDFText_GetUnicode)
+    fun codepoint(i: Int): Int
+    fun charLeft(i: Int): Float
+    fun charBottom(i: Int): Float
+    fun charRight(i: Int): Float
+    fun charTop(i: Int): Float
+}
+```
+
+To map a rectangle to a rendered bitmap of pixel dimensions `W × H`:
+
+```
+scaleX = W / pageSize.widthPoints
+scaleY = H / pageSize.heightPoints
+
+screenX = left × scaleX
+screenY = H - top × scaleY       // flip Y (PDF is bottom-up)
+screenW = (right - left)   × scaleX
+screenH = (top   - bottom) × scaleY
+```
+
+## What's next
+
+- [Getting started](/docs/pdf/getting-started) — the same API used across a full reader screen.
+- [PDF reader overview](/docs/pdf) — supported targets and the render path.
+
+---
+
+# os
 
 URL: https://nucleusframework.dev/docs/os
 
@@ -3274,7 +3861,7 @@ they participate in Compose recomposition when the system state changes.
 
 ---
 
-# Cross-platform notifications
+# os/notifications
 
 URL: https://nucleusframework.dev/docs/os/notifications
 
@@ -3324,17 +3911,32 @@ The `notification(...)` function builds a `Notification` value. Calling `send()`
 
 Lifecycle callbacks are not guaranteed to run on a UI thread, so marshal back to your UI dispatcher before touching Compose state.
 
+
+
 **macOS**
+
+
 
 Delegates to [`notification-macos`](/docs/os/notification-macos). Requires user authorization and a bundled, signed app. Run the packaged binary during testing (`./gradlew runDistributable`).
 
+
+
 **Windows**
+
+
 
 Delegates to [`notification-windows`](/docs/os/notification-windows), which shows WinRT toasts.
 
+
+
 **Linux**
 
+
+
 Delegates to [`notification-linux`](/docs/os/notification-linux), which uses `org.freedesktop.Notifications` over D-Bus. Works on any desktop that runs a notification daemon, including GNOME, KDE, and Cinnamon.
+
+
+
 
 ## API reference
 
@@ -3382,7 +3984,9 @@ if (!NotificationManager.isAvailable()) {
 }
 ```
 
+
 macOS silently drops notifications from unbundled apps. Always test against the packaged binary.
+
 
 ## What's next
 
@@ -3392,7 +3996,7 @@ macOS silently drops notifications from unbundled apps. Always test against the 
 
 ---
 
-# Notifications on macOS
+# os/notification-macos
 
 URL: https://nucleusframework.dev/docs/os/notification-macos
 
@@ -3439,9 +4043,11 @@ NotificationCenter.requestAuthorization(
 
 To deliver immediately, leave `trigger` unset (it defaults to `null`).
 
+
 macOS only delivers notifications from a bundled, bundle-identified app. During development,
 run `./gradlew runDistributable` or `./gradlew runGraalvmNative` — a plain `./gradlew run`
 produces an un-bundled JVM process that the system ignores silently.
+
 
 ## How it works
 
@@ -3572,7 +4178,7 @@ or on screen. Remove entries with `removePendingNotifications(ids)` /
 
 ---
 
-# Notifications on Windows
+# os/notification-windows
 
 URL: https://nucleusframework.dev/docs/os/notification-windows
 
@@ -3618,11 +4224,15 @@ Every method is a no-op on non-Windows platforms. Check `WindowsNotificationCent
 
 A toast on Windows is an XML payload dispatched through `ToastNotificationManager` and identified by an AUMID (Application User Model ID). The library resolves the AUMID for you based on how the app is packaged.
 
+
 - **MSIX / APPX**: the AUMID resolves automatically from the package identity.
 - **Unpackaged (EXE/MSI/dev)**: Nucleus derives the AUMID from `NucleusApp.aumid` and registers it on the current process.
 - Override it with `WindowsNotificationCenter.initialize(aumid = "Vendor.App")`.
 
+
+
 Unpackaged apps need a Start Menu `.lnk` shortcut whose AUMID property matches the one used at runtime. Without it, toasts may fail to appear or to persist in Action Center. `initialize` creates or updates this shortcut by default (`ShortcutPolicy.REQUIRE_CREATE`), and the Nucleus Gradle plugin sets it up when you build the Windows installer formats.
+
 
 ## API reference
 
@@ -3722,7 +4332,7 @@ WindowsNotificationCenter.getHistory { entries, error ->
 
 ---
 
-# Notifications on Linux
+# os/notification-linux
 
 URL: https://nucleusframework.dev/docs/os/notification-linux
 
@@ -3770,8 +4380,10 @@ val id: Int = LinuxNotificationCenter.notify(
 
 `notify` returns an ID greater than `0` on success, or `0` on failure.
 
+
 Check `LinuxNotificationCenter.isAvailable` before sending. It returns `false` on non-Linux
 platforms or when the native library could not be loaded.
+
 
 ## How it works
 
@@ -3886,7 +4498,7 @@ LinuxNotificationCenter.closeNotification(id)
 
 ---
 
-# System tray
+# os/system-tray
 
 URL: https://nucleusframework.dev/docs/os/system-tray
 
@@ -3897,7 +4509,9 @@ Windows, and Linux. The icon is anything Compose can draw, the menu is a Kotlin 
 react to Compose state. `Tray()` is a single composable that hands the rendered icon and menu
 to the native tray API of the current OS.
 
+
 System tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) with its own release cycle. The artifact is `dev.nucleusframework:composenativetray`.
+
 
 ## Add the dependency
 
@@ -3939,21 +4553,40 @@ explicit rebuild calls or separate `.ico`/`.png`/`.icns` files to maintain.
 
 Each platform maps to its native tray mechanism:
 
+
+
 **macOS**
+
+
 
 Backed by `NSStatusItem` in the menu bar. Vector icons render at native DPI, with optional tinting via the `tint` parameter.
 
+
+
 **Windows**
+
+
 
 Backed by `Shell_NotifyIcon`. Vector input is rasterised to a 32×32 `.ico` per scale factor. Pass a hand-authored `.ico` via `windowsIcon` for exact control.
 
+
+
 **Linux (GNOME)**
+
+
 
 Uses StatusNotifierItem (KStatusNotifierItem). On stock GNOME this requires the AppIndicator extension; on Ubuntu it works out of the box.
 
+
+
 **Linux (KDE)**
 
+
+
 StatusNotifierItem is native to Plasma. Hover tooltips and badges work where Plasma supports them.
+
+
+
 
 ## Set the icon source
 
@@ -4016,7 +4649,7 @@ Tray(
 
 ---
 
-# Tray menu DSL
+# os/tray-menu-dsl
 
 URL: https://nucleusframework.dev/docs/os/tray-menu-dsl
 
@@ -4137,7 +4770,7 @@ changes to the platform menu.
 
 ---
 
-# Tray-anchored apps
+# os/tray-app
 
 URL: https://nucleusframework.dev/docs/os/tray-app
 
@@ -4147,7 +4780,9 @@ TrayApp anchors a Compose popup window to a system tray icon so you can build me
 window beside it, and click away to close it. It implements the menu bar app pattern used by
 tools such as Bartender, iStat Menus, and Hidden Bar.
 
+
 `TrayApp` is in alpha and the API may change. Opt in with `@OptIn(ExperimentalTrayAppApi::class)`.
+
 
 ## Add the dependency
 
@@ -4289,7 +4924,7 @@ The app then runs with no Dock entry and no menu bar — only the tray icon.
 
 ---
 
-# Global hotkeys
+# os/global-hotkey
 
 URL: https://nucleusframework.dev/docs/os/global-hotkey
 
@@ -4398,7 +5033,9 @@ GlobalHotKeyManager.register(MediaKey.NEXT_TRACK) { _, _ -> player.skipNext() }
 
 `MediaKey` has four values: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, and `PREV_TRACK`.
 
+
 Media keys are not supported on macOS. On macOS this overload returns `-1` and sets `lastError` to `"Media keys are not supported on macOS"`.
+
 
 ### Check availability
 
@@ -4416,7 +5053,9 @@ if (!GlobalHotKeyManager.isAvailable) {
 
 ## Notes
 
+
 On macOS the user may be prompted to grant your app **Input Monitoring** (and sometimes **Accessibility**) under System Settings → Privacy & Security. Until they accept, callbacks never fire. Link to `x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent` from your prompt.
+
 
 - Linux Wayland compositors generally disallow global key grabs from arbitrary apps. The library uses the `org.freedesktop.portal.GlobalShortcuts` portal where available, which requires a reverse-DNS `.desktop` file and the app launched from it; on other compositors the binding may not fire.
 - Read `GlobalHotKeyManager.lastError` after a failed call to find out why a registration was rejected.
@@ -4429,7 +5068,7 @@ On macOS the user may be prompted to grant your app **Input Monitoring** (and so
 
 ---
 
-# Media controls
+# os/media-control
 
 URL: https://nucleusframework.dev/docs/os/media-control
 
@@ -4521,11 +5160,13 @@ defaulted, so `configure()` with no arguments is the common case.
 After configuring, push metadata and playback state as your player changes. Incoming commands
 are parsed from the native bridge and delivered to your listener on the Swing EDT.
 
+
 The commands the OS can send back differ by platform:
 
 - **Linux (MPRIS)** emits every `MediaControlEvent` variant.
 - **macOS** emits `Play`, `Pause`, `Toggle`, `Next`, `Previous`, `Stop`, and `SetPosition`.
 - **Windows (SMTC)** emits `Play`, `Pause`, `Next`, `Previous`, `Stop`, `SeekBy`, and `SetPosition`.
+
 
 ## API reference
 
@@ -4577,22 +5218,37 @@ MediaControlService.detach()
 
 ### Per-platform notes
 
+
+
 **macOS**
+
+
 
 Set `LSApplicationCategoryType` to `public.app-category.music` in `Info.plist` so the Now
 Playing widget treats the app as a media player. Hardware media keys deliver Play, Pause,
 Next, and Previous when the app is the active now-playing client.
 
+
+
 **Windows**
+
+
 
 SMTC integration is automatic once you call `configure()`. The system treats the most recent
 publisher as the current now-playing source, and the identity resolves through the app's AUMID.
 
+
+
 **Linux**
+
+
 
 `configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<appId>`, derived from
 `NucleusApp.appId`. `playerctl` and desktop indicators discover the player by enumerating that
 prefix. Pass a custom `dbusName` to override it.
+
+
+
 
 ## Notes
 
@@ -4607,7 +5263,7 @@ prefix. Pass a custom `dbusName` to override it.
 
 ---
 
-# Dark mode detector
+# os/dark-mode
 
 URL: https://nucleusframework.dev/docs/os/dark-mode
 
@@ -4653,8 +5309,10 @@ Compose's own `isSystemInDarkTheme()` reads the OS theme once and does not updat
 switches themes at runtime. `isSystemInDarkMode()` returns the current value and registers a
 listener that triggers recomposition on every change.
 
+
 Inside a `@Preview` (when `LocalInspectionMode` is `true`), `isSystemInDarkMode()` delegates to
 Compose's `isSystemInDarkTheme()` so previews render without a running detector.
+
 
 ## How it works
 
@@ -4736,7 +5394,7 @@ val detector: IDarkModeDetector = NoopDarkModeDetector
 
 ---
 
-# System accent colour
+# os/system-color
 
 URL: https://nucleusframework.dev/docs/os/system-color
 
@@ -4807,8 +5465,10 @@ changes, so there is no polling and no manual refresh.
 includes any platform other than macOS, Windows, or Linux. Treat `null` as "use your own brand
 colour".
 
+
 Not every OS or configuration exposes an accent colour. Always handle the `null` case and fall
 back to your own palette.
+
 
 ## API reference
 
@@ -4850,7 +5510,7 @@ accessibility contrast setting.
 
 ---
 
-# System info
+# os/system-info
 
 URL: https://nucleusframework.dev/docs/os/system-info
 
@@ -4977,8 +5637,10 @@ SystemInfo.idleTime()      // Long — seconds since last user input, or -1 if u
 - `processes()` walks every process and can be expensive on a busy host. Use `process(pid)` when
   you only need one.
 
+
 `idleTime()` returns `-1` when the platform library did not load, the same value
 `isAvailable()` reports as `false`.
+
 
 ## What's next
 
@@ -4988,7 +5650,7 @@ SystemInfo.idleTime()      // Long — seconds since last user input, or -1 if u
 
 ---
 
-# macOS menu bar
+# os/menu-macos
 
 URL: https://nucleusframework.dev/docs/os/menu-macos
 
@@ -4998,8 +5660,10 @@ Build the native macOS menu bar from Compose, with items, keyboard shortcuts, ic
 screen, not inside your window — from Compose. You declare menus and items as a tree,
 and the native `NSMenu` is rebuilt whenever the state it reads changes.
 
+
 This module only does anything on macOS. `NativeMenuBar` is a no-op on other platforms,
 so you can leave the call in shared code.
+
 
 ## Add the dependency
 
@@ -5192,7 +5856,7 @@ Item("Software Update", badge = NsMenuItemBadge.Updates(pendingUpdates)) { openU
 
 ---
 
-# SF Symbols
+# os/sf-symbols
 
 URL: https://nucleusframework.dev/docs/os/sf-symbols
 
@@ -5211,8 +5875,10 @@ dependencies {
 }
 ```
 
+
 `menu-macos` exposes `sf-symbols` through `api()`. If you already depend on `menu-macos`, the
 constants are on your classpath without a separate declaration.
+
 
 ## Reference a symbol
 
@@ -5293,8 +5959,10 @@ constant is usable wherever an `SFSymbol` is expected.
 | `SFSymbolTime` | 45 | `ALARM`, `ALARM_FILL` |
 | `SFSymbolConnectivity` | 27 | `CABLE_COAXIAL`, `CABLE_CONNECTOR` |
 
+
 Number symbols begin with a digit, which is not a valid Kotlin identifier, so their constants are
 prefixed with an underscore: `SFSymbolNumbers._0_CIRCLE` maps to `"0.circle"`.
+
 
 ### Build a custom symbol
 
@@ -5326,7 +5994,7 @@ NsMenuItemImage.SystemSymbol(SFSymbolGeneral.GEAR)
 
 ---
 
-# FreeDesktop icon names
+# os/freedesktop-icons
 
 URL: https://nucleusframework.dev/docs/os/freedesktop-icons
 
@@ -5346,8 +6014,10 @@ dependencies {
 }
 ```
 
+
 `notification-linux` and `launcher-linux` expose `freedesktop-icons` through `api()`. If you
 already depend on either, the constants are on your classpath without a separate declaration.
+
 
 ## Reference an icon
 
@@ -5441,7 +6111,7 @@ FreedesktopIcon.flag("jp")   // Custom("flag-jp")
 
 ---
 
-# App lifecycle, from cold launch to sleep
+# lifecycle
 
 URL: https://nucleusframework.dev/docs/lifecycle
 
@@ -5498,7 +6168,7 @@ Linux `.desktop` MIME associations at package time.
 
 ---
 
-# One app, one process
+# lifecycle/single-instance
 
 URL: https://nucleusframework.dev/docs/lifecycle/single-instance
 
@@ -5533,9 +6203,11 @@ fun main(args: Array<String>) = nucleusApplication(args) {
 }
 ```
 
+
 `enableSingleInstance` defaults to `true`. When the app also handles deep links, the secondary
 instance's URI is forwarded to the primary through [`DeepLinkHandler`](/docs/lifecycle/deep-links)
 without extra wiring.
+
 
 ## Wire it manually
 
@@ -5638,7 +6310,7 @@ derived from them and are read-only.
 
 ---
 
-# Deep links and URL schemes
+# lifecycle/deep-links
 
 URL: https://nucleusframework.dev/docs/lifecycle/deep-links
 
@@ -5705,7 +6377,9 @@ fun main(args: Array<String>) {
 }
 ```
 
+
 `installAwtAppleEventHandler` initializes AWT. On the Tao backend (`decorated-window-tao`), AWT and Tao each create their own `NSApp` and deadlock the event loop on macOS. Use `nucleusApplication { onDeepLink { … } }`, which picks the right path per backend.
+
 
 ## How it works
 
@@ -5770,7 +6444,7 @@ Registers a `DeepLinkHandler` callback that defers until the application is runn
 
 ---
 
-# App metadata at runtime
+# lifecycle/app-metadata
 
 URL: https://nucleusframework.dev/docs/lifecycle/app-metadata
 
@@ -5823,8 +6497,10 @@ if (NucleusApp.isConfigured) {
 }
 ```
 
+
 Gate auto-update, telemetry, or anything you don't want firing in development on
 `NucleusApp.isConfigured`. It is `true` only when the plugin injected metadata.
+
 
 ## How it works
 
@@ -5875,7 +6551,7 @@ An object exposing the injected metadata as read-only properties.
 
 ---
 
-# How was I launched?
+# lifecycle/executable-type
 
 URL: https://nucleusframework.dev/docs/lifecycle/executable-type
 
@@ -5939,9 +6615,11 @@ such as checking whether `/snap/` is in the path.
 When neither source is present, as with `./gradlew run` or any unpackaged run, `type()` returns
 `ExecutableType.DEV`. Treat that as your dev-mode signal.
 
+
 Features that need accurate packaging detection short-circuit in dev mode to avoid false
 positives. For example, [`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/auto-launch)
 returns `false` whenever `ExecutableRuntime.isDev()` is `true`.
+
 
 ## API reference
 
@@ -5982,7 +6660,7 @@ An enum with one value per supported packaging format:
 
 ---
 
-# Launcher (macOS)
+# lifecycle/launcher-macos
 
 URL: https://nucleusframework.dev/docs/lifecycle/launcher-macos
 
@@ -6037,8 +6715,10 @@ MacOsDockMenu.listener = DockMenuListener { id ->
 
 Call `MacOsDockMenu.clearDockMenu()` to remove the menu and restore the default Dock behavior.
 
+
 All methods are no-ops off macOS and when the native library fails to load. Check
 `MacOsDockMenu.isAvailable` before you build the menu.
+
 
 ## How it works
 
@@ -6100,7 +6780,7 @@ A `fun interface` with a single method, `onItemClicked(itemId: Int)`, invoked on
 
 ---
 
-# Launcher (Windows)
+# lifecycle/launcher-windows
 
 URL: https://nucleusframework.dev/docs/lifecycle/launcher-windows
 
@@ -6171,10 +6851,12 @@ For unpackaged apps (NSIS, MSI, distributable), call `WindowsJumpListManager.set
 once at the very start of `main()`, before any window is created. APPX/MSIX apps skip this —
 Windows uses the package identity.
 
+
 When the user clicks a jump list item, Windows launches a new process with the item's
 `arguments` on the command line. Pair it with
 [`SingleInstanceManager`](/docs/lifecycle/single-instance) to forward those arguments to the
 already-running instance.
+
 
 ## Add thumbnail toolbar buttons
 
@@ -6318,7 +7000,7 @@ Every API that takes an icon accepts a `TaskbarIconSource`:
 
 ---
 
-# Launcher (Linux)
+# lifecycle/launcher-linux
 
 URL: https://nucleusframework.dev/docs/lifecycle/launcher-linux
 
@@ -6492,7 +7174,7 @@ from `NucleusApp.appId` is usually correct; pass a different id to
 
 ---
 
-# Launch at login
+# lifecycle/auto-launch
 
 URL: https://nucleusframework.dev/docs/lifecycle/auto-launch
 
@@ -6532,9 +7214,11 @@ when (AutoLaunch.state()) {
 }
 ```
 
+
 Never loop on `BLOCKED_BY_USER`. When the user disables the app through Task Manager or System
 Settings, `enable()` returns `BLOCKED_BY_USER` and keeps refusing until the user re-enables it
 manually. Send them to `openSystemSettings()` instead.
+
 
 To wire a toggle in Compose, drive it from `state()`:
 
@@ -6563,9 +7247,11 @@ fun main(args: Array<String>) {
 }
 ```
 
+
 On macOS the login AppleEvent is delivered after `NSApplication.run()` starts, so the first call
 from `main()` usually returns `false`. The method caches positive results, so it is safe to poll it
 from a `LaunchedEffect` once the Compose loop is up.
+
 
 ## How it works
 
@@ -6651,7 +7337,7 @@ Override the defaults before the first `AutoLaunch` call:
 
 ---
 
-# Scheduler — cron jobs that survive reboots
+# lifecycle/scheduler
 
 URL: https://nucleusframework.dev/docs/lifecycle/scheduler
 
@@ -6662,9 +7348,11 @@ app is closed. You register a task once and the OS — launchd on macOS, Task Sc
 Windows, systemd user timers on Linux — fires it on time and handles wakeups and persistence.
 Tasks come in three shapes: periodic, calendar, and on-boot.
 
+
 `DesktopTaskScheduler` is not supported in sandboxed Mac App Store builds (`.pkg`), because it
 writes launchd plists at runtime, which the sandbox forbids. Use
 [Service Management](/docs/lifecycle/service-management) there instead.
+
 
 ## Add the dependency
 
@@ -6728,7 +7416,9 @@ fun main(args: Array<String>) {
 }
 ```
 
+
 This check must come before any UI is built. Otherwise every scheduler fire opens a window.
+
 
 ### 3. Enqueue a request
 
@@ -6876,7 +7566,7 @@ unsatisfied calendar or on-boot fire schedules a retry with backoff.
 
 ---
 
-# Scheduler testing
+# lifecycle/scheduler-testing
 
 URL: https://nucleusframework.dev/docs/lifecycle/scheduler-testing
 
@@ -6998,8 +7688,10 @@ TestDesktopTaskScheduler().use { testScheduler ->
 Each `ExecutionRecord` is a data class exposing `taskId: TaskId`, `result: LastTaskResult`,
 `runAttemptCount: Int`, and `virtualTimeMs: Long`.
 
+
 `advanceTimeBy()` only fires periodic tasks. Trigger a calendar or on-boot task explicitly with
 `runTask(taskId, registry)`.
+
 
 ### Simulate constraints
 
@@ -7038,7 +7730,7 @@ TestDesktopTaskScheduler(constraintChecker = checker).use { testScheduler ->
 
 ---
 
-# Service Management (macOS)
+# lifecycle/service-management
 
 URL: https://nucleusframework.dev/docs/lifecycle/service-management
 
@@ -7080,9 +7772,11 @@ when (AppServiceManager.status(AppService.MainApp)) {
 }
 ```
 
+
 For a cross-platform "launch at login", use [`AutoLaunch`](/docs/lifecycle/auto-launch) — it
 routes to `AppService.MainApp` on macOS. Use `service-management-macos` directly when you need
 agents or daemons.
+
 
 ## Register a background agent
 
@@ -7213,7 +7907,7 @@ System Settings; call `openSystemSettingsLoginItems()` when `status` returns `RE
 
 ---
 
-# Energy manager
+# lifecycle/energy-manager
 
 URL: https://nucleusframework.dev/docs/lifecycle/energy-manager
 
@@ -7278,8 +7972,10 @@ EnergyManager.withLightEfficiencyMode {
 }
 ```
 
+
 Both helpers restore the previous mode when the block returns, including when it throws. Manual
 `enable`/`disable` calls are not balanced for you, so pair them yourself.
+
 
 ## Keep the screen awake
 
@@ -7353,7 +8049,7 @@ unsupported platform the result is `success = false` with `errorCode = -1`.
 
 ---
 
-# Taskbar progress
+# lifecycle/taskbar-progress
 
 URL: https://nucleusframework.dev/docs/lifecycle/taskbar-progress
 
@@ -7470,8 +8166,10 @@ Each backend maps the same `State` and progress value onto the platform's native
 | macOS | `NSDockTile` with a custom `NSProgressIndicator`, and `requestUserAttention` for attention. |
 | Linux | The `com.canonical.Unity.LauncherEntry` D-Bus protocol, shared with [`launcher-linux`](/docs/lifecycle/launcher-linux). |
 
+
 macOS shows a single progress indicator per application. The `window` parameter is accepted for
 API consistency, but the indicator applies to the app's dock tile, not to a specific window.
+
 
 The Tao variant routes each call to the same native bridge as the AWT variant; only the window
 handle type differs. Calls are dispatched on a dedicated worker thread, so the `Boolean` return
@@ -7542,7 +8240,7 @@ Compose-scoped helper bound to the current window.
 
 ---
 
-# Filesystem watcher
+# lifecycle/fs-watcher
 
 URL: https://nucleusframework.dev/docs/lifecycle/fs-watcher
 
@@ -7603,8 +8301,10 @@ suspend fun watchDownloads() = coroutineScope {
 `watch` returns an `FsWatchRegistration` you can close to stop watching one path. Closing the
 `FsWatcher` closes every registration and releases the native watcher.
 
+
 `events` and `errors` are hot flows with no replay. Collect them before calling `watch`, or you
 may miss changes that happen between registration and the first collector subscribing.
+
 
 ## How it works
 
@@ -7715,7 +8415,7 @@ registration fails.
 
 ---
 
-# Performance and native runtimes
+# performance
 
 URL: https://nucleusframework.dev/docs/performance
 
@@ -7777,8 +8477,10 @@ nucleus.application {
 }
 ```
 
+
 Both blocks can be present at once. Select which runtime a build produces per build type or per
 CI matrix entry, or produce both and let users choose.
+
 
 ## Supporting modules
 
@@ -7786,6 +8488,8 @@ The native builds rely on a few modules that supply platform metadata and OS int
 
 - [Native access](/docs/performance/native-access) — how Nucleus supplies GraalVM's reflection,
   resource, and JNI metadata so you don't hand-write JSON.
+- [Native code in Kotlin](/docs/performance/native-code) — write the native side in Kotlin/Native
+  and call it from the JVM through a generated FFM bridge.
 - [Native HTTP](/docs/performance/native-http) — `HttpClient`, OkHttp, and Ktor wired to the OS
   trust store.
 - [Native SSL](/docs/performance/native-ssl) — the OS keychain as the trust-anchor source.
@@ -7800,7 +8504,7 @@ The native builds rely on a few modules that supply platform metadata and OS int
 
 ---
 
-# GraalVM Native Image
+# performance/graalvm
 
 URL: https://nucleusframework.dev/docs/performance/graalvm
 
@@ -7829,7 +8533,9 @@ Most idiomatic Kotlin libraries — Ktor, kotlinx.serialization, Coil, SQLite, J
 
 GraalVM native-image compilation requires the **full** [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/) distribution. Download it yourself and install it locally — Gradle's automatic toolchain provisioning does not fetch the NIK variant.
 
+
 Oracle GraalVM, GraalVM CE, and Liberica NIK Lite lack the AWT/Swing native-image support that desktop apps need. Use the full Liberica NIK distribution.
+
 
 ### Platform toolchains
 
@@ -7858,7 +8564,9 @@ nucleus.application {
 }
 ```
 
+
 `nucleusApplication` calls `GraalVmInitializer.initialize()` at startup. If you write your own `main()` without it, call `GraalVmInitializer.initialize()` yourself before any AWT or Compose code runs.
+
 
 ## What's next
 
@@ -7868,7 +8576,7 @@ nucleus.application {
 
 ---
 
-# Configuration
+# performance/graalvm/configuration
 
 URL: https://nucleusframework.dev/docs/performance/graalvm/configuration
 
@@ -8005,9 +8713,11 @@ Unlike the JVM build types, GraalVM has no release variant: there is no
 
 Use `-Os` in `buildArgs` for size optimization instead of ProGuard.
 
+
 Nucleus ships all generic and platform-specific metadata automatically. You only need
 `nativeImageConfigBaseDir` for app-specific entries the automatic layers don't cover, which
 is rare. See [Automatic metadata](/docs/performance/graalvm/automatic-metadata) for the five layers.
+
 
 ## What's next
 
@@ -8018,7 +8728,7 @@ is rare. See [Automatic metadata](/docs/performance/graalvm/automatic-metadata) 
 
 ---
 
-# Automatic metadata resolution
+# performance/graalvm/automatic-metadata
 
 URL: https://nucleusframework.dev/docs/performance/graalvm/automatic-metadata
 
@@ -8046,9 +8756,11 @@ The `resolveGraalvmReachabilityMetadata` task resolves entries from the
 for each dependency on your runtime classpath. Resolution is enabled by default and uses
 repository version `0.10.6`.
 
+
 Configure this source with the `metadataRepository { }` block: `enabled`, `version`,
 `excludedModules`, and `moduleToConfigVersion`. See
 [Configuration](/docs/performance/graalvm/configuration).
+
 
 ## Level 3 — platform-specific metadata
 
@@ -8124,7 +8836,7 @@ remain.
 
 ---
 
-# Tasks & CI
+# performance/graalvm/tasks-ci
 
 URL: https://nucleusframework.dev/docs/performance/graalvm/tasks-ci
 
@@ -8156,9 +8868,11 @@ The four metadata tasks run as dependencies of `packageGraalvmNative`, so you ra
 invoke them directly. The `packageGraalvm<Format>` tasks use electron-builder, which
 requires Node.js on the runner.
 
+
 The packaging tasks exist only for target formats you request in `nativeDistributions.targetFormats`.
 A task name is the format's enum constant, so `TargetFormat.Deb` produces `packageGraalvmDeb`,
 `TargetFormat.Nsis` produces `packageGraalvmNsis`, and so on.
+
 
 ## Run the tasks
 
@@ -8193,10 +8907,12 @@ nucleus.application {
 }
 ```
 
+
 The Nucleus sample builds map `graalvm.march` to a Gradle property so you can override it
 on the command line: `march = providers.gradleProperty("nativeMarch").getOrElse("native")`.
 With that wiring, `./gradlew packageGraalvmNative -PnativeMarch=compatibility` selects the
 portable target. The `-PnativeMarch` flag only works if your build script reads the property.
+
 
 ## Output locations
 
@@ -8302,8 +9018,10 @@ as `ClassNotFoundException` or `NoSuchFieldException`. To capture the missing en
    entries, so only genuinely new entries are added.
 3. Rebuild with `./gradlew packageGraalvmNative`.
 
+
 `packageGraalvmDeb` fails unless `homepage` is set in `nativeDistributions` — electron-builder
 requires it for DEB packaging. See [Configuration](/docs/start/configuration).
+
 
 ## What's next
 
@@ -8314,7 +9032,7 @@ requires it for DEB packaging. See [Configuration](/docs/start/configuration).
 
 ---
 
-# AOT cache
+# performance/aot-cache
 
 URL: https://nucleusframework.dev/docs/performance/aot-cache
 
@@ -8347,7 +9065,9 @@ nucleus.application {
 }
 ```
 
+
 AOT cache generation requires JDK 25 or later. Older toolchains fail the build.
+
 
 That is the entire build-side setup. When the flag is on, the plugin:
 
@@ -8466,7 +9186,7 @@ Measure from the OS-level process spawn (`time ./MyApp` on Linux and macOS, `Mea
 
 ---
 
-# Native access — reflection metadata, resolved for you
+# performance/native-access
 
 URL: https://nucleusframework.dev/docs/performance/native-access
 
@@ -8525,8 +9245,10 @@ The `graalvm-runtime` JAR registers four resource-include patterns:
 | `nucleus/.*` | Nucleus JNI shared libraries and bundled runtime resources |
 | `META-INF/services/.*` | `ServiceLoader` descriptors (ktor engines, Coil fetchers, SLF4J providers, …) |
 
+
 These patterns are broad on purpose. If you pull in the IntelliJ Platform icons library and
 binary size matters, override the icon glob with a tighter `resource-config.json` of your own.
+
 
 ## Font substitutions
 
@@ -8581,25 +9303,154 @@ If you depend on any of these, ship the [AOT cache build](/docs/performance/aot-
 ## Write native code in Kotlin
 
 To call a platform API that no Nucleus runtime module covers (CoreGraphics, IOKit, Win32,
-GTK4, …), use [NucleusNativeAccess](https://github.com/NucleusFramework/NucleusNativeAccess),
-a separate plugin that lets you write the native side in Kotlin/Native and generates the FFM
-bridge for you. It emits `reflect-config.json`, `resource-config.json`, and
-`reachability-metadata.json` for the generated proxies, which the Nucleus GraalVM pipeline
-picks up transparently.
-
-The plugin ID is `dev.nucleusframeworknativeaccess`, versioned independently from Nucleus. See
-[its repository](https://github.com/NucleusFramework/NucleusNativeAccess) for the full
-type-mapping reference and examples.
+GTK4, …), write that side in Kotlin/Native and let [NucleusNativeAccess](/docs/performance/native-code)
+generate the FFM bridge, the JVM proxies, and the GraalVM metadata for you. The
+`reflect-config.json`, `resource-config.json`, and `reachability-metadata.json` it emits for the
+generated proxies are picked up by the pipeline above transparently.
 
 ## What's next
 
+- [Native code in Kotlin](/docs/performance/native-code) — call Kotlin/Native from the JVM through a generated FFM bridge.
 - [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — the full task graph behind these sources.
 - [GraalVM tasks and CI](/docs/performance/graalvm/tasks-ci) — the Gradle task reference for native builds.
 - [AOT cache](/docs/performance/aot-cache) — the fallback when a dependency rules out native image.
 
 ---
 
-# Native HTTP — the OS trust store, pre-wired
+# performance/native-code
+
+URL: https://nucleusframework.dev/docs/performance/native-code
+
+Write the native side in Kotlin/Native and call it from the JVM as a plain Kotlin API. NucleusNativeAccess generates the FFM bridge, the JVM proxies, and the GraalVM metadata for you.
+
+When a platform API has no Nucleus runtime module (CoreGraphics, IOKit, Win32, GTK4, a C library on the system), you write that side in Kotlin/Native and call it from the JVM as if it were a normal Kotlin dependency. NucleusNativeAccess parses your `nativeMain` API, generates the C bridge and the JVM proxy classes over the Foreign Function & Memory API (FFM), and bundles the compiled shared libraries into your JAR — no hand-written JNI, no C boilerplate.
+
+
+Native access ships from [`NucleusFramework/NucleusNativeAccess`](https://github.com/NucleusFramework/NucleusNativeAccess) with its own release cycle, like the [system tray](/docs/os/system-tray) and the [PDF reader](/docs/pdf). It is a Gradle plugin, `dev.nucleusframework.nna`, versioned independently from Nucleus and licensed MIT.
+
+
+## Add the plugin
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("multiplatform") version "2.3.20"
+    id("dev.nucleusframework.nna") version "0.6.0"
+}
+
+kotlin {
+    jvmToolchain(25) // FFM is stable since JDK 22; 25 is recommended
+    jvm()
+    linuxX64()
+    // macosArm64()
+    // mingwX64()
+}
+
+kotlinNativeExport {
+    nativeLibName = "mylib" // produces libmylib.so / .dylib / .dll
+    buildType = "release"   // "release" (default) or "debug"
+}
+```
+
+The plugin targets `linuxX64()`, `macosArm64()`, and `mingwX64()`. The JVM side needs JDK 22+ (FFM was finalized in JEP 454) and `--enable-native-access=ALL-UNNAMED` at runtime, which is wired in automatically for tests.
+
+## Write once, call across the boundary
+
+Write the native class in `nativeMain`. Only the public API is exported:
+
+```kotlin title="src/nativeMain/kotlin/com/example/Calculator.kt"
+package com.example
+
+class Calculator(initial: Int = 0) {
+    private var acc = initial
+
+    fun add(value: Int): Int { acc += value; return acc }
+    fun subtract(value: Int): Int { acc -= value; return acc }
+    val current: Int get() = acc
+    fun describe(): String = "Calculator(current=$acc)"
+}
+```
+
+Call it from `jvmMain` as a plain Kotlin object. The proxy is `AutoCloseable`; closing it releases the native object:
+
+```kotlin title="src/jvmMain/kotlin/com/example/Main.kt"
+package com.example
+
+fun main() {
+    Calculator(0).use { calc -> // allocates the native object
+        calc.add(5)             // FFM downcall into native
+        calc.add(3)
+        println(calc.current)   // 8
+        println(calc.describe()) // "Calculator(current=8)"
+    }                           // releases the native object
+}
+```
+
+## How it works
+
+The plugin runs a build-time pipeline over your native sources:
+
+1. Parses the `nativeMain` public API with Kotlin PSI.
+2. Generates `@CName` bridge functions on the native side, tracking object lifetime with `StableRef`.
+3. Generates JVM proxy classes that call across the boundary through FFM `MethodHandle` downcalls.
+4. Compiles to a shared library (`.so` / `.dylib` / `.dll`) and bundles it under `kne/native/{os}-{arch}/` in the JAR.
+5. Emits GraalVM reachability metadata for the generated proxies.
+
+At runtime the JVM loads the library through a three-tier strategy — `java.library.path` first, then extraction from the JAR to `~/.cache/kne/`, then the GraalVM native-image loader lookup. Native objects are released when you close the proxy, and any leaked handle is cleaned up through a `Cleaner`.
+
+## What crosses the boundary
+
+The bridge handles far more than primitives:
+
+| Category | Support |
+| -------- | ------- |
+| Primitives | `Int`, `Long`, `Double`, `Float`, `Boolean`, `Byte`, `Short` — direct, zero conversion |
+| `String` | UTF-8, null-terminated buffers both ways |
+| Collections | `List`, `Set`, `Map` (pointer + count encoding), nullable via a `-1`/sentinel count |
+| Data classes & enums | Field decomposition by value; enums map by ordinal |
+| Nullability | Sentinel-based (e.g. `Long.MIN_VALUE` for a null `Long?`) |
+| Objects | Opaque handles via `StableRef`, GC-cleaned through `Cleaner` |
+| `suspend fun` | Mapped to JVM `suspend fun`, bidirectional cancellation |
+| `Flow<T>` | `channelFlow` over `onNext`/`onError`/`onComplete` callbacks, auto-cancel on collection stop |
+| Callbacks / lambdas | `(T) -> R` cross via FFM upcall stubs |
+| Exceptions | Propagated as `KotlinNativeException` on the JVM |
+
+Classes, inheritance, interfaces, sealed classes, companion objects, constructors with default parameters, and extension functions all carry over. Not supported: generics, interface or sealed *return* types (return concrete types), operator overloading, infix functions, `ByteArray` inside collections, and subclassing a native type from the JVM.
+
+## Wrap a C library
+
+Because the native side is Kotlin/Native, you can pull in a C library with `cinterop` and expose it to the JVM through the same generated bridge — this is how you reach CoreGraphics, Win32, GTK4, or any system library from JVM code:
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    linuxX64().compilations["main"].cinterops {
+        val libnotify by creating {
+            defFile(project.file("src/nativeInterop/cinterop/libnotify.def"))
+        }
+    }
+}
+```
+
+Write a thin Kotlin/Native wrapper over the C bindings in `nativeMain`, and the plugin exports it to the JVM like any other native class.
+
+## GraalVM
+
+The plugin writes reachability metadata under `META-INF/native-image/kne/{libName}/`:
+
+- `reflect-config.json` — the generated proxy classes and their constructors.
+- `resource-config.json` — the bundled native libraries under `kne/native/…`.
+- `reachability-metadata.json` — FFM downcall and upcall descriptors, plus reflection and resources.
+
+The Nucleus GraalVM pipeline picks these up as one more metadata source (see [native access](/docs/performance/native-access)), so `./gradlew packageGraalvmNative` links the shared library and its descriptors without any hand-written JSON.
+
+## What's next
+
+- [Native access](/docs/performance/native-access) — how Nucleus assembles reachability metadata, including the descriptors this plugin emits.
+- [System tray](/docs/os/system-tray) — another Nucleus component shipped from its own repository.
+- [PDF reader](/docs/pdf) — one PDF API across Android, iOS, web, and desktop.
+
+---
+
+# performance/native-http
 
 URL: https://nucleusframework.dev/docs/performance/native-http
 
@@ -8659,10 +9510,12 @@ val custom = HttpClient.newBuilder()
 `NativeTrustManager.sslContext` and disables client-certificate requests. Import it as shown to
 bring it into scope.
 
+
 `HttpClient.Builder` does not follow redirects by default. `NativeHttpClient.create()` sets
 `Redirect.NORMAL` for you, but when you call `withNativeSsl()` on your own builder, add
 `.followRedirects(HttpClient.Redirect.NORMAL)` yourself — otherwise any host that returns a 302
 looks like a failure.
+
 
 ## Use OkHttp
 
@@ -8760,7 +9613,7 @@ pooling, HTTP/2, interceptors, and timeouts remain under your control.
 
 ---
 
-# Native SSL
+# performance/native-ssl
 
 URL: https://nucleusframework.dev/docs/performance/native-ssl
 
@@ -8791,8 +9644,10 @@ val sslContext: SSLContext = NativeTrustManager.sslContext
 val sslSocketFactory: SSLSocketFactory = NativeTrustManager.sslSocketFactory
 ```
 
+
 If your client is `java.net.http`, OkHttp, or Ktor, use the [Native HTTP](/docs/performance/native-http) adapters
 instead. They read these properties and wire them into the client for you.
+
 
 ## How it works
 
@@ -8890,7 +9745,7 @@ allowNucleusRuntimeLogging = true
 
 ---
 
-# One DSL, eighteen installers
+# packaging
 
 URL: https://nucleusframework.dev/docs/packaging
 
@@ -8941,8 +9796,10 @@ nucleus {
 
 Every format requested for the host operating system is written under `build/compose/binaries/`.
 
+
 Formats the host operating system cannot produce are skipped silently. The same build script runs
 unchanged on macOS, Windows, and Linux, which suits matrix CI.
+
 
 ## Supported formats
 
@@ -8988,7 +9845,7 @@ Per-OS settings live under `nativeDistributions.macOS { }`, `windows { }`, and `
 
 ---
 
-# Building for macOS
+# packaging/macos
 
 URL: https://nucleusframework.dev/docs/packaging/macos
 
@@ -9061,8 +9918,10 @@ app-specific `password` and `teamID`; a `notarytool` `keychainProfile` (with an 
 `keychainPath`); or an App Store Connect API key (`apiKey`, `apiKeyId`, `apiIssuer`). Configure
 exactly one — combining modes is rejected at validation.
 
+
 Signing and notarization values also read from Gradle properties, so you can keep secrets out
 of the build script. See [Code signing](/docs/packaging/code-signing).
+
 
 ## Package a DMG
 
@@ -9132,8 +9991,10 @@ macOS {
 }
 ```
 
+
 GraalVM native-image builds take the SDK version from the system linker rather than from
 `vtool`. Select Xcode 26 on the build host instead.
+
 
 ## Build a universal binary
 
@@ -9190,7 +10051,7 @@ drag-to-`/Applications` link.
 
 ---
 
-# Building for Windows
+# packaging/windows
 
 URL: https://nucleusframework.dev/docs/packaging/windows
 
@@ -9312,13 +10173,17 @@ windows {
 }
 ```
 
+
 Local AppX builds need Windows Developer Mode enabled (Settings → System → For developers).
 GitHub-hosted Windows runners already have it on.
+
+
 
 For Microsoft Store submissions, `identityName`, `publisher`, and `publisherDisplayName` must
 match the values Partner Center assigned to your reservation; the Store rejects mismatches at
 upload time. `publisher` is the `CN=<GUID>` issued by Partner Center, not your local signing
 certificate's CN.
+
 
 ## Enable Portable mode
 
@@ -9369,7 +10234,7 @@ The `windows { }` block exposes `iconFile`, `packageName`, `console`, `dirChoose
 
 ---
 
-# Building for Linux
+# packaging/linux
 
 URL: https://nucleusframework.dev/docs/packaging/linux
 
@@ -9427,7 +10292,9 @@ nucleus {
 }
 ```
 
+
 `homepage` is required for DEB and RPM builds. The packaging task fails without it.
+
 
 ## Build DEB and RPM packages
 
@@ -9612,8 +10479,10 @@ No manual `desktopEntries` override is needed.
 RPM versions. Bump it when you re-release without changing `packageVersion`. See
 the full [Gradle DSL reference](/docs/reference/gradle-dsl).
 
+
 Snap and Flatpak layer their own desktop files into the user environment and
 ignore the traditional `.desktop` install paths used by DEB and RPM.
+
 
 ## What's next
 
@@ -9624,7 +10493,7 @@ ignore the traditional `.desktop` install paths used by DEB and RPM.
 
 ---
 
-# Code signing
+# packaging/code-signing
 
 URL: https://nucleusframework.dev/docs/packaging/code-signing
 
@@ -9803,10 +10672,12 @@ own GPG key, so no paid certificate or authority is involved.
    # digests signatures OK
    ```
 
+
 Signing does not change installation. A signed package installs exactly like an unsigned one, with
 or without the key imported. Verification is an optional step the user runs before installing, and
 becomes mandatory only when the user enforces it (for example, a `debsig-verify` policy or strict
 RPM signature checking).
+
 
 ### Choose a DEB signing method
 
@@ -9922,7 +10793,7 @@ The full DSL is documented in the [Gradle DSL reference](/docs/reference/gradle-
 
 ---
 
-# Trusted CA certificates
+# packaging/trusted-certificates
 
 URL: https://nucleusframework.dev/docs/packaging/trusted-certificates
 
@@ -9995,8 +10866,10 @@ automatically as part of packaging; you do not invoke it directly.
   end users install themselves at runtime (Keychain on macOS, CryptoAPI on Windows, NSS or system
   PEM stores on Linux), use the [`native-ssl` module](/docs/performance/native-ssl) instead.
 
+
 The two approaches are complementary. Ship build-time CAs with `trustedCertificates`, and read the
 user's already-installed CAs with `native-ssl`.
+
 
 ## What's next
 
@@ -10006,7 +10879,7 @@ user's already-installed CAs with `native-ssl`.
 
 ---
 
-# Sandboxing
+# packaging/sandboxing
 
 URL: https://nucleusframework.dev/docs/packaging/sandboxing
 
@@ -10148,7 +11021,9 @@ These tasks are registered only when a store format is requested.
 
 ## Notes
 
+
 `appStore` is deprecated and ignored. `Pkg` is always treated as an App Store build: Nucleus applies the 3rd Party Mac Developer certificates and sandbox entitlements automatically.
+
 
 - A single `./gradlew packageReleaseDistributionForCurrentOS` builds both pipelines in CI. Sandboxed artifacts are written to `<format>-sandboxed/` subdirectories.
 - The sandboxed pipeline builds on the inside-out signing order used for universal macOS binaries. See [Code signing](/docs/packaging/code-signing).
@@ -10161,7 +11036,7 @@ These tasks are registered only when a store format is requested.
 
 ---
 
-# Auto-update
+# packaging/auto-update
 
 URL: https://nucleusframework.dev/docs/packaging/auto-update
 
@@ -10223,9 +11098,11 @@ The runtime updates in-place formats and leaves store-managed formats to their s
 | Windows | NSIS, NSIS Web, MSI | AppX/MSIX |
 | Linux | DEB, RPM, AppImage | Snap, Flatpak |
 
+
 The updater replaces the `.app` silently from the ZIP; the DMG is only for the first install. Add
 `TargetFormat.Zip` next to `TargetFormat.Dmg` so both ship in the same release — `latest-mac.yml`
 references both.
+
 
 ## How it works
 
@@ -10316,11 +11193,13 @@ The package's root post-install script then sets up passwordless updates as foll
 4. The helper verifies the signature against the bundled key, checks that the package name matches
    the installed app, and only then runs `dpkg -i` or `rpm -U`.
 
+
 The polkit `allow_active=yes` rule is scoped to the single helper binary, and the helper refuses any
 package whose signature does not verify against the bundled key, so a passwordless install cannot
 install an arbitrary package — an attacker would need your private signing key. If the helper or the
 `<file>.asc` is missing, the runtime falls back to the password-prompting `pkexec` install.
 Passwordless install requires an active local session.
+
 
 ## API reference
 
@@ -10393,7 +11272,7 @@ Custom auth headers come from the provider's `authHeaders()`, not from the confi
 
 ---
 
-# Publishing
+# packaging/publishing
 
 URL: https://nucleusframework.dev/docs/packaging/publishing
 
@@ -10417,7 +11296,11 @@ build.
 Add a `publish { }` block inside `nativeDistributions { }` and enable one backend. The block only
 generates configuration and the update YAML; the upload itself runs in CI.
 
+
+
 **GitHub Releases**
+
+
 
 ```kotlin title="build.gradle.kts"
 nucleus {
@@ -10456,7 +11339,11 @@ v1.0.0 (Release)
 The token needs the `contents: write` permission. In GitHub Actions, set `permissions: contents: write`
 on the job.
 
+
+
 **S3**
+
+
 
 Use an S3 bucket, optionally fronted by a CDN, for self-hosted distribution:
 
@@ -10474,7 +11361,11 @@ publish {
 
 Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` in the environment.
 
+
+
 **Generic HTTP**
+
+
 
 Any static host works — Nginx, Caddy, Cloudflare R2, or S3 with public access. The plugin
 generates the YAML metadata for your base URL; you upload the files yourself:
@@ -10492,6 +11383,9 @@ publish {
 
 `useMultipleRangeRequest` enables differential downloads and works only if your server honors
 HTTP `Range` requests.
+
+
+
 
 ## Choose a release channel and type
 
@@ -10527,10 +11421,12 @@ publish {
 - `PublishMode.Auto` — publish when the build runs from a git tag.
 - `PublishMode.Always` — publish on every build, tag or not.
 
+
 The `publish { }` block writes electron-builder publisher settings; it does not upload anything by
 itself. The actual upload runs in your CI workflow (`gh release create` for GitHub, `aws s3 cp` for
 S3, your own copy step for generic). See [release CI](/docs/packaging/ci-cd#release) for the standard
 path.
+
 
 ## Submit to a desktop store
 
@@ -10570,7 +11466,7 @@ See the [Gradle DSL reference](/docs/reference/gradle-dsl) for the full surface.
 
 ---
 
-# CI/CD
+# packaging/ci-cd
 
 URL: https://nucleusframework.dev/docs/packaging/ci-cd
 
@@ -10592,8 +11488,10 @@ your project.
 - The release workflow needs `permissions: contents: write` to create releases and upload assets.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
+
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
 Use `@main` while experimenting and pin to a tag such as `@v2.0.0` for production runs.
+
 
 ## Reference an action
 
@@ -10712,9 +11610,11 @@ End-to-end macOS signing and notarization use these repository secrets:
 | `MAC_RUNTIME_PROVISIONING_PROFILE` | Base64 provisioning profile for the JVM runtime. |
 | `MAC_NOTARIZATION_APPLE_ID`, `MAC_NOTARIZATION_PASSWORD`, `MAC_NOTARIZATION_TEAM_ID` | `notarytool` credentials. |
 
+
 Without the `MAC_*` secrets the pipeline falls back to ad-hoc signing — the same result as an
 unsigned local build. See [Code signing](/docs/packaging/code-signing) for how to produce and
 store each secret.
+
 
 ## Merge the universal macOS binary
 
@@ -10738,6 +11638,14 @@ ZIP, DMG, and PKG:
 Notarization runs as separate workflow steps with `xcrun notarytool submit --wait`. The DMG is
 stapled; the ZIP is notarized but not stapled, so re-zipping never invalidates the blockmap the
 [auto-updater](/docs/packaging/auto-update) relies on.
+
+
+On **private** repositories, macOS runners bill at a 10× minute multiplier against your monthly
+quota, and `--wait` keeps the runner active while it polls Apple's notarization service — you pay
+for that idle time at the macOS rate. Public repositories are free. To cut costs on a private
+repo, run the signing and notarization steps on a self-hosted macOS runner, which GitHub does not
+bill for minutes.
+
 
 ## Bundle Windows for the Microsoft Store
 
@@ -10812,7 +11720,7 @@ selects the matching update channel. A separate `validate-release-ref` step enfo
 
 ---
 
-# Why Nucleus
+# compare
 
 URL: https://nucleusframework.dev/docs/compare
 
@@ -10831,11 +11739,34 @@ This page compares that approach with Electron, Tauri, and vanilla Compose Multi
 | OS APIs | 40+ Kotlin modules, single process | Node `child_process` / native modules | Rust commands over IPC | Limited (`Tray`, `Notification`, no decorated window) |
 | Packaging formats | **18** (DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX, DEB, RPM, AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z) | 5–7 via electron-builder | 5 via tauri-bundler | 6 (DMG, PKG, MSI, EXE, DEB, RPM) |
 | Auto-update | Built-in (`updater-runtime`) | electron-updater | Tauri Updater plugin | None |
-| Cold start | ~0.5 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
-| RAM idle | 35–120 MB* | 200–500 MB | 50–80 MB | 200 MB |
+| Cold start | ~0.2 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
+| RAM idle | 30–120 MB* | 200–500 MB | 50–80 MB | 200 MB |
 | Binary size | 40 MB (GraalVM) · 60 MB (JVM)* | 150–200 MB | 5–20 MB | 80–120 MB |
 | Native window decorations | Yes — Liquid Glass, Fluent, Yaru, Jewel | Limited (Chromium chrome) | Yes (OS chrome) | Limited |
 | Model | One language end-to-end | Two runtimes, IPC bridge | Web frontend + Rust backend | One language, fewer built-ins |
+
+## Measured: startup, RAM, and process count
+
+We built the same Hello-World window in four stacks and measured each one identically on the
+same Windows 11 machine — wall-clock time from process launch to the first window handle, and
+the **private working set** (the figure Task Manager shows) once the window settled.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (private WS) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0.17 s | ~0.10 s | **~30 MB** | 1 |
+| WinUI 3 | .NET 9 + Windows App SDK | ~0.20 s | ~0.28 s | ~32 MB | 1 |
+| Tauri | Rust + WebView2 | ~0.74 s | ~0.12 s | ~87 MB | 7 |
+| Compose (JVM) | JDK 21 + AWT | — | ~0.70 s | ~174 MB | 1 |
+
+Two results worth calling out:
+
+- **Task Manager under-reports WebView2 apps.** The Tauri process itself shows ~4 MB — but the
+  real footprint (~87 MB) lives in six separate `msedgewebview2.exe` processes that Task
+  Manager lists elsewhere. Nucleus runs as a single self-contained process, so the number you
+  see is the number it costs, and there's no reliance on a system-installed WebView.
+- **Nucleus lands in the same ~30 MB class as native WinUI 3** — while staying pure
+  Kotlin/Compose — and uses roughly a third of Tauri's memory and a sixth of the plain-JVM
+  build's. Native/AOT is what buys both the low RAM and the sub-0.2 s start.
 
 ## One language across the stack
 
@@ -10854,9 +11785,13 @@ When you need to drop down to a platform — embed a SwiftUI view, call into Win
 
 The performance numbers above are typical for a Hello-World class app. Real-world cold start and RAM scale with what your app loads. Nucleus has two runtime targets: GraalVM native image for cold start and binary size, and JVM + AOT cache for throughput. See [performance](/docs/performance) for details.
 
-The Electron and Tauri figures are drawn from public benchmarks, not measured in this repository.
+
+In the comparison table, the Electron and Tauri figures are drawn from public benchmarks. The
+Nucleus, WinUI 3, Tauri, and JVM numbers in the **Measured** section above were collected
+first-hand on a single Windows 11 machine, warm runs unless noted.
 *Nucleus RAM was measured on Windows 11 with a Hello World build; binary size is the NSIS
 installer with maximum compression.
+
 
 ## What's next
 
@@ -10865,7 +11800,7 @@ installer with maximum compression.
 
 ---
 
-# Packaging — Nucleus vs the rest
+# compare/packaging
 
 URL: https://nucleusframework.dev/docs/compare/packaging
 
@@ -10939,7 +11874,7 @@ Every compared tool signs and notarizes macOS builds. Windows signing differs:
 ## GraalVM Native Image packaging
 
 Nucleus packages GraalVM Native Image output end to end, producing DMG, NSIS, and DEB for the
-resulting binary. A packaged binary starts in about 0.5 s, uses about 35 MB of RAM (measured
+resulting binary. A packaged binary starts in about 0.2 s, uses about 30 MB of RAM (measured
 on Windows 11 with a Hello World build), and is about 40 MB in size as an NSIS installer with
 maximum compression. See [performance / GraalVM](/docs/performance/graalvm). Other tools route
 Native Image binaries through generic packaging pipelines that do not account for the JDK-less
@@ -10957,8 +11892,10 @@ Snap (Snap Store), and Flatpak (Flathub).
 |-------------------------|----------------------|
 | Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: delta updates, broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
 
+
 Nucleus builds each OS on its own CI runner — there is no cross-compilation. It is Gradle-only
 and younger than Conveyor and install4j.
+
 
 ## When to pick what
 
@@ -10977,7 +11914,7 @@ and younger than Conveyor and install4j.
 
 ---
 
-# Nucleus vs vanilla Compose Multiplatform
+# compare/cmp-default
 
 URL: https://nucleusframework.dev/docs/compare/cmp-default
 
@@ -11025,7 +11962,7 @@ PKG, AppX, and Flatpak trigger a parallel [sandboxed pipeline](/docs/packaging/s
 
 ### GraalVM Native Image
 
-The plugin can compile your Compose Desktop app to a GraalVM Native Image and package the resulting binary as DMG, NSIS, or DEB. Cold start is around 0.5 s and RAM around 35 MB (measured on Windows 11 with a Hello World build). The default CMP plugin does not handle Native Image.
+The plugin can compile your Compose Desktop app to a GraalVM Native Image and package the resulting binary as DMG, NSIS, or DEB. Cold start is around 0.2 s and RAM around 30 MB (measured on Windows 11 with a Hello World build). The default CMP plugin does not handle Native Image.
 
 ### AOT cache
 
@@ -11066,7 +12003,9 @@ nativeDistributions {
 }
 ```
 
+
 Without `homepage`, `packageDeb` and `packageGraalvmDeb` fail with `Please specify project homepage`.
+
 
 ## When to stay on vanilla CMP
 
@@ -11090,7 +12029,7 @@ Without `homepage`, `packageDeb` and `packageGraalvmDeb` fail with `Please speci
 
 ---
 
-# Thirty years of mature libraries, native to your app
+# ecosystem
 
 URL: https://nucleusframework.dev/docs/ecosystem
 
@@ -11181,7 +12120,7 @@ The Nucleus Gradle plugin ships GraalVM reachability metadata for FileKit, so it
 
 ---
 
-# Native file dialogs
+# ecosystem/file-dialog
 
 URL: https://nucleusframework.dev/docs/ecosystem/file-dialog
 
@@ -11234,7 +12173,9 @@ The Nucleus Gradle plugin bundles reachability metadata for FileKit as part of i
 - Windows JNA COM bindings (`FileDialog`, `FileOpenDialog`, `FileSaveDialog`, `ShellItem`, `Shell32`, `COMDLG_FILTERSPEC`, `PROPERTYKEY`).
 - The Linux xdg-desktop-portal D-Bus proxy (`FileChooserDbusInterface`).
 
+
 When you build with the Nucleus plugin and target `native-image`, the dialogs run without a manual `reachability-metadata.json` or a tracing-agent pass.
+
 
 ## Notes
 
@@ -11248,7 +12189,7 @@ FileKit already wraps each native dialog and integrates with Compose state, so N
 
 ---
 
-# Native spell check
+# ecosystem/spell-check
 
 URL: https://nucleusframework.dev/docs/ecosystem/spell-check
 
@@ -11301,8 +12242,10 @@ detection match what the user already sees elsewhere on their system.
 
 ## Notes
 
+
 On Linux, spell checking depends on `hunspell`. Install it through your distribution's package
 manager; if it is missing, the checker cannot run.
+
 
 ## What's next
 
@@ -11312,375 +12255,7 @@ manager; if it is missing, the checker cannot run.
 
 ---
 
-# Migrating from Nucleus 1.x to 2.0
-
-URL: https://nucleusframework.dev/docs/migrate/from-1.x
-
-Port a Nucleus 1.x desktop app to 2.0 by renaming the project namespace and moving bootstrap into nucleusApplication.
-
-In this tutorial, you'll migrate a Nucleus 1.x desktop app to 2.0. Nucleus 2.0 uses a single
-entry point, `nucleusApplication`, and moves the project namespace to `dev.nucleusframework`.
-The migration is mostly mechanical: rename the namespace, then move your `application { }` block
-into `nucleusApplication(args) { }`, which removes about 30 lines of bootstrap from a typical `main()`.
-
-## Before you start
-
-Nucleus 2.0 needs two build changes before you touch any application code.
-
-### Set the JDK toolchain to 25
-
-The 2.0 artifacts target JDK 17 (`nucleus-application`) and JDK 25 (the Jewel stack, via
-`decorated-window-jewel`). Set the toolchain on every Kotlin module that depends on Nucleus:
-
-```kotlin title="build.gradle.kts"
-kotlin { jvmToolchain(25) }
-```
-
-Skip this and dependency resolution fails with: `Dependency resolution is looking for a library
-compatible with JVM runtime version 11, but 'dev.nucleusframework:nucleus.decorated-window-jewel'
-is only compatible with JVM runtime version 25 or newer.`
-
-### Add the IntelliJ snapshots repository
-
-Nucleus 2.0 pulls Jewel `0.37.0-262.4852.74`, which lives only in the IntelliJ snapshots
-repository. Add it to `settings.gradle.kts`:
-
-```kotlin title="settings.gradle.kts"
-dependencyResolutionManagement {
-    repositories {
-        google()
-        mavenCentral()
-        maven("https://www.jetbrains.com/intellij-repository/releases")
-        maven("https://www.jetbrains.com/intellij-repository/snapshots") // new
-    }
-}
-```
-
-If you declare Jewel directly, pin it to the same coordinate Nucleus brings in transitively:
-
-```toml
-intellijIcons = "262.4852.74"
-jewel        = "0.37.0-262.4852.74"
-```
-
-## What changed in 2.0
-
-| Area | 1.x | 2.0 |
-|---|---|---|
-| Plugin ID | `io.github.kdroidfilter.nucleus` | `dev.nucleusframework` |
-| Maven group | `io.github.kdroidfilter` | `dev.nucleusframework` |
-| Kotlin package root | `io.github.kdroidfilter.nucleus.*` | `dev.nucleusframework.*` |
-| Entry point | `application { }` | `nucleusApplication(args) { }` |
-| Window | `Window(...)` | `DecoratedWindow(...)` |
-| GraalVM bootstrap | Manual `GraalVmInitializer.initialize()` | Automatic |
-| Single instance | Manual `SingleInstanceManager.isSingleInstance(...)` | Automatic |
-| Restore on second launch | Manual `LaunchedEffect` + `toFront()` | Automatic |
-| AOT training timer | Manual `Thread` + `exitProcess` | `aotTraining(duration = ...)` |
-| AutoLaunch cache prime | Manual | Automatic |
-| Windows AUMID | Manual | Automatic |
-
-## Update the plugin ID and Maven coordinates
-
-Change the plugin ID and version:
-
-```diff
- plugins {
--    id("io.github.kdroidfilter.nucleus") version "1.3.0"
-+    id("dev.nucleusframework") version "2.0.0"
- }
-```
-
-Update the dependency coordinates:
-
-```diff
- dependencies {
--    implementation("io.github.kdroidfilter:nucleus.core-runtime:1.3.0")
--    implementation("io.github.kdroidfilter:nucleus.nucleus-application:1.3.0")
-+    implementation("dev.nucleusframework:nucleus.core-runtime:2.0.0")
-+    implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")
- }
-```
-
-Update any Gradle DSL imports:
-
-```diff
--import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
-+import dev.nucleusframework.desktop.application.dsl.TargetFormat
-```
-
-## Rename the Kotlin imports
-
-Run a project-wide find and replace:
-
-```
-io.github.kdroidfilter.nucleus  →  dev.nucleusframework
-```
-
-No classes are renamed — only the package prefix changes.
-
-## Switch to nucleusApplication
-
-In 1.x you wrapped Compose Desktop's `application { }` in Nucleus init helpers. In 2.0,
-`nucleusApplication` runs the bootstrap in the correct order and exposes a unified
-`NucleusApplicationScope`.
-
-### Before: main() in 1.x
-
-```kotlin
-fun main(args: Array<String>) {
-    GraalVmInitializer.initialize()
-    AutoLaunch.wasStartedAtLogin(args)
-    if (Platform.Current == Platform.Windows) {
-        WindowsJumpListManager.setProcessAppId()
-    }
-
-    if (AotRuntime.isTraining()) {
-        Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
-            .apply { isDaemon = false }.start()
-    }
-
-    application {
-        val isFirstInstance = remember {
-            SingleInstanceManager.isSingleInstance(
-                onRestoreFileCreated = { DeepLinkHandler.writeUriTo(this) },
-                onRestoreRequest = { /* hand-rolled restore state */ },
-            )
-        }
-        if (!isFirstInstance) { exitApplication(); return@application }
-
-        DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
-
-        Window(onCloseRequest = ::exitApplication, title = "My App") { App() }
-    }
-}
-```
-
-### After: main() in 2.0
-
-```kotlin
-import dev.nucleusframework.application.nucleusApplication
-import dev.nucleusframework.application.aotTraining
-import kotlin.time.Duration.Companion.seconds
-
-fun main(args: Array<String>) = nucleusApplication(args) {
-    aotTraining(duration = 45.seconds)
-
-    onDeepLink { uri -> handleDeepLink(uri) }
-
-    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
-        App()
-    }
-}
-```
-
-### Keep early exits above nucleusApplication
-
-`nucleusApplication` runs the full bootstrap: GraalVM init, the single-instance lock, and the
-Compose loop. For invocation modes that must bypass all of that — a desktop scheduler re-launch
-or a boot receiver — keep the check above the call:
-
-```kotlin
-fun main(args: Array<String>) {
-    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
-        DesktopBootReceiver.handle(args, registry = MyTaskRegistry.registry)
-        exitProcess(0)
-    }
-
-    nucleusApplication(args) { /* ... */ }
-}
-```
-
-Putting these checks inside the scope acquires the single-instance lock first — the opposite of
-what you want for a bypass path.
-
-### What nucleusApplication runs, in order
-
-1. `GraalVmInitializer.initialize()` — fonts, charsets, HiDPI, `java.home`.
-2. The AOT training timer, when `-Dnucleus.aot.mode=training` is set and you call `aotTraining(…)`.
-3. The single-instance lock. A second instance relays its CLI deep link to the primary and exits with code 0.
-4. Platform priming: the `AutoLaunch.wasStartedAtLogin(args)` cache is warmed, and on Windows
-   `WindowsJumpListManager.setProcessAppId()` runs before any window. Both are reflective — they
-   fire only if the modules are on the classpath.
-5. Backend resolution: `NucleusBackend.Auto` picks AWT or Tao.
-6. The Compose application loop.
-
-## Replace Window with DecoratedWindow
-
-Pick the variant that matches your design system:
-
-| Composable | Module |
-|---|---|
-| `DecoratedWindow(…)` | `nucleus.decorated-window-core` |
-| `MaterialDecoratedWindow(…)` | `nucleus.decorated-window-material3` |
-| `JewelDecoratedWindow(…)` | `nucleus.decorated-window-jewel` |
-
-All three expose `nucleusWindow` inside their content — a backend-agnostic handle for `show()`,
-`toFront()`, `setMinimized()`, and similar calls.
-
-### Window composables are extension functions now
-
-This is the most common breakage. In 1.x, `JewelDecoratedWindow` was a plain `@Composable`. In
-2.0 it is an extension on `NucleusApplicationScope`:
-
-```kotlin
-fun NucleusApplicationScope.JewelDecoratedWindow(
-    onCloseRequest: () -> Unit, ...,
-    content: @Composable NucleusDecoratedWindowScope.() -> Unit,
-)
-```
-
-Any wrapper composable you wrote in 1.x must become an extension on the same scope:
-
-```diff
- @Composable
--fun MyOnboardingWindow(vmFactory: ViewModelFactory) {
-+fun NucleusApplicationScope.MyOnboardingWindow(vmFactory: ViewModelFactory) {
-     JewelDecoratedWindow(onCloseRequest = {}, title = "...") { /* ... */ }
- }
-```
-
-The call site inside `nucleusApplication { … }` does not change — the receiver is implicit.
-
-### Dialogs follow the same rule
-
-| Receiver | Backend support |
-|---|---|
-| `JewelDecoratedDialog(…)` (no receiver) | AWT only. Crashes on Tao with `NoClassDefFoundError`. |
-| `NucleusApplicationScope.JewelDecoratedDialog(…)` | Backend-agnostic. Dispatches to AWT or Tao. |
-
-Use the scoped variant for anything composed inside `nucleusApplication { … }`.
-
-### CompositionLocals propagate across the Tao scene
-
-The Tao backend opens a fresh `ComposeScene` per window and dialog. As of 2.0, the full parent
-`CompositionLocalContext` is bridged automatically, so you no longer need to wrap content twice:
-
-```kotlin
-// Before — needed on Tao
-IntUiTheme(theme, styling) {
-    JewelDecoratedWindow(...) {
-        IntUiTheme(theme, styling) { /* duplicate */ }
-    }
-}
-
-// After — a single wrap is enough on every backend
-IntUiTheme(theme, styling) {
-    JewelDecoratedWindow(...) { /* content */ }
-}
-```
-
-## Remove the manual single-instance block
-
-Single instance is automatic in 2.0. Delete the 1.x manual block:
-
-```diff
--val isFirstInstance = remember {
--    SingleInstanceManager.isSingleInstance(...)
--}
--if (!isFirstInstance) { exitApplication(); return@application }
-```
-
-The primary instance restores its `DecoratedWindow` (`show()` + `setMinimized(false)` +
-`toFront()` + `requestFocus()`) on every second launch. The secondary instance's CLI deep link is
-delivered to the primary through `onDeepLink { }`, then it exits with code 0.
-
-Opt out for editor-style apps that allow multiple windows:
-
-```kotlin
-nucleusApplication(args, enableSingleInstance = false) { /* ... */ }
-```
-
-## Move AOT training into aotTraining
-
-```diff
--if (AotRuntime.isTraining()) {
--    Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
--        .apply { isDaemon = false }.start()
--}
-
- nucleusApplication(args) {
-+    aotTraining(duration = 45.seconds)
-+
-+    if (isAotTraining) {
-+        preloadNavigationScreens()
-+        preloadFontsAndImages()
-+    }
- }
-```
-
-`aotTraining` is a no-op outside training mode. The scope also exposes `aotMode`, `isAotTraining`,
-and `isAotRuntime`. See [AOT cache](/docs/performance/aot-cache).
-
-## Register deep links with onDeepLink
-
-```diff
--DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
-+onDeepLink { uri -> handleDeepLink(uri) }
-```
-
-URIs delivered before the handler is registered are buffered and replayed. `DeepLinkHandler`
-remains public for low-level work.
-
-## Drop the explicit GraalVmInitializer call
-
-```diff
--GraalVmInitializer.initialize()
--application { /* ... */ }
-+nucleusApplication(args) { /* ... */ }
-```
-
-It runs as the first bootstrap step now.
-
-## Review the final result
-
-```kotlin
-fun main(args: Array<String>) = nucleusApplication(args) {
-    remember {
-        AutoLaunch.wasStartedAtLogin(args)
-        if (Platform.Current == Platform.Windows) {
-            WindowsJumpListManager.setProcessAppId()
-        }
-        true
-    }
-
-    aotTraining(duration = 45.seconds)
-    onDeepLink { uri -> handleDeepLink(uri) }
-
-    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
-        App()
-    }
-}
-```
-
-No ordered init list, no `SingleInstanceManager` plumbing, and no restore counter with a
-`LaunchedEffect` to bring the window back.
-
-## Troubleshooting
-
-- **Imports won't resolve after the rename.** Search for `io.github.kdroidfilter.nucleus` — anything
-  left is stale. Replace it with `dev.nucleusframework`.
-- **`nucleusApplication` is unresolved.** Add `implementation("dev.nucleusframework:nucleus.nucleus-application:2.0.0")`.
-- **The window doesn't restore on second launch with a plain `Window`.** That behavior lives in
-  `DecoratedWindow`. Switch to a `DecoratedWindow` variant.
-- **`Unresolved reference 'JewelDecoratedWindow'`.** The composable became a scope extension.
-  Propagate the receiver — see [Replace Window with DecoratedWindow](#replace-window-with-decoratedwindow).
-- **`NoClassDefFoundError: …DecoratedDialogKt` on Tao.** You're calling the AWT-only dialog. Use
-  `NucleusApplicationScope.JewelDecoratedDialog`.
-- **`Could not find org.jetbrains.jewel:jewel-foundation:0.37.…`** The IntelliJ snapshots repository
-  is missing. See [Before you start](#before-you-start).
-- **`Dependency resolution is looking for a library compatible with JVM runtime version 11`.** Set
-  the toolchain to 25.
-
-## What's next
-
-- [Quickstart](/docs/start/quickstart) — build and run a Nucleus app from scratch with the 2.0 DSL.
-- [Configuration](/docs/start/configuration) — the full `nucleus { }` DSL.
-- [AOT cache](/docs/performance/aot-cache) — how `aotTraining` primes startup.
-- [Backends](/docs/concepts/backends) — how `NucleusBackend.Auto` chooses AWT or Tao.
-
----
-
-# Migrating from JetBrains Compose Desktop
+# migrate/from-jb-compose
 
 URL: https://nucleusframework.dev/docs/migrate/from-jb-compose
 
@@ -11752,11 +12327,13 @@ inside it stays the same:
  }
 ```
 
+
 Nucleus propagates `nucleus.application.mainClass` to `compose.desktop.application.mainClass`, so
 [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) tasks
 (`hotRun`, `hotSnapshotMain`) resolve the entry point without extra configuration. On macOS with
 `decorated-window-tao`, `-XstartOnFirstThread` is injected into Hot Reload's `JavaExec` tasks
 automatically.
+
 
 ## Enable Nucleus features
 
@@ -11890,7 +12467,7 @@ This also applies to GraalVM Native Image DEB packaging (`packageGraalvmDeb`).
 
 ---
 
-# Gradle DSL reference
+# reference/gradle-dsl
 
 URL: https://nucleusframework.dev/docs/reference/gradle-dsl
 
@@ -12153,7 +12730,7 @@ The plugin injects a `nucleus/nucleus-app.properties` resource into the packaged
 
 ---
 
-# Troubleshooting
+# reference/troubleshooting
 
 URL: https://nucleusframework.dev/docs/reference/troubleshooting
 
@@ -12411,7 +12988,7 @@ See [migrate from 1.x](/docs/migrate/from-1.x).
 
 ---
 
-# Roadmap
+# roadmap
 
 URL: https://nucleusframework.dev/docs/roadmap
 
@@ -12473,7 +13050,7 @@ complexity per OS — the more people that need one, the sooner it ships.
 
 ---
 
-# Changelog
+# changelog
 
 URL: https://nucleusframework.dev/docs/changelog
 
