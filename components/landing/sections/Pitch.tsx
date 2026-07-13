@@ -1,7 +1,7 @@
 import * as React from 'react';
+import { ComponentShelf } from './ComponentShelf';
 import { KmpPlatformRow } from './KmpPlatformRow';
 import { OneLanguageBar } from './OneLanguageBar';
-import { PdfReaderStrip } from './PdfReaderStrip';
 import { type Lang, pitchT, pick } from '@/lib/landing-i18n';
 
 interface PitchProps {
@@ -22,7 +22,7 @@ export function Pitch({ lang }: PitchProps) {
 
         <OneLanguageBar lang={lang}/>
 
-        <PdfReaderStrip lang={lang}/>
+        <ComponentShelf lang={lang}/>
       </div>
     </section>
   );
