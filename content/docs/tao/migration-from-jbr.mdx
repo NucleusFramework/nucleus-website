@@ -12,6 +12,18 @@ In this tutorial, you'll move an existing Nucleus app from the AWT backend
 backends, so the move is a dependency swap and a backend flag. The rest of the tutorial
 covers the integrations you need to retest afterward.
 
+<Callout type="info" title="Why switch">
+On the same machine, running the same app as a GraalVM native image, moving from the AWT
+backend to Tao measurably cuts both startup time and memory:
+
+- **Startup** (launch → first window): **~0.7 s → ~0.12 s**, roughly **6× faster**.
+- **RAM** (private working set, idle with window open): **~155 MB → ~100 MB**, about **35% lower**.
+
+Tao drops the AWT/Swing window hierarchy and its native libraries entirely — that is what
+removes the startup and memory overhead. Figures are from an internal Nucleus app; your
+results vary with app size and platform.
+</Callout>
+
 ## Before you start
 
 - An existing app that runs on `NucleusBackend.Awt`, using `decorated-window-jbr` or
@@ -111,6 +123,8 @@ each of these after the swap:
 
 | Concern                | AWT (JBR / JNI)                     | Tao                                   |
 |------------------------|-------------------------------------|---------------------------------------|
+| Startup (native image) | ~0.7 s to first window              | ~0.12 s to first window (~6× faster)  |
+| RAM (idle, window open)| ~155 MB private working set         | ~100 MB private working set (~35% lower) |
 | Underlying window      | `ComposeWindow` (extends `JFrame`)  | `TaoWindow` (native handle)           |
 | Event dispatch         | AWT EDT                             | Tao event loop on the main thread     |
 | `unsafe` accessor      | `unsafe.awtWindow`                  | `unsafe.taoWindow`                    |

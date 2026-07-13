@@ -12,6 +12,18 @@ Les API `DecoratedWindow` et `TitleBar` sont identiques sur les deux backends : 
 changement se résume à un remplacement de dépendance et à un flag de backend. Le reste du
 tutoriel couvre les intégrations à retester ensuite.
 
+<Callout type="info" title="Pourquoi basculer">
+Sur la même machine, avec la même application compilée en image native GraalVM, le passage
+du backend AWT à Tao réduit nettement le temps de démarrage et la mémoire :
+
+- **Démarrage** (lancement → première fenêtre) : **~0,7 s → ~0,12 s**, environ **6× plus rapide**.
+- **RAM** (working set privé, au repos fenêtre ouverte) : **~155 Mo → ~100 Mo**, environ **35 % de moins**.
+
+Tao abandonne complètement la hiérarchie de fenêtre AWT/Swing et ses bibliothèques natives —
+c'est ce qui supprime le surcoût de démarrage et de mémoire. Chiffres mesurés sur une
+application Nucleus interne ; les résultats varient selon la taille de l'app et la plateforme.
+</Callout>
+
 ## Avant de commencer
 
 - Une application existante qui tourne sur `NucleusBackend.Awt`, avec
@@ -112,6 +124,8 @@ dessous changent. Retestez chacun de ces points après le basculement :
 
 | Aspect                 | AWT (JBR / JNI)                     | Tao                                   |
 |------------------------|-------------------------------------|---------------------------------------|
+| Démarrage (image native) | ~0,7 s jusqu'à la première fenêtre | ~0,12 s jusqu'à la première fenêtre (~6× plus rapide) |
+| RAM (repos, fenêtre ouverte) | ~155 Mo working set privé     | ~100 Mo working set privé (~35 % de moins) |
 | Fenêtre sous-jacente   | `ComposeWindow` (hérite de `JFrame`) | `TaoWindow` (handle natif)           |
 | Dispatch d'événements  | EDT AWT                             | Event loop Tao sur le thread principal |
 | Accesseur `unsafe`     | `unsafe.awtWindow`                  | `unsafe.taoWindow`                    |

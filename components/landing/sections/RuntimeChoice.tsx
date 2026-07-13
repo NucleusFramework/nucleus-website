@@ -9,7 +9,7 @@ export function RuntimeChoice() {
   const isGraal = mode === 'graal';
 
   // numbers driven by mode
-  const cold = isGraal ? '0.5' : '1.0';
+  const cold = isGraal ? '0.2' : '1.0';
   const peak = isGraal ? '82' : '96';
   const ram = isGraal ? '35' : '120';
   const bin = isGraal ? '40' : '60';
@@ -54,7 +54,7 @@ export function RuntimeChoice() {
               <div className="rc-num-k">Cold start</div>
               <div className="rc-num-v">{cold}<span>s</span></div>
               <div className="rc-num-bar">
-                <div className="rc-num-fill" style={{ width: isGraal ? '45%' : '90%' }}/>
+                <div className="rc-num-fill" style={{ width: isGraal ? '18%' : '90%' }}/>
               </div>
             </div>
             <div className="rc-num">
@@ -89,7 +89,7 @@ export function RuntimeChoice() {
                   <span className="rc-pro-dot"/>
                   <div>
                     <div className="rc-pro-h">Instant. Really instant.</div>
-                    <div className="rc-pro-d">~0.5&nbsp;s from <code>./MyApp</code> to first frame — feels like opening a config file.</div>
+                    <div className="rc-pro-d">~0.2&nbsp;s from <code>./MyApp</code> to first frame — feels like opening a config file.</div>
                   </div>
                 </div>
                 <div className="rc-pro">
