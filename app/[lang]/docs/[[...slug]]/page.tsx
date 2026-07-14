@@ -6,7 +6,7 @@ import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { source } from '@/lib/source';
 import { SITE } from '@/lib/site';
 import { i18n } from '@/lib/i18n';
-import { Versions } from '@/components/docs/Versions';
+import { Version } from '@/components/docs/Version';
 
 function makeLocaleLink(lang: string) {
   const knownLocales = new Set(i18n.languages);
@@ -50,7 +50,13 @@ export default async function Page(props: { params: Promise<Params> }) {
       <DocsTitle>{page.data.title}</DocsTitle>
       {page.data.description ? <DocsDescription>{page.data.description}</DocsDescription> : null}
       <DocsBody>
-        <MDX components={{ ...defaultMdxComponents, a: makeLocaleLink(lang), Versions: () => <Versions lang={lang} /> }} />
+        <MDX
+          components={{
+            ...defaultMdxComponents,
+            a: makeLocaleLink(lang),
+            Version: (props: { module: string }) => <Version {...props} lang={lang} />,
+          }}
+        />
       </DocsBody>
     </DocsPage>
   );

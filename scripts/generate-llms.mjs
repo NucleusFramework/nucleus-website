@@ -41,6 +41,7 @@ function cleanBody(body) {
       let text = seg;
       text = text.replace(/^import\s+\{[^}]*\}\s+from\s+['"]fumadocs-ui[^'"]*['"];?\s*$/gm, '');
       text = text.replace(/<Callout[^>]*>\n?/g, '').replace(/<\/Callout>\n?/g, '');
+      text = text.replace(/<Version[^>]*\/>\n?/g, '');
       text = text.replace(/<Tabs[^>]*>\n?/g, '').replace(/<\/Tabs>\n?/g, '');
       text = text.replace(/<Tab\s+value=["']([^"']+)["']>\n?/g, '\n**$1**\n\n');
       text = text.replace(/<\/Tab>\n?/g, '');

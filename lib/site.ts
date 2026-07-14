@@ -41,20 +41,6 @@ export async function fetchGitHubStars(): Promise<number | null> {
   }
 }
 
-export async function fetchLatestRelease(repo: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://api.github.com/repos/NucleusFramework/${repo}/releases/latest`, {
-      next: { revalidate: 3600 },
-      headers: { Accept: 'application/vnd.github+json' },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { tag_name?: string };
-    return typeof data.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : null;
-  } catch {
-    return null;
-  }
-}
-
 export function formatStarCount(n: number): string {
   if (n >= 1000) {
     const k = n / 1000;
