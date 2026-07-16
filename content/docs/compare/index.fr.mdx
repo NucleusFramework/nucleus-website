@@ -49,6 +49,26 @@ Deux résultats à souligner :
   restant 100 % Kotlin/Compose — et utilise environ un tiers de la mémoire de Tauri. C'est le
   natif/AOT qui procure à la fois la RAM basse et le démarrage sous 0,2 s.
 
+### macOS
+
+Même protocole sur une machine macOS 26 (Apple silicon) — temps réel entre le lancement du
+process et la première fenêtre à l'écran, et **RSS totale de tous les process de l'appli**
+une fois la fenêtre stabilisée. La RSS inclut les pages des frameworks partagés : ces chiffres
+ne sont pas directement comparables à la colonne « working set privé » de Windows — comparez
+à l'intérieur du tableau.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (RSS, tous process) | Process |
+|--|--|--|--|--|--|
+| **Nucleus (CMP)** | GraalVM native image | ~0,32 s | ~0,20 s | ~115 MB | 1 |
+| SwiftUI | référence native | ~0,14 s | ~0,14 s | ~78 MB | 1 |
+| Tauri | Rust + WKWebView | ~0,91 s | ~0,19 s | ~173 MB | 4 |
+
+- **WKWebView rejoue le scénario WebView2.** Le process principal Tauri affiche ~97 MB, mais
+  WebKit rend la page dans trois process séparés (`WebContent`, `GPU`, `Networking`) qui
+  ajoutent ~76 MB — comptés dans le tableau.
+- **Nucleus se place entre la référence native SwiftUI et Tauri** — ~35 % de RAM en moins que
+  Tauri et un cold start près de 3× plus rapide, en un seul process.
+
 ## Un seul langage sur toute la pile
 
 Electron et Tauri répartissent la pile sur plusieurs langages. Vous écrivez l'UI en JavaScript, les parties natives en Rust, C++ ou Swift, et vous les reliez par un pont IPC. Nucleus garde toute la pile en Kotlin — UI, logique métier, appels OS et packaging — avec le même call graph, le même modèle mémoire et le même debugger.

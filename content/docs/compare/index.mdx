@@ -47,6 +47,25 @@ Two results worth calling out:
   Kotlin/Compose — and uses roughly a third of Tauri's memory. Native/AOT is what buys both the
   low RAM and the sub-0.2 s start.
 
+### macOS
+
+Same protocol on a macOS 26 machine (Apple silicon) — wall-clock time from process launch to
+the first on-screen window, and total **RSS across every process the app spawns** once the
+window settled. RSS includes shared framework pages, so these figures are not directly
+comparable with the Windows private-working-set column — compare within the table.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (RSS, all processes) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (CMP)** | GraalVM native image | ~0.32 s | ~0.20 s | ~115 MB | 1 |
+| SwiftUI | native reference | ~0.14 s | ~0.14 s | ~78 MB | 1 |
+| Tauri | Rust + WKWebView | ~0.91 s | ~0.19 s | ~173 MB | 4 |
+
+- **The WKWebView story mirrors WebView2.** The Tauri main process shows ~97 MB, but WebKit
+  renders in three separate helper processes (`WebContent`, `GPU`, `Networking`) that add
+  another ~76 MB — all counted in the table.
+- **Nucleus sits between the native SwiftUI reference and Tauri** — ~35 % less RAM than Tauri
+  and a cold start nearly 3× faster, in a single process.
+
 ## One language across the stack
 
 Electron and Tauri split the stack across languages. You write the UI in JavaScript, the native parts in Rust, C++, or Swift, and connect them through an IPC bridge. Nucleus keeps the whole stack in Kotlin — UI, business logic, OS calls, and packaging — with the same call graph, memory model, and debugger.
