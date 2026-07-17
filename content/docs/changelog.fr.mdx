@@ -7,6 +7,110 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.1.0
+
+**Sortie : 2026-07-17**
+
+### Faits marquants
+
+- **Oracle GraalVM est désormais la toolchain recommandée et par défaut.** Nucleus la télécharge et la met en cache automatiquement (`toolchain { }` — Innovation par défaut, `channel = GraalvmChannel.LTS` pour la LTS), et le backend Tao (par défaut) compile les images natives avec. Oracle GraalVM (l'édition auparavant appelée Enterprise) débloque les fonctionnalités avancées d'image native sur lesquelles Nucleus s'appuie — Profile-Guided Optimization, `-O3`, et les profils inférés par ML — que les éditions Community ne fournissent pas. Seul le backend AWT, déprécié, nécessite encore une installation locale de BellSoft Liberica NIK. Aucune étape `setup-graalvm` ; `GRAALVM_HOME` reste prioritaire.
+- **Compose Hot Reload fonctionne d'emblée.** Appliquez le plugin `org.jetbrains.compose.hot-reload` et lancez `hotRun` ; Nucleus résout le point d'entrée depuis `nucleus.application.mainClass`, sans configuration `ComposeHotRun`. `hotDev` sans `-PclassName` se comporte comme `hotRun`. Le hot reload n'était pas fonctionnel en 2.0.
+- **Profile-Guided Optimization intégrée.** Enregistrez un profil avec `runWithPgoInstrument`, committez-le, et les builds natifs ultérieurs l'appliquent automatiquement (`--pgo`). Oracle GraalVM uniquement.
+
+### Nouvelles fonctionnalités
+
+- **Compose Hot Reload sur le backend Tao.** Le sidecar dev-tools du Hot Reload suit désormais les fenêtres pilotées par Tao, pas seulement AWT, via un pont réflexif piloté par les callbacks de fenêtre Tao.
+- **`march` et `optimization` type-safe.** `march` est désormais `NativeImageMarch` (`NATIVE` / `COMPATIBILITY`) avec un défaut par plateforme ; `optimization` est `NativeImageOptimization` (`QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE`). Nouveaux toggles `allCharsets` et `mlProfileInference`.
+- **Oracle GraalVM sous macOS.** Les images natives du backend Tao (par défaut) se construisent sur Oracle GraalVM sous macOS (arm64) ; le backend AWT, déprécié, nécessite encore BellSoft Liberica NIK. Les Mac Intel retombent sur Liberica NIK.
+- **`CompressionLevel.Ultra`.** Nouveau niveau de compression qui recompresse en plus le DMG macOS en LZMA (ULMO, ~20 % plus petit) et le `.deb` Linux avec `xz -9e` (~25 % plus petit). `Maximum` n'exécute plus ces étapes de post-traitement.
+- **Couleur de clear thématisée et ombre portée CSD Linux.** Les hôtes Tao peignent une couleur de clear thématisée ; les fenêtres décorées Linux reproduisent l'ombre portée de la décoration côté client GTK.
+
+### Améliorations
+
+- **Images natives plus petites.** `optimization = NativeImageOptimization.SIZE` (`-Os`) plus le stripping automatique de l'exécutable sous Linux et macOS récupèrent des dizaines de Mo.
+- **`--enable-native-access=ALL-UNNAMED` par défaut.** Ajouté aux arguments JVM par défaut (tâche run et launcher empaqueté) pour que l'accès natif JNI sous JDK 24+ (JEP 472) n'émette plus d'avertissement.
+- **Téléchargement automatique de la toolchain GraalVM** supprime l'installation manuelle de NIK auparavant requise pour les builds natifs.
+- **Reachability metadata repository** — version par défaut passée à `1.1.4` (depuis `0.10.6`).
+- **ProGuard** — version par défaut passée à `7.9.1`.
+
+### Corrections de bugs
+
+- **Alignement de la version de Compose Hot Reload avec la release livrée avec Compose** et durcissement du pont Tao — un écart de version arrête désormais le sidecar pour cette fenêtre au lieu de crasher l'application.
+- **Suppression de l'ombre native sur les panneaux popup macOS** dans le backend Tao.
+
+---
+
+## v2.0.7
+
+**Sortie : 2026-07-14**
+
+### Corrections de bugs
+
+- **`march` par défaut en compatibilité pour des binaires portables** (#344) — les images natives GraalVM ciblent désormais un CPU de base par défaut au lieu de la machine de build, si bien que les binaires distribués s'exécutent sur du matériel plus ancien.
+
+---
+
+## v2.0.6
+
+**Sortie : 2026-07-14**
+
+### Corrections de bugs
+
+- **Intégration de `libjsound` dans l'image native** (#341) — Java Sound fonctionne désormais dans les builds d'image native GraalVM.
+- **Exécution des toasts WinRT Windows sur un thread MTA dédié** (#342) — corrige la livraison des notifications sous Windows.
+
+---
+
+## v2.0.5
+
+**Sortie : 2026-07-14**
+
+### Corrections de bugs
+
+- **`Dispatchers.Main` fonctionne sans boucle Tao active** (#337) — le dispatch principal des coroutines ne nécessite plus une boucle d'événements Tao active.
+
+---
+
+## v2.0.4
+
+**Sortie : 2026-07-13**
+
+### Corrections de bugs
+
+- **`cleanupNativeLibs` fonctionne pour les projets Kotlin Multiplatform** (#335).
+
+---
+
+## v2.0.3
+
+**Sortie : 2026-07-13**
+
+### Nouvelles fonctionnalités
+
+- **`dockIconFollowsWindows`** (#334) — contrôle la visibilité de l'icône du dock pour les apps de barre de menu / tray sous macOS.
+
+---
+
+## v2.0.2
+
+**Sortie : 2026-07-13**
+
+### Corrections de bugs
+
+- **Application de `org.jetbrains.compose` aux côtés de Nucleus** (#331) — le plugin Nucleus n'entre plus en conflit quand le plugin JetBrains Compose est appliqué au même projet.
+
+---
+
+## v2.0.1
+
+**Sortie : 2026-07-13**
+
+### Corrections de bugs
+
+- **Feux de circulation pré-Tahoe + règles ProGuard du menu macOS** (#310) — corrige les boutons feux de circulation de fenêtre sous les versions de macOS antérieures à Tahoe et ajoute les règles ProGuard manquantes pour le menu macOS.
+
+---
+
 ## v2.0.0
 
 **Sortie : 2026-05-14**

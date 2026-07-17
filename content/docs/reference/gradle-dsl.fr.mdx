@@ -23,7 +23,7 @@ Le plugin Gradle Nucleus (`id("dev.nucleusframework")`) expose une seule extensi
 - `val mainJar: RegularFileProperty`
 - `var javaHome: String`
 - `val args: MutableList<String>` / `args(vararg args: String)`
-- `val jvmArgs: MutableList<String>` / `jvmArgs(vararg jvmArgs: String)`
+- `val jvmArgs: MutableList<String>` / `jvmArgs(vararg jvmArgs: String)` — Nucleus ajoute `--enable-native-access=ALL-UNNAMED` aux défauts (tâche run et launcher empaqueté) pour JDK 24+ (JEP 472)
 - `val nativeDistributions: JvmApplicationDistributions` — voir ci-dessous
 - `val buildTypes: JvmApplicationBuildTypes`
 - `val graalvm: GraalvmSettings` — voir [GraalVM](#graalvm--graalvmsettings)
@@ -38,7 +38,7 @@ Le plugin Gradle Nucleus (`id("dev.nucleusframework")`) expose une seule extensi
 | `var splashImage: String?` | — | Chemin de l'image splash |
 | `var enableAotCache: Boolean` | — | Cache AOT JDK 25+ |
 | `var artifactName: String` | défaut `"${name}-${version}-${os}-${arch}.${ext}"` | Template de sortie |
-| `var compressionLevel: CompressionLevel?` | — | `Store`, `Normal`, `Maximum` |
+| `var compressionLevel: CompressionLevel?` | — | `Store`, `Normal`, `Maximum`, `Ultra` |
 | `val trustedCertificates: ConfigurableFileCollection` | — | Certificats CA → `cacerts` du JDK livré (voir [certificats de confiance](/docs/packaging/trusted-certificates)) |
 | `val protocols: MutableList<UrlProtocol>` | — | Protocoles de deep link |
 | `targetFormats: …` | hérité | Les 18 [formats cibles](#targetformat-enum) |
@@ -206,12 +206,24 @@ Les valeurs par défaut sont lues depuis `compose.desktop.linux.sign` et `compos
 ## GraalVM — `GraalvmSettings`
 
 - `isEnabled: Property<Boolean>` (défaut `false`)
-- `javaLanguageVersion: Property<Int>` (défaut `25`)
-- `jvmVendor: Property<JvmVendorSpec>`
 - `imageName: Property<String>`
-- `march: Property<String>` (défaut `"native"`)
+- `march: Property<NativeImageMarch>` — `NATIVE` / `COMPATIBILITY` ; non défini, retombe sur un défaut par plateforme (`COMPATIBILITY`, ou `NATIVE` sous macOS Apple Silicon)
+- `optimization: Property<NativeImageOptimization>` — `QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` ; non défini, conserve `-O2`
+- `allCharsets: Property<Boolean>` (défaut `false`)
+- `mlProfileInference: Property<Boolean>` (défaut `true`)
 - `buildArgs: ListProperty<String>`
+- `javaLanguageVersion: Property<Int>` (défaut `25`) — uniquement quand `toolchain.autoDownload = false`
+- `jvmVendor: Property<JvmVendorSpec>` — uniquement quand `toolchain.autoDownload = false`
 - `nativeImageConfigBaseDir: DirectoryProperty`
+- `val toolchain: GraalvmToolchainSettings` :
+  - `autoDownload: Property<Boolean> = true`
+  - `channel: Property<GraalvmChannel> = INNOVATION` — `INNOVATION` / `LTS`
+  - `version: Property<String>` — remplace `channel`
+  - `macosIntelFallback: Property<Boolean> = true`
+  - `installDir: DirectoryProperty` — défaut `<gradle-user-home>/nucleus/graalvm`
+- `val pgo: GraalvmPgoSettings` :
+  - `enabled: Property<Boolean> = true`
+  - `profile: RegularFileProperty` — défaut `graalvm/pgo/default.iprof`
 - `val macOS: GraalvmMacOSSettings` — `cStubsSrc`, `minimumSystemVersion = "12.0"`, `macOsSdkVersion = "26.0"`
 - `val windows: GraalvmWindowsSettings` :
   - `bundleCRuntime: Property<Boolean> = true` — copie les DLL du runtime MSVC à côté du `.exe` natif
@@ -219,7 +231,7 @@ Les valeurs par défaut sont lues depuis `compose.desktop.linux.sign` et `compos
   - `sourceDir: DirectoryProperty` — répertoire d'où les DLL sont copiées (par défaut le `bin` de la toolchain GraalVM)
 - `val metadataRepository: MetadataRepositorySettings` :
   - `enabled: Boolean = true`
-  - `version: String = "0.10.6"`
+  - `version: String = "1.1.4"`
   - `excludedModules: SetProperty<String>`
   - `moduleToConfigVersion: MapProperty<String, String>`
 
@@ -240,7 +252,10 @@ Pour l'instant macOS Kotlin/Native uniquement.
 - `class LaunchAgentSettings`
 - `class JvmApplicationBuildTypes`
 - `class ProguardSettings`
-- `enum class CompressionLevel`
+- `enum class CompressionLevel` — `Store`, `Normal`, `Maximum`, `Ultra`
+- `enum class GraalvmChannel` — `INNOVATION`, `LTS`
+- `enum class NativeImageMarch` — `NATIVE`, `COMPATIBILITY`
+- `enum class NativeImageOptimization` — `QUICK_BUILD`, `NONE`, `LEVEL_1`, `LEVEL_2`, `LEVEL_3`, `SIZE`
 - `enum class SigningAlgorithm`
 - `enum class ReleaseType`, `enum class ReleaseChannel`, `enum class PublishMode`
 - `enum class SnapGrade`, `enum class SnapConfinement`, `enum class SnapCompression`
