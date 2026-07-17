@@ -1,0 +1,90 @@
+---
+title: Yaru — GTK / LibAdwaita
+description: Affiche un DecoratedWindow accordé à Ubuntu et GNOME, avec une header bar, le layout de boutons défini dans GSettings et des icônes symboliques adaptées au thème.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le toolkit Yaru affiche un `DecoratedWindow` accordé à Ubuntu et GNOME. Les applications GNOME utilisent une header bar à la place d'une barre de titre et placent les boutons de contrôle là où l'utilisateur les a définis dans GSettings. Le toolkit s'appuie sur le backend Tao et les helpers Linux de `decorated-window-core` pour reproduire ce layout, la palette claire et sombre de LibAdwaita, et les icônes symboliques de fermeture, réduction et agrandissement.
+
+<Callout type="info">
+Un pack `decorated-window-yaru` dédié arrive prochainement. En attendant sa sortie, construis le rendu Yaru avec les helpers de layout de boutons et d'icônes Linux de `decorated-window-core`, comme ci-dessous.
+</Callout>
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-core:<version>")
+    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
+}
+```
+
+Le backend Tao est requis : sous Wayland il négocie les décorations côté client, et sous X11 Nucleus dessine la header bar lui-même.
+
+## Construire la header bar
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import dev.nucleusframework.window.NucleusDecoratedWindowTheme
+import dev.nucleusframework.window.TitleBar
+import dev.nucleusframework.window.styling.TitleBarColors
+import dev.nucleusframework.window.styling.TitleBarMetrics
+import dev.nucleusframework.window.styling.TitleBarStyle
+import dev.nucleusframework.window.tao.DecoratedWindow
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val dark = isSystemInDarkMode()
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = if (dark) Color(0xFF2D2D2D) else Color(0xFFF5F5F4),
+            inactiveBackground = if (dark) Color(0xFF222222) else Color(0xFFEDEDEC),
+            content = if (dark) Color.White else Color(0xFF1A1A1A),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 46.dp),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = dark, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Yaru") {
+            TitleBar { _ ->
+                // Place ici les widgets de la header bar. La title bar dessine
+                // elle-même les boutons de contrôle, à partir du layout GSettings
+                // et des icônes symboliques GNOME.
+            }
+            Box(Modifier.fillMaxSize()) { /* contenu */ }
+        }
+    }
+}
+```
+
+## Fonctionnement
+
+La `TitleBar` dessine elle-même les boutons de contrôle. Elle lit la clé GNOME `org.gnome.desktop.wm.preferences` → `button-layout` depuis GSettings, place les boutons dans cet ordre et de ce côté, et les rend avec les icônes symboliques GNOME du thème actif. Sur GNOME la clé vaut par défaut `appmenu:close`, tandis qu'Ubuntu fournit `close,minimize,maximize:`. Tout le reste de la header bar — titre, fil d'Ariane, recherche — est le contenu que tu passes à `TitleBar`.
+
+`rememberLinuxButtonLayout()` expose la même valeur analysée que celle utilisée par la title bar : un `LinuxButtonLayout` avec la liste ordonnée `buttons` et un indicateur `controlsOnRight`. Il suit les changements faits en direct dans GNOME Tweaks. Appelle-le quand tu remplaces les contrôles intégrés par les tiens et que tu dois reproduire le layout de l'utilisateur.
+
+`TitleBarStyle` combine une palette `TitleBarColors` et des `TitleBarMetrics`. Dérive la palette de `isSystemInDarkMode()` pour que la header bar suive la préférence claire ou sombre du système. La palette ne contient que des couleurs ; la title bar récupère ses icônes Linux en interne via `linuxTitleBarIcons()`, que tu peux aussi appeler directement pour rendre des contrôles personnalisés.
+
+## Référence de l'API
+
+- `rememberLinuxButtonLayout(): LinuxButtonLayout` — le layout de boutons GSettings actuel, avec `buttons` et `controlsOnRight`, mis à jour quand l'utilisateur le modifie.
+- `LinuxTitleBarButton.{CLOSE, MINIMIZE, MAXIMIZE}` — les identifiants de boutons contenus dans `LinuxButtonLayout.buttons`.
+- `linuxTitleBarIcons(de, isDark): LinuxTitleBarIconSet` — icônes symboliques pour l'environnement de bureau et le thème actifs.
+- `GnomeControlButtonsIcons` — extension vals de type `ImageVector` (`.Close`, `.Minimize`, `.Maximize`, `.Restore`, plus leurs variantes `Dark`, `Hover`, `Pressed` et `Inactive`).
+
+## Et ensuite
+
+- [Backends](/docs/concepts/backends) — le backend Tao sur lequel repose le rendu Yaru.
+- [Toolkits de fenêtre](/docs/window/toolkits) — les autres packs de style et leur comparaison.
+- [Icônes Freedesktop](/docs/os/freedesktop-icons) — définir l'icône que GNOME affiche dans le shell.
+- [Notifications Linux](/docs/os/notification-linux) — notifications de bureau sur GNOME et KDE.

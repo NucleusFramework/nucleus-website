@@ -1,0 +1,126 @@
+---
+title: Stylet (pen)
+description: Lisez la pression du stylet et de l'écran tactile depuis les pointer events Compose sur le backend Tao.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le backend Tao remonte les contacts stylet et tactiles comme des pointer events Compose de type
+`PointerType.Touch`, chacun portant une valeur de `pressure`. Vous les lisez avec le même modifier
+`pointerInput` que pour la souris. Le seul champ propre au stylet est `pressure`.
+
+## Ajouter la dépendance
+
+La prise en charge du stylet et du tactile est incluse dans le backend Tao. Il n'y a pas
+d'artefact séparé à ajouter.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Lire la pression depuis les pointer events
+
+Lisez les pointer events dans un modifier `pointerInput`. Gardez les contacts `PointerType.Touch` —
+c'est sous cette forme que l'entrée stylet et tactile arrive sur Tao — et utilisez
+`change.pressure` pour dimensionner chaque trait :
+
+```kotlin
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.*
+
+@Composable
+fun InkSurface() {
+    val strokes = remember { mutableStateListOf<Triple<Offset, Offset, Float>>() }
+    var last: Offset? by remember { mutableStateOf(null) }
+
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.first()
+                        if (change.type != PointerType.Touch) {
+                            last = null
+                            continue
+                        }
+                        val start = last ?: change.position
+                        strokes += Triple(start, change.position, change.pressure)
+                        last = if (change.pressed) change.position else null
+                        change.consume()
+                    }
+                }
+            }
+    ) {
+        strokes.forEach { (a, b, p) ->
+            drawLine(Color.Black, a, b, strokeWidth = 1f + p * 6f)
+        }
+    }
+}
+```
+
+## Fonctionnement
+
+Tao lit l'entrée pointeur native de chaque système d'exploitation et transmet chaque contact à
+la scène Compose. Sur Windows, l'entrée stylet et tactile arrive via `WM_POINTER` / `WM_TOUCH` ;
+sur Linux, via les protocoles tactiles Wayland et X11/XWayland. Chaque contact est dispatché en
+`PointerType.Touch` : au niveau Compose, un stylet est donc indiscernable d'un doigt, si ce
+n'est par sa pression.
+
+La couche native remonte la pression sous forme d'entier mis à l'échelle par 10 000, que Tao
+normalise dans `change.pressure` sur l'intervalle `[0f, 1f]`. Quand le digitizer ne remonte pas
+de pression — le cas de la plupart des écrans tactiles grand public — le contact rapporte quand
+même `1f`. Une valeur de `1f` signifie donc soit une pression maximale, soit une absence de
+donnée de pression, pas nécessairement une pression maximale stricte.
+
+Comme un contact se présente en `PointerInputChange` ordinaire, tout ce qui fonctionne pour la
+souris et le tactile — hit testing, détecteurs de gestes, `consume()` — fonctionne aussi pour
+l'entrée stylet, sans changement.
+
+## Référence de l'API
+
+### Champs du pointeur
+
+```kotlin
+val change = event.changes.first()
+val type: PointerType = change.type     // Mouse | Touch
+val pressure: Float = change.pressure   // dans [0f, 1f]
+val pressed: Boolean = change.pressed
+val position: Offset = change.position
+```
+
+`PointerType` et `PointerInputChange` sont des types Compose standards de
+`androidx.compose.ui.input.pointer`. Le backend Tao remonte les contacts stylet et tactiles en
+`PointerType.Touch` ; il ne produit pas `PointerType.Stylus` ni `PointerType.Eraser`.
+`PointerInputChange` ne porte ni inclinaison ni rotation : ces valeurs ne sont donc pas
+disponibles via l'événement.
+
+### Prise en charge par plateforme
+
+| Plateforme                    | Source native              | Pression                                       |
+|-------------------------------|----------------------------|------------------------------------------------|
+| Windows                       | `WM_POINTER` / `WM_TOUCH`  | Remontée quand le digitizer la prend en charge. |
+| Linux (Wayland, X11/XWayland) | protocole tactile          | Remontée quand le digitizer la prend en charge. |
+| macOS                         | —                          | Pas de voie tactile ; les contacts arrivent en souris. |
+
+## Notes
+
+<Callout type="info">
+Un contact rapporte `pressure = 1f` aussi bien à pleine pression que lorsque le digitizer
+n'expose aucune pression. Traitez `1f` comme « maximale ou indisponible », pas comme strictement
+maximale.
+</Callout>
+
+## Et ensuite
+
+- [Multi-touch et gestes du trackpad](/docs/tao/multi-touch) — lire l'entrée tactile et trackpad sur Tao.
+- [Wayland](/docs/tao/wayland) — les prérequis compositeur Linux pour l'entrée tactile.
+- [Le backend Tao](/docs/tao) — comment s'articule le backend de fenêtrage sans AWT.

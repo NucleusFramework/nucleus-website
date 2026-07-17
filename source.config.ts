@@ -6,6 +6,13 @@ export const docs = defineDocs({
   dir: 'content/docs',
 });
 
+// Archived documentation snapshots (frozen at release time by
+// scripts/snapshot-docs.mjs). One export per past version — the script prints
+// the exact line to add. Also register it in lib/source.ts DOC_VERSIONS.
+export const docs_2_0 = defineDocs({
+  dir: 'content/versioned/2.0',
+});
+
 // --- Version injection ------------------------------------------------------
 // Replace the `<version>` placeholder in code snippets with the real latest
 // release of each Nucleus repo. Versions come from lib/versions.json, written

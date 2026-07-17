@@ -1,0 +1,103 @@
+---
+title: Architecture
+description: Les quatre couches qui composent une application Nucleus et la façon dont elles s'articulent.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Une application Nucleus repose sur quatre couches : votre code, le runtime Nucleus, Compose
+Multiplatform et le runtime JVM ou natif en dessous. Chaque couche a un rôle distinct, et vous pouvez
+remplacer chacune sans réécrire celle du dessus. Cette page décrit ce que fait chaque couche et
+comment une frame arrive à l'écran.
+
+## Les quatre couches
+
+### Votre application
+
+Compose UI, view-models et logique métier, écrits en Kotlin. Pour partager ce code avec Android et
+iOS, placez-le dans un source set `commonMain` Kotlin Multiplatform.
+
+```kotlin
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+// Kotlin pur — tourne sur toutes les plateformes que Compose cible.
+class CounterViewModel {
+    var count by mutableStateOf(0)
+        private set
+
+    fun increment() { count++ }
+}
+```
+
+### Le runtime Nucleus
+
+Plus de 40 modules runtime, regroupés par intention :
+
+- **Intégration OS** — fenêtres décorées (backend Tao), notifications, system tray, menus dock et
+  launcher, détection du mode sombre, hotkeys globaux, contrôles média et couleurs système.
+- **Performance** — GraalVM Native Image, le cache AOT (JDK 25+), l'energy manager et HTTP/SSL natif.
+- **Distribution** — 18 formats de packaging, signature et notarisation, auto-update, deep links,
+  auto-launch et actions CI réutilisables.
+
+Chaque module est optionnel et écrit en Kotlin. Vous ajoutez ceux dont vous avez besoin comme dépendances
+Gradle — voir [Modules](/docs/concepts/modules).
+
+Le plugin Gradle (`dev.nucleusframework`) est la moitié build-time de cette couche. Il sélectionne
+les formats de packaging, câble GraalVM, injecte les métadonnées de reachability et génère
+`nucleus-app.properties` pour que `NucleusApp` (dans `core-runtime`) puisse lire l'identité de votre
+application à l'exécution.
+
+### Compose Multiplatform
+
+Une boîte à outils UI typée et réactive, rendue sur Skia, avec hot reload, Compose Resources et un
+modèle d'événements pointeur et clavier unifié.
+
+Nucleus ne remplace pas Compose ; il s'y branche. Chaque `DecoratedWindow` est un `@Composable`, et
+chaque module Nucleus qui touche à l'UI — `isSystemInDarkMode()`, `systemAccentColor()`,
+`NativeMenuBar`, entre autres — en est un aussi.
+
+### Kotlin Multiplatform
+
+Modules partagés, coroutines, `StateFlow`, `kotlinx.serialization` et Ktor : la même stack Kotlin
+Multiplatform que vous utilisez déjà pour Android et iOS. Les modules runtime Nucleus sont JVM-only,
+mais les couches au-dessus restent multiplatform.
+
+### Le runtime JVM ou natif
+
+Une application Nucleus tourne sur l'un de ces trois runtimes :
+
+- **OpenJDK 17+** — la compatibilité la plus large, fonctionne avec le backend Tao sur les JDK
+  standard.
+- **JetBrains Runtime (JBR)** — un fork d'OpenJDK requis uniquement par le backend AWT déprécié
+  (voir [Backends](/docs/concepts/backends)).
+- **GraalVM Native Image** — une compilation anticipée en monde fermé qui produit un binaire
+  autonome, sans JRE embarquée.
+
+Changer de runtime tient en une ligne de DSL — voir [Runtimes](/docs/concepts/runtimes).
+
+<Callout type="info">
+Une application Nucleus exige JDK 17 ou une version plus récente. Les modules runtime eux-mêmes
+compilent en bytecode Java 11, donc le code qui les embarque reste compatible avec des chaînes
+d'outils plus anciennes.
+</Callout>
+
+## Comment une frame est dessinée
+
+Quand l'utilisateur clique sur un bouton :
+
+1. L'OS — ou la couche Rust [Tao](/docs/tao) — émet un événement d'entrée.
+2. Le module de backend actif ([`decorated-window-tao`](/docs/concepts/backends)) le traduit en
+   `PointerEvent` Compose.
+3. Compose recompose, demande à Skia de dessiner les couches affectées et rend la surface GPU au
+   backend.
+4. Le backend échange les buffers via le compositeur de l'OS (Wayland, DWM ou Quartz).
+
+Votre code reste en Kotlin tout le long.
+
+## Et ensuite
+
+- [Runtimes](/docs/concepts/runtimes) — choisir GraalVM Native Image plutôt que la JVM avec le cache AOT.
+- [Backends](/docs/concepts/backends) — Tao, et le backend AWT déprécié, sous votre `DecoratedWindow`.
+- [Modules](/docs/concepts/modules) — comment les modules runtime se composent.

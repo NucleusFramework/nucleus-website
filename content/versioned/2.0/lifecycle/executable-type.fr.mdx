@@ -1,0 +1,108 @@
+---
+title: Comment ai-je été lancée ?
+description: Détectez au runtime comment l'app a été empaquetée et lancée, d'un DMG ou d'un Snap à un simple ./gradlew run.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`ExecutableRuntime` indique comment le processus courant a été empaqueté et lancé : un DMG, un
+APPX, un Flatpak, un Snap, un AppImage, un installeur `.exe`, ou un simple `./gradlew run`.
+Lisez-le quand votre code doit se brancher sur le format d'empaquetage, par exemple pour choisir un
+canal de mise à jour, résoudre un chemin en écriture, ou détecter un sandbox.
+
+## Ajouter la dépendance
+
+`ExecutableRuntime` et `ExecutableType` sont fournis par `core-runtime`, que l'umbrella Nucleus
+tire déjà. Ajoutez-le explicitement seulement si vous dépendez du module seul :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+Le module `aot-runtime` réexporte les deux types sous forme de type aliases, de sorte que du
+code purement AOT peut dépendre de lui seul.
+
+## Détecter le format d'empaquetage
+
+Appelez `ExecutableRuntime.type()` et branchez sur le `ExecutableType` renvoyé :
+
+```kotlin
+import dev.nucleusframework.core.runtime.ExecutableRuntime
+import dev.nucleusframework.core.runtime.ExecutableType
+
+when (ExecutableRuntime.type()) {
+    ExecutableType.APPX    -> showMicrosoftStoreUpdate()
+    ExecutableType.SNAP    -> showSnapStoreUpdate()
+    ExecutableType.FLATPAK -> showFlathubUpdate()
+    ExecutableType.PKG     -> showMacAppStoreUpdate()
+    else                   -> checkForUpdatesDirectly()
+}
+```
+
+Pour un seul format, utilisez le `is*()` correspondant :
+
+```kotlin
+if (ExecutableRuntime.isAppX()) {
+    // Sandboxé : écrivez dans le state du package, pas dans des chemins HOME arbitraires
+}
+```
+
+## Fonctionnement
+
+Le plugin Gradle Nucleus enregistre le format d'empaquetage au moment du build. Pour les apps
+JVM empaquetées, il pose `-Dnucleus.executable.type=<kind>` dans le fichier `.cfg` du launcher ;
+pour les builds GraalVM native-image, où cette system property n'est pas disponible, il écrit un
+fichier marqueur `.nucleus-executable-type` à côté de l'exécutable.
+
+`ExecutableRuntime.type()` lit d'abord la system property, puis se rabat sur le fichier marqueur.
+La détection correspond exactement à votre pipeline d'empaquetage, et ne repose pas sur des
+heuristiques de fichiers comme vérifier si `/snap/` est dans le chemin.
+
+Quand aucune des deux sources n'est présente, comme avec `./gradlew run` ou tout exécutable non
+empaqueté, `type()` renvoie `ExecutableType.DEV`. Servez-vous-en comme signal de mode dev.
+
+<Callout type="info">
+Les fonctionnalités qui ont besoin d'une détection fiable de l'empaquetage court-circuitent en
+mode dev pour éviter les faux positifs. Par exemple,
+[`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/auto-launch) renvoie `false` dès que
+`ExecutableRuntime.isDev()` vaut `true`.
+</Callout>
+
+## Référence de l'API
+
+### ExecutableRuntime
+
+| Membre | Renvoie | Notes |
+|---|---|---|
+| `type()` | `ExecutableType` | Lit la property `nucleus.executable.type`, puis le fichier marqueur. |
+| `type(propertyName)` | `ExecutableType` | Lit le format depuis une system property personnalisée. |
+| `parseType(rawValue)` | `ExecutableType` | Parse une chaîne brute ; une entrée inconnue donne `DEV`. |
+| `markerVersion()` | `String?` | Version de l'app depuis le fichier marqueur (builds native-image). |
+| `isGraalVmNativeImage` | `Boolean` | `true` en exécution comme image native GraalVM. |
+| `isExe()`, `isMsi()`, `isNsis()`, `isNsisWeb()`, `isPortable()`, `isAppX()`, `isDmg()`, `isPkg()`, `isDeb()`, `isRpm()`, `isSnap()`, `isFlatpak()`, `isAppImage()`, `isPacman()`, `isZip()`, `isTar()`, `isSevenZ()`, `isDev()` | `Boolean` | Un test par valeur de `ExecutableType`. |
+
+### ExecutableType
+
+Un enum avec une valeur par format d'empaquetage pris en charge :
+
+- Windows : `EXE`, `MSI`, `NSIS`, `NSIS_WEB`, `PORTABLE`, `APPX`
+- macOS : `DMG`, `PKG`
+- Linux : `DEB`, `RPM`, `SNAP`, `FLATPAK`, `APPIMAGE`, `PACMAN`
+- Archives : `ZIP`, `TAR`, `SEVEN_Z`
+- Dev : `DEV`
+
+## Notes
+
+- `DEV` couvre `./gradlew run` et tout autre exécutable non empaqueté. C'est aussi le repli pour
+  un type inconnu ou manquant, donc un résultat `DEV` ne distingue pas « dans l'IDE » d'un
+  « empaquetage mal configuré ».
+- `ExecutableRuntime` ne connaît que le format d'empaquetage, pas le contenu de l'app. Pour la
+  version en cours d'exécution, utilisez [`NucleusApp.version`](/docs/lifecycle/app-metadata).
+
+## Et ensuite
+
+- [Métadonnées de l'app](/docs/lifecycle/app-metadata) — lit l'id, la version et l'éditeur de l'app au runtime.
+- [Auto-launch](/docs/lifecycle/auto-launch) — démarre l'app au login, en fonction du format d'empaquetage.
+- [Mises à jour automatiques](/docs/packaging/auto-update) — choisit une stratégie de mise à jour par canal de distribution.

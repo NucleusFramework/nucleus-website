@@ -1,0 +1,56 @@
+---
+title: Intégration OS
+description: "Modules Kotlin qui exposent les capacités natives de macOS, Windows et Linux : notifications, system tray, raccourcis globaux, contrôles média, mode sombre et couleurs système."
+---
+
+Les modules d'intégration OS exposent depuis Kotlin les capacités natives du bureau :
+notifications, system tray, raccourcis globaux, contrôles média, mode sombre et couleurs
+système. Chaque capacité est un artefact Gradle distinct : vous ne dépendez que des modules que
+vous utilisez.
+
+## Couverture
+
+| Fonctionnalité | Module | macOS | Windows | Linux |
+| --- | --- | --- | --- | --- |
+| Notifications cross-plateforme | `notification-common` | oui | oui | oui |
+| Notifications natives (par OS) | `notification-macos` / `notification-windows` / `notification-linux` | oui | oui | oui |
+| System tray et apps ancrées au tray | `composenativetray` | oui | oui | oui |
+| Raccourcis globaux | `global-hotkey` | oui | oui | oui |
+| Contrôles média | `media-control` | oui | oui | oui |
+| Mode sombre | `darkmode-detector` | oui | oui | oui |
+| Couleur d'accent et contraste élevé | `system-color` | oui | oui | oui |
+| Infos matériel et OS | `system-info` | oui | oui | oui |
+| Barre de menus macOS | `menu-macos` | oui | — | — |
+| Noms d'icônes FreeDesktop | `freedesktop-icons` | — | — | oui |
+
+Les modules publiés par Nucleus utilisent le groupe `dev.nucleusframework` et le nom d'artefact
+`nucleus.<nom-du-module>`. Le module `composenativetray` provient d'un dépôt distinct, sous le
+même groupe mais sans le préfixe `nucleus.`.
+
+## Modules cross-plateforme et modules par plateforme
+
+Certaines capacités existent sous deux formes. Les modules cross-plateforme —
+`notification-common`, `media-control` et `darkmode-detector` — exposent derrière une seule API
+l'intersection de ce que les trois systèmes prennent en charge. Les modules par plateforme, comme
+`notification-macos`, `notification-windows` et `notification-linux`, exposent directement l'API
+native de chaque système : leur surface diffère donc d'une plateforme à l'autre. Dépendez d'un
+module par plateforme quand vous avez besoin d'une fonctionnalité propre à une plateforme, comme les
+barres de progression des toasts Windows, les niveaux d'interruption macOS ou le volume MPRIS
+sous Linux.
+
+## Fonctionnement
+
+Chaque module encapsule l'API native de sa plateforme via un pont JNI que Nucleus fournit et
+charge pour vous. Les notifications s'appuient sur le framework UserNotifications
+(`UNUserNotificationCenter`) sur macOS, sur les toasts WinRT sur Windows et sur la spécification
+de notifications FreeDesktop (`org.freedesktop.Notifications`) via D-Bus sous Linux. Les
+contrôles média utilisent SMTC sur Windows et MPRIS sous Linux. Le mode sombre et la couleur
+d'accent se lisent de manière réactive via des fonctions `@Composable` : ils participent à la
+recomposition Compose quand l'état du système change.
+
+## Et ensuite
+
+- [Notifications cross-plateforme](/docs/os/notifications) — envoyez des notifications via une seule API sur les trois systèmes.
+- [System tray](/docs/os/system-tray) — icônes et menus de tray rendus par Compose.
+- [Raccourcis globaux](/docs/os/global-hotkey) — enregistrez des raccourcis qui se déclenchent même quand l'app n'a pas le focus.
+- [Mode sombre](/docs/os/dark-mode) — lisez le thème système et observez ses changements.

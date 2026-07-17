@@ -1,0 +1,195 @@
+---
+title: Taskbar progress
+description: Affichez des barres de progression et des demandes d'attention sur le dock, le bouton de la taskbar ou l'entrée du launcher Unity depuis Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module `taskbar-progress` affiche une barre de progression et un état d'attention sur l'icône
+du dock, le bouton de la taskbar ou l'entrée du launcher Unity depuis Kotlin. Il enveloppe
+`NSDockTile` sur macOS, `ITaskbarList3` sur Windows et le protocole D-Bus
+`com.canonical.Unity.LauncherEntry` sur Linux derrière une seule API qui fonctionne avec les
+backends AWT et Tao.
+
+## Ajouter la dépendance
+
+Pour les backends AWT, JBR et JNI, ajoutez l'artefact de base. Ses méthodes prennent une
+`java.awt.Window`.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.taskbar-progress:<version>")
+}
+```
+
+Pour le backend Tao, ajoutez la variante Tao. Elle dépend de `nucleus-application` et expose les
+mêmes opérations sous forme de fonctions d'extension sur `NucleusWindow`.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:<version>")
+}
+```
+
+Quand le bridge natif est absent ou que l'environnement de bureau n'est pas pris en charge,
+chaque appel renvoie `false` au lieu de lever une exception.
+
+## Afficher la progression
+
+`TaskbarProgress` est un object. Chaque méthode prend la `Window` cible et renvoie `Boolean`.
+
+```kotlin
+import dev.nucleusframework.taskbarprogress.TaskbarProgress
+import java.awt.Window
+
+TaskbarProgress.showProgress(window, 0.75)   // barre normale à 75 %
+TaskbarProgress.showIndeterminate(window)    // barre pulsante
+TaskbarProgress.showError(window, 1.0)       // barre rouge
+TaskbarProgress.hideProgress(window)         // efface
+```
+
+Pour demander l'attention de l'utilisateur, faites clignoter le bouton de la taskbar ou rebondir
+l'icône du dock :
+
+```kotlin
+TaskbarProgress.requestAttention(window, TaskbarProgress.AttentionType.INFORMATIONAL)
+TaskbarProgress.stopAttention(window)
+```
+
+## Piloter la progression depuis Compose
+
+Passez la fenêtre AWT au composable, mettez à jour la progression au fil du travail, et effacez-la
+quand le composable quitte l'arbre :
+
+```kotlin
+import androidx.compose.runtime.*
+import dev.nucleusframework.taskbarprogress.TaskbarProgress
+import java.awt.Window
+
+@Composable
+fun DownloadScreen(window: Window) {
+    var progress by remember { mutableStateOf(0.0) }
+
+    DisposableEffect(window) {
+        onDispose { TaskbarProgress.hideProgress(window) }
+    }
+
+    LaunchedEffect(window) {
+        TaskbarProgress.showIndeterminate(window)
+        downloadFlow.collect { chunk ->
+            progress = chunk.fraction
+            TaskbarProgress.showProgress(window, progress)
+        }
+        TaskbarProgress.hideProgress(window)
+    }
+}
+```
+
+## Utiliser le backend Tao
+
+Avec `taskbar-progress-tao`, les mêmes opérations deviennent des fonctions d'extension sur
+`NucleusWindow` ; vous les appelez donc sur le `nucleusWindow` disponible dans un
+`NucleusDecoratedWindowScope` :
+
+```kotlin
+import dev.nucleusframework.taskbarprogress.tao.*
+
+// À l'intérieur d'un NucleusDecoratedWindowScope
+nucleusWindow.setTaskbarProgress(0.42)
+nucleusWindow.showTaskbarIndeterminate()
+nucleusWindow.showTaskbarError()
+nucleusWindow.hideTaskbarProgress()
+nucleusWindow.requestTaskbarAttention()
+```
+
+Pour un usage déclaratif, `rememberTaoTaskbarProgress()` renvoie un `TaoTaskbarProgressScope?`
+lié à la fenêtre Tao courante, ou `null` s'il est appelé en dehors du contenu d'un `DecoratedWindow` Tao :
+
+```kotlin
+val taskbar = rememberTaoTaskbarProgress()
+taskbar?.setProgress(0.5)
+```
+
+## Fonctionnement
+
+Chaque backend projette le même `State` et la même valeur de progression sur le mécanisme natif
+de la plateforme.
+
+| OS | Mécanisme |
+|---|---|
+| Windows | L'interface COM `ITaskbarList3` (`SetProgressValue`, `SetProgressState`), plus `FlashWindowEx` pour l'attention. |
+| macOS | `NSDockTile` avec un `NSProgressIndicator` personnalisé, et `requestUserAttention` pour l'attention. |
+| Linux | Le protocole D-Bus `com.canonical.Unity.LauncherEntry`, partagé avec [`launcher-linux`](/docs/lifecycle/launcher-linux). |
+
+<Callout type="info" title="Sur macOS la progression est à l'échelle de l'application">
+macOS affiche un seul indicateur de progression par application. Le paramètre `window` est
+accepté pour la cohérence de l'API, mais l'indicateur s'applique au dock tile de l'application,
+pas à une fenêtre précise.
+</Callout>
+
+La variante Tao route chaque appel vers le même bridge natif que la variante AWT ; seul le type
+de handle de fenêtre change. Les appels sont dispatchés sur un thread worker dédié, donc la
+valeur `Boolean` renvoyée indique le dispatch au mieux, pas l'affichage effectif.
+
+Sur Linux, le module a besoin du nom de votre fichier `.desktop`. Il est détecté automatiquement à
+partir de `NucleusApp.appId`, des variables d'environnement `GIO_LAUNCHED_DESKTOP_FILE` et
+`BAMF_DESKTOP_FILE_HINT`, du nom de l'exécutable, et d'un scan des répertoires d'applications XDG.
+Surchargez la détection avec `TaskbarProgress.linuxDesktopFilename = "myapp.desktop"`.
+
+## Référence de l'API
+
+### `TaskbarProgress`
+
+Chaque méthode prend une `java.awt.Window` et renvoie `Boolean`.
+
+| Méthode | Effet |
+|---|---|
+| `isAvailable(): Boolean` | Indique si la progression taskbar est prise en charge sur cette plateforme. |
+| `setProgress(window, value: Double)` | Définit la fraction de progression ; `value` est bornée à `0.0..1.0`. |
+| `setState(window, state: State)` | Définit l'état de progression. |
+| `showProgress(window, value)` | État `NORMAL` à `value`. |
+| `showError(window, value = 1.0)` | État `ERROR` à `value`. |
+| `showIndeterminate(window)` | État `INDETERMINATE`. |
+| `showPaused(window, value = 1.0)` | État `PAUSED` à `value`. |
+| `hideProgress(window)` | État `NO_PROGRESS`. |
+| `requestAttention(window, type = AttentionType.INFORMATIONAL)` | Fait clignoter le bouton de la taskbar ou rebondir l'icône du dock. |
+| `stopAttention(window)` | Annule une demande d'attention active. |
+
+### `TaskbarProgress.State`
+
+| État | Windows | macOS | Linux |
+|---|---|---|---|
+| `NO_PROGRESS` | Pas d'overlay | Retiré | `progress-visible: false` |
+| `INDETERMINATE` | Barre pulsante | Barre pulsante | Dépend de l'environnement de bureau |
+| `NORMAL` | Barre verte | Barre bleue | Barre d'accentuation |
+| `ERROR` | Barre rouge | Barre rouge | `urgent: true` |
+| `PAUSED` | Barre jaune | Barre jaune | Mappé sur la progression |
+
+### `TaskbarProgress.AttentionType`
+
+| Valeur | Windows | macOS |
+|---|---|---|
+| `INFORMATIONAL` | Fait clignoter le bouton quatre fois | Fait rebondir l'icône du dock une fois |
+| `CRITICAL` | Clignote jusqu'à ce que l'app ait le focus | Rebondit jusqu'à ce que l'app soit activée |
+
+### Extensions Tao sur `NucleusWindow`
+
+`setTaskbarProgress`, `setTaskbarState`, `showTaskbarProgress`, `showTaskbarError`,
+`showTaskbarIndeterminate`, `showTaskbarPaused`, `hideTaskbarProgress`,
+`requestTaskbarAttention` et `stopTaskbarAttention`. Chacune renvoie `Boolean`.
+
+`rememberTaoTaskbarProgress(): TaoTaskbarProgressScope?` fournit les mêmes opérations sous forme
+de helper Compose lié à la fenêtre courante.
+
+## Notes
+
+- En AWT, récupérez la `Window` depuis votre scope `Window` ou `DecoratedWindow` et passez-la à l'API.
+- Effacez la progression dans un bloc `onDispose` pour qu'une barre fantôme ne reste pas après le départ du composable de l'arbre.
+- Pour les quicklists ou badges de compteur Linux non liés à la progression, utilisez directement [`launcher-linux`](/docs/lifecycle/launcher-linux).
+
+## Et ensuite
+
+- [Launcher Linux](/docs/lifecycle/launcher-linux) — quicklists, badges de compteur et urgence sur l'entrée du launcher Unity.
+- [Launcher Windows](/docs/lifecycle/launcher-windows) — icônes en overlay, jump lists et barres d'outils de miniature.
+- [Launcher macOS](/docs/lifecycle/launcher-macos) — menus du dock et intégration au dock tile.
+- [Energy manager](/docs/lifecycle/energy-manager) — garde l'écran allumé pendant les tâches longues.

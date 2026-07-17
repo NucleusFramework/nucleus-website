@@ -1,0 +1,209 @@
+---
+title: Migrer depuis JetBrains Compose Desktop
+description: Ajoutez Nucleus à un projet JetBrains Compose Desktop existant et déplacez sa configuration de build vers le DSL Nucleus.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez migrer vers Nucleus un projet qui utilise le plugin JetBrains Compose
+Desktop. Nucleus étend `org.jetbrains.compose` au lieu de le remplacer : votre configuration
+existante continue de fonctionner. Vous ajoutez le plugin Nucleus à côté, vous déplacez le bloc
+application vers le DSL Nucleus, puis vous activez au besoin les fonctionnalités de packaging et de
+runtime que Nucleus apporte.
+
+## Avant de commencer
+
+Il vous faut un projet existant qui applique le plugin `org.jetbrains.compose` et se construit avec
+JDK 17 ou une version ultérieure.
+
+## Ajouter le plugin
+
+Appliquez le plugin Nucleus à côté du plugin JetBrains Compose. Ne retirez pas le plugin JetBrains :
+Nucleus l'étend.
+
+```diff
+ plugins {
+     id("org.jetbrains.kotlin.jvm") version "2.3.10"
+     id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
+     id("org.jetbrains.compose") version "1.10.1"
++    id("dev.nucleusframework") version "<version>"
+ }
+```
+
+## Mettre à jour les imports
+
+Remplacez les imports du DSL JetBrains Compose par leurs équivalents Nucleus :
+
+```diff
+-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
++import dev.nucleusframework.desktop.application.dsl.TargetFormat
+```
+
+Faites de même pour `CompressionLevel`, `SigningAlgorithm` et les autres types du DSL.
+
+## Passer au DSL Nucleus
+
+Renommez le bloc `compose.desktop.application { }` en `nucleus.application { }`. Tous les réglages
+qu'il contient restent identiques :
+
+```diff
+-compose.desktop.application {
++nucleus.application {
+     mainClass = "com.example.MainKt"
+
+     nativeDistributions {
+         targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+         packageName = "MyApp"
+         packageVersion = "1.0.0"
+
+         macOS {
+             bundleID = "com.example.myapp"
+             iconFile.set(project.file("icons/app.icns"))
+         }
+
+         windows {
+             iconFile.set(project.file("icons/app.ico"))
+         }
+
+         linux {
+             iconFile.set(project.file("icons/app.png"))
+         }
+     }
+ }
+```
+
+<Callout type="warn" title="Compose Hot Reload">
+Compose Hot Reload ne fonctionne pas dans Nucleus 2.0. Le hot reload — les tâches `hotRun`
+et `hotDev` — a été ajouté dans Nucleus 2.1.
+</Callout>
+
+## Activer les fonctionnalités Nucleus
+
+Les réglages suivants sont optionnels. Ajoutez ceux dont vous avez besoin :
+
+```kotlin
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    nativeDistributions {
+        targetFormats(
+            TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb,
+            TargetFormat.AppImage, TargetFormat.Snap, TargetFormat.Flatpak, // nouveaux
+        )
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        homepage = "https://myapp.example.com" // requis pour DEB
+
+        cleanupNativeLibs = true
+        enableAotCache = true
+        splashImage = "splash.png"
+        compressionLevel = CompressionLevel.Maximum
+        artifactName = "\${name}-\${version}-\${os}-\${arch}.\${ext}"
+
+        // Deep links
+        protocol("MyApp", "myapp")
+
+        // Associations de fichiers
+        fileAssociation(
+            mimeType = "application/x-myapp",
+            extension = "myapp",
+            description = "MyApp Document",
+        )
+
+        // Publication
+        publish {
+            github { enabled = true; owner = "myorg"; repo = "myapp" }
+        }
+
+        // Personnalisation NSIS
+        windows {
+            nsis {
+                oneClick = false
+                allowToChangeInstallationDirectory = true
+                createDesktopShortcut = true
+            }
+        }
+    }
+}
+```
+
+## Ajouter les bibliothèques runtime
+
+Les bibliothèques runtime sont elles aussi optionnelles. Ajoutez celles qui correspondent aux
+fonctionnalités que vous avez activées :
+
+```kotlin
+dependencies {
+    implementation(compose.desktop.currentOs)
+
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+    implementation("dev.nucleusframework:nucleus.aot-runtime:<version>")           // si enableAotCache
+    implementation("dev.nucleusframework:nucleus.updater-runtime:<version>")       // si publication
+    implementation("dev.nucleusframework:nucleus.taskbar-progress:<version>")
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")   // pour nucleusApplication { }
+}
+```
+
+Pour utiliser le point d'entrée unifié `nucleusApplication { }` avec la gestion single-instance, les
+deep links et le câblage AOT, consultez le [guide Nucleus 1.x vers 2.0](/docs/migrate/from-1.x). Le
+même passage `application { } → nucleusApplication { }` s'applique que vous veniez de 1.x ou de
+Compose Multiplatform standard.
+
+## Définir homepage pour les paquets DEB
+
+Nucleus produit ses paquets avec electron-builder plutôt qu'avec jpackage, et electron-builder
+exige `homepage` pour DEB. Sans lui, le build échoue :
+
+```
+Please specify project homepage, see https://electron.build/configuration
+```
+
+Définissez-le sur `nativeDistributions` :
+
+```kotlin
+nativeDistributions {
+    homepage = "https://myapp.example.com"
+}
+```
+
+Cela s'applique aussi au packaging DEB de GraalVM Native Image (`packageGraalvmDeb`).
+
+## Ce qui change
+
+| Fonctionnalité | Avant (compose) | Après (nucleus) |
+|----------------|-----------------|-----------------|
+| Point d'entrée DSL | `compose.desktop.application` | `nucleus.application` |
+| Imports DSL | `org.jetbrains.compose.desktop.application.dsl.*` | `dev.nucleusframework.desktop.application.dsl.*` |
+| Formats cibles | DMG, PKG, MSI, EXE, DEB, RPM | + NSIS, AppX, Portable, AppImage, Snap, Flatpak, archives |
+| Nettoyage des libs natives | Manuel | `cleanupNativeLibs = true` |
+| Cache AOT | Indisponible | `enableAotCache = true` |
+| Splash | Manuel | `splashImage = "splash.png"` |
+| Deep links | Manuel, par OS | `protocol("name", "scheme")` |
+| Associations de fichiers | Limitées | `fileAssociation()` multiplateforme |
+| Config NSIS | Indisponible | DSL `nsis { }` complet |
+| Config AppX | Indisponible | DSL `appx { }` complet |
+| Config Snap | Indisponible | DSL `snap { }` complet |
+| Config Flatpak | Indisponible | DSL `flatpak { }` complet |
+| Pipeline store | Indisponible | Pipeline sandboxé pour PKG, AppX, Flatpak |
+| Auto-update | Indisponible | Intégré avec métadonnées YAML |
+| Signature de code | macOS uniquement | + Windows PFX / Azure Artifact Signing |
+| Apparence DMG | Non personnalisable | DSL `dmg { }` complet ([détails](/docs/packaging/macos#dmg-appearance)) |
+| Nommage d'artefact | Fixe | Template avec `artifactName` |
+
+## Ce qui ne change pas
+
+- `mainClass`, `jvmArgs`.
+- Le bloc `nativeDistributions` (metadata, icônes, ressources).
+- `buildTypes` / ProGuard.
+- `modules()` / `includeAllModules`.
+- Toutes les tâches Gradle existantes (`run`, `packageDmg`, `packageDeb`, etc.).
+- La dépendance `compose.desktop.currentOs`.
+- La configuration des source sets.
+- [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) — non pris en charge en 2.0 (ajouté en 2.1).
+
+## Et ensuite
+
+- [Windowing](/docs/window) et [Tao](/docs/tao) — décorations natives et backend Tao.
+- [Auto-update](/docs/packaging/auto-update) — livrer des mises à jour avec métadonnées YAML.
+- [GraalVM](/docs/performance/graalvm) — packaging GraalVM Native Image.
+- [Depuis 1.x](/docs/migrate/from-1.x) — migrer un codebase 1.x complet avec le même swap de plugin.

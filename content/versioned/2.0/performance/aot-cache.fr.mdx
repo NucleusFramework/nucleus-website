@@ -1,0 +1,152 @@
+---
+title: AOT cache
+description: Générez un AOT cache Project Leyden au build et embarquez-le dans votre installateur pour éviter le warmup de la JVM au lancement.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus peut générer un AOT cache [Project Leyden](https://openjdk.org/projects/leyden/) pendant qu'il build votre application, puis embarquer ce cache dans chaque installateur. Au lancement, la JVM rejoue le chargement de classes et les profils JIT pré-enregistrés au lieu de repartir à froid, donc l'application atteint plus vite une UI réactive. HotSpot C2 reste le JIT — le cache supprime le warmup, pas le compilateur.
+
+Cette page couvre l'activation du cache, l'écriture d'un run de training, et les contraintes de plateforme qui s'appliquent.
+
+## Ajouter la dépendance
+
+`nucleus.aot-runtime` est tiré transitivement par [`nucleus.nucleus-application`](/docs/start/project-setup). Ajoutez-le explicitement uniquement si vous n'utilisez pas l'artefact umbrella :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.aot-runtime:<version>")
+}
+```
+
+## Activer le cache
+
+Activez un seul flag dans le bloc `nativeDistributions` :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+<Callout type="error" title="JDK 25+ requis">
+La génération de l'AOT cache exige JDK 25 ou supérieur. Les toolchains plus anciennes échouent au build.
+</Callout>
+
+C'est tout le paramétrage côté build. Quand le flag est actif, le plugin :
+
+1. Lance votre application en mode training après `createDistributable`.
+2. Enregistre le chargement de classes et la compilation JIT dans `app.aot` avec `-XX:AOTCacheOutput`.
+3. Injecte `-XX:AOTCache=$APPDIR/app.aot` dans la configuration du launcher.
+4. Embarque le cache dans chaque installateur (`.dmg`, `.msi`, `.deb`, etc.).
+
+## Écrire un run de training
+
+Pendant le training, la JVM observe un vrai run de votre application et écrit le cache quand le processus se termine. Votre code doit sortir proprement, sinon le build attend jusqu'à ce que le timeout de sécurité de 300 s force l'arrêt. Avec `nucleusApplication { … }`, vous armez le timer d'auto-sortie en une ligne :
+
+```kotlin
+import dev.nucleusframework.application.aotTraining
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.DecoratedWindow
+import kotlin.time.Duration.Companion.seconds
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    // No-op hors training. Appelle exitApplication() après 45 secondes.
+    aotTraining(duration = 45.seconds)
+
+    if (isAotTraining) {
+        // Plus le run de training touche d'écrans réels, plus de méthodes
+        // sont profilées. Parcourez le graphe de navigation et préchargez les assets.
+        preloadNavigationScreens()
+        preloadFontsAndImages()
+    }
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        App()
+    }
+}
+```
+
+Si vous appelez directement `application { … }` de Compose, lisez le mode et pilotez le timer vous-même :
+
+```kotlin
+import androidx.compose.ui.window.application
+import dev.nucleusframework.aot.runtime.AotRuntime
+import dev.nucleusframework.aot.runtime.AotRuntimeMode
+
+fun main() {
+    if (AotRuntime.mode() == AotRuntimeMode.TRAINING) {
+        Thread({ Thread.sleep(45_000); System.exit(0) }, "aot-timer").start()
+        preloadNavigationScreens()
+        preloadFontsAndImages()
+    }
+    application { /* ... */ }
+}
+```
+
+## Fonctionnement
+
+Le plugin met la propriété système `nucleus.aot.mode` à `training` pendant la génération du cache et à `runtime` quand le cache est chargé. `AotRuntime.mode()` lit cette propriété et renvoie `AotRuntimeMode.TRAINING`, `AotRuntimeMode.RUNTIME`, ou `AotRuntimeMode.OFF` quand la propriété n'est pas définie.
+
+Un run de training doit :
+
+- Sortir avec le code 0. Le DSL `aotTraining` s'en charge en appelant `exitApplication()` dès que le timer se déclenche.
+- Se terminer avant le timeout de sécurité de 300 s.
+- Être représentatif d'une vraie session. Plus il touche d'écrans réels, plus de méthodes sont profilées, et plus le cold start post-cache est rapide.
+
+Sous Linux headless, le plugin démarre Xvfb automatiquement quand `DISPLAY` n'est pas défini.
+
+## Verrouiller la plateforme et le JDK
+
+L'AOT cache est spécifique à la plateforme et au JDK. Un cache produit sur macOS ARM64 avec JBR 25 ne fonctionne pas sous Linux x64 ni avec un autre build de JDK.
+
+- Build sur chaque plateforme cible. Une matrice CI est la mise en place la plus propre.
+- Le plugin entraîne avec le JDK embarqué par `createDistributable`, donc le JDK runtime correspond au JDK de training octet par octet.
+- `setup-nucleus` épingle la même version JBR sur tous les runners. Voir [CI/CD](/docs/packaging/ci-cd).
+
+## Référence de l'API
+
+### DSL Gradle
+
+| Propriété | Défaut | Notes |
+|-----------|--------|-------|
+| `nativeDistributions.enableAotCache` | `false` | Un seul switch. Déclenche le training et le bundling. |
+
+### AotRuntime
+
+`dev.nucleusframework.aot.runtime.AotRuntime` résout le mode depuis la propriété système `nucleus.aot.mode`.
+
+| API | Renvoie |
+|-----|---------|
+| `AotRuntime.mode()` | `AotRuntimeMode.OFF`, `TRAINING` ou `RUNTIME` |
+| `AotRuntime.isTraining()` | `true` pendant une passe de training |
+| `AotRuntime.isRuntime()` | `true` quand le cache est chargé |
+
+### Scope nucleusApplication
+
+Disponible à l'intérieur d'un bloc `nucleusApplication { … }`.
+
+| Membre | Équivalent |
+|--------|------------|
+| `aotMode` | `AotRuntime.mode()` |
+| `isAotTraining` | `aotMode == AotRuntimeMode.TRAINING` |
+| `isAotRuntime` | `aotMode == AotRuntimeMode.RUNTIME` |
+| `aotTraining(duration, onTimeout)` | Timer d'auto-sortie pour les runs de training (`duration` par défaut 15 s, `onTimeout` appelle `exitApplication()`) |
+
+### Mesurer le cold start
+
+Mesurez depuis le spawn du processus au niveau de l'OS (`time ./MyApp` sous Linux et macOS, `Measure-Command` sous Windows) jusqu'au premier frame visible. Comparez un build avec `enableAotCache = false` à un build où il est actif, en utilisant le même JDK et un run de training représentatif.
+
+## Notes
+
+- Le cache est par binaire — chaque release en embarque un neuf. Ne partagez pas les caches entre versions.
+- Si vous voulez une empreinte résidente plus petite ou un cold start plus court, utilisez plutôt la voie [GraalVM native image](/docs/performance/graalvm). L'AOT cache conserve le débit de HotSpot ; GraalVM échange un peu de débit contre le temps de démarrage et la taille.
+
+## Et ensuite
+
+- [Configuration du projet](/docs/start/project-setup) — l'artefact umbrella et la structure des modules.
+- [GraalVM native image](/docs/performance/graalvm) — la voie alternative pour le cold start le plus court et le plus rapide.
+- [CI/CD](/docs/packaging/ci-cd) — build un cache par plateforme dans une matrice CI.

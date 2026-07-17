@@ -1,0 +1,207 @@
+---
+title: Construire pour macOS
+description: Empaquetez une app Nucleus pour macOS en DMG ou en PKG pour le Mac App Store, puis signez et notarisez le build.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez configurer le bloc `macOS { }` pour empaqueter une app Nucleus de deux
+façons : un `Dmg` pour la distribution directe et un `Pkg` pour le Mac App Store. Vous allez signer
+et notariser le build, contrôler la mise en page du DMG, activer Liquid Glass sur le SDK 26 et
+construire un binaire universel.
+
+## Avant de commencer
+
+L'empaquetage macOS se fait sur un hôte macOS et repose sur les outils en ligne de commande d'Apple :
+
+- **Un hôte de build macOS** avec les Xcode Command Line Tools. `vtool`, `notarytool`,
+  `productbuild` et (pour les icônes en couches) `actool` viennent de cette chaîne d'outils.
+- **Un compte Apple Developer** avec les certificats dont vous avez besoin : **Developer ID Application**
+  pour un DMG, et les certificats **3rd Party Mac Developer** plus un provisioning profile pour un PKG.
+- **Un projet Nucleus** avec le plugin Gradle appliqué. Voir le [Démarrage rapide](/docs/start/quickstart).
+
+## Configurer le bloc macOS
+
+Dans `build.gradle.kts`, déclarez les formats cibles et configurez `macOS { }` à l'intérieur de
+`nativeDistributions` :
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Zip)
+
+            macOS {
+                bundleID = "com.example.myapp"
+                dockName = "MyApp"
+                appCategory = "public.app-category.utilities"
+                minimumSystemVersion = "12.0"
+
+                iconFile.set(project.file("icons/app.icns"))
+                layeredIconDir.set(project.file("icons/MyApp.icon")) // macOS 26+
+            }
+        }
+    }
+}
+```
+
+`bundleID` est l'identifiant de l'app dans l'écosystème Apple et suit la notation reverse-DNS.
+`layeredIconDir` pointe vers un bundle `.icon` et ne prend effet que sur les hôtes macOS
+disposant d'`actool` fourni par les Xcode Command Line Tools 26 ou une version ultérieure ;
+sans cet outil, le build émet un avertissement et retombe sur `iconFile`.
+
+## Signer et notariser le build
+
+Ajoutez `signing { }` et `notarization { }` au bloc `macOS` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    signing {
+        sign.set(true)
+        identity.set("Developer ID Application: My Company (TEAMID)")
+    }
+    notarization {
+        appleID.set("dev@example.com")
+        password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+        teamID.set("TEAMID")
+    }
+}
+```
+
+`notarization { }` propose trois modes d'authentification mutuellement exclusifs : Apple ID avec
+un `password` app-specific et un `teamID` ; un `keychainProfile` `notarytool` (avec un
+`keychainPath` optionnel) ; ou une clé API App Store Connect (`apiKey`, `apiKeyId`, `apiIssuer`).
+N'en configurez qu'un seul — combiner plusieurs modes est rejeté à la validation.
+
+<Callout type="info">
+Les valeurs de signature et de notarisation se lisent aussi depuis des propriétés Gradle, ce qui
+vous permet de garder les secrets hors du script de build. Voir [Signature de code](/docs/packaging/code-signing).
+</Callout>
+
+## Empaqueter un DMG
+
+```shell
+./gradlew packageDmg
+```
+
+`Dmg` utilise le flux `createDistributable` standard : un bundle non sandboxé signé avec le
+certificat **Developer ID Application**, notarisé via `xcrun notarytool` et staplé sur place.
+Quand un bloc `notarization { }` est présent, `packageDmg` notarise automatiquement.
+
+Contrôlez la fenêtre du DMG avec le sous-bloc `dmg { }` — taille de la fenêtre, taille des icônes,
+image de fond, et positions du bundle de l'app et du lien de glisser vers `/Applications` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    dmg {
+        title = "\${productName} \${version}"
+        iconSize = 128
+        window { x = 400; y = 100; width = 540; height = 380 }
+        background.set(project.file("packaging/dmg-bg.png"))
+
+        content(x = 130, y = 220, type = DmgContentType.File, name = "MyApp.app")
+        content(x = 410, y = 220, type = DmgContentType.Link, path = "/Applications")
+    }
+}
+```
+
+## Empaqueter pour le Mac App Store
+
+```shell
+./gradlew packagePkg
+```
+
+`Pkg` est toujours construit comme une cible Mac App Store — il n'y a aucun flag `appStore` à
+positionner. Nucleus construit un `.app` sandboxé séparé, le signe avec le certificat
+**3rd Party Mac Developer Application**, intègre le provisioning profile, puis produit le `.pkg`
+final via `productbuild` avec le certificat **3rd Party Mac Developer Installer**.
+
+Pointez le bloc vers vos entitlements et vos provisioning profiles :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    entitlementsFile.set(project.file("packaging/sandbox-entitlements.plist"))
+    runtimeEntitlementsFile.set(project.file("packaging/sandbox-runtime-entitlements.plist"))
+    provisioningProfile.set(project.file("packaging/MyApp.provisionprofile"))
+    runtimeProvisioningProfile.set(project.file("packaging/MyApp_Runtime.provisionprofile"))
+}
+```
+
+En coulisses, PKG déclenche le pipeline sandboxé : les bibliothèques natives sont extraites dans
+`Contents/Frameworks/`, les arguments JVM y redirigent le chargement JNI, chaque `.dylib` est
+signé individuellement et les entitlements App Sandbox sont appliquées. Voir [Sandboxing](/docs/packaging/sandboxing).
+
+## Activer Liquid Glass sur le SDK 26
+
+macOS 26 n'active Liquid Glass que quand le `LC_BUILD_VERSION` du launcher indique le SDK 26.0.
+Le plugin patche cet en-tête Mach-O avec `vtool` avant la signature, donc n'importe quel JDK
+fonctionne — vous n'avez pas besoin d'un JDK compilé avec Xcode 26. La tâche `nucleusPatchMacJvm`
+met en cache un JVM patché dans `build/nucleus/patched-jvm/`, ce qui préserve le support complet
+du débogueur pour la tâche `run`.
+
+Le patching est actif par défaut. Changez le SDK cible ou désactivez-le avec `macOsSdkVersion` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    macOsSdkVersion = "26.0" // défaut ; passez null pour désactiver le patching
+}
+```
+
+<Callout type="info">
+Les builds GraalVM native-image récupèrent la version du SDK depuis le linker système plutôt que
+depuis `vtool`. Sélectionnez Xcode 26 sur l'hôte de build à la place.
+</Callout>
+
+## Construire un binaire universel
+
+Un binaire universel se construit en deux passes : compiler `arm64` et `x86_64` séparément, les
+fusionner avec `lipo`, puis re-signer de l'intérieur vers l'extérieur (dylibs, puis exécutables,
+puis runtime, puis bundle de l'app). L'action composite `build-macos-universal` fait cela en CI.
+Voir [CI/CD](/docs/packaging/ci-cd).
+
+## Personnaliser Info.plist et les launch agents
+
+Ajoutez du XML brut à `Info.plist` avec `infoPlist { }`, et déclarez des launch agents chargés à la
+connexion avec `launchAgents { }` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    infoPlist {
+        extraKeysRawXml = """
+            <key>NSMicrophoneUsageDescription</key>
+            <string>Requis pour les notes vocales.</string>
+        """.trimIndent()
+    }
+    launchAgents {
+        agent("com.example.myapp.indexer") {
+            bundleProgram("Contents/MacOS/indexer")
+            arguments("--background")
+            startInterval(3600)
+        }
+    }
+}
+```
+
+Les launch agents sont intégrés dans `Contents/Library/LaunchAgents/` et enregistrés à l'exécution
+via `SMAppService`. `bundleProgram`, `arguments`, `startInterval`, `runAtLoad`, `keepAlive`,
+`processType` et `calendar` sont des fonctions du bloc de l'agent, pas des propriétés assignables.
+
+## Référence
+
+Le bloc `macOS { }` expose : `iconFile`, `layeredIconDir`, `bundleID`, `dockName`,
+`setDockNameSameAsPackageName`, `appCategory`, `minimumSystemVersion`, `installationPath`,
+`packageName`, `packageVersion`, `packageBuildVersion`, `dmgPackageVersion`, `pkgPackageVersion`,
+`entitlementsFile`, `runtimeEntitlementsFile`, `provisioningProfile`, `runtimeProvisioningProfile`
+et `macOsSdkVersion`, plus les sous-blocs `signing { }`, `notarization { }`, `dmg { }`,
+`launchAgents { }` et `infoPlist { }`. Voir la liste complète propriété par propriété dans la
+[référence Gradle DSL](/docs/reference/gradle-dsl).
+
+`installationPath` n'a pas de valeur par défaut. Il ne s'applique qu'au PKG et à la cible du lien
+de glisser vers `/Applications` du DMG.
+
+## Et ensuite
+
+- [Signature de code](/docs/packaging/code-signing) — les identifiants de signature et de notarisation en détail.
+- [Sandboxing](/docs/packaging/sandboxing) — le pipeline Mac App Store derrière les builds PKG.
+- [CI/CD](/docs/packaging/ci-cd) — binaires universels et signature sur GitHub Actions.
+- [Référence Gradle DSL](/docs/reference/gradle-dsl) — toutes les propriétés de `macOS { }`.

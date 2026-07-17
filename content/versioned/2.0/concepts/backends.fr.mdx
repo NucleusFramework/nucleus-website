@@ -1,0 +1,72 @@
+---
+title: Backends
+description: Nucleus dessine chaque fenêtre via le backend Tao derrière l'API DecoratedWindow. Le backend AWT historique est déprécié.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Chaque fenêtre Nucleus est un composable Compose. Le backend est la couche qui la porte : il fait
+tourner la boucle d'événements de l'OS, possède le handle natif de la fenêtre et affiche à l'écran
+la surface GPU de Skia. Nucleus 2.0 utilise Tao comme backend derrière la même API
+`DecoratedWindow`.
+
+<Callout type="warn" title="Backend AWT déprécié">
+Le backend AWT historique (`decorated-window-jbr` / `decorated-window-jni`) est déprécié et sera
+retiré dans une prochaine version de Nucleus. Les projets nouveaux comme existants devraient
+migrer vers Tao — voyez [Migrer de JBR à Tao](/docs/tao/migration-from-jbr).
+</Callout>
+
+## Le backend Tao
+
+Tao est la couche de fenêtrage Rust qui sous-tend aussi Tauri 2. Nucleus 2.0 en fait le défaut
+pour les nouveaux projets. Tao remplace le toolkit entièrement, si bien que la JVM ne charge
+jamais AWT.
+
+Le backend Tao ajoute :
+
+- **Wayland natif.** Pas de fallback XWayland, avec le scaling fractionnel et les gestures.
+- **Multi-touch et gestures.** Pinch, swipe et rotate arrivent comme des événements de pointeur
+  Compose portant la pression, l'inclinaison et la source.
+- **Stylet.** Entrée sensible à la pression depuis des périphériques comme les tablettes Wacom, le
+  Surface Pen et l'Apple Pencil.
+- **HiDPI par moniteur.** Les configurations mixed-DPI sont gérées quand vous déplacez une fenêtre
+  d'un écran à l'autre.
+- **`NativeView`.** Intègre des widgets SwiftUI, WebView2 ou GTK dans une fenêtre Compose.
+
+Voyez [Tao](/docs/tao) pour la surface complète.
+
+## Choisir un backend
+
+```kotlin
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        // votre UI Compose
+    }
+}
+```
+
+`NucleusBackend` a trois valeurs :
+
+- `Auto` utilise Tao quand `decorated-window-tao` est sur le classpath, sinon le backend AWT
+  déprécié. C'est le défaut.
+- `Tao` force le backend Tao.
+- `Awt` force le backend AWT déprécié, avec JBR ou JNI selon ce qui est résolu.
+
+## Atteindre la fenêtre native
+
+Le composable `DecoratedWindow` est identique entre les backends. Quand vous avez besoin d'un appel
+propre à un backend, atteignez le handle sous-jacent via les échappatoires de la fenêtre :
+
+- `nucleusWindow.unsafe.taoWindow` renvoie la `TaoWindow` possédée par Tao.
+- `nucleusWindow.unsafe.awtWindow` renvoie le `ComposeWindow` AWT (backend déprécié uniquement).
+
+Chacun renvoie `null` sur l'autre backend.
+
+## Et ensuite
+
+- [Tao](/docs/tao) — toute la surface du backend : gestures, stylet, Wayland et `NativeView`.
+- [Decorated Window](/docs/window) — la fenêtre que vous composez par-dessus un backend.
+- [Migrer de JBR à Tao](/docs/tao/migration-from-jbr) — une checklist pour les applications existantes.

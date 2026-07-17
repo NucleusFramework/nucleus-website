@@ -1,0 +1,234 @@
+---
+title: Auto-update
+description: Check for, download, verify, and install application updates from Kotlin, without a third-party service.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `updater-runtime` module checks for, downloads, verifies, and installs application updates
+from Kotlin. It has a build-time half — `latest-*.yml` metadata generated next to your installers
+— and a runtime half, the `NucleusUpdater` class. The metadata format is compatible with
+electron-builder's update format.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.updater-runtime:<version>")
+    // Optional, for corporate networks with a private root CA:
+    implementation("dev.nucleusframework:nucleus.native-http:<version>")
+}
+```
+
+## Check and install an update
+
+Create a `NucleusUpdater`, check the configured provider, then download and install:
+
+```kotlin
+import dev.nucleusframework.updater.NucleusUpdater
+import dev.nucleusframework.updater.UpdateResult
+import dev.nucleusframework.updater.provider.GitHubProvider
+import java.io.File
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+}
+
+when (val result = updater.checkForUpdates()) {
+    is UpdateResult.Available -> {
+        var installer: File? = null
+        updater.downloadUpdate(result.info).collect { progress ->
+            println("${progress.percent.toInt()}%")
+            progress.file?.let { installer = it }
+        }
+        // installAndRestart launches the installer, exits, and relaunches
+        installer?.let(updater::installAndRestart)
+    }
+    UpdateResult.NotAvailable -> println("Up to date")
+    is UpdateResult.Error -> println("Error: ${result.exception.message}")
+}
+```
+
+`checkForUpdates()` is a `suspend` function; call it from a coroutine.
+
+## Supported formats
+
+The runtime updates in-place formats and leaves store-managed formats to their store.
+
+| Platform | Updatable | Managed by the store |
+|----------|-----------|----------------------|
+| macOS | DMG, ZIP | PKG |
+| Windows | NSIS, NSIS Web, MSI | AppX/MSIX |
+| Linux | DEB, RPM, AppImage | Snap, Flatpak |
+
+<Callout type="warn" title="macOS needs a ZIP alongside the DMG">
+The updater replaces the `.app` silently from the ZIP; the DMG is only for the first install. Add
+`TargetFormat.Zip` next to `TargetFormat.Dmg` so both ship in the same release — `latest-mac.yml`
+references both.
+</Callout>
+
+## How it works
+
+### Metadata
+
+The plugin writes one YAML file per platform, listing every installer with its SHA-512 and size.
+Multi-arch or multi-platform releases need a single YAML per platform that lists every
+architecture; CI merges them in the release job. A `latest-mac.yml` looks like this:
+
+```yaml
+version: 1.2.3
+files:
+  - url: MyApp-1.2.3-macos-arm64.dmg
+    sha512: VkJl1gDqcBHYbYhMb0HRI...
+    size: 102400000
+  - url: MyApp-1.2.3-macos-arm64.zip
+    sha512: qJ8a5gFDCwv0R2rW6lM3k...
+    size: 98000000
+releaseDate: '2026-03-01T12:00:00.000Z'
+```
+
+### Channels
+
+The version tag drives the channel: `v1.0.0` maps to `latest`, `v1.0.0-beta.1` to `beta`, and
+`v1.0.0-alpha.1` to `alpha`. Each channel has its own `*-mac.yml`, `*.yml`, and `*-linux.yml`.
+Users on `beta` see `latest` and `beta`; users on `alpha` see all three.
+
+### Hosting
+
+Hosting is configured in `nativeDistributions.publish { }` (see
+[publishing](/docs/packaging/publishing)):
+
+- **GitHub Releases** — the [release workflow](/docs/packaging/ci-cd#release) handles it end to end.
+- **S3** — set credentials via environment variables; the plugin uploads alongside the YAML.
+- **Generic HTTP** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
+
+The `publish { }` block only generates electron-builder config — it does not upload. CI does the upload.
+
+### Post-update detection
+
+After `installAndRestart` or `installAndQuit`, the updater writes a marker file in the platform's
+app-data directory (resolved from `NucleusApp.appId`). On the next launch, `wasJustUpdated()`
+returns `true` and `consumeUpdateEvent()` yields an `UpdateEvent(previousVersion, newVersion,
+updateLevel)` you can use for a "What's new" banner.
+
+## Configure enterprise networks
+
+If your users sit behind a corporate proxy with a private root CA, the default
+`java.net.http.HttpClient` fails the TLS handshake. Inject a `NativeHttpClient` that reads the OS
+trust store:
+
+```kotlin
+import dev.nucleusframework.nativehttp.NativeHttpClient
+
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    httpClient = NativeHttpClient.create()
+}
+```
+
+See [`native-ssl`](/docs/performance/native-ssl) for the trust-manager details.
+
+## Set up passwordless updates on Linux
+
+By default, applying a DEB or RPM update runs through `pkexec`, which shows a PolicyKit password
+dialog. You can let the app install verified updates without a password, gated on a signature check.
+
+This builds on [Linux code signing](/docs/packaging/code-signing#linux--gpg-signing-for-debrpm).
+Enable it on the signing block:
+
+```kotlin title="build.gradle.kts"
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")
+        silentUpdate.set(true)   // requires enabled = true
+    }
+}
+```
+
+The package's root post-install script then sets up passwordless updates as follows:
+
+1. A root-owned update helper at `/opt/<App>/nucleus-update-helper`, and a polkit policy scoped to
+   that exact binary (`allow_active=yes`).
+2. Your signing public key, bundled at `/opt/<App>/resources/nucleus-update.pub.asc`.
+3. At update time the runtime downloads the package and its detached `<file>.asc` signature, then
+   runs `pkexec <helper> <file>`.
+4. The helper verifies the signature against the bundled key, checks that the package name matches
+   the installed app, and only then runs `dpkg -i` or `rpm -U`.
+
+<Callout type="warn">
+The polkit `allow_active=yes` rule is scoped to the single helper binary, and the helper refuses any
+package whose signature does not verify against the bundled key, so a passwordless install cannot
+install an arbitrary package — an attacker would need your private signing key. If the helper or the
+`<file>.asc` is missing, the runtime falls back to the password-prompting `pkexec` install.
+Passwordless install requires an active local session.
+</Callout>
+
+## API reference
+
+### Runtime methods
+
+`NucleusUpdater` exposes:
+
+- `suspend fun checkForUpdates(): UpdateResult` — returns `Available(info, level)`, `NotAvailable`,
+  or `Error(exception)`.
+- `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>` — emits progress; the final
+  emission has `file != null`.
+- `fun installAndRestart(file: File)` — launches the installer, exits the process, relaunches after
+  install.
+- `fun installAndQuit(file: File)` — silent install, no relaunch. The update applies on the next
+  manual launch.
+- `fun isUpdateSupported(): Boolean` — whether the current executable type can auto-update.
+- `fun wasJustUpdated(): Boolean` and `fun consumeUpdateEvent(): UpdateEvent?` — post-update detection.
+
+### Result and level types
+
+- `UpdateResult.Available(info: UpdateInfo, level: UpdateLevel)`
+- `UpdateResult.NotAvailable`
+- `UpdateResult.Error(exception: UpdateException)`
+
+`UpdateLevel` reports how large the jump is: `MAJOR`, `MINOR`, `PATCH`, or `PRE_RELEASE`. Branch your
+UI on it — force a dialog for major bumps, install patches silently.
+
+### Builder fields
+
+`NucleusUpdater { }` configures a `UpdaterConfig`: `currentVersion`, `channel`, `provider`,
+`httpClient`, `allowDowngrade`, `allowPrerelease`, and `executableType`.
+
+### Providers
+
+- `GitHubProvider(owner, repo, token? = null)`
+- `GenericProvider(baseUrl)`
+
+Custom auth headers come from the provider's `authHeaders()`, not from the config.
+
+### Installer commands
+
+| OS | Format | Command |
+|----|--------|---------|
+| Linux | DEB | `pkexec dpkg -i <file>` |
+| Linux | RPM | `pkexec rpm -U <file>` |
+| Linux | AppImage | replace in place |
+| macOS | DMG/ZIP | `open <file>` / extract |
+| Windows | NSIS/EXE | `<file> /S` |
+| Windows | MSI | `msiexec /i <file> /passive` |
+
+### Exceptions
+
+`UpdateException` is the base type. Subtypes: `NetworkException`, `ChecksumException`,
+`NoMatchingFileException`, `ParseException`.
+
+## Notes
+
+- SHA-512 checksums are verified after download; a failed check deletes the file and surfaces an error.
+- Passwordless Linux updates (`signing.silentUpdate`) add a second, stronger check: a GPG signature
+  verified against the key bundled in the app.
+- GitHub tokens are sent in the `Authorization` header, never in URL parameters.
+- For Mac App Store, Microsoft Store, Snapcraft, and Flathub, the store handles updates; skip
+  `updater-runtime` entirely.
+
+## What's next
+
+- [Publishing](/docs/packaging/publishing) — configure providers in `nativeDistributions.publish { }`.
+- [CI/CD](/docs/packaging/ci-cd#release) — the release workflow that generates and uploads metadata.
+- [Code signing](/docs/packaging/code-signing) — GPG signing for DEB/RPM and passwordless updates.

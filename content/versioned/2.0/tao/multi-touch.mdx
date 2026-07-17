@@ -1,0 +1,167 @@
+---
+title: Multi-touch & gestures
+description: Read trackpad and touch gestures on the Tao backend through Compose pointer events, or the raw gesture stream.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Tao backend forwards the operating system's gesture stream into Compose pointer
+events, so pinches, rotations, and trackpad scrolls reach your UI through the standard
+Compose input APIs. When you need the unprocessed gesture data, `TaoWindow` also exposes
+the raw trackpad stream.
+
+## Add the dependency
+
+Gesture support ships with the Tao backend. No extra artifact is required.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Read gestures from Compose
+
+Most gesture handling goes through Compose. Trackpad and touch input arrive as
+`PointerInputChange` values, so `detectTransformGestures` and the other pointer-input
+modifiers work without any Tao-specific code:
+
+```kotlin
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+
+@Composable
+fun ZoomCanvas() {
+    var scale by remember { mutableStateOf(1f) }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoom, _ ->
+                    scale *= zoom
+                }
+            },
+    )
+}
+```
+
+Each `PointerInputChange` also carries the input source and pressure, which lets you branch
+on how the event was produced:
+
+```kotlin
+import androidx.compose.ui.input.pointer.PointerType
+
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            val source = change.type          // PointerType.Mouse | Touch | Stylus | Eraser
+            val pressure = change.pressure    // 0f when the device reports no pressure
+            // React to source / pressure.
+        }
+    }
+}
+```
+
+## Read the raw gesture stream
+
+To distinguish gesture kinds and phases directly — for example, telling a pinch apart from
+a two-finger scroll — register a `TrackpadGestureListener` on the current `TaoWindow`:
+
+```kotlin
+import dev.nucleusframework.window.tao.LocalTaoWindow
+import dev.nucleusframework.window.tao.TaoTrackpadGesture
+import dev.nucleusframework.window.tao.TaoTrackpadPhase
+
+val window = LocalTaoWindow.current
+window?.onTrackpadGesture { kind, phase, xFixed, yFixed, valueFixed ->
+    if (kind == TaoTrackpadGesture.MAGNIFY && phase == TaoTrackpadPhase.CHANGED) {
+        val ratio = valueFixed / 10_000f   // magnify delta as a ratio
+        // Apply the zoom delta.
+    }
+}
+```
+
+The callback receives fixed-point integers: `xFixed` and `yFixed` are view-relative physical
+pixels multiplied by 1024, and `valueFixed` is the delta multiplied by 10000 (a ratio for
+magnify, degrees for rotate).
+
+<Callout type="info">
+`onTrackpadGesture` replaces the previously registered listener rather than adding one.
+Register a single listener per window.
+</Callout>
+
+## How it works
+
+On each platform, Tao subscribes to the native high-resolution gesture source — `NSEvent`
+magnify and rotate on macOS, precision-touchpad input on Windows, and the Wayland pointer-gesture
+protocol on Linux. The Rust bridge reshapes those events and delivers them to the JVM through a
+single wire format, which the scene host turns into Compose pointer events.
+
+The raw `TrackpadGestureListener` sits on that same wire, before the pointer-event synthesis.
+macOS and Linux emit magnify, rotate, and smart-magnify; Windows emits magnify only. There is no
+native source on other configurations, so the listener does not fire there.
+
+## API reference
+
+### Register a gesture listener
+
+```kotlin
+// dev.nucleusframework.window.tao.TaoWindow
+fun onTrackpadGesture(listener: TrackpadGestureListener)
+
+fun interface TrackpadGestureListener {
+    fun onGesture(
+        kind: Int,        // TaoTrackpadGesture value
+        phase: Int,       // TaoTrackpadPhase value
+        xFixed: Int,      // physical pixels × 1024, view-relative
+        yFixed: Int,
+        valueFixed: Int,  // delta × 10000 (ratio for magnify, degrees for rotate)
+    )
+}
+```
+
+Obtain the window from `LocalTaoWindow.current`, which is `null` outside a Tao window.
+
+### Gesture constants
+
+```kotlin
+object TaoTrackpadGesture {
+    const val MAGNIFY: Int = 0
+    const val ROTATE: Int = 1
+    const val SMART_MAGNIFY: Int = 2
+}
+
+object TaoTrackpadPhase {
+    const val BEGAN: Int = 0
+    const val CHANGED: Int = 1
+    const val ENDED: Int = 2
+    const val CANCELLED: Int = 3
+}
+```
+
+### Pointer info on every change
+
+```kotlin
+// androidx.compose.ui.input.pointer.PointerInputChange
+val type: PointerType         // Mouse | Touch | Stylus | Eraser
+val pressure: Float           // 0f when the device reports no pressure
+val position: Offset          // sub-pixel position
+val scrollDelta: Offset       // scroll wheel and trackpad scroll
+```
+
+## What's next
+
+- [Pen & stylus](/docs/tao/pen-stylus) — pressure and tilt from stylus devices.
+- [Wayland](/docs/tao/wayland) — Linux-specific input and windowing behavior.
+- [Decorated window](/docs/tao/decorated-window) — the Tao window and its title bar.
+- [Tao backend](/docs/tao) — what the Tao backend provides.

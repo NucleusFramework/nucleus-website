@@ -1,0 +1,218 @@
+---
+title: Launcher (Windows)
+description: Drive the Windows taskbar from Kotlin with overlay icons, jump lists, thumbnail toolbar buttons, and badges.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `launcher-windows` module exposes four parts of the Windows shell from Kotlin: overlay
+icons on the taskbar button, jump lists in its right-click menu, buttons in the taskbar
+thumbnail preview, and numeric or glyph badges. Each part is a separate `object` you call
+directly; use only the ones you need.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-windows:<version>")
+}
+```
+
+## Set an overlay icon
+
+An overlay icon is a 16x16 status marker in the bottom-right corner of the taskbar button.
+Pass the AWT `Window` and an icon source:
+
+```kotlin
+import dev.nucleusframework.launcher.windows.StockIcon
+import dev.nucleusframework.launcher.windows.TaskbarIconSource
+import dev.nucleusframework.launcher.windows.WindowsOverlayIcon
+
+WindowsOverlayIcon.setIcon(
+    window,
+    TaskbarIconSource.FromStock(StockIcon.WARNING),
+    description = "1 unread message",
+)
+
+// later
+WindowsOverlayIcon.clearIcon(window)
+```
+
+Overlay icons work with every packaging type. Each call returns `true` on success; check
+`WindowsOverlayIcon.isAvailable` first if you support non-Windows platforms.
+
+## Build a jump list
+
+A jump list groups items in the taskbar right-click menu. `setJumpList` replaces the whole
+list atomically:
+
+```kotlin
+import dev.nucleusframework.launcher.windows.JumpListCategory
+import dev.nucleusframework.launcher.windows.JumpListItem
+import dev.nucleusframework.launcher.windows.WindowsJumpListManager
+
+WindowsJumpListManager.setJumpList(
+    categories = listOf(
+        JumpListCategory("Recent", items = listOf(
+            JumpListItem("Project A", arguments = "myapp://open?project=a"),
+            JumpListItem("Project B", arguments = "myapp://open?project=b"),
+        )),
+    ),
+    tasks = listOf(
+        JumpListItem("New window", arguments = "myapp://new"),
+        JumpListItem.SEPARATOR,
+        JumpListItem("Settings", arguments = "myapp://settings"),
+    ),
+)
+```
+
+For unpackaged apps (NSIS, MSI, distributable), call `WindowsJumpListManager.setProcessAppId()`
+once at the very start of `main()`, before any window is created. APPX/MSIX apps skip this —
+Windows uses the package identity.
+
+<Callout type="info">
+When the user clicks a jump list item, Windows launches a new process with the item's
+`arguments` on the command line. Pair it with
+[`SingleInstanceManager`](/docs/lifecycle/single-instance) to forward those arguments to the
+already-running instance.
+</Callout>
+
+## Add thumbnail toolbar buttons
+
+The thumbnail toolbar adds up to 7 clickable buttons to the window's taskbar thumbnail preview.
+Register them once per window with `setButtons`:
+
+```kotlin
+import dev.nucleusframework.launcher.windows.TaskbarIconSource
+import dev.nucleusframework.launcher.windows.ThumbnailToolbarButton
+import dev.nucleusframework.launcher.windows.WindowsThumbnailToolbar
+
+WindowsThumbnailToolbar.setButtons(
+    window,
+    buttons = listOf(
+        ThumbnailToolbarButton(id = 0, tooltip = "Previous", icon = TaskbarIconSource.FromFile("icons/prev.ico")),
+        ThumbnailToolbarButton(id = 1, tooltip = "Play",     icon = TaskbarIconSource.FromFile("icons/play.ico")),
+        ThumbnailToolbarButton(id = 2, tooltip = "Next",     icon = TaskbarIconSource.FromFile("icons/next.ico")),
+    ),
+    onClick = { buttonId -> handleTransport(buttonId) },
+)
+```
+
+Windows does not allow adding buttons after the first registration. To change a button's icon,
+tooltip, or state later, call `updateButtons(window, buttons)` with the same ids. Call
+`unregister(window)` when the window closes.
+
+## Show a badge
+
+Badges show a numeric count or a status glyph on the taskbar button and Start tile. They rely
+on an Application User Model ID that Windows grants only to packaged apps, so the badge API
+works under APPX/MSIX only. Call `initialize()` once before setting a badge:
+
+```kotlin
+import dev.nucleusframework.launcher.windows.BadgeGlyph
+import dev.nucleusframework.launcher.windows.WindowsBadgeManager
+
+WindowsBadgeManager.initialize()
+
+WindowsBadgeManager.setGlyph(BadgeGlyph.NEW_MESSAGE)
+// or a numeric count
+WindowsBadgeManager.setCount(5)
+
+// clear
+WindowsBadgeManager.clear()
+```
+
+`setCount` shows 1–99 as the number and 99+ above that; `setCount(0)` clears it. Call
+`uninitialize()` on shutdown.
+
+## How it works
+
+Overlay icons and the thumbnail toolbar use the COM `ITaskbarList3` interface, keyed by the
+HWND of your `java.awt.Window`. COM is initialized lazily on the first call, and thumbnail
+button clicks are delivered on the AWT event dispatch thread.
+
+Jump lists use `ICustomDestinationList`. Windows owns the menu, so clicks never reach your
+running process — the OS starts a fresh executable with the item's `arguments` appended to the
+command line. That is why jump list actions carry data through `arguments` rather than a
+callback.
+
+Badges use WinRT and require an AUMID. Windows only grants one to packaged apps, so
+`WindowsBadgeManager` reports unavailable outside APPX/MSIX. The AUMID is derived from
+`NucleusApp.aumid` unless you pass an explicit override to `initialize`.
+
+## API reference
+
+### Overlay icon
+
+| Member | Description |
+|---|---|
+| `WindowsOverlayIcon.setIcon(window, icon, description = "")` | Sets the overlay icon. Returns `Boolean`. |
+| `WindowsOverlayIcon.clearIcon(window)` | Removes the overlay icon. Returns `Boolean`. |
+| `WindowsOverlayIcon.isAvailable` | Whether the native library is loaded on this platform. |
+| `WindowsOverlayIcon.lastError` | Message from the last failed call, or `null`. |
+
+### Jump list
+
+| Member | Description |
+|---|---|
+| `WindowsJumpListManager.setProcessAppId(aumid = null)` | Sets the process AUMID; call at the start of `main()` for unpackaged apps. |
+| `WindowsJumpListManager.setJumpList(categories, tasks, knownCategories)` | Replaces the whole jump list. All parameters default to empty. |
+| `WindowsJumpListManager.clearJumpList()` | Removes all entries. |
+
+Supporting types:
+
+| Type | Use |
+|---|---|
+| `JumpListCategory(name, items)` | A named group of items. |
+| `JumpListItem(title, arguments, description, icon, isSeparator)` | A click-to-launch entry; all parameters have defaults. |
+| `JumpListItem.SEPARATOR` | A visual separator (user tasks only). |
+| `KnownCategory.FREQUENT` / `KnownCategory.RECENT` | Shell-managed lists populated from your file associations. |
+
+### Thumbnail toolbar
+
+| Member | Description |
+|---|---|
+| `WindowsThumbnailToolbar.setButtons(window, buttons, onClick = null)` | Registers up to 7 buttons. Callable once per window. |
+| `WindowsThumbnailToolbar.updateButtons(window, buttons)` | Updates icon, tooltip, and flags of already-registered buttons. |
+| `WindowsThumbnailToolbar.unregister(window)` | Removes the click callback and restores the window procedure. |
+
+`ThumbnailToolbarButton(id, tooltip, icon, enabled, hidden, noBackground, dismissOnClick, nonInteractive)` —
+`id` must be 0–6, `tooltip` at most 259 characters. The `onClick` handler is a
+`ThumbBarClickListener` receiving the clicked button's `id`.
+
+### Badge
+
+| Member | Description |
+|---|---|
+| `WindowsBadgeManager.initialize(aumid = null)` | Prepares the badge subsystem. Required before any badge call; APPX/MSIX only. |
+| `WindowsBadgeManager.setCount(count)` | Sets a numeric badge; `0` clears it. |
+| `WindowsBadgeManager.setGlyph(glyph)` | Sets a status glyph; `BadgeGlyph.NONE` clears it. |
+| `WindowsBadgeManager.clear()` | Clears the badge. |
+| `WindowsBadgeManager.uninitialize()` | Releases native resources. |
+
+`BadgeGlyph` values: `NONE`, `ACTIVITY`, `ALARM`, `ALERT`, `ATTENTION`, `AVAILABLE`, `AWAY`,
+`BUSY`, `ERROR`, `NEW_MESSAGE`, `PAUSED`, `PLAYING`, `UNAVAILABLE`.
+
+### Icon sources
+
+Every API that takes an icon accepts a `TaskbarIconSource`:
+
+- `TaskbarIconSource.FromStock(stockIcon)` — one of 93 `StockIcon` values (`WARNING`, `ERROR`,
+  `INFO`, `SHIELD`, `FOLDER`, ...). No files needed.
+- `TaskbarIconSource.FromFile(path)` — an `.ico` file on disk.
+- `TaskbarIconSource.FromResource(dllPath, index)` — an icon index inside a resource DLL such
+  as `shell32.dll` or `imageres.dll`.
+
+## Notes
+
+- Jump list items need a real executable. They do not fire under `./gradlew run`, where the
+  process is `java.exe` — test from `runDistributable` or a packaged build.
+- For a progress bar inside the taskbar button itself, rather than an icon overlay, use
+  [`taskbar-progress`](/docs/lifecycle/taskbar-progress).
+
+## What's next
+
+- [Launcher (macOS)](/docs/lifecycle/launcher-macos) — the dock menu equivalent on macOS.
+- [Launcher (Linux)](/docs/lifecycle/launcher-linux) — launcher entries and quicklists on Linux.
+- [Taskbar progress](/docs/lifecycle/taskbar-progress) — progress bars in the taskbar button.
+- [Single instance](/docs/lifecycle/single-instance) — forward jump list arguments to a running app.

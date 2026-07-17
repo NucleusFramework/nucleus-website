@@ -5,7 +5,7 @@ import { i18n } from '@/lib/i18n';
 export const dynamic = 'force-static';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const { source } = await import('@/lib/source');
+  const { DOC_VERSIONS } = await import('@/lib/source');
   const now = new Date();
   const entries: MetadataRoute.Sitemap = [];
 
@@ -20,14 +20,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     });
   }
 
-  // docs pages — fumadocs returns pages with localized URLs
-  for (const p of source.getPages()) {
-    entries.push({
-      url: `${SITE.url}${p.url}`,
-      lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 0.7,
-    });
+  // docs pages — fumadocs returns pages with localized URLs. Latest gets full
+  // priority; archived snapshots are listed lower (they are noindex anyway).
+  for (const v of DOC_VERSIONS) {
+    for (const p of v.source.getPages()) {
+      entries.push({
+        url: `${SITE.url}${p.url}`,
+        lastModified: now,
+        changeFrequency: 'weekly',
+        priority: v.latest ? 0.7 : 0.3,
+      });
+    }
   }
 
   return entries;

@@ -1,0 +1,142 @@
+---
+title: Raccourcis globaux
+description: Enregistrez des raccourcis clavier au niveau de l'OS qui se déclenchent même quand votre application n'a pas le focus.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`global-hotkey` vous permet d'enregistrer des raccourcis clavier au niveau du système depuis Kotlin sur macOS, Windows et Linux. Un raccourci global se déclenche dès que sa combinaison de touches est pressée, quelle que soit la fenêtre au focus — c'est ce sur quoi reposent les lecteurs média, les outils de capture d'écran et les utilitaires d'accessibilité.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.global-hotkey:<version>")
+}
+```
+
+## Enregistrer un raccourci
+
+Initialisez le manager une fois, enregistrez une combinaison et conservez le handle retourné pour la désenregistrer plus tard :
+
+```kotlin
+import dev.nucleusframework.globalhotkey.GlobalHotKeyManager
+import dev.nucleusframework.globalhotkey.HotKeyModifier
+import java.awt.event.KeyEvent
+
+GlobalHotKeyManager.initialize()
+
+val handle = GlobalHotKeyManager.register(
+    keyCode = KeyEvent.VK_F12,
+    modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT,
+) { keyCode, modifiers ->
+    println("Raccourci pressé")
+}
+
+// plus tard
+GlobalHotKeyManager.unregister(handle)
+GlobalHotKeyManager.shutdown()
+```
+
+`register` retourne un handle `Long`, ou `-1` si la combinaison n'a pas pu être enregistrée. Le listener reçoit le `keyCode` et le bitmask `modifiers` qui l'ont déclenché.
+
+Pour borner un raccourci à la durée de vie d'un Composable, enregistrez-le dans `DisposableEffect` et désenregistrez-le dans `onDispose` :
+
+```kotlin
+DisposableEffect(Unit) {
+    GlobalHotKeyManager.initialize()
+    val handle = GlobalHotKeyManager.register(
+        keyCode = KeyEvent.VK_K,
+        modifiers = HotKeyModifier.META,
+    ) { _, _ ->
+        showQuickSwitcher()
+    }
+
+    onDispose {
+        GlobalHotKeyManager.unregister(handle)
+    }
+}
+```
+
+## Fonctionnement
+
+`GlobalHotKeyManager` est un singleton thread-safe. `initialize()` charge le pont natif de la plateforme courante et démarre sa boucle de messages : `RegisterHotKey` sur Windows, Carbon `RegisterEventHotKey` sur macOS, et `XGrabKey` (X11) ou le portail D-Bus `org.freedesktop.portal.GlobalShortcuts` (Wayland) sur Linux.
+
+Chaque appel à `register(...)` convertit le bitmask `modifiers` portable en drapeaux natifs et retourne un handle que vous repassez à `unregister`. Quand un enregistrement échoue, `register` retourne `-1` et renseigne `lastError` avec la description de l'échec.
+
+Les listeners sont invoqués depuis la boucle de messages native, pas depuis le thread UI. Revenez vous-même sur votre thread UI ou audio avant de toucher à un état partagé.
+
+## Référence de l'API
+
+### Enregistrer une combinaison de touches
+
+```kotlin
+fun register(
+    keyCode: Int,
+    modifiers: Int = 0,
+    description: String? = null,
+    listener: HotKeyListener,
+): Long
+```
+
+`keyCode` est un code de touche virtuel AWT comme `KeyEvent.VK_F12`. `modifiers` est un bitmask construit à partir des valeurs de `HotKeyModifier` ; utilisez `0` pour aucun modificateur. `description` est un libellé lisible affiché dans la boîte de dialogue des raccourcis système sur Linux/Wayland et ignoré ailleurs. Retourne le handle d'enregistrement, ou `-1` en cas d'échec.
+
+### Combiner des modificateurs
+
+`HotKeyModifier` a quatre valeurs : `ALT`, `CONTROL`, `SHIFT` et `META`. Sur macOS, `ALT` correspond à Option et `META` à Command ; sur Windows et Linux, `META` est la touche Win/Super. Combinez-les avec `+`, ce qui produit le bitmask `Int` attendu par `register` :
+
+```kotlin
+val modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT
+```
+
+### Traiter le callback
+
+`HotKeyListener` est une interface fonctionnelle avec une seule méthode :
+
+```kotlin
+fun onHotKey(keyCode: Int, modifiers: Int)
+```
+
+Comme c'est une `fun interface`, vous pouvez passer une lambda à deux paramètres partout où un `HotKeyListener` est attendu.
+
+### Enregistrer une touche média
+
+```kotlin
+GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { _, _ -> player.togglePlayPause() }
+GlobalHotKeyManager.register(MediaKey.NEXT_TRACK) { _, _ -> player.skipNext() }
+```
+
+`MediaKey` a quatre valeurs : `PLAY_PAUSE`, `STOP`, `NEXT_TRACK` et `PREV_TRACK`.
+
+<Callout type="warn">
+Les touches média ne sont pas prises en charge sur macOS. Sur macOS, cette surcharge retourne `-1` et renseigne `lastError` avec `"Media keys are not supported on macOS"`.
+</Callout>
+
+### Vérifier la disponibilité
+
+```kotlin
+if (!GlobalHotKeyManager.isAvailable) {
+    // Le pont natif n'est pas chargé sur cette plateforme.
+}
+```
+
+`isAvailable` indique si la bibliothèque native est chargée et fonctionnelle sur la plateforme courante.
+
+### Désenregistrer et arrêter
+
+`unregister(handle: Long): Boolean` libère un seul binding et indique s'il a réussi. `shutdown()` désenregistre tous les raccourcis et arrête la boucle de messages native ; appelez-la à la sortie de l'application.
+
+## Notes
+
+<Callout type="warn" title="Permissions macOS">
+Sur macOS, l'utilisateur peut être invité à accorder à votre application **Input Monitoring** (et parfois **Accessibilité**) dans Réglages Système → Confidentialité et sécurité. Tant qu'il n'accepte pas, les callbacks ne se déclenchent pas. Depuis votre message, renvoyez vers `x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent`.
+</Callout>
+
+- Les compositeurs Wayland sous Linux interdisent en général les grabs globaux depuis des applications quelconques. La bibliothèque utilise le portail `org.freedesktop.portal.GlobalShortcuts` quand il est disponible, ce qui exige un fichier `.desktop` en reverse-DNS et l'application lancée depuis celui-ci ; sur les autres compositeurs, le binding peut ne pas se déclencher.
+- Lisez `GlobalHotKeyManager.lastError` après un appel qui échoue pour savoir pourquoi un enregistrement a été rejeté.
+
+## Et ensuite
+
+- [Contrôle média](/docs/os/media-control) — expose l'état de lecture et répondez aux événements média du système.
+- [Infos système](/docs/os/system-info) — interroge l'OS, le CPU, la mémoire et la batterie depuis Kotlin.
+- [Aperçu de l'intégration OS](/docs/os) — l'ensemble des modules d'intégration plateforme.

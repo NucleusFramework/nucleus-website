@@ -1,0 +1,259 @@
+---
+title: Gradle DSL reference
+description: Every property and sub-block of the nucleus { } Gradle extension, verified against the plugin source.
+---
+
+The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-level extension, `nucleus`, for configuring packaging, signing, publishing, and GraalVM native builds from Kotlin. It builds on the JetBrains Compose Desktop DSL and adds Nucleus-specific formats, signing surfaces, and GraalVM settings. This page lists every property in the order it appears in the plugin source.
+
+## Top-level: `nucleus { }`
+
+`dev.nucleusframework.NucleusExtension`:
+
+- `val application: JvmApplication` — JVM app configuration (`nucleus { application { … } }`).
+- `val nativeApplication: NativeApplication` — Kotlin/Native macOS targets.
+- `val dependencies: NucleusPlugin.Dependencies` — runtime module coordinates and notations.
+
+## `application { }` — `JvmApplication`
+
+- `from(SourceSet)` / `from(KotlinTarget)`
+- `disableDefaultConfiguration()`
+- `dependsOn(vararg tasks: Task | String)`
+- `fromFiles(vararg files: Any)`
+- `var mainClass: String?`
+- `val mainJar: RegularFileProperty`
+- `var javaHome: String`
+- `val args: MutableList<String>` / `args(vararg args: String)`
+- `val jvmArgs: MutableList<String>` / `jvmArgs(vararg jvmArgs: String)`
+- `val nativeDistributions: JvmApplicationDistributions` — see below
+- `val buildTypes: JvmApplicationBuildTypes`
+- `val graalvm: GraalvmSettings` — see [GraalVM](#graalvm--graalvmsettings)
+
+## `nativeDistributions { }` — `JvmApplicationDistributions`
+
+| Property | Type | Notes |
+|----------|------|-------|
+| `modules: ArrayList<String>` | — | Defaults: `java.base, java.desktop, java.logging, java.net.http, jdk.accessibility, jdk.crypto.ec` |
+| `var includeAllModules: Boolean` | — | Bundle every JDK module |
+| `var cleanupNativeLibs: Boolean` | — | Strip non-target native libs |
+| `var splashImage: String?` | — | Splash image path |
+| `var enableAotCache: Boolean` | — | JDK 25+ AOT cache |
+| `var artifactName: String` | default `"${name}-${version}-${os}-${arch}.${ext}"` | Output template |
+| `var compressionLevel: CompressionLevel?` | — | `Store`, `Normal`, `Maximum` |
+| `val trustedCertificates: ConfigurableFileCollection` | — | CA certificates → bundled JDK `cacerts` (see [trusted certs](/docs/packaging/trusted-certificates)) |
+| `val protocols: MutableList<UrlProtocol>` | — | Deep-link protocols |
+| `targetFormats: …` | inherited | The 18 [target formats](#targetformat-enum) |
+| `val linux: LinuxPlatformSettings` | — | See [Linux](#linux--linuxplatformsettings) |
+| `val macOS: JvmMacOSPlatformSettings` | — | See [macOS](#macos--jvmmacosplatformsettings) |
+| `val windows: WindowsPlatformSettings` | — | See [Windows](#windows--windowsplatformsettings) |
+| `val publish: PublishSettings` | — | See [publish](#publish--publishsettings) |
+
+Methods:
+
+- `fun fileAssociation(mimeType, extension, description, linuxIconFile?, windowsIconFile?, macOSIconFile?)`
+- `fun protocol(name, vararg schemes)`
+- Common (from `AbstractPlatformSettings`): `iconFile`, `packageVersion`, `fileAssociation(...)`
+
+### `TargetFormat` enum
+
+18 formats, in source order:
+
+`RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
+
+`RawAppImage` is the intermediate jpackage app-image; every other format is produced by electron-builder. `Pkg`, `AppX`, and `Flatpak` are store formats and require sandboxing.
+
+## `macOS { }` — `JvmMacOSPlatformSettings`
+
+Extends `AbstractMacOSPlatformSettings`. Identification:
+
+- `packageName: String?`, `packageVersion`, `packageBuildVersion`
+- `dmgPackageVersion`, `dmgPackageBuildVersion`, `pkgPackageVersion`, `pkgPackageBuildVersion`
+- `dockName: String?`, `setDockNameSameAsPackageName: Boolean = true`
+- `bundleID: String?`, `appCategory: String?`, `minimumSystemVersion: String?`
+- `installationPath: String? = null` — macOS install location; when unset the build defaults it to `/Applications`
+- `iconFile`, `layeredIconDir` (macOS 26+ `.icon` directory)
+
+Signing and sandbox:
+
+- `entitlementsFile: RegularFileProperty`, `runtimeEntitlementsFile`
+- `provisioningProfile: RegularFileProperty`, `runtimeProvisioningProfile`
+- `signing { … }` — see [Signing](#macos--signing--macossigningsettings)
+- `notarization { … }` — see [Notarization](#macos--notarization--macosnotarizationsettings)
+
+macOS 26:
+
+- `macOsSdkVersion: String? = "26.0"` — `vtool` patches the launcher Mach-O `LC_BUILD_VERSION` to gate Liquid Glass at SDK 26.
+
+Composition:
+
+- `launchAgents { agent(plistName) { bundleProgram; arguments; startInterval } }`
+- `infoPlist { extraKeysRawXml }`
+- `dmg { … }` — see [DMG](#macos--dmg--dmgsettings)
+
+### `macOS.signing { }` — `MacOSSigningSettings`
+- `sign: Property<Boolean>` (default `false`)
+- `identity: Property<String>`
+- `keychain: Property<String>`
+- `prefix: Property<String>`
+
+### `macOS.notarization { }` — `MacOSNotarizationSettings`
+Three mutually exclusive modes:
+
+- Apple ID: `appleID`, `password`, `teamID`
+- `notarytool` keychain profile: `keychainProfile`, optional `keychainPath`
+- App Store Connect API key: `apiKey`, `apiKeyId`, `apiIssuer`
+
+### `macOS.dmg { }` — `DmgSettings`
+- `title: String?`, `iconSize: Int?`, `iconTextSize: Int?`
+- `format: DmgFormat?` (`UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO`)
+- `size: String?`, `shrink: Boolean?`, `sign: Boolean`
+- `background: RegularFileProperty`, `backgroundColor: String?`
+- `icon: RegularFileProperty`, `badgeIcon: RegularFileProperty`
+- `window { x; y; width; height }`
+- `content(x, y, type: DmgContentType?, name: String?, path: String?)` — `DmgContentType` is `File`, `Link`, `Dir`
+
+## `windows { }` — `WindowsPlatformSettings`
+
+- `iconFile`, `packageName`
+- `console: Boolean`, `dirChooser: Boolean`, `perUserInstall: Boolean`
+- `shortcut`, `menu`, `menuGroup`
+- `upgradeUuid: String?`, `msiPackageVersion`, `exePackageVersion`
+- `nsis { … }` — see [NSIS](#windows--nsis--nsissettings)
+- `appx { … }` — see [AppX](#windows--appx--appxsettings)
+- `signing { … }` — see [Signing](#windows--signing--windowssigningsettings)
+
+### `windows.nsis { }` — `NsisSettings`
+- `oneClick: Boolean`
+- `allowElevation: Boolean`, `perMachine: Boolean`
+- `allowToChangeInstallationDirectory: Boolean`
+- `createDesktopShortcut: Boolean`, `createStartMenuShortcut: Boolean`
+- `runAfterFinish: Boolean`, `deleteAppDataOnUninstall: Boolean`
+- `multiLanguageInstaller: Boolean`, `installerLanguages: List<String>`
+- `installerIcon`, `uninstallerIcon`, `installerHeader`, `installerSidebar`
+- `license`, `script`, `includeScript`
+
+### `windows.appx { }` — `AppXSettings`
+- `applicationId`, `publisherDisplayName`, `displayName`, `publisher`, `identityName`
+- `languages: List<String>`
+- `backgroundColor: String?`, `showNameOnTiles: Boolean`
+- `storeLogo`, `square44x44Logo`, `square150x150Logo`, `wide310x150Logo`
+- `minVersion: String?`, `maxVersionTested: String?`
+- `addAutoLaunchExtension: Boolean`, `setBuildNumber: Boolean`
+
+### `windows.signing { }` — `WindowsSigningSettings`
+- `enabled: Boolean`
+- `certificateFile`, `certificatePassword`, `certificateSha1`, `certificateSubjectName`
+- `algorithm: SigningAlgorithm` (`Sha1`, `Sha256`, `Sha512`)
+- `timestampServer: String?`
+- Azure Artifact Signing: `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName`
+
+## `linux { }` — `LinuxPlatformSettings`
+
+- `iconFile`, `shortcut: Boolean`, `packageName`, `packageVersion`
+- `appRelease: String?`, `appCategory: String?`, `menuGroup: String?`
+- `startupWMClass: String?`
+- `debMaintainer: String?`, `debPackageVersion`, `debDepends: List<String>`
+- `rpmLicenseType: String?`, `rpmPackageVersion`, `rpmRequires: List<String>`
+- `pacmanPackageVersion: String?`, `pacmanDepends: List<String>` — for the `Pacman` (Arch Linux) target
+- `appImage { … }` — see [AppImage](#linux--appimage--appimagesettings)
+- `snap { … }` — see [Snap](#linux--snap--snapsettings)
+- `flatpak { … }` — see [Flatpak](#linux--flatpak--flatpaksettings)
+- `signing { … }` — see [Signing](#linux--signing--linuxsigningsettings)
+
+### `linux.signing { }` — `LinuxSigningSettings`
+GPG-signs DEB/RPM for distribution outside a store. See [Code signing](/docs/packaging/code-signing#linux--gpg-signing-for-debrpm).
+- `enabled: Property<Boolean>` (default `false`)
+- `keyId: Property<String>` — GPG key id, fingerprint or email
+- `keyFile: RegularFileProperty` — ASCII-armored private key, imported into a throwaway keyring (optional if the key is already in the signing keyring)
+- `passphrase: Property<String>`
+- `debMethod: DebSignMethod` (default `Detached`; also `DpkgSig`, `Debsig`)
+- `silentUpdate: Property<Boolean>` (default `false`) — passwordless signature-verified self-update; requires `enabled`. See [passwordless updates](/docs/packaging/auto-update#passwordless-updates-on-linux).
+
+Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signing.{keyId,keyFile,passphrase,silentUpdate}`.
+
+### `linux.appImage { }` — `AppImageSettings`
+- `category: AppImageCategory?` (`AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility`)
+- `genericName: String?`, `synopsis: String?`
+- `desktopEntries: Map<String, String>`
+
+### `linux.snap { }` — `SnapSettings`
+- `confinement: SnapConfinement` (default `Strict`; also `Classic`, `Devmode`)
+- `grade: SnapGrade` (default `Stable`; also `Devel`)
+- `summary: String?`, `base: String?`
+- `plugs: List<SnapPlug>` — 11 defaults
+- `autoStart: Boolean`
+- `compression: SnapCompression?` (`Xz`, `Lzo`)
+
+`SnapPlug`: `Desktop`, `DesktopLegacy`, `Home`, `X11`, `Wayland`, `Unity7`, `BrowserSupport`, `Network`, `NetworkBind`, `Gsettings`, `AudioPlayback`, `AudioRecord`, `Opengl`, `RemovableMedia`, `Cups`.
+
+### `linux.flatpak { }` — `FlatpakSettings`
+- `runtime: String = "org.freedesktop.Platform"`
+- `runtimeVersion: String = "23.08"`
+- `sdk: String = "org.freedesktop.Sdk"`
+- `branch: String = "master"`
+- `finishArgs: List<String>` — defaults: `--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`, `--device=dri`
+- `license: RegularFileProperty`
+
+## `publish { }` — `PublishSettings`
+
+- `publishMode: PublishMode` (`Never`, `Auto`, `Always`)
+- `github { enabled, owner, repo, token, channel, releaseType }`
+- `s3 { enabled, bucket, region, path, acl }`
+- `generic { enabled, url, channel, useMultipleRangeRequest }`
+
+`ReleaseChannel`: `Latest`, `Beta`, `Alpha`.
+`ReleaseType`: `Release`, `Draft`, `Prerelease`.
+
+## GraalVM — `GraalvmSettings`
+
+- `isEnabled: Property<Boolean>` (default `false`)
+- `javaLanguageVersion: Property<Int>` (default `25`)
+- `jvmVendor: Property<JvmVendorSpec>`
+- `imageName: Property<String>`
+- `march: Property<String>` (default `"native"`)
+- `buildArgs: ListProperty<String>`
+- `nativeImageConfigBaseDir: DirectoryProperty`
+- `val macOS: GraalvmMacOSSettings` — `cStubsSrc`, `minimumSystemVersion = "12.0"`, `macOsSdkVersion = "26.0"`
+- `val windows: GraalvmWindowsSettings`:
+  - `bundleCRuntime: Property<Boolean> = true` — copy the MSVC runtime DLLs next to the native `.exe`
+  - `dlls: ListProperty<String>` — defaults: `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`
+  - `sourceDir: DirectoryProperty` — directory the DLLs are copied from (defaults to the GraalVM toolchain `bin`)
+- `val metadataRepository: MetadataRepositorySettings`:
+  - `enabled: Boolean = true`
+  - `version: String = "0.10.6"`
+  - `excludedModules: SetProperty<String>`
+  - `moduleToConfigVersion: MapProperty<String, String>`
+
+## Native app — `NativeApplication`
+
+Currently macOS Kotlin/Native only.
+
+- `targets(vararg targets: KotlinTarget)` — must be `KotlinNativeTarget` on `Family.OSX`
+- `val distributions: NativeApplicationDistributions`
+
+## Annotations
+
+- `@ExperimentalNucleusLibrary` — opt-in marker for unstable plugin DSL surface.
+
+## Other types
+- `class FileAssociation(mimeType, extension, description, iconFile?)`
+- `class UrlProtocol(name, schemes: List<String>)`
+- `class LaunchAgentSettings`
+- `class JvmApplicationBuildTypes`
+- `class ProguardSettings`
+- `enum class CompressionLevel`
+- `enum class SigningAlgorithm`
+- `enum class ReleaseType`, `enum class ReleaseChannel`, `enum class PublishMode`
+- `enum class SnapGrade`, `enum class SnapConfinement`, `enum class SnapCompression`
+- `enum class AppImageCategory`
+- `enum class DmgFormat`, `enum class DmgContentType`
+
+## Notes
+
+The plugin injects a `nucleus/nucleus-app.properties` resource into the packaged app containing `app.id`, `app.version`, `app.vendor`, `app.aumid`, `startup.task.id`, and similar keys. The `NucleusApp` runtime object reads these at startup, which is how the DSL configuration reaches the runtime library.
+
+## What's next
+
+- [Configuration](/docs/start/configuration) — the `nucleus { }` DSL in a working build script.
+- [Packaging formats](/docs/packaging) — what each `TargetFormat` produces.
+- [Code signing](/docs/packaging/code-signing) — the macOS, Windows, and Linux signing blocks.
+- [Publishing](/docs/packaging/publishing) — the `publish { }` block and release channels.

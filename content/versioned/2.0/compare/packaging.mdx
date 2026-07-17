@@ -1,0 +1,112 @@
+---
+title: Packaging — Nucleus vs the rest
+description: How Nucleus compares with jpackage, Compose Multiplatform, Conveyor, install4j, and other JVM packaging tools across formats, auto-update, signing, CI, and store distribution.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+This page compares Nucleus packaging with the other tools that build native installers
+for JVM desktop apps: jpackage, Compose Multiplatform, Conveyor, install4j, jDeploy, and
+JavaPackager. It covers distributable formats, auto-update, code signing, CI/CD, GraalVM
+Native Image, and store distribution.
+
+Nucleus builds 18 distributable formats and packages auto-update, signing, sandboxing,
+CI actions, and GraalVM Native Image output in one Gradle plugin under an Apache/MIT
+license. jpackage covers six formats and nothing around them, install4j is proprietary,
+and Conveyor covers a different set but does not produce DMG or PKG.
+
+## Format coverage
+
+| Tool | DMG | PKG | NSIS | MSI | MSIX/AppX | Portable | DEB | RPM | AppImage | Snap | Flatpak | Archives | Total |
+|------|:---:|:---:|:----:|:---:|:---------:|:--------:|:---:|:---:|:--------:|:----:|:-------:|:--------:|:-----:|
+| **Nucleus** | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | ZIP, TAR, 7Z | **18** |
+| Conveyor | — | — | — | — | Y | — | Y | — | — | — | — | ZIP, TAR + custom EXE | 6 |
+| install4j | Y | — | — | Y | — | — | Y | Y | — | — | — | TAR, shell | 7 |
+| jpackage | Y | Y | — | Y | — | — | Y | Y | — | — | — | — | 6 |
+| jDeploy | — | — | — | — | — | — | Y | — | — | — | — | EXE, TAR | 4 |
+| Compose MP | Y | Y | — | Y | — | — | Y | Y | — | — | — | — | 6 |
+| JavaPackager | Y | Y | — | Y | — | — | Y | Y | Y | — | — | ZIP | 8 |
+
+Nucleus reaches the higher format count by combining two build steps: jpackage builds the
+app-image, then electron-builder's `--prepackaged` mode produces every installer flavor from
+it — including the formats jpackage does not support, such as NSIS, MSIX, Snap, Flatpak, and
+AppImage. This hybrid build path is specific to Nucleus in the JVM ecosystem.
+
+Nucleus's total also counts four formats not broken out as their own columns above: `Exe`
+(a jpackage-native Windows installer, distinct from NSIS), `Pacman` (Arch Linux), `NsisWeb`
+(a web-installer variant of NSIS), and `RawAppImage` (the intermediate jpackage app-image,
+also selectable directly as a `targetFormats` entry).
+
+## Auto-update
+
+| Tool | Runtime lib | Channels | Verification |
+|------|-------------|----------|--------------|
+| **Nucleus** | `NucleusUpdater` | 3 (latest/beta/alpha) | SHA-512 |
+| Conveyor | OS-native (Sparkle 2 / MSIX / apt) | Yes | Yes |
+| install4j | Updater API | Yes | Yes |
+| jDeploy | Built-in | No | No |
+| jpackage / Compose MP | None | — | — |
+
+Conveyor is the only compared tool with delta updates (about 31 KB on macOS via Sparkle 2).
+Nucleus downloads the full file and exposes a runtime API for progress flow, channel
+switching, post-update detection, and restart-on-update.
+
+## Code signing and notarization
+
+Every compared tool signs and notarizes macOS builds. Windows signing differs:
+
+- **Nucleus** — `.pfx` and Azure Artifact Signing.
+- **Conveyor** — the widest set of signing backends: Azure Key Vault, AWS KMS, SSL.com
+  eSigner, DigiCert ONE, Google Cloud KMS, and SafeNet/YubiKey HSMs.
+- **install4j** — `.pfx` only.
+- **jpackage** — macOS only.
+
+## CI/CD integration
+
+- **Nucleus** — six composite GitHub Actions: `setup-nucleus`, `setup-macos-signing`,
+  `build-macos-universal`, `build-windows-appxbundle`, `generate-update-yml`, and
+  `publish-release`.
+- **Conveyor** — examples only; single-machine builds.
+- **install4j** — CLI only.
+- **jpackage / Compose MP** — none.
+
+## GraalVM Native Image packaging
+
+Nucleus packages GraalVM Native Image output end to end, producing DMG, NSIS, and DEB for the
+resulting binary. A packaged binary starts in about 0.2 s, uses about 30 MB of RAM (measured
+on Windows 11 with a Hello World build), and is about 40 MB in size as an NSIS installer with
+maximum compression. See [performance / GraalVM](/docs/performance/graalvm). Other tools route
+Native Image binaries through generic packaging pipelines that do not account for the JDK-less
+output.
+
+## Store distribution
+
+Nucleus, Conveyor, and Compose Multiplatform each produce store-acceptable artifacts. Nucleus
+produces all four store formats from one DSL: PKG (Mac App Store), AppX/MSIX (Microsoft Store),
+Snap (Snap Store), and Flatpak (Flathub).
+
+## Trade-offs
+
+| Where Nucleus is strong | Where competitors win |
+|-------------------------|----------------------|
+| Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: delta updates, broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
+
+<Callout type="info">
+Nucleus builds each OS on its own CI runner — there is no cross-compilation. It is Gradle-only
+and younger than Conveyor and install4j.
+</Callout>
+
+## When to pick what
+
+- A small CLI or single-window app that needs delta updates and cloud HSM signing — **Conveyor**.
+- An enterprise installer with custom dialogs and paid support — **install4j**.
+- A DMG, MSI, or DEB straight from jpackage — **Compose Multiplatform** or **jpackage** directly.
+- One Kotlin codebase covering every format and store, with auto-update, AOT, and GraalVM —
+  **Nucleus**.
+
+## What's next
+
+- [Auto-update](/docs/packaging/auto-update) — configure `NucleusUpdater` and release channels.
+- [Code signing](/docs/packaging/code-signing) — sign and notarize builds per OS.
+- [CI/CD](/docs/packaging/ci-cd) — the composite GitHub Actions for building and publishing.
+- [GraalVM Native Image](/docs/performance/graalvm) — package a JDK-less native binary.

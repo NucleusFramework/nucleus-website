@@ -1,0 +1,143 @@
+---
+title: Energy manager
+description: Abaissez la priorité d'ordonnancement OS de votre app et empêchez l'écran de s'éteindre, depuis Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module `energy-manager` vous permet de contrôler deux comportements d'énergie depuis Kotlin :
+abaisser la priorité CPU, I/O et timers de votre app quand elle tourne en arrière-plan, et
+empêcher l'écran et le système de se mettre en veille pendant une tâche longue. Les deux
+fonctionnent sur Windows, macOS et Linux via l'objet `EnergyManager`.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.energy-manager:<version>")
+}
+```
+
+## Throttler une fenêtre en arrière-plan
+
+Le mode efficacité a deux niveaux. Le mode light déprioritise seulement l'ordonnancement CPU ;
+le mode full throttle aussi les I/O et, sur macOS, le réseau. Associez-les à l'état de la
+fenêtre — mode light à la perte de focus, mode full à la minimisation :
+
+```kotlin
+import dev.nucleusframework.energymanager.EnergyManager
+
+LaunchedEffect(state.isMinimized, isWindowFocused) {
+    when {
+        state.isMinimized -> {
+            EnergyManager.disableLightEfficiencyMode()
+            EnergyManager.enableEfficiencyMode()       // full — CPU et I/O throttlés
+        }
+        !isWindowFocused -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.enableLightEfficiencyMode()  // CPU seul — I/O reste normal
+        }
+        else -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.disableLightEfficiencyMode()
+        }
+    }
+}
+```
+
+## Exécuter une coroutine à priorité réduite
+
+`withEfficiencyMode` exécute un bloc sur un thread dédié à priorité arrière-plan et libère le
+thread au retour du bloc. `withLightEfficiencyMode` applique une QoS light au niveau process
+pour la durée du bloc, sans l'épingler à un thread :
+
+```kotlin
+// Thread dédié à basse priorité (efficacité thread), I/O non throttlés
+val report = EnergyManager.withEfficiencyMode {
+    computeHeavyReport()
+}
+
+// QoS light au niveau process pour le bloc — utile pour du travail I/O par lots
+EnergyManager.withLightEfficiencyMode {
+    syncDataFromServer()
+    writeToDatabase()
+}
+```
+
+<Callout type="info">
+Les deux helpers restaurent le mode précédent au retour du bloc, y compris s'il lève une
+exception. Les appels `enable`/`disable` manuels ne sont pas équilibrés pour vous : à vous de les
+appairer.
+</Callout>
+
+## Garder l'écran allumé
+
+Empêchez l'écran et le système de se mettre en veille pendant une tâche ou une présentation,
+puis relâchez la demande à la fin :
+
+```kotlin
+EnergyManager.keepScreenAwake()
+// ... tâche longue ou présentation
+EnergyManager.releaseScreenAwake()
+```
+
+## Fonctionnement
+
+Le mode efficacité a deux niveaux. Le mode light laisse l'app pleinement fonctionnelle en
+arrière-plan : l'ordonnancement CPU est déprioritisé via des hints QoS, mais les I/O et le
+réseau tournent à vitesse normale, donc les jobs de synchronisation et les téléchargements
+continuent d'avancer. Le mode full vise une fenêtre minimisée, sans UI à rendre — il ajoute le
+throttling des I/O et fait passer le process dans la classe de priorité la plus basse. Les deux
+sont réversibles immédiatement.
+
+L'efficacité au niveau thread applique le même mécanisme au seul thread appelant. Elle confine
+une coroutine lourde à la voie lente sans ralentir le reste du process, ce qui garde une UI
+réactive à côté du travail de fond. Le helper `withEfficiencyMode` s'appuie dessus en exécutant
+son bloc sur un thread unique épinglé.
+
+Chaque plateforme mappe ces niveaux sur des fonctions natives de l'OS :
+
+| OS | Mode full | Mode light | Écran allumé |
+|---|---|---|---|
+| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (feuille verte dans Task Manager 22H2+) | EcoQoS uniquement | `SetThreadExecutionState(ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` |
+| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (confinement E-cores, throttling I/O et réseau sur Apple Silicon) | `task_policy_set` Tier 5 uniquement — CPU déprioritisé, I/O intact | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` |
+| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` uniquement | GNOME SessionManager DBus, logind `Inhibit("idle")`, ou X11 `XScreenSaverSuspend` |
+
+Le mode thread utilise la forme par-thread de ces primitives sur Linux,
+`pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` sur macOS, et
+`SetThreadInformation`/`THREAD_PRIORITY_IDLE` sur Windows.
+
+## Référence de l'API
+
+### EnergyManager
+
+| Méthode | Description |
+|---|---|
+| `isAvailable(): Boolean` | Si le bridge natif a été chargé sur cette plateforme. |
+| `enableEfficiencyMode()` / `disableEfficiencyMode()` | Mode full au niveau process. |
+| `enableLightEfficiencyMode()` / `disableLightEfficiencyMode()` | Mode light au niveau process. |
+| `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Par thread ; n'affecte que le thread appelant. |
+| `withEfficiencyMode { }` (suspend) | Exécute le bloc sur un thread dédié à efficacité thread ; le thread est libéré au retour du bloc. |
+| `withLightEfficiencyMode { }` (suspend) | Applique une QoS light au niveau process pour la durée du bloc ; pas d'épinglage de thread. |
+| `keepScreenAwake()` / `releaseScreenAwake()` | Empêche puis restaure la veille écran et système. |
+| `isScreenAwakeActive(): Boolean` | Si le maintien de l'écran allumé est actif. |
+
+Chaque appel `enable`/`disable` et `keepScreenAwake`/`releaseScreenAwake` renvoie un
+`EnergyManager.Result` avec `success: Boolean`, `errorCode: Int` et `message: String`. Sur une
+plateforme non supportée, le résultat est `success = false` avec `errorCode = -1`.
+
+## Notes
+
+- Sur Linux, `libdbus-1`, `libX11` et `libXss` sont chargées via `dlopen()` au runtime. Les
+  bibliothèques manquantes dégradent proprement, et une connexion DBus privée évite que le
+  module interfère avec le bus d'accessibilité de la JVM.
+- Sur Windows 10 1709+, EcoQoS ne s'applique que sur batterie ; Windows 11+ le respecte aussi
+  sur secteur.
+- Pour une tâche longue qui doit aussi réveiller la machine, maintenez `keepScreenAwake()` en
+  parallèle d'un job du [scheduler](/docs/lifecycle/scheduler).
+
+## Et ensuite
+
+- [Scheduler](/docs/lifecycle/scheduler) — exécute du travail de fond différé ou périodique.
+- [Taskbar progress](/docs/lifecycle/taskbar-progress) — affiche la progression d'une tâche longue dans la barre des tâches.
+- [Auto-launch](/docs/lifecycle/auto-launch) — lance votre app au login.

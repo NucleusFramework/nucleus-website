@@ -1,0 +1,142 @@
+---
+title: Global hotkeys
+description: Register OS-wide keyboard shortcuts that fire even when your app does not have focus.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`global-hotkey` lets you register system-wide keyboard shortcuts from Kotlin on macOS, Windows, and Linux. A global hotkey fires when its key combination is pressed, regardless of which window has focus, which is what media players, screen-capture tools, and accessibility utilities rely on.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.global-hotkey:<version>")
+}
+```
+
+## Register a hotkey
+
+Initialize the manager once, register a combination, and keep the returned handle to unregister it later:
+
+```kotlin
+import dev.nucleusframework.globalhotkey.GlobalHotKeyManager
+import dev.nucleusframework.globalhotkey.HotKeyModifier
+import java.awt.event.KeyEvent
+
+GlobalHotKeyManager.initialize()
+
+val handle = GlobalHotKeyManager.register(
+    keyCode = KeyEvent.VK_F12,
+    modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT,
+) { keyCode, modifiers ->
+    println("Hotkey pressed")
+}
+
+// later
+GlobalHotKeyManager.unregister(handle)
+GlobalHotKeyManager.shutdown()
+```
+
+`register` returns a `Long` handle, or `-1` if the binding could not be registered. The listener receives the `keyCode` and `modifiers` bitmask that triggered it.
+
+To scope a hotkey to a Composable's lifetime, register in `DisposableEffect` and unregister in `onDispose`:
+
+```kotlin
+DisposableEffect(Unit) {
+    GlobalHotKeyManager.initialize()
+    val handle = GlobalHotKeyManager.register(
+        keyCode = KeyEvent.VK_K,
+        modifiers = HotKeyModifier.META,
+    ) { _, _ ->
+        showQuickSwitcher()
+    }
+
+    onDispose {
+        GlobalHotKeyManager.unregister(handle)
+    }
+}
+```
+
+## How it works
+
+`GlobalHotKeyManager` is a thread-safe singleton. `initialize()` loads the native bridge for the current platform and starts its message loop: `RegisterHotKey` on Windows, Carbon `RegisterEventHotKey` on macOS, and `XGrabKey` (X11) or the `org.freedesktop.portal.GlobalShortcuts` D-Bus portal (Wayland) on Linux.
+
+Each `register(...)` call maps the portable `modifiers` bitmask to the native modifier flags and returns a handle you pass back to `unregister`. When a registration fails, `register` returns `-1` and sets `lastError` to a description of the failure.
+
+Listeners are invoked from the native message loop, not the UI thread. Marshal back to your UI or audio thread yourself before touching shared state.
+
+## API reference
+
+### Register a key combination
+
+```kotlin
+fun register(
+    keyCode: Int,
+    modifiers: Int = 0,
+    description: String? = null,
+    listener: HotKeyListener,
+): Long
+```
+
+`keyCode` is an AWT virtual key code such as `KeyEvent.VK_F12`. `modifiers` is a bitmask built from `HotKeyModifier` values; use `0` for no modifiers. `description` is a user-readable label shown in the system shortcut dialog on Linux/Wayland and ignored elsewhere. Returns the registration handle, or `-1` on failure.
+
+### Combine modifiers
+
+`HotKeyModifier` has four values: `ALT`, `CONTROL`, `SHIFT`, and `META`. On macOS, `ALT` is Option and `META` is Command; on Windows and Linux, `META` is the Win/Super key. Combine them with `+`, which produces the `Int` bitmask that `register` expects:
+
+```kotlin
+val modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT
+```
+
+### Handle the callback
+
+`HotKeyListener` is a functional interface with a single method:
+
+```kotlin
+fun onHotKey(keyCode: Int, modifiers: Int)
+```
+
+Because it is a `fun interface`, you can pass a two-parameter lambda wherever a `HotKeyListener` is expected.
+
+### Register a media key
+
+```kotlin
+GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { _, _ -> player.togglePlayPause() }
+GlobalHotKeyManager.register(MediaKey.NEXT_TRACK) { _, _ -> player.skipNext() }
+```
+
+`MediaKey` has four values: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, and `PREV_TRACK`.
+
+<Callout type="warn">
+Media keys are not supported on macOS. On macOS this overload returns `-1` and sets `lastError` to `"Media keys are not supported on macOS"`.
+</Callout>
+
+### Check availability
+
+```kotlin
+if (!GlobalHotKeyManager.isAvailable) {
+    // The native bridge is not loaded on this platform.
+}
+```
+
+`isAvailable` reports whether the native library is loaded and functional on the current platform.
+
+### Unregister and shut down
+
+`unregister(handle: Long): Boolean` releases a single binding and returns whether it succeeded. `shutdown()` unregisters every hotkey and stops the native message loop; call it on app exit.
+
+## Notes
+
+<Callout type="warn" title="macOS permissions">
+On macOS the user may be prompted to grant your app **Input Monitoring** (and sometimes **Accessibility**) under System Settings → Privacy & Security. Until they accept, callbacks never fire. Link to `x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent` from your prompt.
+</Callout>
+
+- Linux Wayland compositors generally disallow global key grabs from arbitrary apps. The library uses the `org.freedesktop.portal.GlobalShortcuts` portal where available, which requires a reverse-DNS `.desktop` file and the app launched from it; on other compositors the binding may not fire.
+- Read `GlobalHotKeyManager.lastError` after a failed call to find out why a registration was rejected.
+
+## What's next
+
+- [Media control](/docs/os/media-control) — expose playback state and respond to system media events.
+- [System info](/docs/os/system-info) — query OS, CPU, memory, and battery details from Kotlin.
+- [OS integration overview](/docs/os) — the full set of platform integration modules.

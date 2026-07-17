@@ -1,0 +1,194 @@
+---
+title: Tasks & CI
+description: The Gradle tasks the Nucleus plugin adds for GraalVM native image, where their output lands, and how to run them on each OS in CI.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Nucleus Gradle plugin registers a task graph for building and packaging your app
+as a GraalVM native image, plus per-format packaging tasks (`packageGraalvmDeb`,
+`packageGraalvmDmg`, `packageGraalvmNsis`). Most tasks are wired as dependencies of
+`packageGraalvmNative` and run automatically. This page lists the tasks, shows where
+their output lands, and covers running them on each target OS in CI.
+
+## Gradle tasks
+
+| Task | Description |
+|------|-------------|
+| `packageGraalvmNative` | Compile and package the app as a native binary. This is the main task. |
+| `runGraalvmNative` | Build and run the native image directly. |
+| `runWithNativeAgent` | Run the app with the GraalVM `native-image-agent` to collect reflection metadata. |
+| `resolveGraalvmReachabilityMetadata` | Resolve reachability metadata from the Oracle repository for runtime dependencies. Runs automatically. |
+| `analyzeGraalvmStaticMetadata` | Statically analyze bytecode to detect reflection, JNI, and resource usage. Runs automatically. |
+| `filterGraalvmLibraryMetadata` | Filter and merge per-library metadata against the runtime classpath. Runs automatically. |
+| `generateGraalvmPlatformMetadata` | Generate platform-specific metadata for the current OS. Runs automatically. |
+| `cleanupGraalvmMetadata` | Remove entries from your manual `reachability-metadata.json` that automatic metadata already covers. |
+| `packageGraalvmDeb` | Package the native image as a `.deb` installer (Linux). |
+| `packageGraalvmDmg` | Package the native image as a `.dmg` installer (macOS). |
+| `packageGraalvmNsis` | Package the native image as an NSIS `.exe` installer (Windows). |
+
+The four metadata tasks run as dependencies of `packageGraalvmNative`, so you rarely
+invoke them directly. The `packageGraalvm<Format>` tasks use electron-builder, which
+requires Node.js on the runner.
+
+<Callout type="info">
+The packaging tasks exist only for target formats you request in `nativeDistributions.targetFormats`.
+A task name is the format's enum constant, so `TargetFormat.Deb` produces `packageGraalvmDeb`,
+`TargetFormat.Nsis` produces `packageGraalvmNsis`, and so on.
+</Callout>
+
+## Run the tasks
+
+```shell
+# Compile the native binary; triggers every automatic metadata task
+./gradlew packageGraalvmNative
+
+# Build and run the binary
+./gradlew runGraalvmNative
+
+# Platform installers
+./gradlew packageGraalvmDeb     # Linux
+./gradlew packageGraalvmDmg     # macOS
+./gradlew packageGraalvmNsis    # Windows
+
+# Collect reflection metadata before a release
+./gradlew runWithNativeAgent
+
+# Remove redundant manual metadata
+./gradlew cleanupGraalvmMetadata
+```
+
+The plugin defaults the native-image target architecture (`graalvm.march`) to `native`,
+which produces a binary tuned for the build machine's CPU. To build a portable binary,
+set `march = "compatibility"` in the DSL:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    graalvm {
+        march = "compatibility"
+    }
+}
+```
+
+<Callout type="info">
+The Nucleus sample builds map `graalvm.march` to a Gradle property so you can override it
+on the command line: `march = providers.gradleProperty("nativeMarch").getOrElse("native")`.
+With that wiring, `./gradlew packageGraalvmNative -PnativeMarch=compatibility` selects the
+portable target. The `-PnativeMarch` flag only works if your build script reads the property.
+</Callout>
+
+## Output locations
+
+The native binary and its companion libraries land under the app's temp directory:
+
+```
+<project>/build/compose/tmp/<app>/graalvm/output/
+```
+
+| Platform | Output |
+|----------|--------|
+| **macOS** | `output/<app>.app/` — a full `.app` bundle with `Info.plist`, icons, and signed dylibs |
+| **Windows** | `output/<app>.exe` plus companion DLLs (`awt.dll`, `jvm.dll`, `jawt.dll`, `skiko.dll`, …) |
+| **Linux** | `output/<app>` plus companion `.so` files (`libawt.so`, `libjvm.so`, `libjawt.so`, `libskiko.so`, …) |
+
+Per-format installers land under the binaries directory, one folder per format:
+
+```
+<project>/build/compose/binaries/<app>/graalvm-<format>/
+```
+
+`<format>` is the format id, for example `graalvm-deb`, `graalvm-dmg`, or `graalvm-nsis`.
+
+## Build in CI with GitHub Actions
+
+A native image must be compiled on each target OS — you cannot cross-compile. Run a
+matrix over `ubuntu-latest`, `macos-latest`, and `windows-latest`, and provision the
+toolchain with the `setup-nucleus` action:
+
+```yaml
+name: GraalVM release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-natives:
+    uses: ./.github/workflows/build-natives.yaml
+
+  graalvm:
+    needs: build-natives
+    name: GraalVM - ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x64,    os: ubuntu-latest }
+          - { name: macOS ARM64,  os: macos-latest  }
+          - { name: Windows x64,  os: windows-latest }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download pre-built JNI native libs from the build-natives job here.
+
+      - name: Set up Nucleus (GraalVM)
+        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
+        with:
+          graalvm: 'true'
+          setup-gradle: 'true'
+          setup-node: 'true'   # required for packageGraalvm<Format>
+
+      - name: Build the GraalVM native package
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   ./gradlew :myapp:packageGraalvmDeb  -PnativeMarch=compatibility --no-daemon ;;
+            macOS)   ./gradlew :myapp:packageGraalvmDmg  -PnativeMarch=compatibility --no-daemon ;;
+            Windows) ./gradlew :myapp:packageGraalvmNsis -PnativeMarch=compatibility --no-daemon ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graalvm-${{ runner.os }}
+          path: myapp/build/compose/binaries/**/graalvm-*/**
+```
+
+With `graalvm: 'true'`, `setup-nucleus` provisions BellSoft Liberica NIK (Java 25 by
+default) and the platform toolchain instead of the JBR it installs for JVM builds.
+`setup-gradle: 'true'` configures Gradle, and `setup-node: 'true'` installs Node.js for
+the electron-builder packaging tasks. See [CI/CD](/docs/packaging/ci-cd) for the full
+release workflow, including publishing to GitHub Releases.
+
+### Cache the Gradle build
+
+`setup-gradle: 'true'` runs `gradle/actions/setup-gradle`, which caches Gradle's
+dependency and build outputs. That already covers the Oracle reachability metadata
+repository — it is resolved as a normal dependency — and the outputs of the metadata
+tasks. GraalVM native-image compilation is the long step (roughly 5–15 minutes per
+platform) and runs from scratch on each build; it is not incrementally cached.
+
+## Debug missing reflection at runtime
+
+Run the native binary from a terminal. Reflection failures produce clear messages such
+as `ClassNotFoundException` or `NoSuchFieldException`. To capture the missing entries:
+
+1. Run `./gradlew runWithNativeAgent` and exercise the failing code path so the agent
+   records the entry.
+2. The agent merges its output into your metadata without overwriting manually enriched
+   entries, so only genuinely new entries are added.
+3. Rebuild with `./gradlew packageGraalvmNative`.
+
+<Callout type="warn">
+`packageGraalvmDeb` fails unless `homepage` is set in `nativeDistributions` — electron-builder
+requires it for DEB packaging. See [Configuration](/docs/start/configuration).
+</Callout>
+
+## What's next
+
+- [GraalVM configuration](/docs/performance/graalvm/configuration) — the `graalvm { }` DSL and its properties.
+- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — how reflection metadata is resolved for you.
+- [CI/CD](/docs/packaging/ci-cd) — the full release workflow with signing and publishing.
+- [Configuration](/docs/start/configuration) — `nativeDistributions` and the `homepage` property.

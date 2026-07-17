@@ -1,0 +1,164 @@
+---
+title: Notifications on Linux
+description: Send freedesktop desktop notifications over D-Bus from Kotlin, with urgency, hints, sounds, and action callbacks.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`notification-linux` sends desktop notifications through the `org.freedesktop.Notifications`
+D-Bus service, which GNOME, KDE, Cinnamon, Xfce, and other desktops implement. It maps the
+freedesktop Desktop Notifications specification to Kotlin over GIO/GDBus, with no JNA or
+Java D-Bus dependency.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-linux:<version>")
+}
+```
+
+This pulls in [`freedesktop-icons`](/docs/os/freedesktop-icons) transitively for typesafe icon names.
+
+## Send a notification
+
+Build a `Notification` and pass it to `LinuxNotificationCenter.notify`, which returns the
+server-assigned ID:
+
+```kotlin
+import dev.nucleusframework.notification.linux.LinuxNotificationCenter
+import dev.nucleusframework.notification.linux.Notification
+import dev.nucleusframework.notification.linux.NotificationAction
+import dev.nucleusframework.notification.linux.NotificationHints
+import dev.nucleusframework.notification.linux.Urgency
+import dev.nucleusframework.freedesktop.icons.FreedesktopIcon
+
+val id: Int = LinuxNotificationCenter.notify(
+    Notification(
+        appName = "MyApp",
+        summary = "Build finished",
+        body = "myapp-2.0.0.zip is ready",
+        appIcon = FreedesktopIcon.Status.DIALOG_INFORMATION,
+        hints = NotificationHints(urgency = Urgency.NORMAL),
+        actions = listOf(NotificationAction("open", "Open")),
+    ),
+)
+```
+
+`notify` returns an ID greater than `0` on success, or `0` on failure.
+
+<Callout type="info">
+Check `LinuxNotificationCenter.isAvailable` before sending. It returns `false` on non-Linux
+platforms or when the native library could not be loaded.
+</Callout>
+
+## How it works
+
+`LinuxNotificationCenter` talks to `org.freedesktop.Notifications` over D-Bus through JNI.
+Each call to `notify` invokes the `Notify` method and returns the ID the server assigns.
+Passing a non-zero `replacesId` atomically replaces an existing notification with that ID.
+
+Action clicks and close events arrive later as D-Bus signals. Register a
+`LinuxNotificationListener` to receive them; signal monitoring starts when the first listener is
+added and stops when the last is removed. Callbacks are dispatched on the Swing EDT.
+
+The specification is uniform, but servers differ in what they render. GNOME Shell in particular
+is unreliable about `appIcon`; set `hints.imagePath` for consistent iconography. Call
+`getServerInformation()` at startup to log the active server, and `getCapabilities()` to see
+what the server supports.
+
+## API reference
+
+### Set urgency
+
+```kotlin
+hints = NotificationHints(urgency = Urgency.CRITICAL)
+```
+
+`Urgency` is `LOW`, `NORMAL`, or `CRITICAL`. Critical notifications typically bypass
+do-not-disturb and do not auto-expire.
+
+### Add action buttons
+
+Each `NotificationAction` has a `key` and a `label`. Use `NotificationAction.DEFAULT_KEY`
+for the action bound to clicking the notification body.
+
+```kotlin
+val notification = Notification(
+    appName = "MyApp",
+    summary = "New message",
+    actions = listOf(
+        NotificationAction("reply", "Reply"),
+        NotificationAction("archive", "Archive"),
+    ),
+)
+```
+
+### Receive callbacks
+
+```kotlin
+import dev.nucleusframework.notification.linux.CloseReason
+import dev.nucleusframework.notification.linux.LinuxNotificationListener
+
+LinuxNotificationCenter.addListener(object : LinuxNotificationListener {
+    override fun onActionInvoked(notificationId: Int, actionKey: String) { /* … */ }
+    override fun onClosed(notificationId: Int, reason: CloseReason) { /* … */ }
+})
+```
+
+`CloseReason` is `EXPIRED`, `DISMISSED`, `CLOSED`, or `UNDEFINED`. Remove a listener with
+`removeListener`.
+
+### Embed inline image data
+
+Use `ImageData` when you have raw pixels rather than a file path — for example, a generated
+avatar. The bytes must be in RGB or RGBA order:
+
+```kotlin
+import dev.nucleusframework.notification.linux.ImageData
+
+hints = NotificationHints(
+    imageData = ImageData(
+        width = width,
+        height = height,
+        rowstride = width * 4,
+        hasAlpha = true,
+        data = bytes,
+    ),
+)
+```
+
+`channels` defaults to `4` when `hasAlpha` is `true` and `3` otherwise, and `bitsPerSample`
+defaults to `8`.
+
+### Play a sound
+
+```kotlin
+import dev.nucleusframework.notification.linux.NotificationSound
+
+hints = NotificationHints(
+    soundName = NotificationSound.Notification.DIALOG_INFORMATION,
+)
+```
+
+Sound names are grouped by category (`Alert`, `Notification`, `Action`, `InputFeedback`,
+`Game`); use `NotificationSound.Custom("x-myapp-…")` for names outside the specification.
+
+### Close a notification
+
+```kotlin
+LinuxNotificationCenter.closeNotification(id)
+```
+
+## Notes
+
+- Under `Xvfb` or a headless CI, `notify` returns without error, but no daemon displays the
+  notification.
+- If notifications work in development but not under Flatpak, check the
+  `org.freedesktop.Notifications` portal permission in your manifest.
+
+## What's next
+
+- [freedesktop-icons](/docs/os/freedesktop-icons) — typesafe icon names for `appIcon` and `imagePath`.
+- [Notifications overview](/docs/os/notifications) — the cross-platform notification API.
+- [Notifications on macOS](/docs/os/notification-macos) and [Windows](/docs/os/notification-windows).

@@ -1,0 +1,120 @@
+---
+title: DSL menu du tray
+description: Construisez le menu contextuel du tray depuis Kotlin avec des items, des cases à cocher, des sous-menus, des séparateurs et du contenu conditionnel.
+---
+
+Le DSL menu du tray vous permet de construire le menu contextuel du tray depuis Kotlin, dans la
+lambda finale de `Tray()`. Le menu participe à la recomposition Compose : quand un
+`mutableStateOf` change, les labels, les cases, les icônes et des branches entières se mettent
+à jour dans le menu natif.
+
+Le DSL fournit quatre types d'items — `Item`, `CheckableItem`, `SubMenu` et `Divider`. Chaque
+type d'item accepte une icône sous forme d'`ImageVector`, `Painter`, `DrawableResource` ou
+`@Composable`. Comme le menu n'est que du code Kotlin, vous pouvez utiliser directement des branches
+`if` et des valeurs calculées.
+
+## Ajouter des items
+
+Ajoutez un `Item` pour chaque action. Passez `isEnabled = false` pour désactiver un item, et
+`icon` pour afficher une icône :
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Ouvrir les réglages") { openSettings() }
+    Item(label = "Désactivé", isEnabled = false) {}
+    Item(label = "Exporter", icon = Icons.Default.Upload) { export() }
+}
+```
+
+## Ajouter des cases à cocher
+
+Utilisez `CheckableItem` pour les bascules. Chaque plateforme affiche son style de coche natif.
+Le paramètre `checked` reflète l'état courant, et la lambda finale reçoit la nouvelle valeur :
+
+```kotlin
+var notifications by remember { mutableStateOf(true) }
+var darkMode by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    CheckableItem(label = "Notifications", checked = notifications) {
+        notifications = it
+    }
+    CheckableItem(label = "Mode sombre", icon = Icons.Default.DarkMode, checked = darkMode) {
+        darkMode = it
+    }
+}
+```
+
+## Ajouter des sous-menus
+
+Imbriquez un `SubMenu` pour regrouper des items liés. Les sous-menus peuvent s'imbriquer à
+n'importe quelle profondeur :
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    SubMenu(label = "Outils", icon = Icons.Default.Build) {
+        Item(label = "Terminal") { openTerminal() }
+        Item(label = "Explorateur") { openFiles() }
+        SubMenu(label = "Plus") {
+            Item(label = "Calculatrice") { openCalc() }
+        }
+    }
+}
+```
+
+## Ajouter des séparateurs
+
+Insérez un `Divider` pour séparer des groupes d'items :
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Afficher la fenêtre") { show() }
+    Divider()
+    Item(label = "Réglages") { settings() }
+    Item(label = "À propos") { about() }
+    Divider()
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+## Construire un menu réactif
+
+Comme le DSL est du code Compose, vous pouvez afficher des items conditionnellement et calculer les
+labels à partir de l'état. Écrivez le menu comme n'importe quel arbre Compose :
+
+```kotlin
+var isConnected by remember { mutableStateOf(false) }
+var showAdvanced by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Wifi, tooltip = "Réseau") {
+    Item(label = if (isConnected) "Déconnecter" else "Connecter") {
+        isConnected = !isConnected
+    }
+
+    CheckableItem(label = "Options avancées", checked = showAdvanced) {
+        showAdvanced = it
+    }
+
+    if (showAdvanced) {
+        Divider()
+        SubMenu(label = "Avancé") {
+            Item(label = "Réglages DNS") {}
+            Item(label = "Proxy") {}
+        }
+    }
+
+    Divider()
+    Item(label = "Quitter") { exitProcess(0) }
+}
+```
+
+## Fonctionnement
+
+Le menu natif se reconstruit tout seul quand l'état qu'il lit change. Vous n'appelez pas
+`refresh()` et vous ne gérez aucun diff vous-même — Compose suit les lectures d'état et Nucleus
+applique les changements au menu de la plateforme.
+
+## Et ensuite
+
+- [System tray](/docs/os/system-tray) — types d'icônes, action primaire et icônes par plateforme.
+- [Tray apps](/docs/os/tray-app) — afficher une popup à la place du menu, ou en plus.

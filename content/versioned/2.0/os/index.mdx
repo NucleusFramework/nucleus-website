@@ -1,0 +1,53 @@
+---
+title: OS integration
+description: Kotlin modules that expose native macOS, Windows, and Linux desktop capabilities such as notifications, system tray, global hotkeys, media controls, dark mode, and system colors.
+---
+
+The OS integration modules expose native desktop capabilities from Kotlin: notifications,
+system tray, global hotkeys, media controls, dark mode, and system colors. Each capability is a
+separate Gradle artifact, so you depend only on the modules you use.
+
+## Coverage
+
+| Feature | Module | macOS | Windows | Linux |
+| --- | --- | --- | --- | --- |
+| Cross-platform notifications | `notification-common` | yes | yes | yes |
+| Native notifications (per OS) | `notification-macos` / `notification-windows` / `notification-linux` | yes | yes | yes |
+| System tray and tray-anchored apps | `composenativetray` | yes | yes | yes |
+| Global hotkeys | `global-hotkey` | yes | yes | yes |
+| Media controls | `media-control` | yes | yes | yes |
+| Dark mode | `darkmode-detector` | yes | yes | yes |
+| Accent color and high contrast | `system-color` | yes | yes | yes |
+| Hardware and OS info | `system-info` | yes | yes | yes |
+| macOS menu bar | `menu-macos` | yes | — | — |
+| FreeDesktop icon names | `freedesktop-icons` | — | — | yes |
+
+Modules published by Nucleus use the group `dev.nucleusframework` and the artifact name
+`nucleus.<module-name>`. The `composenativetray` module ships from a separate repository under
+the same group, without the `nucleus.` prefix.
+
+## Cross-platform modules and platform modules
+
+Some capabilities come in two forms. The cross-platform modules — `notification-common`,
+`media-control`, and `darkmode-detector` — expose the intersection of what all three systems
+support behind a single API. The platform modules, such as `notification-macos`,
+`notification-windows`, and `notification-linux`, expose each system's native API directly, so
+their surfaces differ from one platform to the next. Depend on a platform module when you need a
+platform-specific feature, such as Windows toast progress bars, macOS interruption levels, or
+MPRIS volume on Linux.
+
+## How it works
+
+Each module wraps its platform's native API through a JNI bridge that Nucleus ships and loads
+for you. Notifications use the UserNotifications framework (`UNUserNotificationCenter`) on macOS,
+WinRT toast notifications on Windows, and the FreeDesktop notification specification
+(`org.freedesktop.Notifications`) over D-Bus on Linux. Media controls use SMTC on Windows and
+MPRIS on Linux. Dark mode and accent color read reactively through `@Composable` functions, so
+they participate in Compose recomposition when the system state changes.
+
+## What's next
+
+- [Cross-platform notifications](/docs/os/notifications) — send notifications from a single API on all three systems.
+- [System tray](/docs/os/system-tray) — Compose-rendered tray icons and menus.
+- [Global hotkeys](/docs/os/global-hotkey) — register shortcuts that fire even when your app is unfocused.
+- [Dark mode](/docs/os/dark-mode) — read the system theme and observe changes.

@@ -1,0 +1,108 @@
+---
+title: Fluent — Mica & Acrylic
+description: Reproduce the Windows 11 Fluent look on a Nucleus DecoratedWindow with Mica tinting, Acrylic surfaces, and the native caption buttons.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Fluent is the Windows 11 design language: Mica desktop tinting, Acrylic surfaces in flyouts,
+rounded corners, and caption buttons on the right. This page shows how to reproduce that look on
+a Nucleus `DecoratedWindow` running on the Tao backend.
+
+<Callout type="info">
+The dedicated `decorated-window-fluent` style pack is coming soon and has no published artifact
+yet. Until it ships, target the same look manually with the Tao backend, a transparent
+`TitleBarStyle`, and the Windows icons in `decorated-window-core`.
+</Callout>
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-fluent:<version>") — not yet published
+}
+```
+
+## Apply the Fluent look
+
+Run on the Tao backend so the native title bar can be transparent, then make the title-bar
+background transparent so the Mica material shows through:
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import dev.nucleusframework.window.NucleusDecoratedWindowTheme
+import dev.nucleusframework.window.TitleBar
+import dev.nucleusframework.window.styling.TitleBarColors
+import dev.nucleusframework.window.styling.TitleBarMetrics
+import dev.nucleusframework.window.styling.TitleBarStyle
+import dev.nucleusframework.window.tao.DecoratedWindow
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val dark = isSystemInDarkMode()
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color.Transparent,        // let Mica show through
+            inactiveBackground = Color.Transparent,
+            content = if (dark) Color(0xFFE6E6E6) else Color(0xFF1F1F1F),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 32.dp),
+    )
+
+    NucleusDecoratedWindowTheme(isDark = dark, titleBarStyle = titleBarStyle) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Fluent") {
+            TitleBar { _ -> /* search box, breadcrumbs, … */ }
+            Box(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+`NucleusDecoratedWindowTheme` provides the `titleBarStyle` to every `TitleBar` in the window
+through a composition local, so you configure it once.
+
+## How it works
+
+Fluent's depth effects (Mica and Acrylic) are window-level materials exposed by the Desktop
+Window Manager (`DwmSetWindowAttribute` with `DWMWA_SYSTEMBACKDROP_TYPE`). The Tao backend
+toggles them on the native `HWND`. A transparent title-bar background lets that material render
+behind your Compose content instead of a solid fill.
+
+The default `TitleBar` draws the Windows caption buttons from `windowsTitleBarIcons()` in
+`decorated-window-core`, so screenshots stay consistent across backends. Snap layouts (the
+popover above the maximize button) are handled by the OS once the window is decorated as a
+normal top-level window.
+
+## API reference
+
+- `windowsTitleBarIcons(isDark: Boolean = LocalIsDarkTheme.current): WindowsTitleBarIconSet` in
+  `dev.nucleusframework.window.utils.windows` — the caption-button icon set.
+- `WindowsControlButtonIcons` in `dev.nucleusframework.window.icons.windows` — `ImageVector`
+  extension properties `.Close`, `.Maximize`, `.Minimize`, `.Restore` (plus dark, hover, and
+  inactive variants) for drawing your own caption buttons.
+- `Modifier.windowDragHandler(window: Window): Modifier` in `decorated-window-awt` (deprecated
+  backend only) — mark a custom region, such as a tab strip, as the drag handle. It takes an
+  AWT `Window`.
+
+## Notes
+
+<Callout type="info">
+Mica is a Windows 11 feature. On Windows 10 the window falls back to a solid color. Acrylic still
+works as an overlay, but it draws on top of content rather than behind it.
+</Callout>
+
+## What's next
+
+- [Material toolkit](/docs/window/toolkit-material) — drive the title bar from a Material color scheme.
+- [Jewel toolkit](/docs/window/toolkit-jewel) — the IntelliJ-style title bar.
+- [Backends](/docs/concepts/backends) — when Tao is required and how to select it.

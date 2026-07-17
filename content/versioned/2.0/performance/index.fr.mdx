@@ -1,0 +1,89 @@
+---
+title: Performance et runtimes natifs
+description: Nucleus construit deux runtimes à partir du même code Kotlin — une image native GraalVM ou une image JDK 25 avec un cache AOT — sélectionnés depuis un seul DSL Gradle.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus compile le même code Kotlin en deux runtimes, et vous choisissez lequel produire au moment
+du build : une image native GraalVM, ou une image JDK 25 standard avec un cache ahead-of-time
+(AOT). Les deux sont pilotés par le même DSL Gradle : passer de l'un à l'autre change la sortie
+du build, pas votre code.
+
+## Les deux runtimes
+
+Les runtimes diffèrent par la façon dont l'application est compilée et par ce qu'elle embarque,
+ce qui donne des caractéristiques de démarrage et de débit différentes.
+
+|                     | GraalVM Native Image              | JDK 25 + AOT cache               |
+|---------------------|-----------------------------------|----------------------------------|
+| Compilation         | Ahead-of-time, monde fermé        | JIT à l'exécution, monde ouvert  |
+| Runtime Java        | Aucun ; binaire autonome          | JRE embarqué plus cache AOT      |
+| Réflexion et JNI    | Métadonnées statiques uniquement  | Dynamique, sans restriction      |
+| Artefact            | `nucleus.graalvm-runtime`         | `nucleus.aot-runtime`            |
+
+Une image native GraalVM démarre rapidement et occupe moins de mémoire, car elle est compilée
+en amont et n'embarque aucune JVM. Le runtime JDK atteint un débit soutenu plus élevé une fois
+que le JIT d'HotSpot a chauffé sur les chemins chauds ; le cache AOT raccourcit ce warmup en
+réutilisant le chargement de classes et la compilation d'une exécution précédente.
+
+## Choisir un runtime
+
+- **GraalVM Native Image** — utilitaires en arrière-plan, apps de barre de menu, outils desktop
+  type CLI et cibles sandboxées comme l'App Store ou MSIX. Le démarrage est rapide, l'installateur
+  est petit et aucun runtime Java n'est livré avec l'application.
+- **JDK 25 + AOT cache** — outils longue durée type IDE, traitements de données lourds, hôtes de
+  plugins et tout ce qui repose sur du comportement dynamique comme les moteurs de script,
+  ByteBuddy ou les class loaders personnalisés. Le JIT d'HotSpot devient payant dès que les
+  chemins chauds chauffent, et le cache AOT supprime l'essentiel du coût de warmup.
+- **Les deux** — les deux peuvent cohabiter dans un même projet. Une équipe peut livrer un build
+  GraalVM sur l'App Store et un build JDK avec cache AOT pour le téléchargement direct.
+
+## Basculer entre les runtimes
+
+Les deux runtimes se configurent dans le bloc `nucleus.application`. Activer `graalvm` produit
+une image native ; définir `enableAotCache` produit une image JDK avec un cache AOT.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    // Produit une image native GraalVM.
+    graalvm {
+        isEnabled = true
+        imageName = "myapp"
+    }
+
+    // Ou produit une image JDK 25 avec un cache AOT.
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+<Callout type="info">
+Les deux blocs peuvent être présents en même temps. Choisissez le runtime produit par un build selon
+le build type ou l'entrée de matrice CI, ou produisez les deux et laissez l'utilisateur choisir.
+</Callout>
+
+## Modules complémentaires
+
+Les builds natifs s'appuient sur quelques modules qui fournissent les métadonnées de plateforme
+et l'intégration à l'OS :
+
+- [Accès natif](/docs/performance/native-access) — comment Nucleus fournit les métadonnées
+  GraalVM de réflexion, de ressources et JNI pour que vous n'écriviez pas de JSON à la main.
+- [Du code natif en Kotlin](/docs/performance/native-code) — écrivez le côté natif en Kotlin/Native
+  et appelez-le depuis la JVM via un bridge FFM généré.
+- [HTTP natif](/docs/performance/native-http) — `HttpClient`, OkHttp et Ktor câblés au trust
+  store de l'OS.
+- [SSL natif](/docs/performance/native-ssl) — le keychain de l'OS comme source d'ancres de
+  confiance.
+
+## Et ensuite
+
+- [GraalVM Native Image](/docs/performance/graalvm) — le DSL Gradle complet, les métadonnées
+  automatiques, les tâches Gradle et le câblage CI.
+- [AOT cache](/docs/performance/aot-cache) — Project Leyden de JDK 25, branché à Gradle en une
+  ligne.
+- [Runtimes](/docs/concepts/runtimes) — l'architecture derrière les deux backends.

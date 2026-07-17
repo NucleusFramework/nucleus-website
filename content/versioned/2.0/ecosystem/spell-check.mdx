@@ -1,0 +1,64 @@
+---
+title: Native spell check
+description: Check spelling in a Kotlin desktop app with PlatformSpellCheckerKt, a wrapper over each operating system's native spell-check engine.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+[PlatformSpellCheckerKt](https://github.com/Wavesonics/PlatformSpellCheckerKt) lets you check
+spelling from Kotlin using each operating system's native spell-check engine. Nucleus does not
+ship a spell-check module; this library already covers the platforms Nucleus targets, so add it
+to your app directly.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("com.darkrockstudios:platform-spellcheckerkt:<version>")
+}
+```
+
+## Check spelling
+
+Create a checker through `PlatformSpellCheckerFactory`, then check either a single word or a
+whole string:
+
+```kotlin
+val checker = PlatformSpellCheckerFactory().createSpellChecker()
+
+// Check a single word; the result carries suggested corrections.
+val result = checker.checkWord("sentance")
+val suggestions = result.suggestions // e.g. ["sentence", ...]
+
+// Check a full string; each entry reports the misspelled word and its position.
+val misspellings = checker.checkMultiword("This is a sentance with errors")
+// each entry: misspelledWord, startIndex, length
+```
+
+`checkWord` validates one token and returns its suggestions. `checkMultiword` scans a string and
+returns one entry per misspelling, each with the word and its offset in the text.
+
+## How it works
+
+The library delegates to the spell-check engine already built into the host OS:
+
+- **macOS** — `NSSpellChecker`, the same engine TextEdit and the system text fields use.
+- **Windows** — the Windows Spell Checking API (available since Windows 8), through the
+  `ISpellCheckerFactory` COM interface.
+- **Linux** — `hunspell`.
+
+Because it uses the platform engine, spelling behavior, installed dictionaries, and language
+detection match what the user already sees elsewhere on their system.
+
+## Notes
+
+<Callout type="warn">
+On Linux, spell checking depends on `hunspell`. Install it through your distribution's package
+manager; if it is missing, the checker cannot run.
+</Callout>
+
+## What's next
+
+- [The JVM ecosystem](/docs/ecosystem) — libraries that cover common desktop needs.
+- [Native file dialogs](/docs/ecosystem/file-dialog) — FileKit for open, save, and folder pickers.
+- [Quickstart](/docs/start/quickstart) — build and run a Nucleus app.

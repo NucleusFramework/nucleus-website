@@ -1,0 +1,129 @@
+---
+title: Native access — reflection metadata, resolved for you
+description: Nucleus generates the reflection, resource, and JNI metadata a GraalVM Native Image build needs, merging it from several sources so the build compiles without hand-written JSON.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+GraalVM Native Image uses a closed-world model: every reflective `Class.forName`, every
+`getResource` pattern, and every JNI call has to be declared in JSON at build time. Nucleus
+generates that metadata for you. It collects entries from five sources and hands them to
+`native-image`, so `./gradlew packageGraalvmNative` produces a working binary without a
+hand-written `reachability-metadata.json`.
+
+## Add the dependency
+
+The build tasks come from the Nucleus Gradle plugin. Add the runtime baseline so its bundled
+metadata, resource patterns, and AWT substitutions are on the classpath:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.graalvm-runtime:<version>")
+}
+```
+
+## Build a native image
+
+```shell
+./gradlew packageGraalvmNative
+```
+
+The task assembles metadata from every source below, passes each directory to `native-image`
+via `-H:ConfigurationFileDirectories=`, and packages the resulting binary for the current OS.
+
+## How the metadata is assembled
+
+Nucleus draws reachability metadata from five sources and merges them at build time:
+
+| Source | What it covers | How it gets in |
+|--------|----------------|----------------|
+| **L1 — Per-library metadata** | 28 curated files: Compose UI, Skiko, ktor, kotlinx.serialization, SQLite, Coil, JNA, FileKit, SLF4J, the JDK/AWT baseline, and more | Shipped in the plugin JAR. Files that declare `matchPackages` are included only when that library is on the runtime classpath. |
+| **L2 — Oracle Reachability Metadata Repository** | SLF4J, Logback, and hundreds of other community libraries | Resolved from the [official repository](https://github.com/oracle/graalvm-reachability-metadata) for each runtime dependency. |
+| **L3 — Platform metadata** | `sun.awt.windows.*`, `sun.lwawt.macosx.*`, `sun.awt.X11.*`, Java2D pipelines, font managers, and security providers | Written to the build directory at compile time for the current target OS. |
+| **L4 — Static bytecode analysis** | `Class.forName`, `MethodHandles.Lookup.findClass`, `getResource[AsStream]`, JNI native methods with their field and parameter chains, `ServiceLoader` calls, and `@Serializable` types | The `analyzeGraalvmStaticMetadata` task scans every compiled class on the runtime classpath. |
+| **L5 — Runtime baseline** | Resource-include patterns, AWT font-path substitutions, and serialization entries | Shipped inside `nucleus.graalvm-runtime`. Auto-detected from the JAR's `META-INF/native-image` directory. |
+
+L1 through L4 and your own manual config are each passed as a `-H:ConfigurationFileDirectories=`
+entry. The `nucleus.graalvm-runtime` baseline (L5) is picked up through GraalVM's standard
+classpath detection. `native-image` merges all of them.
+
+## Included resources
+
+The `graalvm-runtime` JAR registers four resource-include patterns:
+
+| Pattern | Covers |
+|---------|--------|
+| `.*\.(svg\|ttf\|otf)` | SVG icons and fonts on the classpath — Jewel, IntelliJ Platform icons, Compose resources, and your own |
+| `composeResources/.*` | Compose Multiplatform resources loaded through `Res.*` |
+| `nucleus/.*` | Nucleus JNI shared libraries and bundled runtime resources |
+| `META-INF/services/.*` | `ServiceLoader` descriptors (ktor engines, Coil fetchers, SLF4J providers, …) |
+
+<Callout type="info" title="Binary size tradeoff">
+These patterns are broad on purpose. If you pull in the IntelliJ Platform icons library and
+binary size matters, override the icon glob with a tighter `resource-config.json` of your own.
+</Callout>
+
+## Font substitutions
+
+The `graalvm-runtime` JAR ships `@TargetClass` substitutions that fix AWT font handling under
+native image:
+
+- `FontCreateFontSubstitution` — buffers `Font.createFont(int, InputStream)` to a temp file
+  before delegating, avoiding `IOException: Problem reading font data` on Windows and Linux.
+- `Win32FontManagerSubstitution` — replaces the native `sun.awt.Win32FontManager.getFontPath`
+  with a pure-Java version, avoiding `InternalError: platform encoding not initialized`.
+- `FcFontManagerSubstitution` — the same fix for `sun.awt.FcFontManager.getFontPath` on Linux.
+
+The `native-image` compiler picks these up automatically; no configuration is needed.
+
+## Collect missing metadata with the tracing agent
+
+Static analysis cannot see reflection driven by runtime values or classes loaded dynamically.
+For those cases, run the app once under the GraalVM native-image agent:
+
+```shell
+./gradlew runWithNativeAgent
+```
+
+Exercise every screen and feature. The agent records reflection, JNI, resource, and proxy
+accesses to a temp directory, then merges the new entries into your config without overwriting
+manually enriched ones.
+
+## Remove redundant manual metadata
+
+If you have accumulated manual entries that the automatic sources now cover, prune them:
+
+```shell
+./gradlew cleanupGraalvmMetadata
+```
+
+The task compares your `reachability-metadata.json` against L1, L2, L3, and the static analysis
+output, removes every entry already managed by Nucleus, and reports what it removed.
+
+## When automatic metadata isn't enough
+
+Some libraries make GraalVM impractical regardless of metadata:
+
+- Heavy JNA users (dynamic function-call proxies)
+- Full-text search engines (Lucene, the Elasticsearch client)
+- Embedded scripting runtimes (Groovy, JRuby, Nashorn)
+- Runtime annotation processing (Spring)
+- OSGi and custom classloaders
+- Runtime bytecode generation (ByteBuddy, cglib, ASM-based mocking)
+
+If you depend on any of these, ship the [AOT cache build](/docs/performance/aot-cache) instead.
+
+## Write native code in Kotlin
+
+To call a platform API that no Nucleus runtime module covers (CoreGraphics, IOKit, Win32,
+GTK4, …), write that side in Kotlin/Native and let [NucleusNativeAccess](/docs/performance/native-code)
+generate the FFM bridge, the JVM proxies, and the GraalVM metadata for you. The
+`reflect-config.json`, `resource-config.json`, and `reachability-metadata.json` it emits for the
+generated proxies are picked up by the pipeline above transparently.
+
+## What's next
+
+- [Native code in Kotlin](/docs/performance/native-code) — call Kotlin/Native from the JVM through a generated FFM bridge.
+- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — the full task graph behind these sources.
+- [GraalVM tasks and CI](/docs/performance/graalvm/tasks-ci) — the Gradle task reference for native builds.
+- [AOT cache](/docs/performance/aot-cache) — the fallback when a dependency rules out native image.

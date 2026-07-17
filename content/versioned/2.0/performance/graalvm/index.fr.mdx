@@ -1,0 +1,70 @@
+---
+title: GraalVM Native Image
+description: GraalVM Native Image compile une application Nucleus en amont vers un binaire natif autonome, avec la metadata de réflexion, de ressources et de JNI générée pour chaque module Nucleus.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+GraalVM Native Image compile en amont (ahead-of-time) une application Compose Desktop vers un binaire autonome unique qui s'exécute sans JVM. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, et chaque appel par réflexion déclaré au moment du build. Nucleus génère cette metadata pour vous, si bien que la même source qui produit une application JVM produit aussi une image native.
+
+## Quand utiliser GraalVM Native Image
+
+- Services en arrière-plan, applications de barre de menu et outils de barre système qui restent inactifs mais doivent rester réactifs.
+- Utilitaires et lanceurs où le temps de démarrage compte.
+- Distribution sur les stores (App Store, MSIX, Snap) et petits installateurs autonomes qui n'embarquent pas de JRE séparé.
+- Environnements à mémoire contrainte, comme les bacs à sable et le matériel bas de gamme.
+
+## Compromis
+
+- **Pas de JIT.** Une image native exécute du code compilé en amont, sans optimisation à la volée : les charges de travail intensives en CPU sur la durée sont donc plus lentes que sur la JVM. Pour ces cas, utilisez plutôt le [cache AOT](/docs/performance/aot-cache).
+- **Monde fermé.** Pas de `Class.forName` piloté par des valeurs dynamiques à l'exécution, pas de classloaders personnalisés, pas de moteurs de script, pas de génération de bytecode à l'exécution. Les bibliothèques qui reposent sur ces mécanismes — Spring, Groovy, le mocking basé sur ByteBuddy, un usage intensif de JNA — ne sont pas compatibles ; livrez-les avec le cache AOT.
+- **Builds par plateforme.** Une image native doit être compilée sur chaque OS cible : produire des binaires pour macOS, Windows et Linux demande donc une matrice CI.
+
+La plupart des bibliothèques Kotlin idiomatiques — Ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose, SLF4J — fonctionnent sans configuration supplémentaire.
+
+## Pré-requis
+
+### BellSoft Liberica NIK 25
+
+La compilation native-image exige la distribution **complète** [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/). Téléchargez-la vous-même et installez-la en local — le provisioning automatique de la toolchain Gradle ne récupère pas la variante NIK.
+
+<Callout type="error" title="Les autres distributions échouent">
+Oracle GraalVM, GraalVM CE et Liberica NIK Lite n'ont pas le support AWT/Swing native-image dont les applications desktop ont besoin. Utilisez la distribution Liberica NIK complète.
+</Callout>
+
+### Toolchains par plateforme
+
+| Plateforme | Requis |
+|------------|--------|
+| **macOS** | Xcode Command Line Tools |
+| **Windows** | MSVC (Visual Studio Build Tools) |
+| **Linux** | GCC, `patchelf` et `xvfb` pour la compilation headless |
+
+## Comment Nucleus construit l'image native
+
+Trois modules coopèrent pour produire une image native à partir de la même source qu'un build JVM :
+
+- **`nucleus.graalvm-runtime`** — la bibliothèque de support runtime. Elle fournit des substitutions SVM `@TargetClass` pour les parties internes d'AWT qui ne fonctionnent pas telles quelles sous native-image (les gestionnaires de polices Fontconfig et Win32, la création de polices, le splash screen et le WMClass du toolkit X11), enregistre les ressources de l'application et expose `GraalVmInitializer`.
+- **Le plugin Gradle Nucleus** — génère la reachability metadata (réflexion, ressources, JNI) pour vos dépendances et câble le graphe de tâches `packageGraalvmNative`.
+- **`nucleus.nucleus-application`** — appelle `GraalVmInitializer.initialize()` pour vous et expose la même API `DecoratedWindow` / `NucleusWindow` que le chemin JVM, si bien qu'une seule arborescence de sources produit les deux artefacts.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+        javaLanguageVersion = 25
+    }
+}
+```
+
+<Callout type="info">
+`nucleusApplication` appelle `GraalVmInitializer.initialize()` au démarrage. Si vous écrivez votre propre `main()` sans lui, appelez `GraalVmInitializer.initialize()` vous-même avant tout code AWT ou Compose.
+</Callout>
+
+## Et ensuite
+
+- [Configuration](/docs/performance/graalvm/configuration) — le DSL `graalvm { }` complet et les arguments de build recommandés.
+- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — comment la réflexion, les ressources et le JNI sont résolus pour vous.
+- [Tâches et CI](/docs/performance/graalvm/tasks-ci) — tâches Gradle, emplacements de sortie et matrice GitHub Actions.

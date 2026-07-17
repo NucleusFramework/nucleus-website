@@ -1,0 +1,152 @@
+---
+title: Configuration
+description: "Référence du bloc DSL graalvm { } qui configure les builds native-image GraalVM : toolchain, nom d'image, arguments de build, repository de metadata et réglages par OS."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le bloc `graalvm { }` à l'intérieur de `nucleus.application { }` configure les builds
+native-image GraalVM : la toolchain, le binaire de sortie, les arguments passés à
+`native-image`, les métadonnées de reachability et les réglages macOS et Windows. Chaque
+propriété est paresseuse et typée `Property`. Le bloc est défini sur `JvmApplication`, il se
+place donc à côté de `mainClass` et `nativeDistributions`.
+
+## Activer une native image
+
+Mettez `isEnabled = true` et choisissez une toolchain. Une configuration minimale ressemble à ceci :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    graalvm {
+        isEnabled = true
+        imageName = "myapp"
+
+        // Téléchargez vous-même la distribution complète BellSoft Liberica NIK 25 et
+        // installez-la en local — le provisioning automatique de Gradle ne récupère pas
+        // la variante NIK.
+        // En CI, configurez d'abord le JDK avec graalvm/setup-graalvm@v1.
+        javaLanguageVersion = 25
+
+        buildArgs.addAll(
+            "-H:+AddAllCharsets",
+            "-Djava.awt.headless=false",
+            "-Os",
+            "-H:-IncludeMethodData",
+        )
+
+        metadataRepository {
+            enabled = true           // défaut
+            version = "0.10.6"       // défaut
+            excludedModules.add("com.example:my-lib")
+        }
+    }
+}
+```
+
+## Référence de graalvm { }
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `isEnabled` | `Property<Boolean>` | `false` | Interrupteur principal du build native-image. |
+| `javaLanguageVersion` | `Property<Int>` | `25` | Version de langage de la toolchain ; déclenche le téléchargement de la toolchain par Gradle. |
+| `imageName` | `Property<String>` | nom du package | Nom du binaire de sortie. |
+| `march` | `Property<String>` | `"native"` | `native` cible le CPU courant ; `compatibility` cible des CPU plus anciens. |
+| `buildArgs` | `ListProperty<String>` | vide | Arguments supplémentaires passés à `native-image`. |
+| `nativeImageConfigBaseDir` | `DirectoryProperty` | — | Répertoire du `reachability-metadata.json` spécifique à l'app. Rarement nécessaire. |
+| `macOS` | `GraalvmMacOSSettings` | — | Sous-bloc macOS (voir plus bas). |
+| `windows` | `GraalvmWindowsSettings` | — | Sous-bloc Windows (voir plus bas). |
+| `metadataRepository` | `MetadataRepositorySettings` | activé | Oracle Reachability Metadata Repository (voir plus bas). |
+
+## Définir les arguments de build
+
+Les `buildArgs` sont transmis tels quels à `native-image`. Voici les arguments dont la
+plupart des apps desktop ont besoin :
+
+| Argument | Rôle |
+|----------|------|
+| `-H:+AddAllCharsets` | Inclut tous les charsets, requis pour les I/O texte. |
+| `-Djava.awt.headless=false` | Active le support GUI, requis pour les apps desktop. |
+| `-Os` | Optimise pour la taille du binaire. |
+| `-H:-IncludeMethodData` | Retire les métadonnées de méthodes, réduisant le binaire de plusieurs Mo. |
+
+## Configurer le repository de metadata
+
+Le plugin Nucleus télécharge l'
+[Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
+et résout les entrées de chaque dépendance runtime du classpath. Le sous-bloc
+`metadataRepository { }` correspond à `MetadataRepositorySettings`.
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `enabled` | `Property<Boolean>` | `true` | Mettez `false` pour ignorer entièrement le repository. |
+| `version` | `Property<String>` | `"0.10.6"` | Version de l'artefact du repository. |
+| `excludedModules` | `SetProperty<String>` | vide | Coordonnées `group:artifact` à ignorer. |
+| `moduleToConfigVersion` | `MapProperty<String, String>` | vide | Épingle la version du répertoire de metadata pour un module donné. |
+
+```kotlin title="build.gradle.kts"
+metadataRepository {
+    moduleToConfigVersion.put("io.ktor:ktor-client-core", "3.0.0")
+    excludedModules.add("group:noisy-lib")
+}
+```
+
+## Configurer les réglages macOS
+
+Le sous-bloc `macOS { }` correspond à `GraalvmMacOSSettings`.
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `cStubsSrc` | `RegularFileProperty` | — | Fichier de stubs C supplémentaires liés dans le binaire. |
+| `minimumSystemVersion` | `Property<String>` | `"12.0"` | Corrige la commande de chargement Mach-O `LC_VERSION_MIN_MACOSX`. |
+| `macOsSdkVersion` | `Property<String>` | `"26.0"` | Version du SDK estampillée dans les headers Mach-O du launcher, qui détermine l'éligibilité à Liquid Glass. |
+
+## Configurer les réglages Windows
+
+Le sous-bloc `windows { }` correspond à `GraalvmWindowsSettings`. Sur Windows, les native
+images GraalVM sont liées dynamiquement au runtime Visual C++, qui ne fait pas partie d'une
+installation Windows propre. Regrouper les DLL du runtime à côté de l'exécutable permet à
+l'app de démarrer sans le Visual C++ Redistributable.
+
+| Propriété | Type | Défaut | Notes |
+|-----------|------|--------|-------|
+| `bundleCRuntime` | `Property<Boolean>` | `true` | Copie les DLL du runtime MSVC à côté du `.exe`. |
+| `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` | Noms des DLL copiées quand `bundleCRuntime` est activé. |
+| `sourceDir` | `DirectoryProperty` | `bin` de la toolchain | Répertoire d'où les DLL sont copiées. Pointez-le vers le MSVC redistributable si une DLL manque dans la toolchain. |
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    windows {
+        bundleCRuntime = true
+        dlls.add("vcruntime140.dll")
+    }
+}
+```
+
+## Pas de variant release
+
+Contrairement aux build types JVM, GraalVM n'a pas de variant release : il n'existe ni
+`packageReleaseGraalvmNative` ni `runReleaseGraalvmNative`. Les tâches natives sont
+`packageGraalvmNative` et `runGraalvmNative`. C'est volontaire :
+
+- L'élimination de code mort de ProGuard est redondante. `native-image` fait déjà une
+  élimination de code mort en monde fermé au moment de la compilation.
+- ProGuard peut renommer des classes encore référencées par `reachability-metadata.json`,
+  ce qui casse le build silencieusement.
+
+Utilisez `-Os` dans `buildArgs` pour optimiser la taille plutôt que ProGuard.
+
+<Callout type="info" title="nativeImageConfigBaseDir est généralement vide">
+Nucleus livre automatiquement toutes les métadonnées génériques et spécifiques à la
+plateforme. Vous n'avez besoin de `nativeImageConfigBaseDir` que pour les entrées spécifiques à
+l'app que les couches automatiques ne couvrent pas, ce qui est rare. Voir
+[Metadata automatique](/docs/performance/graalvm/automatic-metadata) pour les cinq couches.
+</Callout>
+
+## Et ensuite
+
+- [Vue d'ensemble GraalVM](/docs/performance/graalvm) — ce que native-image apporte à une app Nucleus.
+- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — les cinq couches de metadata que Nucleus assemble pour vous.
+- [Tâches et CI](/docs/performance/graalvm/tasks-ci) — les tâches Gradle et la configuration CI pour les builds natifs.
+- [Référence du DSL Gradle](/docs/reference/gradle-dsl) — toute la surface `nucleus { }`.

@@ -1,0 +1,180 @@
+---
+title: Notifications on macOS
+description: Kotlin bindings for Apple's UserNotifications framework, covering authorization, categories, attachments, text input, schedules, and interruption levels.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `notification-macos` module lets you drive Apple's UserNotifications framework from Kotlin.
+You request authorization, schedule notifications, register action categories with text input,
+attach media, and handle user responses through `NotificationCenter` and a typed delegate.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-macos:<version>")
+}
+```
+
+## Send a notification
+
+Request authorization, then submit a `NotificationRequest` with `NotificationCenter.add`:
+
+```kotlin
+import dev.nucleusframework.notification.*
+
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, error ->
+    if (!granted) return@requestAuthorization
+
+    NotificationCenter.add(
+        NotificationRequest(
+            identifier = "greeting",
+            content = NotificationContent(
+                title = "Hello",
+                body = "Welcome to Nucleus",
+                sound = NotificationSound.Default,
+                interruptionLevel = InterruptionLevel.TIME_SENSITIVE,
+            ),
+            trigger = NotificationTrigger.TimeInterval(interval = 5.0),
+        ),
+    )
+}
+```
+
+To deliver immediately, leave `trigger` unset (it defaults to `null`).
+
+<Callout type="warn">
+macOS only delivers notifications from a bundled, bundle-identified app. During development,
+run `./gradlew runDistributable` or `./gradlew runGraalvmNative` — a plain `./gradlew run`
+produces an un-bundled JVM process that the system ignores silently.
+</Callout>
+
+## How it works
+
+Each API is a typed wrapper over the matching UserNotifications call, reached through a JNI
+bridge. `NotificationCenter` is a singleton that forwards `UNUserNotificationCenterDelegate`
+callbacks to the `NotificationCenterDelegate` you register. On non-macOS platforms every method
+is a no-op; check `NotificationCenter.isAvailable` first.
+
+Categories let you register reusable sets of action buttons — including text-input actions —
+ahead of time, then reference them by identifier from a `NotificationContent`. The system stores
+the category set, so each request only carries the `categoryIdentifier` string.
+
+Delegate callbacks are not dispatched on AWT or Swing threads. Marshal to the active UI
+dispatcher before you touch UI state from `willPresent` or `didReceive`.
+
+## API reference
+
+### Check availability
+
+```kotlin
+if (NotificationCenter.isAvailable) {
+    // running on macOS with a loaded native bridge and an app bundle
+}
+```
+
+### Request authorization
+
+`requestAuthorization` takes a set of `AuthorizationOption` values and a callback reporting the
+result:
+
+```kotlin
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, error -> /* … */ }
+```
+
+Available options: `BADGE`, `SOUND`, `ALERT`, `CRITICAL_ALERT`,
+`PROVIDES_APP_NOTIFICATION_SETTINGS`, `PROVISIONAL`, `TIME_SENSITIVE`.
+
+### Register categories with action buttons
+
+Build a `NotificationCategory` from `NotificationAction` or `TextInputNotificationAction`
+entries, then register the full set with `setNotificationCategories`:
+
+```kotlin
+val category = NotificationCategory(
+    identifier = "MESSAGE",
+    actions = listOf(
+        TextInputNotificationAction(
+            identifier = "REPLY",
+            title = "Reply",
+            textInputButtonTitle = "Send",
+            textInputPlaceholder = "Type a reply…",
+        ),
+    ),
+    options = setOf(CategoryOption.CUSTOM_DISMISS_ACTION),
+)
+NotificationCenter.setNotificationCategories(setOf(category))
+```
+
+Reference the category from a notification through `NotificationContent.categoryIdentifier`.
+
+### Attach media
+
+`NotificationAttachment.url` is a file-path string, not a `java.net.URI`:
+
+```kotlin
+val request = NotificationRequest(
+    identifier = "screenshot",
+    content = NotificationContent(
+        title = "Screenshot saved",
+        body = "Click to preview",
+        attachments = listOf(
+            NotificationAttachment(identifier = "img", url = imageFile.absolutePath),
+        ),
+    ),
+)
+```
+
+### Schedule with triggers
+
+| Trigger | Use case |
+| --- | --- |
+| `trigger = null` (default) | fire now |
+| `NotificationTrigger.TimeInterval(interval, repeats)` | delay or recurring (repeats require `interval >= 60`) |
+| `NotificationTrigger.Calendar(dateComponents, repeats)` | "every Monday at 9 am" via `DateComponents` |
+
+### Handle responses with a delegate
+
+Implement `NotificationCenterDelegate` to control foreground presentation and react to taps,
+action selections, and text-input responses:
+
+```kotlin
+NotificationCenter.setDelegate(object : NotificationCenterDelegate {
+    override fun willPresent(notification: DeliveredNotification): Set<PresentationOption> =
+        setOf(PresentationOption.BANNER, PresentationOption.SOUND)
+
+    override fun didReceive(response: NotificationResponse) { /* … */ }
+})
+```
+
+`willPresent` returns the presentation options to use while the app is in the foreground; return
+an empty set to handle the notification silently. `NotificationResponse.userText` carries the
+text a user typed into a `TextInputNotificationAction`.
+
+### Inspect and remove notifications
+
+`getPendingNotifications` and `getDeliveredNotifications` take callbacks and report what is queued
+or on screen. Remove entries with `removePendingNotifications(ids)` /
+`removeAllPendingNotifications()` and `removeDeliveredNotifications(ids)` /
+`removeAllDeliveredNotifications()`.
+
+## Notes
+
+- Sandboxed apps need the notifications entitlement. Point the macOS `entitlementsFile` property
+  in the Nucleus Gradle DSL at a `.entitlements` file that declares it.
+- For alerts that bypass Focus modes, set `interruptionLevel = InterruptionLevel.CRITICAL` and
+  request `AuthorizationOption.CRITICAL_ALERT`.
+- A bundle identifier mismatch is the most common cause of silent failure — verify that
+  `NucleusApp.appId` matches the bundle id in the packaged `.app`.
+
+## What's next
+
+- [Cross-platform notifications](/docs/os/notifications) — the shared `NotificationManager` API.
+- [Notifications on Windows](/docs/os/notification-windows) — toast notifications via `WindowsNotificationCenter`.
+- [Notifications on Linux](/docs/os/notification-linux) — freedesktop notifications via `LinuxNotificationCenter`.
+- [Code signing](/docs/packaging/code-signing) — sign and bundle the app so macOS delivers its notifications.

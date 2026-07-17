@@ -1,0 +1,263 @@
+---
+title: Construire pour Linux
+description: Configurez une application Nucleus pour produire des paquets DEB, RPM, AppImage et pacman, et publier sur les stores Snap et Flatpak.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez configurer une application Nucleus pour produire tous les
+formats de paquets Linux — DEB, RPM, AppImage et pacman pour la distribution
+directe, plus Snap et Flatpak pour les stores — depuis un seul bloc `linux { }`,
+puis les construire et inspecter le résultat.
+
+## Avant de commencer
+
+- Le plugin Gradle Nucleus est appliqué à votre projet. Voir [Configuration du projet](/docs/start/project-setup).
+- Vous travaillez sur un **hôte de build Linux**. DEB, RPM, AppImage, pacman, Snap et
+  Flatpak sont des formats propres à Linux et ne se construisent pas depuis macOS ni Windows.
+- L'outillage propre à chaque format est installé comme indiqué à chaque étape (par
+  exemple `libfuse2` pour AppImage, `snapcraft` pour Snap, `flatpak-builder` pour Flatpak).
+
+## Configurer les formats cibles
+
+Dans `build.gradle.kts`, listez les formats Linux souhaités dans `targetFormats(...)`
+et décrivez le paquet dans le bloc `linux { }` :
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Deb,
+                TargetFormat.Rpm,
+                TargetFormat.AppImage,
+                TargetFormat.Pacman,
+                TargetFormat.Snap,
+                TargetFormat.Flatpak,
+            )
+            homepage = "https://myapp.example.com"
+
+            linux {
+                iconFile.set(project.file("icons/app.png"))
+                packageName = "myapp"
+                shortcut = true
+                appCategory = "Utility"
+                menuGroup = "Development"
+
+                debMaintainer = "Your Name <dev@example.com>"
+                debDepends = listOf("libfuse2", "libgtk-3-0", "libasound2")
+
+                rpmLicenseType = "MIT"
+                rpmRequires = listOf("gtk3", "libX11", "alsa-lib")
+
+                pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
+            }
+        }
+    }
+}
+```
+
+<Callout type="warn">
+`homepage` est obligatoire pour les builds DEB et RPM. Sans lui, la tâche de
+packaging échoue.
+</Callout>
+
+## Construire les paquets DEB et RPM
+
+Chaque format a sa propre tâche Gradle, nommée d'après la constante `TargetFormat` :
+
+```shell
+./gradlew packageDeb
+./gradlew packageRpm
+```
+
+Le plugin écrit une entrée `.desktop` dans chaque paquet avec les bonnes lignes
+`Categories=`, `MimeType=`, `StartupWMClass=` et `Exec=`. Si la classe de fenêtre
+de votre application ne correspond pas à ce que rapporte le gestionnaire de fenêtres,
+fixez `startupWMClass` explicitement :
+
+```kotlin title="build.gradle.kts"
+linux {
+    startupWMClass = "com-example-MyApp"
+}
+```
+
+Quand `startupWMClass` n'est pas défini, Nucleus le dérive de `mainClass` en
+remplaçant les points par des tirets.
+
+## Construire un AppImage
+
+Un AppImage est un exécutable portable unique qui tourne sur la plupart des
+distributions sans installation :
+
+```shell
+./gradlew packageAppImage
+```
+
+L'hôte de build a besoin de `libfuse2` :
+
+```shell
+sudo apt-get install -y libfuse2
+```
+
+Configurez les métadonnées desktop dans le sous-bloc `appImage { }` :
+
+```kotlin title="build.gradle.kts"
+linux {
+    appImage {
+        category = AppImageCategory.Utility
+        genericName = "My Application"
+        synopsis = "Une description courte"
+        desktopEntries = mapOf("Keywords" to "editor;text;")
+    }
+}
+```
+
+La taille du résultat et le temps de build dépendent de
+`nativeDistributions.compressionLevel` :
+
+| `CompressionLevel` | Résultat | Temps de build |
+|--------------------|----------|----------------|
+| `Store`            | Le plus gros | Le plus rapide |
+| `Normal` (défaut)  | Équilibré | Modéré |
+| `Maximum`          | Le plus petit | Le plus lent |
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    compressionLevel = CompressionLevel.Normal
+}
+```
+
+## Empaqueter pour Arch Linux
+
+`TargetFormat.Pacman` produit une archive pacman pour Arch Linux et ses dérivées :
+
+```shell
+./gradlew packagePacman
+```
+
+Définissez les dépendances propres à Arch et, si besoin, une chaîne de version
+indépendante :
+
+```kotlin title="build.gradle.kts"
+linux {
+    pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
+    pacmanPackageVersion = "2.0.0"
+}
+```
+
+## Publier sur le Snap Store
+
+Snap cible le [Snap Store](https://snapcraft.io/). Les `plugs` par défaut couvrent
+l'intégration desktop, X11 et Wayland, le réseau, la lecture audio et OpenGL.
+Changez `confinement` quand votre application a besoin d'un accès au système de
+fichiers au-delà de `home` :
+
+```kotlin title="build.gradle.kts"
+linux {
+    snap {
+        confinement = SnapConfinement.Strict
+        grade = SnapGrade.Stable
+        base = "core22"
+        plugs = listOf(
+            SnapPlug.Desktop,
+            SnapPlug.Home,
+            SnapPlug.Wayland,
+            SnapPlug.Network,
+            SnapPlug.AudioPlayback,
+        )
+        compression = SnapCompression.Xz
+    }
+}
+```
+
+```shell
+./gradlew packageSnap
+```
+
+L'hôte de build a besoin de `snapd` et de `snapcraft --classic`.
+
+## Publier sur Flathub avec Flatpak
+
+Flatpak est sandboxé. Déclarez les permissions dont votre application a besoin via
+`finishArgs`. Les valeurs par défaut sont `--share=ipc`, `--socket=x11`,
+`--socket=wayland`, `--socket=pulseaudio` et `--device=dri` ; définir `finishArgs`
+les remplace entièrement, alors incluez tout ce qu'il vous faut :
+
+```kotlin title="build.gradle.kts"
+linux {
+    flatpak {
+        runtime = "org.freedesktop.Platform"
+        runtimeVersion = "23.08"
+        sdk = "org.freedesktop.Sdk"
+
+        finishArgs = listOf(
+            "--share=ipc",
+            "--socket=wayland",
+            "--socket=pulseaudio",
+            "--device=dri",
+            "--filesystem=home",
+            "--share=network",
+        )
+    }
+}
+```
+
+```shell
+./gradlew packageFlatpak
+```
+
+Flatpak est un format store et passe par le
+[pipeline sandboxé](/docs/packaging/sandboxing) : les bibliothèques natives sont
+pré-extraites et les arguments JVM redirigés. Si `flatpak-builder` ou le runtime
+n'est pas installé, la tâche est ignorée au lieu d'échouer.
+
+## Enregistrer les deep links et les associations de fichiers
+
+Les entrées `protocol(...)` et `fileAssociation(...)` de premier niveau sont
+fusionnées dans le fichier `.desktop` généré sous forme de valeurs `MimeType=` :
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    protocol(name = "MyApp URL", schemes = listOf("myapp"))
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+    )
+}
+```
+
+Ce qui produit :
+
+```ini
+MimeType=x-scheme-handler/myapp;application/x-myapp;
+```
+
+Aucun override manuel de `desktopEntries` n'est nécessaire.
+
+## Référence de configuration
+
+`linux { }` expose `iconFile`, `packageVersion`, `shortcut`, `startupWMClass`,
+`packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
+`debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
+`rpmRequires`, `pacmanPackageVersion` et `pacmanDepends`. Les sous-blocs sont
+`appImage { }`, `snap { }`, `flatpak { }` et `signing { }`.
+
+`appRelease` fixe le numéro de release du paquet — le chiffre après le `-` dans les
+versions DEB et RPM. Incrémentez-le quand vous rééditerez sans changer
+`packageVersion`. Voir la [référence Gradle DSL](/docs/reference/gradle-dsl)
+complète.
+
+<Callout type="info">
+Snap et Flatpak déposent leurs propres fichiers desktop dans l'environnement
+utilisateur et ignorent les chemins d'installation `.desktop` classiques utilisés
+par DEB et RPM.
+</Callout>
+
+## Et ensuite
+
+- [Signature de code](/docs/packaging/code-signing) — signez les paquets DEB et RPM avec GPG.
+- [Sandboxing](/docs/packaging/sandboxing) — comment le pipeline Flatpak réempaquette votre application.
+- [Publication](/docs/packaging/publishing) — diffusez les artefacts construits vers GitHub, S3 ou un serveur générique.
+- [Référence Gradle DSL](/docs/reference/gradle-dsl) — toutes les propriétés de `linux { }`.

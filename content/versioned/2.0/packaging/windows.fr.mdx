@@ -1,0 +1,186 @@
+---
+title: Construire pour Windows
+description: Empaqueter une app Nucleus pour Windows en NSIS, MSI, MSIX/AppX ou Portable, puis la signer pour la distribution.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez empaqueter une app Nucleus pour Windows dans un ou plusieurs des cinq
+formats — NSIS, NSIS Web, MSI, MSIX/AppX et Portable — puis signer le résultat pour la
+distribution.
+
+## Avant de commencer
+
+L'empaquetage Windows fait partie du plugin Gradle Nucleus : aucune dépendance supplémentaire
+n'est nécessaire. Il vous faut :
+
+- Le plugin Nucleus appliqué à votre build. Il fournit le bloc `windows { }` utilisé ci-dessous.
+- Le **mode développeur** Windows activé pour construire un package AppX en local
+  (Paramètres → Système → Pour les développeurs). Les runners Windows hébergés par GitHub
+  l'ont déjà activé.
+- Un certificat `.pfx`/`.p12` ou des identifiants Azure Artifact Signing pour signer un build.
+
+## Configurer le build Windows
+
+Ajoutez les formats souhaités à `targetFormats(...)`, puis configurez le bloc `windows { }` :
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Nsis,
+                TargetFormat.Msi,
+                TargetFormat.AppX,
+                TargetFormat.Portable,
+            )
+
+            windows {
+                iconFile.set(project.file("icons/app.ico"))
+                upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+                perUserInstall = true
+                menuGroup = "My Company"
+
+                signing {
+                    enabled = true
+                    certificateFile.set(file("certs/certificate.pfx"))
+                    certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+                    algorithm = SigningAlgorithm.Sha256
+                    timestampServer = "http://timestamp.digicert.com"
+                }
+            }
+        }
+    }
+}
+```
+
+Les cinq formats Windows sont :
+
+- `TargetFormat.Nsis` — l'installateur Windows standard.
+- `TargetFormat.NsisWeb` — un stub téléchargeur NSIS qui récupère la charge utile au moment de l'installation.
+- `TargetFormat.Msi` — un package Windows Installer pour le déploiement en entreprise.
+- `TargetFormat.AppX` — un package MSIX/AppX pour le Microsoft Store et le sideload.
+- `TargetFormat.Portable` — un exécutable unique qui s'exécute sans installation.
+
+## Personnaliser l'installateur NSIS
+
+Nucleus expose les options NSIS d'electron-builder : installation one-click ou assistée,
+placement per-user ou per-machine, sélecteur de langue, bitmaps header et sidebar personnalisés,
+dialogue de licence, et un échappatoire `script` / `includeScript` pour des sources NSIS
+personnalisées.
+
+```kotlin
+windows {
+    nsis {
+        oneClick = false
+        allowElevation = true
+        perMachine = true
+        allowToChangeInstallationDirectory = true
+        createDesktopShortcut = true
+        runAfterFinish = true
+
+        multiLanguageInstaller = true
+        installerLanguages = listOf("en_US", "fr_FR", "de_DE", "ja_JP")
+
+        installerHeader.set(project.file("packaging/header.bmp"))
+        installerSidebar.set(project.file("packaging/sidebar.bmp"))
+        license.set(project.file("LICENSE"))
+    }
+}
+```
+
+## Construire un MSI pour le déploiement en entreprise
+
+La cible MSI s'active avec `TargetFormat.Msi`. Fixez `upgradeUuid` à une valeur stable pour que
+Windows associe correctement les versions successives lors d'une mise à jour. Sans UUID stable,
+chaque nouvelle version est traitée comme un produit distinct.
+
+## Construire un package AppX ou MSIX
+
+Les cibles AppX produisent un `.appx` (ou un `.msixbundle` via CI). Le Desktop Bridge tourne
+avec `runFullTrust` : l'app n'est donc pas sandboxée au sens Windows, mais le format est accepté
+par le Microsoft Store et gère une installation et une désinstallation propres.
+
+```kotlin
+windows {
+    appx {
+        // Identité sideload — n'importe quel CN qui correspond à votre certificat de signature
+        identityName = "MyCompany.MyApp"
+        publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
+        publisherDisplayName = "My Company"
+        applicationId = "MyApp"
+
+        languages = listOf("en-US", "fr-FR")
+        backgroundColor = "#001F3F"
+        storeLogo.set(project.file("packaging/appx/StoreLogo.png"))
+        square44x44Logo.set(project.file("packaging/appx/Square44x44Logo.png"))
+        square150x150Logo.set(project.file("packaging/appx/Square150x150Logo.png"))
+        wide310x150Logo.set(project.file("packaging/appx/Wide310x150Logo.png"))
+
+        // Le Store exige MinVersion > 10.0.17134.0
+        minVersion = "10.0.17763.0"
+        maxVersionTested = "10.0.22621.0"
+    }
+}
+```
+
+<Callout type="warn" title="Mode développeur requis pour les builds AppX locaux">
+Les builds AppX locaux nécessitent le mode développeur Windows (Paramètres → Système → Pour les
+développeurs). Les runners Windows hébergés par GitHub l'ont déjà activé.
+</Callout>
+
+<Callout type="warn" title="Identité Microsoft Store">
+Pour soumettre au Microsoft Store, `identityName`, `publisher` et `publisherDisplayName` doivent
+correspondre aux valeurs que Partner Center a assignées à votre réservation ; le Store rejette les
+écarts au moment de l'upload. `publisher` est le `CN=<GUID>` délivré par Partner Center, pas le
+CN de votre certificat de signature local.
+</Callout>
+
+## Activer le mode portable
+
+`TargetFormat.Portable` produit un exécutable unique qui se déploie dans un répertoire temporaire
+au lancement. Pas d'UI d'installation, pas de droits admin, pas d'entrées de registre — pratique
+pour la distribution sur clé USB.
+
+## Ajouter des associations de fichiers et des deep links
+
+Déclarez les associations et les protocoles d'URL sur `nativeDistributions` ; ils se propagent
+vers chaque format Windows :
+
+```kotlin
+nativeDistributions {
+    protocol("MyApp", "myapp")  // deep links myapp://…
+    fileAssociation(
+        mimeType = "application/x-myapp",
+        extension = "myapp",
+        description = "MyApp Document",
+    )
+}
+```
+
+Pour une icône de fichier spécifique à Windows, appelez plutôt `windows.fileAssociation(...)`.
+
+## Référence
+
+Le bloc `windows { }` expose `iconFile`, `packageName`, `console`, `dirChooser`,
+`perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion` et
+`exePackageVersion`, ainsi que les sous-blocs `nsis { }`, `appx { }` et `signing { }`. Consultez
+la [référence Gradle DSL](/docs/reference/gradle-dsl) pour chaque propriété.
+
+## Notes
+
+- L'installateur MSI est construit par le wrapper WiX d'electron-builder. Pour de la
+  personnalisation MSI entreprise au-delà des chemins d'installation (dialogues custom, ajustements
+  du registre), passez plutôt par NSIS.
+- `latest.yml` (métadonnées de mise à jour Windows) est généré pour NSIS, MSI et Portable. AppX
+  est géré par le Store et n'a pas de YML d'auto-update.
+- `WindowsJumpListManager.setProcessAppId()` est appelé automatiquement sur Windows au démarrage :
+  le regroupement dans la barre des tâches et les notifications AUMID-aware fonctionnent sans
+  configuration supplémentaire.
+
+## Et ensuite
+
+- [Signature de code](/docs/packaging/code-signing) — PFX et Azure Artifact Signing pour les builds Windows.
+- [Publication](/docs/packaging/publishing) — pousser des versions vers GitHub, S3 ou un serveur générique.
+- [CI/CD](/docs/packaging/ci-cd) — construire et signer les packages Windows sur GitHub Actions.
+- [Référence Gradle DSL](/docs/reference/gradle-dsl) — toute la surface de configuration `nucleus { }`.

@@ -1,0 +1,69 @@
+---
+title: Backends
+description: Nucleus draws every window through the Tao backend behind the DecoratedWindow API. The legacy AWT backend is deprecated.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every Nucleus window is a Compose composable. The backend is the layer beneath it: it runs the
+OS event loop, owns the native window handle, and presents Skia's GPU surface on screen. Nucleus
+2.0 uses Tao as its backend behind the same `DecoratedWindow` API.
+
+<Callout type="warn" title="AWT backend deprecated">
+The legacy AWT backend (`decorated-window-jbr` / `decorated-window-jni`) is deprecated and will
+be removed in a future Nucleus release. New and existing projects should move to Tao — see
+[Migrating from JBR to Tao](/docs/tao/migration-from-jbr).
+</Callout>
+
+## The Tao backend
+
+Tao is the Rust windowing layer that also underpins Tauri 2. Nucleus 2.0 makes it the default for
+new projects. Tao replaces the toolkit entirely, so the JVM never loads AWT.
+
+The Tao backend adds:
+
+- **Native Wayland.** No XWayland fallback, with fractional scaling and gestures.
+- **Multi-touch and gestures.** Pinch, swipe, and rotate arrive as Compose pointer events that
+  carry pressure, tilt, and source.
+- **Pen and stylus.** Pressure-sensitive input from devices such as Wacom tablets, the Surface
+  Pen, and Apple Pencil.
+- **Per-monitor HiDPI.** Mixed-DPI setups are handled as you drag a window between displays.
+- **`NativeView`.** Embed SwiftUI, WebView2, or GTK widgets inside a Compose window.
+
+See [Tao](/docs/tao) for the full surface.
+
+## Select a backend
+
+```kotlin
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        // your Compose UI
+    }
+}
+```
+
+`NucleusBackend` has three values:
+
+- `Auto` uses Tao when `decorated-window-tao` is on the classpath, otherwise the deprecated AWT
+  backend. This is the default.
+- `Tao` forces the Tao backend.
+- `Awt` forces the deprecated AWT backend, using JBR or JNI depending on which is resolved.
+
+## Reach the native window
+
+The `DecoratedWindow` composable is identical across backends. When you need a backend-specific
+call, reach the underlying handle through the window's escape hatches:
+
+- `nucleusWindow.unsafe.taoWindow` returns the Tao-owned `TaoWindow`.
+- `nucleusWindow.unsafe.awtWindow` returns the AWT `ComposeWindow` (deprecated backend only).
+
+Each returns `null` on the other backend.
+
+## What's next
+
+- [Tao](/docs/tao) — the full backend surface: gestures, pen, Wayland, and `NativeView`.
+- [Decorated Window](/docs/window) — the window you compose on top of a backend.
+- [Migrating from JBR to Tao](/docs/tao/migration-from-jbr) — a checklist for existing apps.

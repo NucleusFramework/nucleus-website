@@ -1,0 +1,151 @@
+---
+title: Project setup
+description: Configure repositories, the Nucleus plugin, runtime modules, a JDK toolchain, and a multi-module Gradle layout.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+In this tutorial, you'll set up a multi-module Nucleus project. You'll configure the
+repositories, apply the Gradle plugin, pin the runtime modules, choose a JDK toolchain, and
+lay out `:app`, `:ui`, and `:domain` modules so that dependencies flow in one direction.
+
+## Before you start
+
+This tutorial builds on the [Quickstart](/docs/start/quickstart), which fits in a single
+module. You need:
+
+- **JDK 17 or later** for a standard build, or **JDK 25** to enable the AOT cache.
+- **Kotlin 2.0 or later** and **Gradle 8.x**.
+
+## Configure the repositories
+
+Resolve the plugin from the Gradle Plugin Portal and the runtime modules from Maven Central.
+Add both to `settings.gradle.kts`:
+
+```kotlin title="settings.gradle.kts"
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+```
+
+## Apply the plugin
+
+Apply the Nucleus plugin in the module that holds your `main` function:
+
+```kotlin title="app/build.gradle.kts"
+plugins {
+    kotlin("jvm") version "2.4.0"
+    id("org.jetbrains.compose") version "1.11.1"
+    id("dev.nucleusframework") version "<version>"
+}
+```
+
+<Callout type="warn">
+Compose Hot Reload does not work in Nucleus 2.0. Hot reload — the `hotRun` and `hotDev`
+tasks — was added in Nucleus 2.1.
+</Callout>
+
+## Add the runtime modules
+
+All `dev.nucleusframework:nucleus.*` runtime artifacts publish the same version. Pin it once,
+then declare only the modules you use:
+
+```kotlin title="app/build.gradle.kts"
+val nucleusVersion = "<version>"
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+    implementation("dev.nucleusframework:nucleus.nucleus-application:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:$nucleusVersion")
+    // Add only the modules you need:
+    implementation("dev.nucleusframework:nucleus.notification-common:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.global-hotkey:$nucleusVersion")
+}
+```
+
+`nucleus-application` is the entry-point module. It transitively pulls the core runtime, the
+AOT runtime, and the GraalVM runtime. Add `decorated-window-tao` for the window backend; every
+other module is opt-in.
+
+## Set the JDK toolchain
+
+Pin a JDK toolchain so the build uses a consistent Java version:
+
+```kotlin title="app/build.gradle.kts"
+kotlin {
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
+        // Optional: pin the vendor for reproducible builds
+        // vendor.set(JvmVendorSpec.JETBRAINS)
+    }
+}
+```
+
+Use JDK 17 if you don't need the AOT cache. Use JDK 25 to enable it with
+`enableAotCache = true` inside `nativeDistributions`. For GraalVM native images, set the Java
+version with `nucleus.application.graalvm { javaLanguageVersion.set(25) }`. See
+[Configuration](/docs/start/configuration) for both.
+
+## Configure gradle.properties
+
+These settings speed up the build and enable the configuration cache, which the Nucleus
+plugin supports:
+
+```properties title="gradle.properties"
+org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC
+org.gradle.parallel=true
+org.gradle.caching=true
+org.gradle.configuration-cache=true
+
+kotlin.code.style=official
+```
+
+## Lay out the modules
+
+A single module works for small apps. As the app grows, split UI, application wiring, and
+business logic into separate modules:
+
+```
+my-app/
+├── settings.gradle.kts
+├── build.gradle.kts             ← shared conventions, no plugins
+├── app/                         ← Nucleus entry point + main()
+│   └── build.gradle.kts         ← applies dev.nucleusframework
+├── ui/                          ← Compose composables, themes
+│   └── build.gradle.kts
+└── domain/                      ← pure Kotlin: models, repositories, services
+    └── build.gradle.kts
+```
+
+Follow these rules to keep dependencies flowing in one direction:
+
+- Only `:app` applies `dev.nucleusframework`, and only `:app` declares
+  `nucleus.application { … }`.
+- `:domain` stays pure Kotlin, so you can share it with Android or iOS later by moving it into
+  a Kotlin Multiplatform `commonMain` source set.
+- Platform-specific code, such as a macOS dock menu or a Windows jump list, lives next to the
+  code that uses it, most often inside `:app`.
+
+## Share code across platforms
+
+The Nucleus runtime modules are JVM-only, but `:domain` and `:ui` can be Kotlin Multiplatform
+modules. The `:app` module consumes their JVM target and needs no change when you add other
+targets.
+
+## What's next
+
+- [Quickstart](/docs/start/quickstart) — build and run a single-module app first.
+- [Configuration](/docs/start/configuration) — the full `nucleus { }` Gradle DSL.
+- [Modules](/docs/concepts/modules) — how Nucleus modules compose.
+- [Runtimes](/docs/concepts/runtimes) — the core, AOT, and GraalVM runtimes.

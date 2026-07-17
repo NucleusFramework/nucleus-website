@@ -1,0 +1,70 @@
+---
+title: GraalVM Native Image
+description: GraalVM Native Image compiles a Nucleus app ahead of time into a self-contained native binary, with reflection, resource, and JNI metadata generated for every Nucleus module.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+GraalVM Native Image ahead-of-time compiles a Compose Desktop app into a single self-contained binary that runs without a JVM. The trade-off is the closed-world assumption: no dynamic class loading, no agents, and every reflective call declared at build time. Nucleus generates that metadata for you, so the same source that builds a JVM app also builds a native image.
+
+## When to use GraalVM Native Image
+
+- Background services, menu-bar apps, and system-tray tools that stay idle but must remain responsive.
+- Utilities and launchers where startup time matters.
+- Store distribution (App Store, MSIX, Snap) and small self-contained installers that ship no separate JRE.
+- Memory-constrained environments such as sandboxes and low-spec hardware.
+
+## Trade-offs
+
+- **No JIT.** A native image runs ahead-of-time compiled code with no just-in-time optimization, so sustained CPU-heavy workloads run slower than on the JVM. For those, use the [AOT cache](/docs/performance/aot-cache) instead.
+- **Closed world.** No runtime `Class.forName` driven by dynamic values, no custom classloaders, no scripting engines, no runtime bytecode generation. Libraries that rely on these — Spring, Groovy, ByteBuddy-based mocking, heavy JNA use — are not compatible; ship them with the AOT cache.
+- **Per-platform builds.** A native image must be compiled on each target OS, so producing binaries for macOS, Windows, and Linux requires a CI matrix.
+
+Most idiomatic Kotlin libraries — Ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose, SLF4J — work without extra configuration.
+
+## Requirements
+
+### BellSoft Liberica NIK 25
+
+GraalVM native-image compilation requires the **full** [BellSoft Liberica NIK 25](https://bell-sw.com/liberica-native-image-kit/) distribution. Download it yourself and install it locally — Gradle's automatic toolchain provisioning does not fetch the NIK variant.
+
+<Callout type="error" title="Other distributions will fail">
+Oracle GraalVM, GraalVM CE, and Liberica NIK Lite lack the AWT/Swing native-image support that desktop apps need. Use the full Liberica NIK distribution.
+</Callout>
+
+### Platform toolchains
+
+| Platform | Required |
+|----------|----------|
+| **macOS** | Xcode Command Line Tools |
+| **Windows** | MSVC (Visual Studio Build Tools) |
+| **Linux** | GCC, `patchelf`, and `xvfb` for headless compilation |
+
+## How Nucleus builds the native image
+
+Three modules cooperate to produce a native image from the same source as a JVM build:
+
+- **`nucleus.graalvm-runtime`** — the runtime support library. It provides SVM `@TargetClass` substitutions for the AWT internals that don't work as-is under native image (the Fontconfig and Win32 font managers, font creation, the splash screen, and the X11 toolkit WMClass), registers app resources, and exposes `GraalVmInitializer`.
+- **The Nucleus Gradle plugin** — generates the reachability metadata (reflection, resources, JNI) for your dependencies and wires the `packageGraalvmNative` task graph.
+- **`nucleus.nucleus-application`** — calls `GraalVmInitializer.initialize()` for you and exposes the same `DecoratedWindow` / `NucleusWindow` API as the JVM path, so one source tree produces both artifacts.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    graalvm {
+        isEnabled = true
+        imageName = "my-app"
+        javaLanguageVersion = 25
+    }
+}
+```
+
+<Callout type="info">
+`nucleusApplication` calls `GraalVmInitializer.initialize()` at startup. If you write your own `main()` without it, call `GraalVmInitializer.initialize()` yourself before any AWT or Compose code runs.
+</Callout>
+
+## What's next
+
+- [Configuration](/docs/performance/graalvm/configuration) — the full `graalvm { }` DSL and recommended build arguments.
+- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — how reflection, resources, and JNI are resolved for you.
+- [Tasks and CI](/docs/performance/graalvm/tasks-ci) — Gradle tasks, output locations, and the GitHub Actions matrix.

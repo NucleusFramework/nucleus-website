@@ -1,0 +1,67 @@
+---
+title: Pourquoi Nucleus
+description: Nucleus fournit les intégrations desktop natives et l'empaquetage pour les applications Compose Multiplatform écrites en Kotlin.
+---
+
+Kotlin et Compose tournent sur Android, iOS et le web. Sur le desktop, Compose Multiplatform
+rend l'interface, mais atteindre les fonctionnalités du système d'exploitation imposait de
+passer par JNI, l'API Foreign Function & Memory ou des bibliothèques natives propres à chaque
+plateforme — une API différente sur chaque OS. Nucleus fournit ces intégrations sous forme
+d'APIs Kotlin, avec l'outillage d'empaquetage et de distribution dont une application desktop
+a besoin.
+
+## Ce que Nucleus ajoute à Compose Multiplatform
+
+Compose Multiplatform rend l'interface desktop. En revanche, il ne fournit pas les décorations
+de fenêtre natives, les menus dock, les system trays, les pipelines de signature, les deep
+links, l'auto-update ni les installateurs. C'est ce que Nucleus ajoute : des Composables
+agnostiques du backend côté interface, et un plugin Gradle ainsi que des modules runtime côté
+plateforme.
+
+Chaque API native conserve toute sa surface. Windows Toast Notifications, macOS
+UserNotifications, StatusNotifierItem de FreeDesktop et Win32 ITaskbarList3 ont chacune leur
+propre modèle de threading et leurs conventions. Nucleus les expose via un DSL Kotlin de même
+forme sur tous les OS, et les APIs sous-jacentes restent accessibles au besoin.
+
+## Ce que fournit Nucleus
+
+- **Fenêtre décorée native** — un `DecoratedWindow` qui respecte les conventions de barre de
+  titre macOS/Windows/Linux, servi par le [backend Tao](/docs/concepts/backends).
+- **Modules runtime** — plus de 40 modules couvrant les notifications, le system tray, les
+  hotkeys globaux, la progression dans la barre des tâches, le dark mode, la couleur
+  d'accentuation, les menus dock, les jump lists, les contrôles média, l'auto-launch, le
+  scheduler, l'auto-update, les informations système et les file dialogs. Chacun est optionnel
+  et écrit en Kotlin.
+- **Deux runtimes** — GraalVM Native Image produit un binaire autonome (environ 40 Mo en
+  installateur NSIS avec compression maximale, démarrant en environ 0,2 s) ; JVM avec un cache
+  AOT tourne sur HotSpot pour les charges longues. Les métadonnées de reachability — pour vos
+  bibliothèques tierces aussi, pas seulement Nucleus — sont résolues automatiquement à la
+  compilation depuis un jeu curé, le repository Oracle et l'analyse statique du bytecode, si bien
+  que la plupart des images natives compilent sans configuration de reflection écrite à la main.
+  Une seule ligne Gradle permet de basculer entre les deux.
+- **18 formats d'empaquetage** — DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX/MSIX, DEB, RPM,
+  AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR et 7Z, avec signature et notarisation.
+- **Prise en charge de la CI** — actions GitHub réutilisables, builds en matrice
+  multi-plateforme, binaires universels macOS et bundles MSIX.
+
+## Comparé à Tauri et Electron
+
+| | Tauri / Electron | Nucleus |
+|---|---|---|
+| **Stack de langages** | JavaScript + Rust + Swift + Kotlin/Java | Kotlin |
+| **Runtime UI** | Moteur de navigateur (Chromium / WebView) | Compose Multiplatform sur Skia GPU |
+| **Appels OS** | Pont IPC entre langages | Direct, dans le process |
+| **Intégration UI native** | Une web view dans une fenêtre | Fenêtre et widgets natifs via `NativeView` |
+| **Partage avec le mobile** | Bundle web | Le même module Kotlin qu'Android et iOS |
+
+Tauri utilise Rust avec un front end WebView en JavaScript, en communiquant par un pont IPC.
+Electron embarque un moteur de navigateur avec chaque application. Nucleus utilise Kotlin pour
+l'interface, la logique métier, les appels OS et l'empaquetage, dans un seul process.
+
+## Et ensuite
+
+- [Architecture](/docs/concepts/architecture) — le modèle en couches, de votre application
+  jusqu'au JDK ou à GraalVM.
+- [Quickstart](/docs/start/quickstart) — construire et lancer une fenêtre Tao.
+- [Runtimes](/docs/concepts/runtimes) — choisir entre GraalVM Native Image et JVM avec un cache
+  AOT.

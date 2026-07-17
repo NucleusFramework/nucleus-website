@@ -1,0 +1,227 @@
+---
+title: Scheduler — cron jobs that survive reboots
+description: Run periodic, calendar, and on-boot background tasks from Kotlin that the OS fires on schedule even when your app is closed.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The scheduler module lets you run background tasks on a schedule from Kotlin, even when your
+app is closed. You register a task once and the OS — launchd on macOS, Task Scheduler on
+Windows, systemd user timers on Linux — fires it on time and handles wakeups and persistence.
+Tasks come in three shapes: periodic, calendar, and on-boot.
+
+<Callout type="warn">
+`DesktopTaskScheduler` is not supported in sandboxed Mac App Store builds (`.pkg`), because it
+writes launchd plists at runtime, which the sandbox forbids. Use
+[Service Management](/docs/lifecycle/service-management) there instead.
+</Callout>
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("plugin.serialization") version "<kotlin version>"
+}
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.scheduler:<version>")
+}
+```
+
+`kotlinx-serialization-json` is exposed transitively, so you can annotate task input with
+`@Serializable` without adding it yourself.
+
+## Schedule a task
+
+### 1. Define a task and a registry
+
+Implement `DesktopTask`, give it a `TaskId`, and register a factory for it. The OS relaunches
+your binary to run a task, so the registry is how the receiver maps an ID back to your code.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopTask
+import dev.nucleusframework.scheduler.TaskContext
+import dev.nucleusframework.scheduler.TaskId
+import dev.nucleusframework.scheduler.TaskRegistry
+import dev.nucleusframework.scheduler.TaskResult
+
+val SyncId = TaskId("sync")
+
+class SyncTask : DesktopTask {
+    override suspend fun doWork(context: TaskContext): TaskResult {
+        performSync()
+        return TaskResult.Success
+    }
+}
+
+val registry = TaskRegistry.Builder()
+    .register(SyncId) { SyncTask() }
+    .build()
+```
+
+### 2. Handle scheduler invocations in main()
+
+When the OS fires a task, it relaunches your binary with a scheduler flag. Check for that at
+the top of `main()` and hand control to `DesktopBootReceiver`, which runs the task and exits.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopBootReceiver
+
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args = args, registry = registry)
+        return
+    }
+
+    // Normal UI startup
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+<Callout type="warn">
+This check must come before any UI is built. Otherwise every scheduler fire opens a window.
+</Callout>
+
+### 3. Enqueue a request
+
+Build a `TaskRequest` with one of the three factories and enqueue it. Enqueuing is idempotent
+by default — see [`ExistingTaskPolicy`](#taskrequest) to change that.
+
+```kotlin
+import dev.nucleusframework.scheduler.CronExpression
+import dev.nucleusframework.scheduler.DesktopTaskScheduler
+import dev.nucleusframework.scheduler.TaskRequest
+import java.time.LocalTime
+import kotlin.time.Duration.Companion.hours
+
+val scheduler = DesktopTaskScheduler.getInstance()
+
+// Every hour, from enqueue time
+scheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours))
+
+// Every day at 09:00, wall-clock
+scheduler.enqueue(TaskRequest.calendar(ReportId, CronExpression.everyDayAt(LocalTime.of(9, 0))))
+
+// At system/user login
+scheduler.enqueue(TaskRequest.onBoot(StartupCheckId))
+```
+
+## How it works
+
+The OS schedulers can't run a Kotlin function — they only run binaries. So the scheduler
+registers your application binary with the platform's timer/job system and passes
+`--nucleus-scheduler-run <taskId>` on the command line. When that fires, your `main()` runs,
+`DesktopBootReceiver.isSchedulerInvocation(args)` returns `true`, and the receiver:
+
+1. Loads the persisted `TaskContext` (input data and attempt count) from the per-task metadata file.
+2. Checks any registered constraints against current system state via [`system-info`](/docs/os/system-info).
+3. If they are satisfied, calls your `doWork(context)`.
+4. Records the outcome — `Success`, `Failure`, `Retry`, or `ConstraintsNotMet` — and, on `Retry`, schedules a backoff.
+
+| Platform | Mechanism | Plist / unit location |
+|---|---|---|
+| macOS | launchd plists | `~/Library/LaunchAgents/dev.nucleusframework.<appId>.<taskId>.plist` |
+| Linux | systemd user service + timer via D-Bus to `org.freedesktop.systemd1.Manager` | `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` |
+| Windows | Task Scheduler 2.0 COM API (`ITaskService`) | `\Nucleus\<appId>\<taskId>` |
+
+On Linux and Windows, the scheduler doesn't register the app binary directly — it writes a
+small wrapper (`.sh` / `.vbs`) that checks the binary still exists. If the user uninstalls the
+app without cleaning up, the wrapper self-destructs: it unregisters the timer/task, deletes its
+metadata, and removes itself. macOS doesn't get this trick, because the launchd entry must point
+directly at the binary to show up correctly in System Settings. Orphan cleanup there relies on
+you calling `DesktopTaskScheduler.cancelAll()` from your sign-out or reset flows.
+
+## API reference
+
+### DesktopTaskScheduler
+
+Obtain the singleton with `DesktopTaskScheduler.getInstance()`, or call the methods on the
+object directly.
+
+| Method | Returns | Description |
+|---|---|---|
+| `isAvailable()` | `Boolean` | Whether the platform backend is wired up. |
+| `enqueue(request)` | `Boolean` | Registers a task; `true` if scheduled or already present. |
+| `cancel(taskId)` | `Boolean` | Removes a task; `true` if it was found. |
+| `cancelAll()` | `Unit` | Removes every task this app registered. |
+| `isScheduled(taskId)` | `Boolean` | Whether the task is currently scheduled. |
+| `getTaskInfo(taskId)` | `TaskInfo?` | State, last/next run, run count, and last result. |
+| `getAllTasks()` | `List<TaskInfo>` | Info for every task this app registered. |
+
+### TaskRequest
+
+Create requests with the factories `periodic(taskId, interval)`, `calendar(taskId, expression)`,
+and `onBoot(taskId)`. Each takes an optional builder lambda:
+
+```kotlin
+import dev.nucleusframework.scheduler.ExistingTaskPolicy
+import dev.nucleusframework.scheduler.NetworkType
+import dev.nucleusframework.scheduler.RetryPolicy
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+
+TaskRequest.periodic(SyncId, 1.hours) {
+    inputData(SyncInput(endpoint = "https://api.example.com"))
+    retryPolicy(RetryPolicy.ExponentialBackoff(initialDelay = 30.minutes, maxAttempts = 3))
+    runImmediately()
+    constraints {
+        requiredNetworkType = NetworkType.UNMETERED
+        requiresBatteryNotLow = true
+    }
+    existingTaskPolicy(ExistingTaskPolicy.REPLACE)
+}
+```
+
+The minimum periodic interval is 15 minutes; a shorter value throws.
+
+| Builder method | Description |
+|---|---|
+| `inputData(value)` | Attach a `@Serializable` payload, persisted as JSON. |
+| `retryPolicy(policy)` | `RetryPolicy.Linear` or `RetryPolicy.ExponentialBackoff`. |
+| `runImmediately()` | Run once on registration, in addition to the interval (periodic only). |
+| `constraints { ... }` | Network, charging, idle, and storage conditions. |
+| `existingTaskPolicy(policy)` | `KEEP` (default), `UPDATE_DATA`, or `REPLACE`. |
+
+### CronExpression
+
+`everyDayAt(time)`, `everyWeekdayAt(time)` (Monday–Friday), `everyWeekdayAt(day, time)`, and
+`everyHour()`. Times use `java.time.LocalTime`; days use `java.time.DayOfWeek`. Expressions map
+to systemd `OnCalendar=` syntax on all platforms.
+
+### TaskResult
+
+Return one of these from `doWork`:
+
+- `TaskResult.Success`
+- `TaskResult.Failure(message)` — permanent, no retry.
+- `TaskResult.Retry(message)` — retried according to the task's `RetryPolicy`.
+
+### Constraints
+
+Set on the `constraints { }` block; all are checked at execution time.
+
+| Property | Type | Description |
+|---|---|---|
+| `requiredNetworkType` | `NetworkType` | `NOT_REQUIRED`, `CONNECTED`, or `UNMETERED`. |
+| `requiresBatteryNotLow` | `Boolean` | Requires battery above 15 %. |
+| `requiresCharging` | `Boolean` | Requires the device to be plugged in. |
+| `requiresDeviceIdle` | `Boolean` | Requires no user input for at least 5 minutes. |
+| `minimumStorageBytes` | `Long?` | Minimum free disk space on the app partition. |
+
+An unsatisfied periodic fire is silently skipped and re-checked on the next trigger. An
+unsatisfied calendar or on-boot fire schedules a retry with backoff.
+
+## Notes
+
+- Don't put secrets in `inputData` — it's persisted as plain JSON in the per-task metadata file.
+  Store references there and resolve credentials from the keychain at run time.
+- `CronExpression.everyHour()` means the wall-clock top of the hour, not "one hour from enqueue".
+  For a fixed cadence relative to enqueue time, use `TaskRequest.periodic(id, 1.hours)`.
+- For tests, the `scheduler-testing` module ships `TestTaskRunner` for isolated unit tests and
+  `TestDesktopTaskScheduler` with virtual time, execution history, and a `TestConstraintChecker`.
+
+## What's next
+
+- [Service Management](/docs/lifecycle/service-management) — background agents and daemons for sandboxed macOS builds.
+- [System info](/docs/os/system-info) — the signals the scheduler reads to evaluate constraints.
+- [Auto-launch](/docs/lifecycle/auto-launch) — start your app itself at login, not just a task.

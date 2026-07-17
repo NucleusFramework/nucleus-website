@@ -1,0 +1,125 @@
+---
+title: Notifications cross-plateforme
+description: Envoyez des notifications desktop sur macOS, Windows et Linux depuis une seule API Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+`notification-common` vous permet d'envoyer une notification desktop depuis Kotlin sans écrire de code par plateforme. Le module expose une fonction `notification(...)` et un `NotificationManager` qui détecte l'OS courant à l'exécution et délègue au backend natif adéquat sur macOS, Windows ou Linux.
+
+L'API commune couvre le sous-ensemble partagé : titre, corps de texte, grande image, petite icône, jusqu'à cinq boutons d'action et callbacks de cycle de vie. Pour les fonctionnalités propres à une plateforme (planification, catégories, barres de progression, images héros), utilisez directement le module par OS.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-common:<version>")
+}
+```
+
+Cette dépendance tire les trois modules par plateforme de façon transitive. Seul le module correspondant à l'OS hôte est chargé à l'exécution.
+
+## Envoyer une notification
+
+```kotlin
+import dev.nucleusframework.notification.common.NotificationManager
+import dev.nucleusframework.notification.common.notification
+
+NotificationManager.initialize()
+
+val n = notification(
+    title = "Téléchargement terminé",
+    message = "report.pdf a été enregistré",
+    onActivated = { openFile() },
+) {
+    button("Ouvrir") { openFile() }
+    button("Afficher dans le dossier") { showInFolder() }
+}
+
+n.send()
+```
+
+`title` et `message`, tout comme les callbacks, sont des paramètres de la fonction `notification(...)`. Le bloc lambda final sert uniquement à déclarer les boutons d'action via `button(title, onClick)`.
+
+## Fonctionnement
+
+`NotificationManager` détecte la plateforme active à la première utilisation et délègue au pont natif adéquat. Appeler `NotificationManager.initialize()` initialise le sous-système immédiatement ; sinon l'initialisation se fait paresseusement au premier `send()`.
+
+La fonction `notification(...)` construit une valeur `Notification`. Appeler `send()` dessus route vers `NotificationManager.send(notification)` et renvoie un `NotificationResult`. La même instance `Notification` peut être envoyée plusieurs fois ; chaque appel produit une nouvelle notification OS.
+
+Les callbacks de cycle de vie ne s'exécutent pas forcément sur un thread UI : revenez sur votre dispatcher UI avant de toucher à l'état Compose.
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+
+Délègue à [`notification-macos`](/docs/os/notification-macos). Requiert l'autorisation utilisateur et une app signée et bundlée. Testez sur le binaire packagé (`./gradlew runDistributable`).
+
+</Tab>
+<Tab value="Windows">
+
+Délègue à [`notification-windows`](/docs/os/notification-windows), qui affiche des toasts WinRT.
+
+</Tab>
+<Tab value="Linux">
+
+Délègue à [`notification-linux`](/docs/os/notification-linux), qui utilise `org.freedesktop.Notifications` sur D-Bus. Fonctionne sur tout bureau exécutant un daemon de notifications, dont GNOME, KDE et Cinnamon.
+
+</Tab>
+</Tabs>
+
+## Référence de l'API
+
+### Construire une notification
+
+Passez le contenu et les callbacks en paramètres de la fonction, et déclarez les boutons dans le bloc :
+
+```kotlin
+val n = notification(
+    title = "Nouveau message d'Alice",
+    message = "Vous avez vu le dernier build ?",
+    onActivated = { openConversation() },
+    onDismissed = { reason -> log.info("rejetée: $reason") },
+    onFailed = { log.warn("échec de l'affichage de la notification") },
+) {
+    button("Répondre") { /* … */ }
+    button("Muet") { /* … */ }
+}
+```
+
+- `onActivated: (() -> Unit)?` — l'utilisateur a cliqué sur le corps de la notification.
+- `onDismissed: ((DismissReason) -> Unit)?` — la notification a été rejetée. `DismissReason` vaut `USER_DISMISSED`, `TIMED_OUT`, `APPLICATION` ou `UNKNOWN`.
+- `onFailed: (() -> Unit)?` — l'affichage de la notification a échoué.
+
+Vous pouvez ajouter jusqu'à cinq boutons ; au-delà, une exception est levée.
+
+### Envoyer
+
+`send()` renvoie un `NotificationResult` :
+
+```kotlin
+when (val result = n.send()) {
+    is NotificationResult.Success -> result.handle.dismiss()
+    is NotificationResult.Failure -> log.warn(result.reason)
+}
+```
+
+`NotificationResult.Success` porte un `NotificationHandle` ; appelez `handle.dismiss()` pour fermer la notification par programme tant qu'elle est visible. `NotificationResult.Failure` porte une chaîne `reason`.
+
+### Vérifier la disponibilité
+
+```kotlin
+if (!NotificationManager.isAvailable()) {
+    // L'OS courant ou la sandbox interdit les notifications.
+}
+```
+
+<Callout type="warn">
+macOS ignore silencieusement les notifications des apps non bundlées. Testez toujours sur le binaire packagé.
+</Callout>
+
+## Et ensuite
+
+- [Notifications macOS](/docs/os/notification-macos) — autorisation, planification, catégories et pièces jointes.
+- [Notifications Windows](/docs/os/notification-windows) — contenu des toasts, barres de progression et historique.
+- [Notifications Linux](/docs/os/notification-linux) — indices d'urgence, actions et daemon D-Bus.

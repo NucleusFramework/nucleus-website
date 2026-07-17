@@ -1,0 +1,129 @@
+---
+title: Modules
+description: Comment Nucleus découpe son runtime en modules Gradle versionnés séparément, et comment ajouter ceux dont vous avez besoin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus est un ensemble de modules Gradle versionnés séparément. Un module ombrelle apporte
+les essentiels du runtime, et chaque autre capacité est un module distinct que vous ajoutez au
+besoin, si bien que votre build n'embarque que ce que votre application utilise.
+
+## Le module ombrelle
+
+Ajoutez `nucleus-application` pour tirer les essentiels du runtime :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+}
+```
+
+Cela tire trois modules runtime :
+
+- `core-runtime` — détection de plateforme, chargement de bibliothèques natives, gestionnaire de deep links, verrou single-instance et métadonnées d'application.
+- `aot-runtime` — détection du mode cache AOT.
+- `graalvm-runtime` — les substitutions SVM et l'initialiseur appelé depuis `nucleusApplication { }`.
+
+Il apporte aussi le code Compose de fenêtre partagé dans `decorated-window-core` ; vous n'ajoutez
+donc qu'un backend de fenêtre par-dessus. Tout le reste est optionnel.
+
+## Modules de fenêtre
+
+Chaque application utilise exactement un backend de fenêtre, plus un adaptateur de style
+optionnel.
+
+| Module | Rôle |
+|---|---|
+| `decorated-window-core` | Styling, thèmes et jeux d'icônes Compose partagés. Tiré par les autres. |
+| `decorated-window-tao` | Backend natif Rust ([Tao](/docs/concepts/backends)). Par défaut pour les nouveaux projets. |
+| `decorated-window-jbr` / `decorated-window-jni` / `decorated-window-awt` | Backend AWT. **Déprécié**, sera retiré dans une prochaine version de Nucleus. |
+| `decorated-window-jewel` | Adaptateur de style — look IntelliJ Platform. |
+| `decorated-window-material2` | Adaptateur de style — Material 2. |
+| `decorated-window-material3` | Adaptateur de style — Material 3. |
+
+Choisissez exactement un backend (`-tao`, ou l'un des modules AWT dépréciés), et zéro ou un
+adaptateur de style.
+
+## Modules d'intégration OS
+
+| Capacité | Module |
+|---|---|
+| Notifications (DSL cross-platform) | `notification-common` |
+| Notifications (macOS) | `notification-macos` |
+| Notifications (Windows Toast) | `notification-windows` |
+| Notifications (DBus Linux) | `notification-linux` |
+| Menu du dock (macOS) | `launcher-macos` |
+| Jump lists, boutons de barre des tâches (Windows) | `launcher-windows` |
+| Quicklist Unity (Linux) | `launcher-linux` |
+| Barre de menus native (macOS) | `menu-macos` |
+| Progression dans la barre des tâches | `taskbar-progress`, [`taskbar-progress-tao`](/docs/tao/taskbar-progress) |
+| Détection du mode sombre | `darkmode-detector` |
+| Couleur d'accentuation système | `system-color` |
+| Raccourcis clavier globaux | `global-hotkey` |
+| Contrôles média (Now Playing / SMTC / MPRIS) | `media-control` |
+| Infos système (CPU, RAM, GPU, batteries) | `system-info` |
+| Mode économie / efficience énergétique | `energy-manager` |
+| Lancement automatique à la connexion | `autolaunch` |
+| Planificateur (cron / périodique / au démarrage) | `scheduler` |
+| Tests du planificateur (horloge virtuelle) | [`scheduler-testing`](/docs/lifecycle/scheduler-testing) |
+| Surveillance du système de fichiers | [`fs-watcher`](/docs/lifecycle/fs-watcher) |
+| Gestion de services macOS | `service-management-macos` |
+| Détection du facteur d'échelle HiDPI Linux | `linux-hidpi` |
+| Catalogue SF Symbols | [`sf-symbols`](/docs/os/sf-symbols) |
+| Noms d'icônes FreeDesktop | `freedesktop-icons` |
+
+## Modules de performance et de réseau
+
+| Capacité | Module |
+|---|---|
+| Trust manager natif (CA du trousseau de l'OS) | `native-ssl` |
+| `java.net.http.HttpClient` avec confiance native | `native-http` |
+| OkHttp avec confiance native | [`native-http-okhttp`](/docs/performance/native-http) |
+| Ktor avec confiance native | [`native-http-ktor`](/docs/performance/native-http) |
+| Mise à jour automatique | `updater-runtime` |
+
+## Ajouter un module
+
+Déclarez l'ombrelle, un backend de fenêtre et les modules de capacité dont vous avez besoin :
+
+```kotlin title="build.gradle.kts"
+val nucleusVersion = "<version>"
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:$nucleusVersion")
+
+    // Ajoutez les capacités dont vous avez besoin
+    implementation("dev.nucleusframework:nucleus.notification-common:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.global-hotkey:$nucleusVersion")
+    implementation("dev.nucleusframework:nucleus.system-info:$nucleusVersion")
+}
+```
+
+<Callout type="info">
+Épinglez tous les artefacts `nucleus.*` à la même version. Les modules sont publiés ensemble.
+</Callout>
+
+## Fonctionnement de la composition des modules
+
+La plupart des modules dépendent de `core-runtime` pour la détection de plateforme et les
+métadonnées d'application. Quelques catalogues autonomes, comme `sf-symbols` et
+`freedesktop-icons`, n'ont aucune dépendance runtime. Certains modules dépendent les uns des
+autres : `notification-common` orchestre les modules de notification par OS, et
+`taskbar-progress-tao` dépend de `nucleus-application` pour ajouter des fonctions d'extension
+sur `NucleusWindow`.
+
+Le plugin Gradle injecte `nucleus-app.properties` dans le classpath au moment du build, si
+bien que n'importe quel module lit l'identité de votre application via `NucleusApp.appId`,
+`NucleusApp.version`, `NucleusApp.aumid` et les autres propriétés, sans câblage
+supplémentaire.
+
+Lors du build GraalVM, les métadonnées de reachability de chaque module sont intégrées
+automatiquement : aucune configuration de réflexion à maintenir à la main.
+
+## Et ensuite
+
+- [Architecture](/docs/concepts/architecture) — comment les couches s'imbriquent.
+- [Intégration OS](/docs/os) — recettes concrètes par capacité.
+- [Référence : DSL Gradle](/docs/reference/gradle-dsl) — coordonnées complètes et table des versions.

@@ -1,0 +1,302 @@
+---
+title: Signature de code
+description: Signez et notarisez les installateurs de votre app sur macOS, signez avec un certificat PFX ou Azure Artifact Signing sur Windows, et signez les paquets DEB/RPM en GPG sur Linux.
+---
+
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez signer les installateurs de votre app Nucleus sur macOS, Windows et Linux,
+et notariser le build macOS auprès d'Apple. La signature se configure dans le même DSL
+`nativeDistributions { }` que le packaging : un bloc `signing { }` par système d'exploitation, ou
+un seul bloc unifié pour les trois.
+
+## Avant de commencer
+
+La signature est livrée avec le plugin Gradle, il n'y a donc rien de plus à installer. Ce dont vous avez
+besoin dépend de la plateforme visée :
+
+- **macOS** — un compte Apple Developer avec un certificat *Developer ID Application*, plus des
+  identifiants de notarisation (un mot de passe app-specific d'Apple ID, un profil keychain
+  `notarytool`, ou une clé API App Store Connect).
+- **Windows** — un certificat de signature `.pfx`/`.p12`, ou un compte Azure Trusted Signing.
+- **Linux** — une paire de clés GPG. Aucun certificat payant ni autorité n'est requis.
+
+## Signer et notariser sur macOS
+
+Les formats de distribution directe (DMG, ZIP) sont signés avec une identité
+*Developer ID Application* puis soumis à Apple pour notarisation. Configurez l'identité dans
+`signing { }` et les identifiants dans `notarization { }` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    signing {
+        sign.set(true)
+        identity.set("Developer ID Application: My Company (TEAMID)")
+    }
+    notarization {
+        appleID.set("dev@example.com")
+        password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+        teamID.set("TEAMID")
+    }
+}
+```
+
+Les builds Mac App Store (PKG) suivent un autre chemin : un certificat
+*3rd Party Mac Developer Application* avec des provisioning profiles, et pas de notarisation — Apple
+review l'envoi via Transporter.
+
+### Choisir un mode de notarisation
+
+La notarisation propose trois modes d'authentification mutuellement exclusifs. En configurer
+plusieurs dans le même build est rejeté à la validation : choisissez-en un.
+
+1. Apple ID et mot de passe app-specific :
+
+   ```kotlin
+   notarization {
+       appleID.set("dev@example.com")
+       password.set(System.getenv("MAC_NOTARIZATION_PASSWORD"))
+       teamID.set("TEAMID")
+   }
+   ```
+
+2. Un profil keychain `notarytool`. Stockez les identifiants une fois avec
+   `xcrun notarytool store-credentials AC_PASSWORD …`, puis référencez le profil :
+
+   ```kotlin
+   notarization {
+       keychainProfile.set("AC_PASSWORD")
+   }
+   ```
+
+3. Une clé API App Store Connect, le mode recommandé en CI :
+
+   ```kotlin
+   notarization {
+       apiKey.set("/path/to/AuthKey_ABC123.p8")
+       apiKeyId.set("ABC123")
+       apiIssuer.set("12345678-90ab-cdef-1234-567890abcdef")
+   }
+   ```
+
+### Signer les binaires universels
+
+`lipo` invalide toutes les signatures existantes, donc les builds universels re-signent après la
+fusion dans un ordre inside-out strict : les fichiers `.dylib` et `.jnilib` avec runtime
+entitlements, les exécutables principaux avec app entitlements, puis le runtime bundle, puis le
+`.app` lui-même. Tous les appels `codesign` utilisent `--options runtime --timestamp`. L'action
+composite `build-macos-universal` s'en charge en CI — voir [CI/CD](/docs/packaging/ci-cd).
+
+## Signer sur Windows
+
+Utilisez un certificat `.pfx` ou `.p12`, éventuellement protégé par mot de passe, avec un serveur de
+timestamping. L'algorithme par défaut est `SigningAlgorithm.Sha256` :
+
+```kotlin title="build.gradle.kts"
+windows {
+    signing {
+        enabled = true
+        certificateFile.set(file(System.getenv("WIN_CSC_LINK") ?: "certs/certificate.pfx"))
+        certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
+        algorithm = SigningAlgorithm.Sha256
+        timestampServer = "http://timestamp.digicert.com"
+    }
+}
+```
+
+Serveurs de timestamping courants : DigiCert (`http://timestamp.digicert.com`), Sectigo
+(`http://timestamp.sectigo.com`) et GlobalSign (`http://timestamp.globalsign.com`).
+
+Pour signer via un HSM cloud plutôt qu'avec un fichier de certificat local, utilisez Azure Artifact
+Signing :
+
+```kotlin title="build.gradle.kts"
+windows {
+    signing {
+        enabled = true
+        publisherName = "My Publisher"
+        azureTenantId = System.getenv("AZURE_TENANT_ID")
+        azureEndpoint = "https://eastus.codesigning.azure.net"
+        azureCertificateProfileName = "my-profile"
+        azureCodeSigningAccountName = "my-account"
+    }
+}
+```
+
+## Signer sur Linux
+
+Sur Linux, il n'y a pas de gatekeeper OS. La signature permet à quiconque télécharge votre `.deb`/`.rpm`
+en direct — hors dépôt apt/dnf — de vérifier qu'il vient bien de vous et n'a pas été altéré. Vous signez
+avec votre propre clé GPG, sans certificat payant ni autorité.
+
+1. Générez une clé une fois, si vous n'en avez pas déjà une :
+
+   ```shell
+   gpg --full-generate-key          # RSA 4096, votre nom et votre email
+   gpg --list-secret-keys --keyid-format=long
+   # sec   rsa4096/AB12CD34EF56 ...  l'id de la clé est "AB12CD34EF56"
+   ```
+
+2. Activez la signature avec cet id de clé :
+
+   ```kotlin title="build.gradle.kts"
+   linux {
+       signing {
+           enabled.set(true)
+           keyId.set("AB12CD34EF56")
+           // passphrase.set(System.getenv("LINUX_GPG_PASSPHRASE"))  // seulement si la clé en a une
+       }
+   }
+   ```
+
+   La clé est lue depuis votre trousseau GPG local. En CI, pointez plutôt `keyFile` sur une clé
+   exportée — voir [Gérer les secrets de signature en CI](#gérer-les-secrets-de-signature-en-ci).
+
+3. Buildez. Chaque paquet sort signé, avec sa clé publique écrite à côté :
+
+   ```text
+   MyApp-1.0.0-linux-x64.deb
+   MyApp-1.0.0-linux-x64.deb.asc        # signature détachée (DEB)
+   MyApp-1.0.0-linux-x64.deb.pub.asc    # votre clé publique
+   MyApp-1.0.0-linux-x64.rpm            # signature intégrée au header RPM
+   MyApp-1.0.0-linux-x64.rpm.pub.asc
+   ```
+
+   Publiez chaque paquet avec son `.pub.asc` (et le `.deb.asc` pour le DEB) sur votre page de
+   téléchargement.
+
+4. Les utilisateurs vérifient un téléchargement avant de lui faire confiance :
+
+   ```shell
+   # DEB — signature détachée
+   gpg --import MyApp-1.0.0-linux-x64.deb.pub.asc
+   gpg --verify MyApp-1.0.0-linux-x64.deb.asc MyApp-1.0.0-linux-x64.deb
+   # Good signature from "Your Name <you@example.com>"
+
+   # RPM — signature du header
+   sudo rpm --import MyApp-1.0.0-linux-x64.rpm.pub.asc
+   rpm -K MyApp-1.0.0-linux-x64.rpm
+   # digests signatures OK
+   ```
+
+<Callout type="info">
+La signature ne change rien à l'installation. Un paquet signé s'installe exactement comme un non
+signé, avec ou sans la clé importée. La vérification est une étape optionnelle que l'utilisateur
+lance avant d'installer, et ne devient obligatoire que s'il l'impose lui-même (par exemple une policy
+`debsig-verify`, ou une vérification RPM stricte).
+</Callout>
+
+### Choisir une méthode de signature DEB
+
+`debMethod` sélectionne comment le DEB est signé, via une valeur `DebSignMethod` :
+
+- `Detached` (défaut) écrit un `<pkg>.deb.asc` détaché, vérifié avec
+  `gpg --verify <pkg>.deb.asc <pkg>.deb`. Il ne nécessite que `gpg`, donc marche sur toutes les
+  distributions. C'est le défaut parce que `dpkg-sig` a été retiré des versions récentes de Debian et
+  Ubuntu.
+- `DpkgSig` intègre un membre `_gpgorigin` via `dpkg-sig`, vérifié avec un simple
+  `gpg --verify <pkg>.deb`. Il nécessite `dpkg-sig` au moment du build.
+- `Debsig` intègre un membre `_gpgorigin` via `debsigs`, vérifié avec `debsig-verify`. Il nécessite
+  en plus une policy et un keyring par clé côté client.
+
+```kotlin title="build.gradle.kts"
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set("AB12CD34EF56")
+        debMethod = DebSignMethod.Detached   // Detached | DpkgSig | Debsig
+    }
+}
+```
+
+La clé de signature ne touche jamais votre vrai trousseau pendant le build : Nucleus importe `keyFile`
+dans un `GNUPGHOME` jetable, supprimé ensuite.
+
+### Activer la mise à jour sans mot de passe
+
+Une fois vos paquets signés, l'app peut appliquer les mises à jour sans prompt de mot de passe root,
+car l'install est conditionnée à la signature. Ajoutez `silentUpdate.set(true)` au bloc signing
+Linux ; voir [mises à jour sans mot de passe](/docs/packaging/auto-update#mises-à-jour-sans-mot-de-passe-sur-linux)
+pour le flux complet et le modèle de sécurité.
+
+## Configurer toutes les plateformes dans un seul bloc
+
+Pour garder la signature dans un seul point d'entrée, enveloppez les blocs par OS dans un unique
+`signing { }` sous `nativeDistributions`. Il délègue aux mêmes instances `macOS.signing`,
+`windows.signing` et `linux.signing`, donc vous pouvez mélanger les deux styles librement :
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    signing {
+        macOS   { sign.set(true); identity.set("Developer ID Application: My Company (TEAMID)") }
+        windows { enabled = true; certificateFile.set(file("certs/certificate.pfx")) }
+        linux   { enabled.set(true); keyId.set("AB12CD34EF56") }
+    }
+}
+```
+
+## Gérer les secrets de signature en CI
+
+Ne commitez jamais de certificats ni de clés privées. Sur GitHub Actions, encodez le PFX en base64 et
+décodez-le au build. Pour macOS, l'action composite `setup-macos-signing` crée un keychain temporaire
+et importe les certificats depuis les secrets — voir [CI/CD](/docs/packaging/ci-cd).
+
+Pour Linux, exportez la clé privée et stockez-la en secret :
+
+```shell
+gpg --armor --export-secret-keys AB12CD34EF56   # à coller dans le secret LINUX_GPG_PRIVATE_KEY
+```
+
+Ajoutez `LINUX_GPG_PRIVATE_KEY`, `LINUX_GPG_KEY_ID` et (si définie) `LINUX_GPG_PASSPHRASE`. Le
+workflow de release écrit un fichier de clé temporaire et les passe au build via les propriétés
+`compose.desktop.linux.signing.*` ; quand les secrets sont absents, le build est laissé non signé.
+Configurez le build pour les lire :
+
+```kotlin title="build.gradle.kts"
+linux {
+    signing {
+        enabled.set(true)
+        keyId.set(System.getenv("LINUX_GPG_KEY_ID"))
+        keyFile.set(file(System.getenv("LINUX_GPG_KEY_FILE") ?: "build/signing-key.asc"))
+        passphrase.set(System.getenv("LINUX_GPG_PASSPHRASE"))
+    }
+}
+```
+
+## Référence
+
+- `macOS.signing { }` — `sign`, `identity`, `keychain`, `prefix`
+- `macOS.notarization { }` — `appleID` + `password` + `teamID`, ou `keychainProfile`
+  (+ `keychainPath`), ou `apiKey` + `apiKeyId` + `apiIssuer`
+- `windows.signing { }` — `enabled`, `certificateFile`, `certificatePassword`, `certificateSha1`,
+  `certificateSubjectName`, `algorithm`, `timestampServer`, plus les champs Azure
+- `linux.signing { }` — `enabled`, `keyId`, `keyFile`, `passphrase`, `debMethod`
+  (`Detached` | `DpkgSig` | `Debsig`), `silentUpdate`
+- `signing { macOS { } windows { } linux { } }` — bloc unifié sur les mêmes settings par OS
+
+Le DSL complet est documenté dans la [référence Gradle DSL](/docs/reference/gradle-dsl).
+
+## Notes
+
+- **Entitlements pour le hardened runtime.** Les entitlements JVM minimales sont
+  `com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory` et
+  `com.apple.security.cs.allow-dyld-environment-variables`. Voir
+  [sandboxing](/docs/packaging/sandboxing) pour les entitlements du PKG sandboxé.
+- **Propriétés Gradle équivalentes.** Chaque champ de notarisation a une propriété Gradle
+  `compose.desktop.mac.notarization.<name>`, utile quand vous passez les secrets avec `-P` plutôt qu'en
+  variables d'environnement. La signature Linux expose `compose.desktop.linux.sign` et
+  `compose.desktop.linux.signing.{keyId,keyFile,passphrase}`.
+- **La signature Linux est opt-in.** Elle reste désactivée tant que `linux.signing.enabled` n'est pas
+  `true` avec un `keyId` défini. La signature au niveau dépôt (apt/dnf `Release.gpg`, `InRelease`) est
+  un sujet distinct, hors périmètre — ici on signe le paquet autonome pour le téléchargement direct.
+- **Rotation du `.pfx`.** Mettez à jour le certificat au moins 30 jours avant son expiration. Un binaire
+  signé mais expiré échoue SmartScreen jusqu'à ce qu'une nouvelle signature timestampée soit
+  appliquée.
+
+## Et ensuite
+
+- [CI/CD](/docs/packaging/ci-cd) — signez les builds dans GitHub Actions avec les actions composites.
+- [Mise à jour automatique](/docs/packaging/auto-update) — livrez des mises à jour signées, dont les mises à jour sans mot de passe sur Linux.
+- [Sandboxing](/docs/packaging/sandboxing) — entitlements et builds au format store.
+- [Référence Gradle DSL](/docs/reference/gradle-dsl) — la surface complète de `nativeDistributions { }`.
