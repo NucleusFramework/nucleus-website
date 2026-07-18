@@ -71,20 +71,24 @@ download_with_progress() {
   local url="$1"
   local output="$2"
   local bar_width=40
+  local rc=0
 
   # Get total file size via HEAD request (follow redirects)
   local total_size
-  total_size=$(curl -sIL "$url" | grep -i '^content-length:' | tail -1 | tr -dc '0-9')
+  total_size=$(curl -fsIL "$url" | grep -i '^content-length:' | tail -1 | tr -dc '0-9')
 
   if [ -z "$total_size" ] || [ "$total_size" -eq 0 ]; then
     # Fallback: download with spinner if size unknown
-    curl -sL --output "$output" "$url" &
-    spin $! "Downloading"
-    return
+    # -f: fail (non-zero) on HTTP errors instead of writing the error body to disk.
+    curl -fsSL --output "$output" "$url" &
+    local pid=$!
+    spin "$pid" "Downloading"
+    wait "$pid" || rc=$?
+    return "$rc"
   fi
 
-  # Download silently in background
-  curl -sL --output "$output" "$url" &
+  # Download in background (-f so a 404 is a real error, not a saved HTML page)
+  curl -fsSL --output "$output" "$url" &
   local curl_pid=$!
 
   tput civis 2>/dev/null || true
@@ -117,7 +121,8 @@ download_with_progress() {
   echo ""
 
   tput cnorm 2>/dev/null || true
-  wait "$curl_pid"
+  wait "$curl_pid" || rc=$?
+  return "$rc"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────
@@ -162,7 +167,12 @@ trap cleanup EXIT
 
 # Download
 step "Downloading ${YELLOW}${app_name}${RESET} ${DIM}(${version_number})${RESET} ..."
-download_with_progress "$mac_zip_url" "$tmpfile"
+if ! download_with_progress "$mac_zip_url" "$tmpfile"; then
+  fail "Download failed: ${mac_zip_url}"
+fi
+if [ ! -s "$tmpfile" ]; then
+  fail "Downloaded file is empty: ${mac_zip_url}"
+fi
 success "Download complete"
 echo ""
 
