@@ -69,19 +69,23 @@ download_with_progress() {
   local url="$1"
   local output="$2"
   local bar_width=40
+  local rc=0
 
   # Get total file size via HEAD request (follow redirects)
   local total_size
-  total_size=$(curl -sIL "$url" | grep -i '^content-length:' | tail -1 | tr -dc '0-9')
+  total_size=$(curl -fsIL "$url" | grep -i '^content-length:' | tail -1 | tr -dc '0-9')
 
   if [ -z "$total_size" ] || [ "$total_size" -eq 0 ]; then
-    curl -sL --output "$output" "$url" &
-    spin $! "Downloading"
-    return
+    # -f: fail (non-zero) on HTTP errors instead of writing the error body to disk.
+    curl -fsSL --output "$output" "$url" &
+    local pid=$!
+    spin "$pid" "Downloading"
+    wait "$pid" || rc=$?
+    return "$rc"
   fi
 
-  # Download silently in background
-  curl -sL --output "$output" "$url" &
+  # Download in background (-f so a 404 is a real error, not a saved HTML page)
+  curl -fsSL --output "$output" "$url" &
   local curl_pid=$!
 
   tput civis 2>/dev/null || true
@@ -114,7 +118,8 @@ download_with_progress() {
   echo ""
 
   tput cnorm 2>/dev/null || true
-  wait "$curl_pid"
+  wait "$curl_pid" || rc=$?
+  return "$rc"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────
@@ -157,6 +162,16 @@ success "Architecture: ${BOLD}${machine}${RESET}"
 success "Package format: ${BOLD}${pkg_format}${RESET}"
 echo ""
 
+# Verify the release actually ships this asset before downloading, so a missing
+# ${pkg_format} package (some releases publish only a subset of artifacts) gives a
+# clear error instead of a silently-broken install.
+if ! curl -fsIL -o /dev/null "$pkg_url"; then
+  fail "No ${pkg_format} package for ${version} at:
+    ${pkg_url}
+  This release may not ship a ${pkg_format} build. Please report it at
+  https://github.com/${repo}/issues"
+fi
+
 # Temp directory
 tmpdir="$(mktemp -d -t nucleus-install.XXXXXX)"
 tmpfile="$tmpdir/$pkg_file"
@@ -170,24 +185,35 @@ trap cleanup EXIT
 
 # Download
 step "Downloading ${YELLOW}${app_name}${RESET} ${DIM}(${version_number})${RESET} ..."
-download_with_progress "$pkg_url" "$tmpfile"
+if ! download_with_progress "$pkg_url" "$tmpfile"; then
+  fail "Download failed: ${pkg_url}"
+fi
+# Guard against a truncated or empty download slipping through to the installer.
+if [ ! -s "$tmpfile" ]; then
+  fail "Downloaded file is empty: ${pkg_url}"
+fi
 success "Download complete"
 echo ""
 
-# Install
+# Install — surface the package manager's own errors (do not suppress them) and
+# only report success when the install actually succeeded.
 step "Installing ${YELLOW}${app_name}${RESET} ..."
+install_rc=0
 if [ "$pkg_format" = "deb" ]; then
-  sudo dpkg -i "$tmpfile" >/dev/null 2>&1 || sudo apt-get install -f -y >/dev/null 2>&1
+  sudo dpkg -i "$tmpfile" || sudo apt-get install -f -y || install_rc=$?
 elif [ "$pkg_format" = "rpm" ]; then
   if command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y "$tmpfile" >/dev/null 2>&1
+    sudo dnf install -y "$tmpfile" || install_rc=$?
   elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y "$tmpfile" >/dev/null 2>&1
+    sudo yum install -y "$tmpfile" || install_rc=$?
   elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper install -y "$tmpfile" >/dev/null 2>&1
+    sudo zypper install -y "$tmpfile" || install_rc=$?
   else
-    sudo rpm -i "$tmpfile" >/dev/null 2>&1
+    sudo rpm -i "$tmpfile" || install_rc=$?
   fi
+fi
+if [ "$install_rc" -ne 0 ]; then
+  fail "Installation failed (exit ${install_rc}). See the package manager output above."
 fi
 success "Package installed"
 
