@@ -37,34 +37,28 @@ nucleus.application {
 ```
 
 <Callout type="info" title="New in 2.1">
-The toolchain is downloaded automatically (see below), `march` and `optimization` are now
-type-safe enums, and Profile-Guided Optimization is built in. In 2.0 you installed a GraalVM
-toolchain yourself and passed size flags through `buildArgs`.
+The toolchain is downloaded automatically (see below) and defaults to GraalVM Community
+Edition, `march` and `optimization` are now type-safe enums, and Profile-Guided Optimization is
+built in. In 2.0 you installed a GraalVM toolchain yourself and passed size flags through
+`buildArgs`.
 </Callout>
 
 ## Provision the toolchain
 
-By default Nucleus downloads and caches Oracle GraalVM on the first native build under
+By default Nucleus downloads and caches **GraalVM Community Edition** under
 `<gradle-user-home>/nucleus/graalvm` — no local install and no `graalvm/setup-graalvm` step
-needed. A `GRAALVM_HOME` environment variable always takes precedence. The `toolchain { }`
-sub-block maps to `GraalvmToolchainSettings`.
-
-<Callout type="info" title="Nucleus recommends Oracle GraalVM">
-Oracle GraalVM (the edition formerly called Enterprise) is the recommended and default
-toolchain. The default Tao backend builds native images on it, and only Oracle GraalVM provides
-the advanced native-image features Nucleus builds on: Profile-Guided Optimization,
-`optimization = NativeImageOptimization.LEVEL_3` (`-O3`), and ML-inferred profiles. GraalVM CE
-and Mandrel still build, but without those features. Only the deprecated AWT backend still
-requires a local BellSoft Liberica NIK install, for its AWT/Swing native-image support. Oracle
-GraalVM is free for production use under the GraalVM Free Terms and Conditions.
-</Callout>
+needed. The download happens only when a native-image task actually runs: listing tasks or
+syncing the IDE never pulls a JDK. A `GRAALVM_HOME` environment variable takes precedence,
+provided it matches the requested distribution. The `toolchain { }` sub-block maps to
+`GraalvmToolchainSettings`.
 
 ```kotlin title="build.gradle.kts"
 graalvm {
     toolchain {
-        autoDownload = true                   // default
-        channel = GraalvmChannel.INNOVATION   // default; LTS for the long-term-support line
-        // version = "25"                     // optional; overrides channel
+        autoDownload = true                              // default
+        distribution = GraalvmDistribution.COMMUNITY     // default
+        channel = GraalvmChannel.INNOVATION              // default; LTS for the long-term-support line
+        // version = "25"                                // optional; overrides channel
     }
 }
 ```
@@ -72,14 +66,47 @@ graalvm {
 | Property | Type | Default | Notes |
 |----------|------|---------|-------|
 | `autoDownload` | `Property<Boolean>` | `true` | Set `false` to resolve via Gradle's toolchain machinery (`javaLanguageVersion` / `jvmVendor`) instead. |
-| `channel` | `Property<GraalvmChannel>` | `INNOVATION` | `INNOVATION` (latest Oracle release) or `LTS`. Used only when `version` is unset. |
+| `distribution` | `Property<GraalvmDistribution>` | `COMMUNITY` | `COMMUNITY` (GraalVM CE) or `ORACLE` (Oracle GraalVM). See the licensing note below. |
+| `channel` | `Property<GraalvmChannel>` | `INNOVATION` | `INNOVATION` (latest release) or `LTS`. Used only when `version` is unset. Applies to both distributions. |
 | `version` | `Property<String>` | unset | Overrides `channel`. Accepts `"25i1"`, `"25"`, or a pinned `"25.0.1"`. |
-| `macosIntelFallback` | `Property<Boolean>` | `true` | On Intel Macs (Oracle dropped after 25.0.1), fall back to BellSoft Liberica NIK. |
+| `macosIntelFallback` | `Property<Boolean>` | `true` | On Intel Macs (dropped by both distributions after 25.0.1), fall back to BellSoft Liberica NIK. |
 | `installDir` | `DirectoryProperty` | `<gradle-user-home>/nucleus/graalvm` | Cache location for the downloaded toolchain. |
 
-`channel` selects between the two Oracle lines only. To build on a community toolchain
-(GraalVM CE, Liberica NIK, Mandrel), point `GRAALVM_HOME` at it, or set `autoDownload = false`
-and pick a `jvmVendor`.
+### Choose a distribution
+
+<Callout type="warn" title="Oracle GraalVM changes your redistribution terms">
+GraalVM CE is licensed under GPLv2 with the Classpath Exception, which places no restriction on
+shipping it inside a paid application. Oracle GraalVM is governed by the
+[GraalVM Free Terms and Conditions](https://www.oracle.com/downloads/licenses/graal-free-license.html)
+(GFTC), which permit production and commercial use but only allow redistributing the Program
+"provided that You do not charge Your licensees any fees associated with such distribution or
+use". Nucleus copies GraalVM runtime libraries (`libjvm`, `libawt`, …) next to the packaged
+executable, so this clause applies to your app bundle. Selecting `ORACLE` logs a build warning.
+Review the GFTC before shipping a paid application.
+</Callout>
+
+Opt into Oracle GraalVM when you need its exclusive optimizations — Profile-Guided
+Optimization, `optimization = NativeImageOptimization.LEVEL_3` (`-O3`), ML-inferred profiles,
+and `advancedObfuscation`:
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    toolchain {
+        distribution = GraalvmDistribution.ORACLE
+    }
+}
+```
+
+Under the default community toolchain those Oracle-only features degrade gracefully: `-O3`,
+`--pgo` and `-H:AdvancedObfuscation` are skipped with a warning instead of failing the build,
+and the `runWithPgoInstrument` task is not registered at all.
+
+Install directories embed the distribution (`graalvm-community-jdk-*` vs `graalvm-jdk-*`), so
+switching never reuses the other build's download, and a `GRAALVM_HOME` whose distribution
+disagrees with the DSL is ignored with a warning.
+
+To build on another community toolchain (Liberica NIK, Mandrel), point `GRAALVM_HOME` at it, or
+set `autoDownload = false` and pick a `jvmVendor`.
 
 ## graalvm { } reference
 
@@ -91,6 +118,7 @@ and pick a `jvmVendor`.
 | `optimization` | `Property<NativeImageOptimization>` | native-image `-O2` | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` is Oracle GraalVM only. |
 | `allCharsets` | `Property<Boolean>` | `false` | `true` emits `-H:+AddAllCharsets` (embed every JDK charset; only for legacy encodings). |
 | `mlProfileInference` | `Property<Boolean>` | `true` | `false` emits `-H:-MLProfileInference`, opting out of Oracle's ML-inferred PGO. |
+| `advancedObfuscation` | `Property<Boolean>` | `false` | `true` emits `-H:AdvancedObfuscation=`, renaming symbols inside the binary. Oracle GraalVM only; ignored with a warning elsewhere. |
 | `buildArgs` | `ListProperty<String>` | empty | Extra arguments passed to `native-image` (win over the properties above). |
 | `javaLanguageVersion` | `Property<Int>` | `25` | Toolchain language version — used only when `toolchain { autoDownload = false }`. |
 | `jvmVendor` | `Property<JvmVendorSpec>` | unset | Toolchain vendor — used only when `toolchain { autoDownload = false }`. |
@@ -120,7 +148,10 @@ of MB. Combine with `optimization = NativeImageOptimization.SIZE` for the smalle
 ## Optimize with a PGO profile
 
 Profile-Guided Optimization (Oracle GraalVM only) records how the app actually runs and feeds
-that profile back into the next build. The `pgo { }` sub-block maps to `GraalvmPgoSettings`.
+that profile back into the next build. It requires
+`toolchain { distribution = GraalvmDistribution.ORACLE }`; under the default community
+toolchain `runWithPgoInstrument` is not registered. The `pgo { }` sub-block maps to
+`GraalvmPgoSettings`.
 
 ```kotlin title="build.gradle.kts"
 graalvm {
@@ -137,8 +168,8 @@ graalvm {
    automatically as `--pgo=<profile>`.
 
 Disable a recorded profile for one build with `-Pnucleus.graalvm.pgo=off`. On community
-toolchains (GraalVM CE, Liberica NIK, Mandrel) `--pgo` is unavailable: a profile is ignored
-with a warning, and `runWithPgoInstrument` fails fast.
+toolchains (GraalVM CE, Liberica NIK, Mandrel) `--pgo` is unavailable: a recorded profile is
+ignored with a warning, and the `runWithPgoInstrument` task does not exist.
 
 | Property | Type | Default | Notes |
 |----------|------|---------|-------|
@@ -168,9 +199,9 @@ metadataRepository {
 
 ## Configure macOS settings
 
-On macOS (arm64), native images on the default Tao backend build on Oracle GraalVM — automatic
-with the default toolchain. The deprecated AWT backend still requires BellSoft Liberica NIK.
-Intel Macs fall back to Liberica NIK.
+On macOS (arm64), native images on the default Tao backend build on the auto-provisioned
+toolchain (GraalVM CE by default). The deprecated AWT backend still requires BellSoft Liberica
+NIK. Intel Macs fall back to Liberica NIK.
 
 The `macOS { }` sub-block maps to `GraalvmMacOSSettings`.
 
