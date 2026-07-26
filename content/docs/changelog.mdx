@@ -6,6 +6,80 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.1.9
+
+**Released: 2026-07-26**
+
+### Bug fixes
+
+- **Survive obfuscation for all JNI bridges and coroutines** (#405) — with `obfuscate = true` on by default since 2.1.6, release builds crashed at runtime. The module-by-module JNI keep list is replaced by generic rules that keep the names of any `dev.nucleusframework` class declaring native methods plus `*Bridge`/`*Jni` objects whole, fixing `UnsatisfiedLinkError` in the modules the list missed (autolaunch, launcher-linux, notification-linux/macos, service-management-macos, system-info, taskbar-progress, graalvm-runtime). Dropping `allowoptimization` from the `kotlinx.**` safety rules fixes a `VerifyError` in `ChannelsKt.trySendBlocking`; shrinking stays fully active. The system-color and media-control native builds now invoke `build.bat` by absolute path like every other module.
+
+### CI
+
+- **Microsoft JDK on Windows, Temurin elsewhere** (#406) — replaces JBR as the `setup-nucleus` JDK. The Microsoft Build of OpenJDK is the only mainstream distribution shipping GA windows-aarch64 builds for current LTS majors, and `decorated-window-jbr` needs no JBR at build time since the JBR API comes from the `org.jetbrains.runtime:jbr-api` artifact.
+
+---
+
+## v2.1.8
+
+**Released: 2026-07-26**
+
+### New features
+
+- **`aotCache { }` configuration block** (#404) — exposes the AOT cache portability trade-off: `compatibility = NATIVE` restores the JDK default for locally-built or fleet-homogeneous deployments, and `extraTrainingJvmArgs` is an escape hatch for the training run. `enableAotCache` keeps working as a shorthand.
+
+### Bug fixes
+
+- **CPU-portable AOT cache by default** (#404) — the JDK 25+ AOT cache also stores machine code (i2c/c2i adapter blobs) emitted for the training machine's CPU features, and HotSpot records no ISA information for that region before JDK 27, so a cache built on a CI runner died with `EXCEPTION_ILLEGAL_INSTRUCTION`/`SIGILL` on a narrower CPU. The cache now defaults to metadata only (`-XX:-AOTAdapterCaching` on both the training run and the shipped launcher), keeping the class loading and linking gains and leaving the JIT untouched at runtime. `compatibility = NATIVE` warns at build time when the bundled runtime predates the CPU-feature validation added after JDK 26.
+
+---
+
+## v2.1.7
+
+**Released: 2026-07-26**
+
+### Breaking changes
+
+- **GraalVM Community Edition is now the default toolchain** (#403) — the auto-provisioned toolchain was Oracle GraalVM, governed by the GraalVM Free Terms and Conditions. The GFTC only allows redistributing the Program provided you do not charge your licensees any fees associated with such distribution or use, and the plugin copies GraalVM runtime libraries next to the packaged executable — so that clause silently reached every app built with Nucleus. GraalVM CE (GPLv2 + Classpath Exception) carries no such restriction and is now the default via `GraalvmDistribution.COMMUNITY`. Oracle GraalVM stays available behind an explicit opt-in that logs a licensing warning. `-O3`, `--pgo` and `-H:AdvancedObfuscation` degrade to a warning under a community toolchain, and `runWithPgoInstrument` is not registered at all. The distribution is embedded in the install directory and the CI cache key so an existing Oracle download is never reused, and a `GRAALVM_HOME` whose distribution disagrees with the DSL is ignored.
+
+### Improvements
+
+- **Lazy toolchain provisioning** (#403) — every toolchain provider now resolves in `doFirst`, so an IDE sync or `gradlew tasks` no longer downloads a JDK.
+
+### Bug fixes
+
+- **Survive GitHub API rate limits when resolving Community Edition** (#403) — a pinned version (`"25.0.2"`) now constructs the download URL directly instead of listing releases, making the documented pin-a-version workaround work offline; the native-image build steps pass `GITHUB_TOKEN` so the releases API call is authenticated. Floating versions (`"25"`, `"25i1"`) still need the API.
+- **Decode Mach-O `cpu_type` in the file's own byte order** (#402) — `MH_CIGAM_64` is the byte-swapped magic that every little-endian macOS dylib starts with on disk, so `cpu_type` was read swapped and every thin dylib reported `arch=UNKNOWN`. Cross-checked against `lipo` on 57 real dylibs: 44 decoded wrong before, all 57 are correct now. Also recognizes `FAT_MAGIC_64` alongside `FAT_MAGIC`, and hoists the path-plus-header merge into `NativeLibArchDetector.detectEntry` so the strip transform shares it.
+- **Extract the target-arch native lib, not the first match** (#401) — native libs whose JAR path carries an arch but no OS token were extracted for the wrong architecture: `detectInfo` discarded the path-detected arch whenever the OS was `UNKNOWN`, and the 64-byte header buffer was too small to reach the PE machine field. An ARM64 DLL could therefore win the flattening race on an x64 target and fail to load. `detectInfo` now merges path and header information field by field and reads 4096 header bytes. Fixes #399.
+
+---
+
+## v2.1.6
+
+**Released: 2026-07-23**
+
+### New features
+
+- **Advanced obfuscation for native images** (#389) — `graalvm { advancedObfuscation = true }` passes `-H:AdvancedObfuscation=` (Oracle GraalVM only, gated on the resolved toolchain and warning otherwise) so the symbol names baked into the binary — stack traces, heap dumps, `Class#getName`, strings — are obfuscated. Reflection and JNI names from the reachability metadata are preserved automatically, so it is JNI-safe by construction. `-H:+UnlockExperimentalVMOptions` is passed alongside it, and `--enable-sbom=export` keeps the SBOM as a build artifact instead of embedding it and re-leaking the dependency list obfuscation hides.
+- **Obfuscate-safe ProGuard rules** (#389) — when `proguard { obfuscate = true }`, a bundled `nucleus-obfuscation-safety-rules.pro` is injected automatically to preserve framework names (`androidx.**`, `kotlinx.**`) while still allowing shrinking and optimization, so the Compose and Kotlin runtimes survive renaming and only the app's own packages get obfuscated. Prevents `ClassNotFoundException: androidx.compose.runtime.Composer`. Not injected when obfuscation is off.
+- **Desktop-appropriate default max heap for native images** (#390) — native-image's Serial GC defaults the max heap to 80% of physical RAM, far above a desktop app's norm. Nucleus now bakes `-R:MaximumHeapSizePercent=25` for parity with HotSpot's `MaxRAMPercentage`, configurable via `graalvm { maxHeapSizePercent = N }` or an absolute `graalvm { maxHeapSize = "2g" }` (which takes precedence). Both are defaults only, still overridable at runtime with `-Xmx`.
+- **`--enable-native-access=ALL-UNNAMED` baked into native images** (#390) — native modules call `System.loadLibrary` from the unnamed module, which since JDK 24 (JEP 472) emits a restricted-method warning and will be blocked in a future release. The JVM run path already passed the flag; the native binary now starts clean too.
+- **Pause the render loop while the window is minimized** (#384) — each platform scene host gates its frame body on `window.isMinimized` before the frame-clock tick, so Compose animations park instead of recording and presenting into a hidden surface. This matters most on Windows, where ANGLE's flip-model swapchain never reports occlusion and there is no vsync back-pressure while minimized; restore re-kicks a redraw explicitly.
+- **Jewel 0.39 and IntelliJ icons 262** (#395) — bumps Jewel to `0.39.0-262.9437.21`, adds the `intellij-icons-api`/`impl` dependencies that Jewel 0.39's `IntUiTheme` needs, and registers the build-time initialization and reflection entries required to avoid a `Method.invoke` segfault under SVM.
+
+### Bug fixes
+
+- **Scope JNI local refs on permanently-attached upcall threads** (#387) — object-creating upcalls on permanently attached threads never had their local frame popped, leaking local refs for the life of the process. The touch path was the worst: `dispatch_touch` allocated three `long[]` per event, so a sustained touch drag grew the JNI local reference table until it overflowed and aborted the JVM. Each such upcall body is now wrapped in `env.with_local_frame(...)`, covering the Linux touch and drop paths, macOS deep links, and the macOS/Windows accessibility action trampolines.
+- **Clear pending JNI exceptions after accessibility and deep-link upcalls** (#385) — the accessibility and deep-link native-to-JVM callbacks invoked `NativeTaoBridge.dispatch*` without `exception_check`/`exception_clear`, unlike every other dispatch path. A throwing Kotlin handler left the exception pending on the long-lived callback thread (AT-SPI/zbus, UIA, AppKit), making the next JNI call on that thread undefined behavior and, under `panic = "abort"`, a process abort with an unrelated-looking crash site. The guard is now applied to all 18 upcall sites.
+- **Migrate `-H:IncludeResources` to reachability-metadata globs** (#389) — the deprecated option warned at build time; the resource inclusion patterns moved into the module's `reachability-metadata.json` with identical semantics. The blanket font and icon globs are deliberately kept: they cover resources bundled inside library JARs, such as Jewel's SVG icons, which per-root `autoIncludeResources` does not reach.
+
+### Improvements
+
+- **Shared scene drag-and-drop extracted into `TaoSceneDnD`** (#386) — deduplicates the three platform scene hosts into one shared file, preserving the Linux-specific behavior where `has_files` reflects the presence of a `text/uri-list` target.
+- **Jewel-specific native-image metadata moved into `decorated-window-jewel`** (#395) — the Jewel build-time initialization and reflection entries ship only with Jewel consumers; `graalvm-runtime` keeps only the generic slf4j build-time init.
+
+---
+
 ## v2.1.5
 
 **Released: 2026-07-21**

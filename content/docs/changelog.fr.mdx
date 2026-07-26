@@ -7,6 +7,80 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.1.9
+
+**Sortie : 2026-07-26**
+
+### Corrections de bugs
+
+- **Résistance à l'obfuscation pour tous les ponts JNI et les coroutines** (#405) — depuis l'activation par défaut d'`obfuscate = true` en 2.1.6, les builds de release plantaient à l'exécution. L'énumération module par module des règles de conservation JNI est remplacée par des règles génériques qui conservent le nom de toute classe `dev.nucleusframework` déclarant des méthodes natives ainsi que les objets `*Bridge`/`*Jni` dans leur intégralité, ce qui corrige les `UnsatisfiedLinkError` dans les modules oubliés par la liste (autolaunch, launcher-linux, notification-linux/macos, service-management-macos, system-info, taskbar-progress, graalvm-runtime). La suppression d'`allowoptimization` des règles de sûreté `kotlinx.**` corrige un `VerifyError` dans `ChannelsKt.trySendBlocking` ; le shrinking reste pleinement actif. Les builds natifs system-color et media-control invoquent désormais `build.bat` par chemin absolu, comme tous les autres modules.
+
+### CI
+
+- **JDK Microsoft sous Windows, Temurin ailleurs** (#406) — remplace la JBR comme JDK de `setup-nucleus`. Le Microsoft Build of OpenJDK est la seule distribution grand public à publier des builds windows-aarch64 en GA pour les majeures LTS actuelles, et `decorated-window-jbr` n'a pas besoin de JBR au build puisque l'API JBR provient de l'artefact `org.jetbrains.runtime:jbr-api`.
+
+---
+
+## v2.1.8
+
+**Sortie : 2026-07-26**
+
+### Nouvelles fonctionnalités
+
+- **Bloc de configuration `aotCache { }`** (#404) — expose le compromis de portabilité du cache AOT : `compatibility = NATIVE` restaure le comportement par défaut du JDK pour les builds locaux ou les parcs homogènes, et `extraTrainingJvmArgs` sert d'échappatoire pour l'exécution d'entraînement. `enableAotCache` continue de fonctionner comme raccourci.
+
+### Corrections de bugs
+
+- **Cache AOT portable entre CPU par défaut** (#404) — le cache AOT du JDK 25+ stocke aussi du code machine (blobs d'adaptateurs i2c/c2i) généré pour les capacités CPU de la machine d'entraînement, et HotSpot n'enregistre aucune information d'ISA pour cette région avant le JDK 27 : un cache construit sur un runner de CI mourait donc en `EXCEPTION_ILLEGAL_INSTRUCTION`/`SIGILL` sur un CPU plus restreint. Le cache se limite désormais aux métadonnées par défaut (`-XX:-AOTAdapterCaching` sur l'exécution d'entraînement comme sur le lanceur livré), ce qui conserve les gains de chargement et de liaison des classes sans toucher au JIT à l'exécution. `compatibility = NATIVE` émet un avertissement au build si le runtime embarqué est antérieur à la validation des capacités CPU ajoutée après le JDK 26.
+
+---
+
+## v2.1.7
+
+**Sortie : 2026-07-26**
+
+### Changements incompatibles
+
+- **GraalVM Community Edition devient la toolchain par défaut** (#403) — la toolchain provisionnée automatiquement était Oracle GraalVM, régie par les GraalVM Free Terms and Conditions. La GFTC n'autorise la redistribution du programme qu'à condition de ne facturer à vos licenciés aucuns frais liés à cette distribution ou à cet usage, et le plugin copie les bibliothèques du runtime GraalVM à côté de l'exécutable packagé — cette clause atteignait donc silencieusement toute application construite avec Nucleus. GraalVM CE (GPLv2 + Classpath Exception) ne comporte pas cette restriction et devient la valeur par défaut via `GraalvmDistribution.COMMUNITY`. Oracle GraalVM reste disponible derrière une activation explicite qui journalise un avertissement de licence. `-O3`, `--pgo` et `-H:AdvancedObfuscation` se dégradent en avertissement sous une toolchain communautaire, et `runWithPgoInstrument` n'est plus enregistrée du tout. La distribution est intégrée au répertoire d'installation et à la clé de cache CI pour qu'un téléchargement Oracle existant ne soit jamais réutilisé, et un `GRAALVM_HOME` dont la distribution contredit le DSL est ignoré.
+
+### Améliorations
+
+- **Provisionnement paresseux de la toolchain** (#403) — chaque fournisseur de toolchain se résout désormais dans `doFirst`, si bien qu'une synchronisation de l'IDE ou un `gradlew tasks` ne télécharge plus de JDK.
+
+### Corrections de bugs
+
+- **Résistance aux limites de débit de l'API GitHub lors de la résolution de la Community Edition** (#403) — une version épinglée (`"25.0.2"`) construit désormais l'URL de téléchargement directement au lieu de lister les releases, ce qui rend la solution documentée d'épinglage réellement utilisable hors ligne ; les étapes de build d'image native transmettent `GITHUB_TOKEN` pour authentifier l'appel à l'API des releases. Les versions flottantes (`"25"`, `"25i1"`) nécessitent toujours l'API.
+- **Décodage du `cpu_type` Mach-O dans l'ordre d'octets du fichier** (#402) — `MH_CIGAM_64` est justement le magic inversé par lequel commence sur disque toute dylib macOS petit-boutiste : `cpu_type` était donc lu inversé et chaque dylib « thin » remontait `arch=UNKNOWN`. Vérification croisée avec `lipo` sur 57 dylibs réelles : 44 étaient mal décodées auparavant, les 57 sont correctes désormais. `FAT_MAGIC_64` est également reconnu en plus de `FAT_MAGIC`, et la fusion chemin + en-tête est remontée dans `NativeLibArchDetector.detectEntry` pour que la transformation de strip en bénéficie aussi.
+- **Extraction de la bibliothèque native de l'architecture cible, et non de la première trouvée** (#401) — les bibliothèques natives dont le chemin dans le JAR porte une architecture mais aucun jeton d'OS étaient extraites pour la mauvaise architecture : `detectInfo` écartait l'architecture détectée depuis le chemin dès que l'OS valait `UNKNOWN`, et le tampon d'en-tête de 64 octets était trop petit pour atteindre le champ machine du format PE. Une DLL ARM64 pouvait ainsi gagner la course d'aplatissement sur une cible x64 et échouer au chargement. `detectInfo` fusionne maintenant champ par champ les informations du chemin et de l'en-tête, et lit 4096 octets d'en-tête. Corrige #399.
+
+---
+
+## v2.1.6
+
+**Sortie : 2026-07-23**
+
+### Nouvelles fonctionnalités
+
+- **Obfuscation avancée des images natives** (#389) — `graalvm { advancedObfuscation = true }` passe `-H:AdvancedObfuscation=` (Oracle GraalVM uniquement, conditionné à la toolchain résolue et avertissant sinon) afin d'obfusquer les noms de symboles inscrits dans le binaire : traces d'appels, heap dumps, `Class#getName`, chaînes. Les noms de réflexion et JNI issus des métadonnées d'atteignabilité sont préservés automatiquement, l'option est donc sûre pour JNI par construction. `-H:+UnlockExperimentalVMOptions` l'accompagne, et `--enable-sbom=export` conserve le SBOM comme artefact de build au lieu de l'embarquer et de re-divulguer la liste de dépendances que l'obfuscation masque.
+- **Règles ProGuard sûres pour l'obfuscation** (#389) — lorsque `proguard { obfuscate = true }`, un fichier `nucleus-obfuscation-safety-rules.pro` fourni avec le framework est injecté automatiquement pour préserver les noms du framework (`androidx.**`, `kotlinx.**`) tout en laissant le shrinking et l'optimisation actifs, de sorte que les runtimes Compose et Kotlin survivent au renommage et que seuls les paquets de l'application soient obfusqués. Évite le `ClassNotFoundException: androidx.compose.runtime.Composer`. Non injecté quand l'obfuscation est désactivée.
+- **Tas maximal par défaut adapté au bureau pour les images natives** (#390) — le Serial GC de native-image fixe le tas maximal à 80 % de la RAM physique, très au-delà de la norme d'une application de bureau. Nucleus inscrit désormais `-R:MaximumHeapSizePercent=25` par parité avec le `MaxRAMPercentage` de HotSpot, configurable via `graalvm { maxHeapSizePercent = N }` ou une valeur absolue `graalvm { maxHeapSize = "2g" }` (prioritaire). Ce ne sont que des valeurs par défaut, toujours surchargeables à l'exécution avec `-Xmx`.
+- **`--enable-native-access=ALL-UNNAMED` inscrit dans les images natives** (#390) — les modules natifs appellent `System.loadLibrary` depuis le module sans nom, ce qui depuis le JDK 24 (JEP 472) émet un avertissement de méthode restreinte et sera bloqué dans une version future. Le chemin d'exécution JVM passait déjà l'option ; le binaire natif démarre maintenant proprement lui aussi.
+- **Mise en pause de la boucle de rendu quand la fenêtre est minimisée** (#384) — chaque hôte de scène conditionne le corps de sa frame à `window.isMinimized` avant le tick de l'horloge de frames, si bien que les animations Compose se mettent en pause au lieu d'enregistrer et de présenter sur une surface masquée. C'est surtout critique sous Windows, où le swapchain en flip-model d'ANGLE ne signale jamais d'occlusion et n'exerce donc aucune contre-pression vsync pendant la minimisation ; la restauration relance explicitement un redraw.
+- **Jewel 0.39 et icônes IntelliJ 262** (#395) — passe Jewel en `0.39.0-262.9437.21`, ajoute les dépendances `intellij-icons-api`/`impl` requises par l'`IntUiTheme` de Jewel 0.39, et enregistre les initialisations au build et les entrées de réflexion nécessaires pour éviter un segfault de `Method.invoke` sous SVM.
+
+### Corrections de bugs
+
+- **Cadrage des références locales JNI sur les threads attachés en permanence** (#387) — les upcalls créant des objets sur des threads attachés en permanence ne dépilaient jamais leur frame locale, fuyant des références locales pendant toute la vie du processus. Le chemin tactile était le pire : `dispatch_touch` allouait trois `long[]` par événement, si bien qu'un glissement tactile prolongé faisait croître la table de références locales JNI jusqu'au débordement et à l'abandon de la JVM. Le corps de chacun de ces upcalls est désormais encapsulé dans `env.with_local_frame(...)`, couvrant les chemins tactile et de dépôt sous Linux, les liens profonds macOS et les trampolines d'actions d'accessibilité macOS/Windows.
+- **Purge des exceptions JNI en attente après les upcalls d'accessibilité et de liens profonds** (#385) — les callbacks natif-vers-JVM d'accessibilité et de liens profonds appelaient `NativeTaoBridge.dispatch*` sans `exception_check`/`exception_clear`, contrairement à tous les autres chemins de dispatch. Un gestionnaire Kotlin levant une exception la laissait en attente sur le thread de callback à longue durée de vie (AT-SPI/zbus, UIA, AppKit), rendant l'appel JNI suivant sur ce thread indéfini et, sous `panic = "abort"`, provoquant un abandon du processus dont le site de crash paraissait sans rapport. La garde est désormais appliquée aux 18 sites d'upcall.
+- **Migration de `-H:IncludeResources` vers les globs des métadonnées d'atteignabilité** (#389) — l'option dépréciée émettait un avertissement au build ; les motifs d'inclusion de ressources sont passés dans le `reachability-metadata.json` du module, à sémantique identique. Les globs génériques de polices et d'icônes sont volontairement conservés : ils couvrent les ressources embarquées dans les JAR de bibliothèques, comme les icônes SVG de Jewel, que l'`autoIncludeResources` par racine n'atteint pas.
+
+### Améliorations
+
+- **Extraction du glisser-déposer de scène partagé dans `TaoSceneDnD`** (#386) — déduplique les trois hôtes de scène par plateforme en un seul fichier partagé, en préservant le comportement propre à Linux où `has_files` reflète la présence d'une cible `text/uri-list`.
+- **Déplacement des métadonnées d'image native propres à Jewel dans `decorated-window-jewel`** (#395) — les initialisations au build et les entrées de réflexion de Jewel ne sont livrées qu'aux consommateurs de Jewel ; `graalvm-runtime` ne conserve que l'initialisation générique de slf4j.
+
+---
+
 ## v2.1.5
 
 **Sortie : 2026-07-21**
