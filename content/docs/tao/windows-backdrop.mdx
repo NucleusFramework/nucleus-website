@@ -1,0 +1,159 @@
+---
+title: Windows backdrop
+description: Apply a Windows 11 system backdrop (Mica or Acrylic) behind a Tao DecoratedWindow, with an app tint layer and a tier pin for the three DWM implementations.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`WindowsBackdrop` applies a Windows 11 system backdrop — Mica or Acrylic — to a
+`DecoratedWindow` on the Tao backend. DWM composites the material behind the window, and it
+shows wherever your Compose content paints nothing. It is a silent no-op on macOS and Linux:
+macOS has a per-region equivalent (`Modifier.windowGlassRegion`), and Linux has none.
+
+## Add the dependency
+
+`WindowsBackdrop` lives in `decorated-window-tao`, so the Tao backend must be on the classpath:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Apply a backdrop
+
+Call `WindowsBackdrop` inside the `DecoratedWindow` content, alongside `WindowBackground` and
+`WindowAppearance`. A backdrop is only visible where the app paints nothing, so drop the opaque
+surfaces over the regions that should reveal the material:
+
+```kotlin
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.WindowAppearance
+import dev.nucleusframework.window.WindowAppearanceMode
+import dev.nucleusframework.window.WindowBackground
+import dev.nucleusframework.window.WindowsBackdrop
+import dev.nucleusframework.window.WindowsBackdropStyle
+
+fun main() = nucleusApplication {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        MaterialTheme(colorScheme = colors) {
+            WindowBackground(colors.background)
+            WindowAppearance(if (darkTheme) WindowAppearanceMode.Dark else WindowAppearanceMode.Light)
+            WindowsBackdrop(WindowsBackdropStyle.Mica)
+            // Your content. Leave margins or panels unpainted to reveal the Mica.
+            Surface(color = Color.Transparent) { /* ... */ }
+        }
+    }
+}
+```
+
+`WindowBackground` keeps working alongside a backdrop and does not need removing: its colour is
+suspended while the backdrop is active and restored when it leaves the composition, which is what
+makes a backdrop toggleable at runtime.
+
+The material follows the OS light/dark setting on its own. `WindowAppearance` themes the
+Compose-drawn chrome (caption-button glyphs, hover overlays) and is the signal DWM uses to tint
+the material — pass the same value that drives your Compose theme.
+
+## Styles
+
+```kotlin
+enum class WindowsBackdropStyle { Default, None, Mica, Acrylic, MicaAlt }
+```
+
+| Style | Effect |
+|---|---|
+| `Default` | No explicit backdrop; the OS default window behaviour. |
+| `None` | Explicitly opaque — forces the window background to show. |
+| `Mica` | Mica over the whole window, tinted from the wallpaper. |
+| `MicaAlt` | Mica with the alt tint (the title-bar band reads differently). |
+| `Acrylic` | Acrylic — blurs what is *behind* the window and tints it. |
+
+Each value carries an explicit `nativeValue` (it never relies on `ordinal`), so the enum is safe
+to reorder.
+
+<Callout type="info">
+Older Windows versions degrade rather than no-op, because the documented
+`DWMWA_SYSTEMBACKDROP_TYPE` only exists from Windows 11 22H2:
+
+- **Windows 11 before 22H2** — `Mica` and `MicaAlt` use the older single-material Mica attribute
+  and become indistinguishable.
+- **Windows 10** — no Mica exists at all, so every style degrades to acrylic, which blurs what is
+  *behind* the window rather than tinting from the wallpaper. Expect a different look, not the same
+  one.
+
+Both fallbacks rely on undocumented APIs and are skipped if unavailable, in which case the window
+simply stays opaque.
+</Callout>
+
+## Tint
+
+`tint` is the app's tint layer over the material — the Fluent acrylic recipe is blur + tint + noise,
+and the tint belongs to the app. Its alpha decides how much material survives: the lower, the
+prettier and the less readable.
+
+```kotlin
+WindowsBackdrop(WindowsBackdropStyle.Acrylic, tint = Color(0xCC1B2430))
+```
+
+Left `Color.Unspecified`:
+
+- **Mica / MicaAlt** get no tint — they already follow the window's light/dark.
+- **Acrylic** gets the window background at a moderate opacity. DWM's own acrylic tint is a generic
+  system grey, unrelated to the app's palette, and untinted it reads as a foreign surface inside a
+  themed app.
+
+On the Windows 10 accent fallback the tint rides the accent policy instead of the Compose clear
+layer.
+
+The tint is deliberately **not** a key of the `DisposableEffect` that applies the backdrop: a
+theme-driven tint change re-tints in place rather than tearing the native backdrop down and up
+(which would be a visible opaque blink).
+
+## Tier
+
+```kotlin
+enum class WindowsBackdropTier { Auto, Modern, LegacyMica, Windows10Acrylic }
+```
+
+`Auto` (the default) picks the best implementation the OS supports. The other values pin a
+specific one so you can test it on any Windows 11 machine — otherwise the three generations are
+easy to ship broken:
+
+| Tier | Implementation | Where it applies |
+|---|---|---|
+| `Modern` | `DWMWA_SYSTEMBACKDROP_TYPE` | Windows 11 22H2+. |
+| `LegacyMica` | The older single-material Mica attribute | Windows 11 before 22H2. |
+| `Windows10Acrylic` | Undocumented `SetWindowCompositionAttribute` accent | Windows 10. |
+
+Which tier ended up showing is reported back through the holder; a style the OS declined is never
+stacked, so its release can never tear down a survivor's backdrop.
+
+## Stacking and release
+
+`WindowsBackdrop` tracks the active holders per window as an ordered stack — last-writer-wins.
+Releasing the top holder re-applies the next survivor's backdrop exactly as it had it; releasing
+the last one restores `DWMSBT_AUTO` and the opaque window background. A holder whose native apply
+failed is never stacked, so it cannot underflow a survivor's slot.
+
+This is what lets you layer a forced backdrop over a composed one (for example a dialog) and have
+each release hand the window back cleanly.
+
+## Notes
+
+- The Tao backend's ANGLE child-HWND swapchain already presents per-pixel alpha, so no native
+  transparency flag is needed for the material to show through — the client area is simply cleared
+  to alpha 0 while a backdrop is active.
+- On close, the window reverts to its opaque themed background before the close animation, so the
+  fade-out snapshots an opaque window instead of a transparent tint fading towards black.
+
+## What's next
+
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — the window `WindowsBackdrop` is applied to.
+- [Window & toolkits](/docs/window) — the shared window API across backends.
+- [The Tao backend](/docs/tao) — what the no-AWT backend covers.
