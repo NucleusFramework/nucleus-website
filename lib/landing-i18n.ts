@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { NUCLEUS_VTAG } from './nucleus-version';
 
 export type Lang = 'en' | 'fr';
 
@@ -553,5 +554,8 @@ export const footerT = {
     en: '© 2026 Nucleus Framework. MIT licensed.',
     fr: '© 2026 Nucleus Framework. Sous licence MIT.',
   } as Bi<string>,
-  version: { en: 'v2.2.0 · Tao backend', fr: 'v2.2.0 · backend Tao' } as Bi<string>,
+  version: {
+    en: `${NUCLEUS_VTAG} · Tao backend`,
+    fr: `${NUCLEUS_VTAG} · backend Tao`,
+  } as Bi<string>,
 };

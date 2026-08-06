@@ -62,10 +62,10 @@ export function TaoBackendStrip() {
             </svg>
           </span>
           Powered by Tao
-          <span className="tao-strip-new">New backend · 2.0</span>
+          <span className="tao-strip-new">Default backend</span>
         </div>
         <p className="tao-strip-lede">
-          Tao is the Rust windowing layer underpinning Tauri 2. Nucleus 2.0 makes it the default — bringing modern desktop primitives that JBR can&apos;t reach: Wayland, multi-touch, pen and stylus input, and a ~35&nbsp;MB resident footprint on Windows 11 for a GraalVM Hello World.
+          Tao is the Rust windowing layer underpinning Tauri 2. Nucleus makes it the default — bringing modern desktop primitives that JBR can&apos;t reach: Wayland, multi-touch, pen and stylus input, window scaffold chrome, and a ~35&nbsp;MB resident footprint on Windows 11 for a GraalVM Hello World.
         </p>
       </div>
       <div className="tao-strip-grid">

@@ -1,6 +1,7 @@
 import * as Source from '@/.source';
 import { loader } from 'fumadocs-core/source';
 import { i18n } from './i18n';
+import { NUCLEUS_LATEST_DOCS_LABEL } from './nucleus-version';
 
 // All doc versions share the same collection schema, so we borrow the concrete
 // types from the latest collection — this keeps `page.data` fully typed
@@ -52,7 +53,7 @@ function version(opts: {
 // Newest first; `latest` must stay index 0.
 // Archive procedure: .docs-versioning.md — `npm run snapshot-docs <X.Y>` then wire here.
 export const DOC_VERSIONS: DocVersion[] = [
-  version({ id: 'latest', label: '2.2 (latest)', baseUrl: '/docs', collection: Source.docs, latest: true }),
+  version({ id: 'latest', label: NUCLEUS_LATEST_DOCS_LABEL, baseUrl: '/docs', collection: Source.docs, latest: true }),
   version({ id: '2.1', label: '2.1', baseUrl: '/docs/2.1', collection: Source.docs_2_1 }),
   version({ id: '2.0', label: '2.0', baseUrl: '/docs/2.0', collection: Source.docs_2_0 }),
 ];

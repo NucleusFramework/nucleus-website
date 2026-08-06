@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { CodeBlock } from '@/components/landing/CodeBlock';
 import { SectionHeading } from '@/components/landing/SectionHeading';
+import { NUCLEUS_LABEL, NUCLEUS_VERSION } from '@/lib/nucleus-version';
 
 function CodeFeature({ label, desc }: { label: string; desc: string }) {
   return (
@@ -16,7 +17,7 @@ function CodeFeature({ label, desc }: { label: string; desc: string }) {
 
 export function CodeSection() {
   const buildGradle = `plugins {
-    id("dev.nucleusframework") version "2.0.0"
+    id("dev.nucleusframework") version "${NUCLEUS_VERSION}"
 }
 
 nucleus.application {
@@ -31,27 +32,21 @@ nucleus.application {
         packageName = "MyApp"
         packageVersion = "1.0.0"
     }
-
-    // New in 2.0 — Tao backend for native window decorations
-    decoratedWindow {
-        backend = WindowBackend.Tao
-        useNativeTitleBar = true
-    }
 }`;
 
   const mainKt = `package com.example
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import dev.nucleusframework.application.NucleusApplication
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
 import dev.nucleusframework.notification.notify
-import dev.nucleusframework.window.DecoratedWindow
 
-fun main() = NucleusApplication {
+fun main() = nucleusApplication {
     val dark = isSystemInDarkMode()
 
-    DecoratedWindow(title = "MyApp") {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
         Greeting(dark)
     }
 }
@@ -59,7 +54,7 @@ fun main() = NucleusApplication {
 @Composable
 fun Greeting(dark: Boolean) {
     Text("Hello, native desktop. (dark = " + dark + ")")
-    notify("Welcome", "Running on Nucleus 2.0")
+    notify("Welcome", "Running on ${NUCLEUS_LABEL}")
 }`;
 
   const installSh = `# macOS — detects Apple Silicon or Intel

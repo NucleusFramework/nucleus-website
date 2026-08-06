@@ -2,10 +2,10 @@ import type { Metadata } from 'next';
 import { LandingPage } from '@/components/landing/LandingPage';
 import { i18n } from '@/lib/i18n';
 import { isLang, type Lang } from '@/lib/landing-i18n';
-import { fetchGitHubStars } from '@/lib/site';
+import { SITE, fetchGitHubStars } from '@/lib/site';
 
 export const metadata: Metadata = {
-  description: 'Nucleus 2.2 — Built on Compose Multiplatform, GraalVM native image, and the Tao backend.',
+  description: SITE.description,
 };
 
 export function generateStaticParams() {

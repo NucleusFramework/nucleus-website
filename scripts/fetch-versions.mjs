@@ -35,3 +35,16 @@ await Promise.all(
 );
 fs.writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
 console.log('[versions]', out);
+
+// Keep marketing / docs line in sync with published core (lib/nucleus-version.ts).
+const verTs = path.join(process.cwd(), 'lib/nucleus-version.ts');
+if (out.core && fs.existsSync(verTs)) {
+  const src = fs.readFileSync(verTs, 'utf8');
+  const m = src.match(/NUCLEUS_VERSION\s*=\s*'([^']+)'/);
+  if (m && m[1] !== out.core) {
+    console.warn(
+      `[versions] lib/nucleus-version.ts is '${m[1]}' but GitHub latest core is '${out.core}'. ` +
+        'Bump NUCLEUS_VERSION (and snapshot the previous docs line) so landing + docs stay aligned.',
+    );
+  }
+}

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { SectionHeading } from '@/components/landing/SectionHeading';
+import { NUCLEUS_LINE } from '@/lib/nucleus-version';
 
 interface FeatureItem {
   name: string;
@@ -9,7 +10,8 @@ interface FeatureItem {
 }
 
 const ITEMS: FeatureItem[] = [
-  { name: 'Decorated Window', desc: 'Custom title bar, native controls, theme-aware. Tao backend in 2.0.', icon: 'window', new: true },
+  { name: 'Decorated Window', desc: 'Custom title bar, native controls, theme-aware. Tao backend by default.', icon: 'window' },
+  { name: 'Window Scaffold', desc: 'Full-window layouts, glass regions, Mica/Acrylic, custom chrome primitives.', icon: 'window', new: true },
   { name: 'Native Notifications', desc: 'macOS UserNotifications, Win Toast, freedesktop D-Bus. One Kotlin API.', icon: 'bell' },
   { name: 'System Tray', desc: 'Status icons with menus, badges, click handlers — across all three OSes.', icon: 'tray' },
   { name: 'Dock & Launcher', desc: 'Badges, jump lists, dock menus, Unity launcher entries.', icon: 'dock' },
@@ -55,7 +57,7 @@ export function Features() {
         <div className="feat-grid">
           {ITEMS.map((f, i) => (
             <div key={i} className="feat-card">
-              {f.new && <span className="feat-new">New in 2.0</span>}
+              {f.new && <span className="feat-new">New in {NUCLEUS_LINE}</span>}
               <div className="feat-icon"><FeatIcon name={f.icon} /></div>
               <div className="feat-name">{f.name}</div>
               <div className="feat-desc">{f.desc}</div>

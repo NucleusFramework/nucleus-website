@@ -2,6 +2,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { type Lang, navT, pick } from '@/lib/landing-i18n';
 import { asset } from '@/lib/site';
+import { NUCLEUS_VTAG } from '@/lib/nucleus-version';
 
 interface TopNavProps {
   lang: Lang;
@@ -16,7 +17,7 @@ export function TopNav({ lang }: TopNavProps) {
         <Link href={home} className="nav-brand">
           <img src={asset('/assets/logo.png')} alt="" />
           <span>Nucleus</span>
-          <span className="ver">v2.0</span>
+          <span className="ver">{NUCLEUS_VTAG}</span>
         </Link>
         <div className="nav-links">
           <Link href={docsHref}>{pick(navT.docs, lang)}</Link>
