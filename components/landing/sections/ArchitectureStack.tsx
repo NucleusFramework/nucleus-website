@@ -7,6 +7,8 @@ const NUCLEUS_FEATURES = [
     label: 'OS integration',
     items: [
       { name: 'Decorated Window', tag: 'Tao' },
+      { name: 'TextureView', tag: 'Tao' },
+      { name: 'NativeView', tag: 'Tao' },
       { name: 'Notifications' },
       { name: 'System Tray' },
       { name: 'Dock & Launcher' },
@@ -30,7 +32,7 @@ const NUCLEUS_FEATURES = [
     items: [
       { name: '18 packaging formats' },
       { name: 'Code signing + notarization' },
-      { name: 'Auto-Update' },
+      { name: 'Differential auto-update' },
       { name: 'Deep Links' },
       { name: 'Auto-Launch' },
       { name: 'CI reusable actions' },

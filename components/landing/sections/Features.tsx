@@ -1,29 +1,150 @@
 import * as React from 'react';
+import Link from 'next/link';
 import { SectionHeading } from '@/components/landing/SectionHeading';
 import { NUCLEUS_LINE } from '@/lib/nucleus-version';
+import { TaoBackendStrip } from './TaoBackendStrip';
+import { type Bi, type Lang, featuresT, pick } from '@/lib/landing-i18n';
 
 interface FeatureItem {
-  name: string;
-  desc: string;
+  name: Bi<string>;
+  desc: Bi<string>;
   icon: string;
+  /** English docs path under /docs (locale prefix applied at render). */
+  href: string;
   new?: boolean;
 }
 
+/** Lead with the 2.3 headlines, then the broader OS surface. */
 const ITEMS: FeatureItem[] = [
-  { name: 'Decorated Window', desc: 'Custom title bar, native controls, theme-aware. Tao backend by default.', icon: 'window' },
-  { name: 'Window Scaffold', desc: 'Full-window layouts, glass regions, Mica/Acrylic, custom chrome primitives.', icon: 'window' },
-  { name: 'TextureView', desc: 'External GPU textures in the Compose scene — D3D11, Metal, DMA-BUF. No CPU copy.', icon: 'chip', new: true },
-  { name: 'Native Notifications', desc: 'macOS UserNotifications, Win Toast, freedesktop D-Bus. Per-platform DSL options.', icon: 'bell' },
-  { name: 'System Tray', desc: 'Status icons with menus, badges, click handlers — across all three OSes.', icon: 'tray' },
-  { name: 'Dock & Launcher', desc: 'Badges, jump lists, dock menus, Unity launcher entries.', icon: 'dock' },
-  { name: 'Dark Mode Detector', desc: 'Reactive OS theme — bridges Compose isSystemInDarkTheme under nucleusApplication.', icon: 'theme' },
-  { name: 'System Color', desc: 'OS accent color + high-contrast — observed via JNI.', icon: 'color' },
-  { name: 'Global Hotkey', desc: 'OS-level shortcuts, multi-modifier, work app-wide.', icon: 'key' },
-  { name: 'Taskbar Progress', desc: 'Progress bars on Windows taskbar, macOS dock, Unity launcher.', icon: 'progress' },
-  { name: 'Auto-Update', desc: 'Check, download (differential block maps), verify, install. Post-update events.', icon: 'update', new: true },
-  { name: 'Deep Links', desc: 'Protocol handlers + file associations on all platforms.', icon: 'link' },
-  { name: 'Native HTTP / SSL', desc: 'OS trust store merged into JDK defaults.', icon: 'shield' },
-  { name: 'Native Access', desc: 'Write Kotlin/Native and call from JVM. No C, no glue.', icon: 'chip' },
+  {
+    name: { en: 'TextureView', fr: 'TextureView' },
+    desc: {
+      en: 'External GPU textures in the Compose scene — D3D11, Metal, DMA-BUF. Real z-order, no CPU copy.',
+      fr: 'Textures GPU externes dans la scène Compose — D3D11, Metal, DMA-BUF. Vrai ordre z, sans copie CPU.',
+    },
+    icon: 'texture',
+    href: '/docs/tao/texture-view',
+    new: true,
+  },
+  {
+    name: { en: 'NativeView', fr: 'NativeView' },
+    desc: {
+      en: 'Embed NSView, HWND, or GtkWidget inside Compose — sized to the layout slot, disposed with composition.',
+      fr: 'Intégrez un NSView, un HWND ou un GtkWidget dans Compose — dimensionné au slot de layout, libéré avec la composition.',
+    },
+    icon: 'native',
+    href: '/docs/tao/native-views',
+    new: true,
+  },
+  {
+    name: { en: 'Differential updates', fr: 'Mises à jour différentielles' },
+    desc: {
+      en: 'Download only the blocks that changed — electron-builder block maps, HTTP ranges, silent fallback to full.',
+      fr: 'Ne téléchargez que les blocs modifiés — block maps electron-builder, requêtes HTTP range, repli silencieux sur le téléchargement complet.',
+    },
+    icon: 'update',
+    href: '/docs/packaging/auto-update',
+    new: true,
+  },
+  {
+    name: { en: 'Decorated Window', fr: 'Fenêtre décorée' },
+    desc: {
+      en: 'Custom title bar, native controls, theme-aware. Tao backend by default.',
+      fr: 'Barre de titre personnalisée, contrôles natifs, adaptée au thème. Backend Tao par défaut.',
+    },
+    icon: 'window',
+    href: '/docs/tao/decorated-window',
+  },
+  {
+    name: { en: 'Window Scaffold', fr: 'Scaffold de fenêtre' },
+    desc: {
+      en: 'Full-window layouts, glass regions, Mica/Acrylic, custom chrome primitives.',
+      fr: 'Mises en page plein fenêtre, régions de verre, Mica/Acrylic, primitives de chrome.',
+    },
+    icon: 'window',
+    href: '/docs/tao/window-scaffold',
+  },
+  {
+    name: { en: 'Native Notifications', fr: 'Notifications natives' },
+    desc: {
+      en: 'macOS, Win Toast, freedesktop — one Kotlin API, plus per-platform DSL options.',
+      fr: 'macOS, Toast Windows, freedesktop — une seule API Kotlin, plus options DSL par plateforme.',
+    },
+    icon: 'bell',
+    href: '/docs/os/notifications',
+  },
+  {
+    name: { en: 'System Tray', fr: 'Zone de notification' },
+    desc: {
+      en: 'Status icons with menus, badges, click handlers — across all three OSes.',
+      fr: 'Icônes de statut avec menus, badges et clics — sur les trois systèmes.',
+    },
+    icon: 'tray',
+    href: '/docs/os/system-tray',
+  },
+  {
+    name: { en: 'Dock & Launcher', fr: 'Dock et launcher' },
+    desc: {
+      en: 'Badges, jump lists, dock menus, Unity launcher entries.',
+      fr: 'Badges, jump lists, menus du dock, entrées du launcher Unity.',
+    },
+    icon: 'dock',
+    href: '/docs/lifecycle',
+  },
+  {
+    name: { en: 'Dark Mode Detector', fr: 'Détecteur de mode sombre' },
+    desc: {
+      en: 'Reactive OS theme — bridges Compose isSystemInDarkTheme under nucleusApplication.',
+      fr: 'Thème système réactif — relie isSystemInDarkTheme de Compose sous nucleusApplication.',
+    },
+    icon: 'theme',
+    href: '/docs/os/dark-mode',
+  },
+  {
+    name: { en: 'Global Hotkey', fr: 'Raccourci global' },
+    desc: {
+      en: 'OS-level shortcuts, multi-modifier, work app-wide — stable portal ids on Wayland.',
+      fr: 'Raccourcis au niveau OS, multi-modificateurs, valables dans toute l\'app — ids portail stables sous Wayland.',
+    },
+    icon: 'key',
+    href: '/docs/os/global-hotkey',
+  },
+  {
+    name: { en: 'Taskbar Progress', fr: 'Progression barre des tâches' },
+    desc: {
+      en: 'Progress bars on Windows taskbar, macOS dock, Unity launcher.',
+      fr: 'Barres de progression sur la barre des tâches Windows, le dock macOS et le launcher Unity.',
+    },
+    icon: 'progress',
+    href: '/docs/lifecycle/taskbar-progress',
+  },
+  {
+    name: { en: 'Deep Links', fr: 'Liens profonds' },
+    desc: {
+      en: 'Protocol handlers + file associations on all platforms.',
+      fr: 'Gestionnaires de protocole et associations de fichiers sur toutes les plateformes.',
+    },
+    icon: 'link',
+    href: '/docs/lifecycle/deep-links',
+  },
+  {
+    name: { en: 'Native HTTP / SSL', fr: 'HTTP / SSL natifs' },
+    desc: {
+      en: 'OS trust store merged into JDK defaults.',
+      fr: 'Magasin de confiance de l\'OS fusionné aux valeurs par défaut du JDK.',
+    },
+    icon: 'shield',
+    href: '/docs/performance/native-ssl',
+  },
+  {
+    name: { en: 'Native Access', fr: 'Native Access' },
+    desc: {
+      en: 'Write Kotlin/Native and call from JVM. No C, no glue.',
+      fr: 'Écrivez en Kotlin/Native et appelez depuis la JVM. Sans C, sans glue.',
+    },
+    icon: 'chip',
+    href: '/docs/performance/native-access',
+  },
 ];
 
 function FeatIcon({ name }: { name: string }) {
@@ -31,14 +152,15 @@ function FeatIcon({ name }: { name: string }) {
   const sw = 1.4;
   switch (name) {
     case 'window': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke={c} strokeWidth={sw}/><path d="M3 9h18" stroke={c} strokeWidth={sw}/><circle cx="6" cy="7" r="0.6" fill={c}/><circle cx="8" cy="7" r="0.6" fill={c}/><circle cx="10" cy="7" r="0.6" fill={c}/></svg>;
+    case 'texture': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke={c} strokeWidth={sw}/><path d="M3 15l5-4 4 3 4-5 5 6" stroke={c} strokeWidth={sw} strokeLinejoin="round"/><circle cx="9" cy="9" r="1.2" fill={c}/></svg>;
+    case 'native': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="10" height="8" rx="1.5" stroke={c} strokeWidth={sw}/><rect x="11" y="12" width="10" height="8" rx="1.5" stroke={c} strokeWidth={sw}/><path d="M8 12v2M16 12V9" stroke={c} strokeWidth={sw} strokeLinecap="round" opacity="0.6"/></svg>;
     case 'bell': return <svg viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0v3l1.5 3h-15L6 12V9z" stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M10 18a2 2 0 004 0" stroke={c} strokeWidth={sw}/></svg>;
     case 'tray': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="16" width="18" height="4" rx="1" stroke={c} strokeWidth={sw}/><circle cx="7" cy="18" r="0.8" fill={c}/><circle cx="10" cy="18" r="0.8" fill={c}/><circle cx="13" cy="18" r="0.8" fill={c}/><path d="M9 12l3 3 3-3M12 4v11" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case 'dock': return <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="14" width="20" height="6" rx="2" stroke={c} strokeWidth={sw}/><circle cx="7" cy="17" r="1.2" stroke={c} strokeWidth={sw}/><circle cx="12" cy="17" r="1.2" stroke={c} strokeWidth={sw}/><circle cx="17" cy="17" r="1.2" stroke={c} strokeWidth={sw}/><path d="M12 4v6" stroke={c} strokeWidth={sw} strokeLinecap="round"/><circle cx="17" cy="6" r="2" fill={c}/></svg>;
     case 'theme': return <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke={c} strokeWidth={sw}/><path d="M12 4a8 8 0 000 16V4z" fill={c}/></svg>;
-    case 'color': return <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke={c} strokeWidth={sw}/><circle cx="8" cy="9" r="1.2" fill={c}/><circle cx="15" cy="8" r="1.2" fill={c}/><circle cx="16" cy="14" r="1.2" fill={c}/><circle cx="10" cy="16" r="1.2" fill={c}/></svg>;
     case 'key': return <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="12" rx="2" stroke={c} strokeWidth={sw}/><path d="M6 10v0M10 10v0M14 10v0M18 10v0M6 14h12" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
-    case 'progress': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="10" width="18" height="4" rx="2" stroke={c} strokeWidth={sw}/><rect x="5" y="12" width="9" height="0" stroke={c} strokeWidth={sw}/><path d="M5 12h9" stroke={c} strokeWidth="2.5" strokeLinecap="round"/></svg>;
-    case 'update': return <svg viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case 'progress': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="10" width="18" height="4" rx="2" stroke={c} strokeWidth={sw}/><path d="M5 12h9" stroke={c} strokeWidth="2.5" strokeLinecap="round"/></svg>;
+    case 'update': return <svg viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/><path d="M8 12h3l2 3 3-6 2 3h2" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/></svg>;
     case 'link': return <svg viewBox="0 0 24 24" fill="none"><path d="M10 14l4-4M9 7l1-1a4 4 0 015.7 5.7l-1 1M15 17l-1 1a4 4 0 01-5.7-5.7l1-1" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
     case 'shield': return <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M9 12l2 2 4-4" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case 'chip': return <svg viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" stroke={c} strokeWidth={sw}/><rect x="9" y="9" width="6" height="6" stroke={c} strokeWidth={sw}/><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
@@ -46,34 +168,49 @@ function FeatIcon({ name }: { name: string }) {
   }
 }
 
-export function Features() {
+interface FeaturesProps {
+  lang: Lang;
+}
+
+export function Features({ lang }: FeaturesProps) {
+  const base = lang === 'fr' ? '/fr' : '/en';
   return (
     <section className="features" id="features">
       <div className="section-inner">
         <SectionHeading
-          eyebrow="Runtime"
-          title={<>40+ modules. <br/>Every OS feature, <span className="hero-grad">first-class</span>.</>}
-          subtitle="Nucleus doesn't just expose native APIs — it makes them simpler than the originals. A clean Kotlin API per platform feature, same shape everywhere."
+          eyebrow={pick(featuresT.eyebrow, lang)}
+          title={pick(featuresT.title, lang)}
+          subtitle={pick(featuresT.subtitle, lang)}
         />
         <div className="feat-grid">
-          {ITEMS.map((f, i) => (
-            <div key={i} className="feat-card">
-              {f.new && <span className="feat-new">New in {NUCLEUS_LINE}</span>}
+          {ITEMS.map((f) => (
+            <Link
+              key={f.href}
+              href={`${base}${f.href}`}
+              className="feat-card"
+            >
+              {f.new && (
+                <span className="feat-new">
+                  {pick(featuresT.newIn, lang).replace('{line}', NUCLEUS_LINE)}
+                </span>
+              )}
               <div className="feat-icon"><FeatIcon name={f.icon} /></div>
-              <div className="feat-name">{f.name}</div>
-              <div className="feat-desc">{f.desc}</div>
-            </div>
+              <div className="feat-name">{pick(f.name, lang)}</div>
+              <div className="feat-desc">{pick(f.desc, lang)}</div>
+            </Link>
           ))}
         </div>
 
         <div className="feat-cta">
-          <a href="/docs/concepts/runtimes" className="btn btn-ghost">
-            Browse all runtime modules
+          <Link href={`${base}/docs/changelog`} className="btn btn-ghost">
+            {pick(featuresT.cta, lang)}
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-          </a>
+          </Link>
         </div>
+
+        <TaoBackendStrip lang={lang} />
       </div>
     </section>
   );

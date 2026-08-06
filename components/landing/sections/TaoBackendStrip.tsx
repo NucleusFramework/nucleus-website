@@ -1,12 +1,34 @@
 import * as React from 'react';
+import { type Lang, taoStripT, pick } from '@/lib/landing-i18n';
 
 interface TaoFeature {
   icon: React.ReactNode;
-  title: string;
-  desc: string;
+  titleKey: keyof typeof taoStripT;
+  descKey: keyof typeof taoStripT;
 }
 
 const FEATURES: TaoFeature[] = [
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+        <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6"/>
+        <path d="M3 15l5-4 4 3 4-5 5 6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+      </svg>
+    ),
+    titleKey: 'textureTitle',
+    descKey: 'textureDesc',
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+        <rect x="3" y="4" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.6"/>
+        <rect x="11" y="12" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.6"/>
+        <path d="M8 12v2M16 12V9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.6"/>
+      </svg>
+    ),
+    titleKey: 'nativeTitle',
+    descKey: 'nativeDesc',
+  },
   {
     icon: (
       <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
@@ -14,8 +36,8 @@ const FEATURES: TaoFeature[] = [
         <path d="M3 17c3-5 6-5 9-1s6 4 9-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.5"/>
       </svg>
     ),
-    title: 'Native Wayland',
-    desc: 'First-class Wayland support — no XWayland fallback, fractional scaling, gestures.',
+    titleKey: 'waylandTitle',
+    descKey: 'waylandDesc',
   },
   {
     icon: (
@@ -25,33 +47,16 @@ const FEATURES: TaoFeature[] = [
         <path d="M3 12c0 4 2 7 5 8M21 12c0-4-2-7-5-8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.6"/>
       </svg>
     ),
-    title: 'Multi-touch & gestures',
-    desc: 'Pinch, swipe, rotate — every Compose pointer event carries pressure, tilt and source.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
-        <path d="M15 4l5 5-10 10H5v-5L15 4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
-        <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      </svg>
-    ),
-    title: 'Pen & stylus',
-    desc: 'Pressure-sensitive input on every OS — Wacom, Surface Pen, Apple Pencil sidecar.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
-        <rect x="2.5" y="4.5" width="9" height="7" rx="1" stroke="currentColor" strokeWidth="1.6"/>
-        <rect x="13" y="12.5" width="8.5" height="7" rx="1" stroke="currentColor" strokeWidth="1.6"/>
-        <path d="M7 12v3M16 12V8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.6"/>
-      </svg>
-    ),
-    title: 'Per-monitor HiDPI',
-    desc: 'Mixed-DPI setups handled transparently. Drag a window between displays, it adapts.',
+    titleKey: 'touchTitle',
+    descKey: 'touchDesc',
   },
 ];
 
-export function TaoBackendStrip() {
+interface TaoBackendStripProps {
+  lang: Lang;
+}
+
+export function TaoBackendStrip({ lang }: TaoBackendStripProps) {
   return (
     <div className="tao-strip">
       <div className="tao-strip-head">
@@ -61,19 +66,17 @@ export function TaoBackendStrip() {
               <path d="M8 0l1.6 5.4L15 7l-5.4 1.6L8 14l-1.6-5.4L1 7l5.4-1.6L8 0z"/>
             </svg>
           </span>
-          Powered by Tao
-          <span className="tao-strip-new">Default backend</span>
+          {pick(taoStripT.badge, lang)}
+          <span className="tao-strip-new">{pick(taoStripT.badgeNew, lang)}</span>
         </div>
-        <p className="tao-strip-lede">
-          Tao is the Rust windowing layer underpinning Tauri 2. Nucleus makes it the default — bringing modern desktop primitives that JBR can&apos;t reach: Wayland, multi-touch, pen and stylus input, window scaffold chrome, and a ~35&nbsp;MB resident footprint on Windows 11 for a GraalVM Hello World.
-        </p>
+        <p className="tao-strip-lede">{pick(taoStripT.lede, lang)}</p>
       </div>
       <div className="tao-strip-grid">
-        {FEATURES.map((f, i) => (
-          <div key={i} className="tao-feat">
+        {FEATURES.map((f) => (
+          <div key={f.titleKey} className="tao-feat">
             <div className="tao-feat-icon">{f.icon}</div>
-            <div className="tao-feat-title">{f.title}</div>
-            <div className="tao-feat-desc">{f.desc}</div>
+            <div className="tao-feat-title">{pick(taoStripT[f.titleKey], lang)}</div>
+            <div className="tao-feat-desc">{pick(taoStripT[f.descKey], lang)}</div>
           </div>
         ))}
       </div>

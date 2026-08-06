@@ -941,12 +941,15 @@ import dev.nucleusframework.updater.provider.GitHubProvider
 
 val updater = NucleusUpdater {
     provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    // default: differentialDownload = true
+    // only the blocks that changed (block maps + HTTP ranges)
 }
 
 when (val r = updater.checkForUpdates()) {
     is UpdateResult.Available -> {
         updater.downloadUpdate(r.info).collect { p ->
-            ui.setProgress(p.percent)
+            ui.setProgress(p.percent)          // of bytes transferred
+            // p.isDifferential == true when a delta path ran
             if (p.file != null) updater.installAndRestart(p.file!!)
         }
     }

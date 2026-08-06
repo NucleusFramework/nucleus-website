@@ -6,6 +6,7 @@ import { TopNav } from './sections/TopNav';
 import { Hero } from './sections/Hero';
 import { Pitch } from './sections/Pitch';
 import { Toolkits } from './sections/Toolkits';
+import { Features } from './sections/Features';
 import { Accessibility } from './sections/Accessibility';
 import { Perf } from './sections/Perf';
 import { NativeParadox } from './sections/NativeParadox';
@@ -56,6 +57,7 @@ export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
       <TopNav lang={lang} />
       <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} stars={stars} />
       <Pitch lang={lang} />
+      <Features lang={lang} />
       <Accessibility lang={lang} />
       <Toolkits lang={lang} />
       <Perf lang={lang} />

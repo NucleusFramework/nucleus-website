@@ -165,17 +165,17 @@ export const kmpT = {
 export const oneLangT = {
   themTag: { en: 'Vanilla Compose Desktop', fr: 'Compose Desktop vanilla' } as Bi<string>,
   themCap: {
-    en: 'Skia window, thin tray/notifications, six jpackage formats. You own the native chrome, OS glue, signing scripts, auto-update, and store pipelines.',
-    fr: 'Fenêtre Skia, tray/notifications légers, six formats jpackage. À toi le chrome natif, la glue OS, les scripts de signature, l\'auto-update et les pipelines store.',
+    en: 'Skia window, mouse and keyboard only — no multi-touch, no pen. Tray APIs on Windows and Linux are legacy and barely usable; notifications stay minimal. System integration is a thin demo surface, not a production desktop stack. Six jpackage formats; you still own chrome, signing, auto-update, and stores.',
+    fr: 'Fenêtre Skia, souris et clavier uniquement — pas de multi-touch, pas de stylet. Le tray Windows et Linux est obsolète et à peine utilisable ; les notifications restent basiques. L\'intégration système est une couche de démo, pas un stack desktop de production. Six formats jpackage ; chrome, signature, auto-update et stores restent à votre charge.',
   } as Bi<string>,
   usTag: { en: 'Compose + Nucleus', fr: 'Compose + Nucleus' } as Bi<string>,
   usCap: {
     en: 'Same Compose UI — plus native decorated windows, 40+ Kotlin OS modules, 18 packaging formats, auto-update, and store-ready CI. Drop-in on the JetBrains plugin.',
     fr: 'La même UI Compose — plus fenêtres décorées natives, 40+ modules OS Kotlin, 18 formats de packaging, auto-update et CI prête pour les stores. Drop-in sur le plugin JetBrains.',
   } as Bi<string>,
-  themPill1: { en: 'UI + Skia', fr: 'UI + Skia' } as Bi<string>,
-  themPill2: { en: '6 formats', fr: '6 formats' } as Bi<string>,
-  themPill3: { en: 'You build the rest', fr: 'Le reste, à toi' } as Bi<string>,
+  themPill1: { en: 'No touch / pen', fr: 'Pas de tactile / stylet' } as Bi<string>,
+  themPill2: { en: 'Legacy tray', fr: 'Tray obsolète' } as Bi<string>,
+  themPill3: { en: 'Not production-ready', fr: 'Inutilisable en prod' } as Bi<string>,
   usPill1: { en: 'Native chrome', fr: 'Chrome natif' } as Bi<string>,
   usPill2: { en: '40+ OS modules', fr: '40+ modules OS' } as Bi<string>,
   usPill3: { en: 'Ship & stores', fr: 'Ship & stores' } as Bi<string>,
@@ -204,6 +204,65 @@ export const componentsT = {
   } as Bi<string>,
   replaces: { en: 'replaces', fr: 'remplace' } as Bi<string>,
   comingSoon: { en: 'Coming soon', fr: 'Prochainement' } as Bi<string>,
+};
+
+// =====================================================================
+// Features (runtime modules grid)
+// =====================================================================
+export const featuresT = {
+  eyebrow: { en: 'Runtime', fr: 'Runtime' } as Bi<string>,
+  title: {
+    en: React.createElement(React.Fragment, null,
+      '40+ modules. ',
+      React.createElement('br'),
+      'Every OS feature, ',
+      React.createElement('span', { className: 'hero-grad' }, 'first-class.'),
+    ),
+    fr: React.createElement(React.Fragment, null,
+      '40+ modules. ',
+      React.createElement('br'),
+      'Chaque fonctionnalité OS, ',
+      React.createElement('span', { className: 'hero-grad' }, 'citoyenne de première classe.'),
+    ),
+  } as Bi,
+  subtitle: {
+    en: 'TextureView and NativeView put GPU frames and platform widgets inside Compose. Differential auto-update ships only the blocks that changed. Plus the full OS surface — notifications, tray, hotkeys, dark mode — one Kotlin shape per capability.',
+    fr: 'TextureView et NativeView placent textures GPU et widgets natifs dans Compose. L\'auto-update différentiel ne télécharge que les blocs modifiés. Et toute la surface OS — notifications, tray, raccourcis globaux, mode sombre — une API Kotlin par capacité.',
+  } as Bi<string>,
+  newIn: { en: 'New in {line}', fr: 'Nouveau dans {line}' } as Bi<string>,
+  cta: { en: 'See what shipped in this release', fr: 'Voir le contenu de cette version' } as Bi<string>,
+};
+
+// =====================================================================
+// Tao backend strip (under Features)
+// =====================================================================
+export const taoStripT = {
+  badge: { en: 'Powered by Tao', fr: 'Propulsé par Tao' } as Bi<string>,
+  badgeNew: { en: 'Default backend', fr: 'Backend par défaut' } as Bi<string>,
+  lede: {
+    en: 'Tao is the Rust windowing crate behind Tauri 2. Nucleus uses it as the default window backend — no AWT — so you get TextureView for external GPU textures, NativeView for platform widgets, native Wayland, multi-touch, pen input, and window-scaffold chrome in the same Compose tree.',
+    fr: 'Tao est la crate de fenêtrage Rust derrière Tauri 2. Nucleus en fait le backend de fenêtre par défaut — sans AWT — : TextureView pour les textures GPU externes, NativeView pour les widgets natifs, Wayland natif, multi-touch, stylet et chrome via window scaffold, dans le même arbre Compose.',
+  } as Bi<string>,
+  textureTitle: { en: 'TextureView', fr: 'TextureView' } as Bi<string>,
+  textureDesc: {
+    en: 'External GPU textures composited in the scene — D3D11, Metal, DMA-BUF. No CPU frame copy.',
+    fr: 'Textures GPU externes compositées dans la scène — D3D11, Metal, DMA-BUF. Aucune copie CPU des frames.',
+  } as Bi<string>,
+  nativeTitle: { en: 'NativeView', fr: 'NativeView' } as Bi<string>,
+  nativeDesc: {
+    en: 'Embed NSView, HWND, or GtkWidget in Compose layout — same slot lifecycle as AndroidView.',
+    fr: 'Embarquez un NSView, HWND ou GtkWidget dans le layout Compose — même cycle de vie de slot qu\'AndroidView.',
+  } as Bi<string>,
+  waylandTitle: { en: 'Native Wayland', fr: 'Wayland natif' } as Bi<string>,
+  waylandDesc: {
+    en: 'First-class Wayland support — no XWayland fallback, fractional scaling, gestures.',
+    fr: 'Support Wayland de premier plan — sans repli XWayland, scaling fractionnaire, gestes.',
+  } as Bi<string>,
+  touchTitle: { en: 'Multi-touch & pen', fr: 'Multi-touch et stylet' } as Bi<string>,
+  touchDesc: {
+    en: 'Pinch, swipe, rotate, pressure and tilt — every pointer event carries the full source.',
+    fr: 'Pinch, swipe, rotation, pression et inclinaison — chaque événement pointeur porte la source complète.',
+  } as Bi<string>,
 };
 
 // =====================================================================
@@ -287,14 +346,14 @@ export const toolkitsT = {
   m3Os: { en: 'Cross-platform', fr: 'Multiplateforme' } as Bi<string>,
   footnote: {
     en: React.createElement(React.Fragment, null,
-      'Pick one per OS. Or mix freely — every toolkit works on every platform, so you can ship a Fluent build on macOS while you prototype its native look. Your ',
+      'Pick one toolkit per OS, or mix freely — every design system runs on every platform. You can ship a Fluent build on macOS while you prototype the native look. Either way, your ',
       React.createElement('code', null, 'DecoratedWindow'),
-      ' stays the same Composable either way.',
+      ' stays the same Composable.',
     ),
     fr: React.createElement(React.Fragment, null,
-      'Un par OS, ou mélange libre — chaque toolkit fonctionne sur chaque plateforme : livrer un build Fluent sur macOS pour prototyper son look natif reste possible. Le ',
+      'Choisissez un toolkit par OS, ou mélangez librement — chaque design system tourne sur chaque plateforme. Vous pouvez livrer un build Fluent sur macOS le temps de prototyper le look natif. Dans tous les cas, le ',
       React.createElement('code', null, 'DecoratedWindow'),
-      ' reste le même Composable, dans tous les cas.',
+      ' reste le même Composable.',
     ),
   } as Bi,
   // Preview UI strings
@@ -467,7 +526,7 @@ export const shipT = {
   stageSign: { en: 'Sign · bundle · notarize', fr: 'Signer · bundler · notariser' } as Bi<string>,
   stageSignSub: { en: 'lipo universal · MSIX · staple', fr: 'lipo universal · MSIX · staple' } as Bi<string>,
   stageRelease: { en: 'GitHub Release', fr: 'GitHub Release' } as Bi<string>,
-  stageReleaseSub: { en: 'installers + auto-update YAML', fr: 'installeurs + YAML auto-update' } as Bi<string>,
+  stageReleaseSub: { en: 'installers + block maps + update YAML', fr: 'installeurs + block maps + YAML update' } as Bi<string>,
   // Action cards
   actionsLabel: { en: 'Six composite actions', fr: 'Six actions composites' } as Bi<string>,
   a1Name: { en: 'setup-nucleus', fr: 'setup-nucleus' } as Bi<string>,
@@ -492,8 +551,8 @@ export const shipT = {
   } as Bi<string>,
   a5Name: { en: 'generate-update-yml', fr: 'generate-update-yml' } as Bi<string>,
   a5Desc: {
-    en: 'SHA-512 every installer, emit latest-mac.yml / latest.yml / latest-linux.yml for the auto-updater.',
-    fr: 'SHA-512 de chaque installeur, génère latest-mac.yml / latest.yml / latest-linux.yml pour l\'auto-updater.',
+    en: 'SHA-512 every installer, emit latest-*.yml plus electron-builder block maps so clients download only changed blocks.',
+    fr: 'SHA-512 de chaque installeur, génère latest-*.yml et les block maps electron-builder pour ne télécharger que les blocs modifiés.',
   } as Bi<string>,
   a6Name: { en: 'publish-release', fr: 'publish-release' } as Bi<string>,
   a6Desc: {
