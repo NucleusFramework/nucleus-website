@@ -136,11 +136,22 @@ For unsupported libraries, see [GraalVM configuration](/docs/performance/graalvm
 **Symptom.** The app opens quickly in development but takes about a minute when packaged
 as an AppImage.
 
-**Cause.** `compressionLevel = CompressionLevel.Maximum`. AppImage uses squashfs, and
-maximum compression triggers FUSE decompression on every launch.
+**Cause.** `compressionLevel = CompressionLevel.Maximum` or `Ultra`. AppImage uses squashfs,
+and maximum compression triggers FUSE decompression on every launch.
 
-**Fix.** Use `CompressionLevel.Normal` (the default) for production builds. `Maximum` is
-for archival.
+**Fix.** Use `CompressionLevel.Normal` (the default) for AppImage. Prefer a format-local
+override so DEB/DMG can stay on a higher global level:
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    compressionLevel = CompressionLevel.Ultra
+    linux {
+        appImage {
+            compressionLevel = CompressionLevel.Normal
+        }
+    }
+}
+```
 
 ### DEB or RPM fails: "Please specify project homepage"
 

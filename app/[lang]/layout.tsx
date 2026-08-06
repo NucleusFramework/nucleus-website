@@ -105,6 +105,21 @@ export default async function RootLayout({
               { name: 'English', locale: 'en' },
               { name: 'Français', locale: 'fr' },
             ],
+            translations:
+              lang === 'fr'
+                ? {
+                    search: 'Rechercher',
+                    searchNoResult: 'Aucun résultat',
+                    toc: 'Sur cette page',
+                    tocNoHeadings: 'Pas de titres',
+                    lastUpdate: 'Dernière mise à jour',
+                    chooseLanguage: 'Langue',
+                    nextPage: 'Page suivante',
+                    previousPage: 'Page précédente',
+                    chooseTheme: 'Thème',
+                    editOnGithub: 'Modifier sur GitHub',
+                  }
+                : undefined,
           }}
           search={{
             SearchDialog: NucleusSearchDialog,

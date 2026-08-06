@@ -65,15 +65,26 @@ function switcherVersions(lang: string) {
 }
 
 export async function renderDocsPage(versionId: string, props: { params: Promise<Params> }) {
-  const { source, baseUrl } = getDocVersion(versionId);
+  const { source, baseUrl, latest } = getDocVersion(versionId);
   const { lang, slug } = await props.params;
   const page = source.getPage(slug, lang);
   if (!page) notFound();
 
   const MDX = page.data.body;
 
+  // Edit only the live line: archived trees under content/versioned/ are frozen.
+  // `page.path` is relative to the collection dir (e.g. `tao/texture-view.mdx`).
+  const editOnGithub = latest
+    ? {
+        owner: SITE.docsGithub.owner,
+        repo: SITE.docsGithub.repo,
+        sha: SITE.docsGithub.branch,
+        path: `${SITE.docsGithub.contentRoot}/${page.path}`,
+      }
+    : undefined;
+
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage toc={page.data.toc} full={page.data.full} editOnGithub={editOnGithub}>
       <DocsTitle>{page.data.title}</DocsTitle>
       {page.data.description ? <DocsDescription>{page.data.description}</DocsDescription> : null}
       <DocsBody>

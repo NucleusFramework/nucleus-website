@@ -13,8 +13,9 @@ is discovered from the classpath.
 
 ## Level 1 — per-library metadata
 
-The plugin ships 28 metadata files curated for the Kotlin desktop ecosystem, covering Compose,
-Skiko, ktor, kotlinx.serialization, SQLite JDBC, Coil, JNA, FileKit, SLF4J, Sentry, and others.
+The plugin ships 29 metadata files curated for the Kotlin desktop ecosystem, covering Compose,
+Skiko, ktor (including client plugins, server, and websockets), kotlinx.serialization,
+SQLite JDBC, `androidx.sqlite` bundled, Coil, JNA, FileKit, SLF4J, Sentry, and others.
 Each file may declare a `matchPackages` condition. The `filterGraalvmLibraryMetadata` task reads
 these files from the plugin JAR and includes a file only when the corresponding packages are on
 the runtime classpath; files without a condition are always included. Libraries in the curated
@@ -74,6 +75,11 @@ graalvm {
 Build logs emit `[orphan] fqcn` for each registration. Prefer the default detector; only enable
 `reflectionForProjectClasses` when you need a temporary sledgehammer (image growth is measurable).
 
+From 2.3.1 the detector resolves project class directories from the **application target's**
+compilation outputs (for example `jvm("desktop")` → `desktopMainClasses`) instead of hardcoded
+`jvm`/`main` paths, so KMP named JVM targets are covered. Nest-internal reference edges no longer
+hide real Room `*_Impl` classes that contain nested types.
+
 ## Level 5 — bundled runtime metadata
 
 The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
@@ -128,6 +134,10 @@ From 2.3 it also **reports** entries whose types resolve nowhere on the runtime 
 # Analyze without rewriting:
 ./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.dryRun=true
 ```
+
+From 2.3.1, well-known Kotlin tracing-agent phantoms (`kotlin.Any` / `Int` / `FunctionN` /
+collections mapped types) are **always removed** during cleanup, without requiring
+`removeUnresolvable`.
 
 Types under the configured `exactReachabilityMetadata` packages are never removed — a missing
 registration under exact mode is what restores a clear error. Remaining manual entries are listed

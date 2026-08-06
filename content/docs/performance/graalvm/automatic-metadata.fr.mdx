@@ -13,13 +13,14 @@ metadata embarquée par le module est découverte depuis le classpath.
 
 ## Niveau 1 — metadata par bibliothèque
 
-Le plugin embarque 28 fichiers de metadata curés pour l'écosystème Kotlin desktop, couvrant
-Compose, Skiko, ktor, kotlinx.serialization, SQLite JDBC, Coil, JNA, FileKit, SLF4J, Sentry et
-d'autres. Chaque fichier peut déclarer une condition `matchPackages`. La tâche
-`filterGraalvmLibraryMetadata` lit ces fichiers depuis le JAR du plugin et n'inclut un fichier
-que si les packages correspondants sont présents sur le classpath runtime ; les fichiers sans
-condition sont toujours inclus. Les bibliothèques de l'ensemble curé sont couvertes sans
-configuration supplémentaire.
+Le plugin embarque 29 fichiers de metadata curés pour l'écosystème Kotlin desktop, couvrant
+Compose, Skiko, ktor (plugins client, server et websockets inclus), kotlinx.serialization,
+SQLite JDBC, `androidx.sqlite` bundled, Coil, JNA, FileKit, SLF4J, Sentry et d'autres. Chaque
+fichier peut déclarer une condition `matchPackages`. La tâche `filterGraalvmLibraryMetadata`
+lit ces fichiers depuis le JAR du plugin et n'inclut un fichier que si les packages
+correspondants sont présents sur le classpath runtime ; les fichiers sans condition sont
+toujours inclus. Les bibliothèques de l'ensemble curé sont couvertes sans configuration
+supplémentaire.
 
 ## Niveau 2 — Reachability Metadata Repository GraalVM
 
@@ -79,6 +80,12 @@ Les logs de build émettent `[orphan] fqcn` pour chaque enregistrement. Préfér
 défaut ; n'activez `reflectionForProjectClasses` que comme massue temporaire (croissance d'image
 mesurable).
 
+Depuis 2.3.1 le détecteur résout les répertoires de classes projet à partir des sorties de
+compilation de la **cible application** (par exemple `jvm("desktop")` → `desktopMainClasses`)
+au lieu de chemins `jvm`/`main` en dur, ce qui couvre les cibles JVM nommées KMP. Les arêtes
+nest-internal ne masquent plus les vraies classes Room `*_Impl` qui contiennent des types
+imbriqués.
+
 ## Niveau 5 — metadata embarquée par le runtime
 
 Le module `nucleus.graalvm-runtime` embarque de la metadata GraalVM dans son JAR :
@@ -137,6 +144,10 @@ report-only. Pour les purger :
 # Analyser sans réécrire :
 ./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.dryRun=true
 ```
+
+Depuis 2.3.1, les phantoms bien connus de l'agent de tracing Kotlin (`kotlin.Any` / `Int` /
+`FunctionN` / types de collections mappés) sont **toujours retirés** pendant le cleanup, sans
+exiger `removeUnresolvable`.
 
 Les types sous les packages configurés dans `exactReachabilityMetadata` ne sont jamais retirés —
 un enregistrement manquant en mode exact est ce qui restaure une erreur claire. Les entrées

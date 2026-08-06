@@ -7,7 +7,19 @@ export const SITE = {
     `${NUCLEUS_LABEL} — The production desktop layer for Kotlin teams on Compose Multiplatform: native chrome, OS APIs, packaging, and stores — without leaving Kotlin.`,
   url: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://nucleusframework.dev',
   ogImage: '/og.png',
+  /** Product repository (landing / nav GitHub link). */
   github: 'https://github.com/NucleusFramework/Nucleus',
+  /**
+   * Docs website repository — “Edit on GitHub” for latest content under content/docs/.
+   * Archived versions do not get an edit link.
+   */
+  docsGithub: {
+    owner: 'NucleusFramework',
+    repo: 'nucleus-website',
+    branch: 'main',
+    /** Path prefix of live docs inside the website repo. */
+    contentRoot: 'content/docs',
+  },
   twitter: '@nucleusframework',
   author: 'Elie Gambache',
   keywords: [

@@ -44,6 +44,34 @@ FileKit appelle le dialogue natif sur chaque système d'exploitation :
 
 Il prend en charge les filtres de type avec descriptions ; les modes single-file, multi-file, folder et save ; et une API Compose (`rememberFilePickerLauncher`) construite autour du handle `PlatformFile`.
 
+## Parenter un dialogue à la fenêtre Tao
+
+Depuis 2.3.1, Tao expose les identités plateforme dont FileKit et les dialogues natifs ont
+besoin pour attacher les sélecteurs à votre fenêtre plutôt que de les laisser flotter
+indépendamment :
+
+| Plateforme | API | Valeur |
+|------------|-----|--------|
+| Linux X11 / XWayland | `TaoWindow.x11PortalParent` ou `xdgPortalParent()` | `x11:<xid-hex-minuscule>` |
+| Linux Wayland | `TaoWindow.xdgPortalParent()` / `exportXdgForeignHandle()` | `wayland:<token xdg_foreign>` |
+| macOS | `TaoWindow.nsWindowHandle` | le `NSWindow*` propriétaire (pas le `NSView*` Compose) |
+| Windows | `TaoWindow.nativeHandle` | `HWND` |
+
+```kotlin
+// Préférez le helper agnostique du backend sous Linux :
+val parent = window.xdgPortalParent()
+// X11 → XdgPortalParent.X11(xid) ; Wayland → XdgPortalParent.Wayland(export)
+// Gardez un export Wayland ouvert jusqu'à la fin du dialogue portal, puis fermez-le.
+(parent as? AutoCloseable)?.close()
+
+// Parent de sheet macOS (une fois que FileKit accepte un parent NSWindow) :
+// window.nsWindowHandle?.let { FileKitDialogParent.macos(it) }
+```
+
+Sous Wayland, `exportXdgForeignHandle()` / `XdgPortalParent.Wayland` encapsule un
+`XdgForeignExport` qui doit rester ouvert tant que le dialogue portal emprunte son handle.
+Un `wl_surface*` brut ou le `NSView*` Compose n'est pas un parent portal / sheet valide.
+
 ## Exécuter sous GraalVM native image
 
 Le plugin Gradle Nucleus fournit les métadonnées de reachability pour FileKit dans son [bundle de métadonnées de bibliothèques](/docs/performance/graalvm/automatic-metadata). Les métadonnées ne sont incluses que lorsque `io.github.vinceglb.filekit` est présent sur le classpath d'exécution, et couvrent :
