@@ -25,15 +25,27 @@ export const docs_2_0 = defineDocs({
 // --- Version injection ------------------------------------------------------
 // Replace the `<version>` placeholder in code snippets with the real latest
 // release of each Nucleus repo. Versions come from lib/versions.json, written
-// by scripts/fetch-versions.mjs (npm prebuild/predev). A third-party coordinate
-// (or a missing version) keeps `<version>` untouched. Same source as the
-// on-page <Version/> badge — see components/docs/Version.tsx.
+// by scripts/fetch-versions.mjs (npm prebuild/predev). Core is always taken
+// from lib/nucleus-version.ts (NUCLEUS_VERSION) so a docs bump never lags a
+// delayed GitHub Release. A third-party coordinate (or a missing version)
+// keeps `<version>` untouched. Same source as the on-page <Version/> badge.
+function readNucleusVersion(): string | null {
+  try {
+    const src = fs.readFileSync(path.join(process.cwd(), 'lib/nucleus-version.ts'), 'utf8');
+    return src.match(/NUCLEUS_VERSION\s*=\s*'([^']+)'/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 let VERSIONS: Record<string, string | null> = {};
 try {
   VERSIONS = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'lib/versions.json'), 'utf8'));
 } catch {
   // No versions.json yet (fresh checkout before prebuild) — leave placeholders.
 }
+const nucleusVersion = readNucleusVersion();
+if (nucleusVersion) VERSIONS.core = nucleusVersion;
 
 // Which module a `<version>` on this line belongs to — order matters (nna before core).
 function versionForLine(line: string) {
