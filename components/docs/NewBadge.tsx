@@ -1,10 +1,13 @@
-/** Small "New" / "Nouveau" pill for the docs sidebar (2.2 highlights). */
+/**
+ * Quiet sidebar marker for 2.2 highlights — sits after the label like a
+ * footnote, not a marketing chip.
+ */
 export function NewBadge({ lang }: { lang: string }) {
-  const label = lang === 'fr' ? 'Nouveau' : 'New';
+  const label = lang === 'fr' ? 'nouveau' : 'new';
   return (
     <span
-      className="shrink-0 rounded-full bg-fd-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fd-primary"
-      aria-label={label}
+      className="shrink-0 text-[0.65rem] font-normal leading-none text-fd-muted-foreground/80"
+      aria-label={lang === 'fr' ? 'Nouveau' : 'New'}
     >
       {label}
     </span>

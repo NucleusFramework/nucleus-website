@@ -17,11 +17,13 @@ import { NewBadge } from '@/components/docs/NewBadge';
 
 function withBadge(name: ReactNode, show: boolean, lang: string) {
   if (!show) return name;
+  // Space-separated like the label itself — no chip, no flex stretch fight
+  // with the folder chevron's ms-auto.
   return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
-      <span className="min-w-0 truncate">{name}</span>
+    <>
+      {name}
       <NewBadge lang={lang} />
-    </span>
+    </>
   );
 }
 
