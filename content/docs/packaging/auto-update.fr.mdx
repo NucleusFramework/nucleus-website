@@ -106,6 +106,55 @@ L'hébergement se configure dans `nativeDistributions.publish { }` (voir
 
 Le bloc `publish { }` ne fait que générer la config electron-builder — il n'upload pas. C'est la CI qui upload.
 
+### Téléchargements différentiels
+
+Depuis 2.3, `downloadUpdate` tente un téléchargement **différentiel** avant un fetch complet. Il
+aligne les block maps electron-builder du nouvel artefact sur une copie en cache de l'ancien,
+copie les blocs inchangés depuis le disque, et récupère le reste par requêtes HTTP range. Les
+blocs sont appariés par contenu : un saut 1.0 → 1.7 est donc aussi différentiel — aucun fichier
+delta pair-wise n'est produit.
+
+Le plugin Gradle Nucleus publie déjà les maps dont le runtime a besoin :
+
+| Format | Block map |
+|--------|-----------|
+| NSIS, ZIP / DMG macOS | Companion gzippé autonome `<artifact>.blockmap` à côté de l'installeur |
+| AppImage | Map appendée dans le trailer AppImage (`blockMapSize` dans `latest-linux.yml`) |
+
+Comportement :
+
+- **AppImage** — l'exécutable en cours *est* l'artefact précédent, donc la première mise à jour
+  peut déjà être différentielle.
+- **Autres formats** — l'updater met en cache chaque téléchargement réussi (et sa map) sous
+  `cacheDir` (défaut `%LOCALAPPDATA%/nucleus/updates/<appId>` sous Windows,
+  `~/.cache/nucleus/updates/<appId>` ailleurs). La deuxième mise à jour devient différentielle.
+- Map manquante, échec de range request ou mismatch de digest → **repli silencieux** sur un
+  téléchargement complet.
+
+```kotlin
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    differentialDownload = true   // défaut
+    // cacheDir = File("/var/cache/myapp/updates")  // override optionnel
+}
+
+updater.downloadUpdate(info).collect { progress ->
+    val kind = if (progress.isDifferential) "différentiel" else "complet"
+    println(
+        "${progress.percent.toInt()}% " +
+            "(${progress.bytesDownloaded}/${progress.totalBytes}, $kind)",
+    )
+    progress.file?.let { installer = it }
+}
+```
+
+`DownloadProgress.bytesDownloaded` / `totalBytes` comptent les **octets transférés** : en
+différentiel, `totalBytes` est plus petit que la taille de l'artefact et `percent` suit le temps
+d'attente. `isDifferential` vaut `true` quand le chemin différentiel a abouti.
+
+Mettez `differentialDownload = false` pour forcer les téléchargements complets (CDN sans
+support des ranges HTTP, par exemple).
+
 ### Détection après mise à jour
 
 Après `installAndRestart` ou `installAndQuit`, l'updater écrit un fichier marqueur dans le
@@ -149,22 +198,31 @@ linux {
 }
 ```
 
-Le script post-install root du paquet met alors en place les mises à jour sans mot de passe ainsi :
+Le payload du paquet et les scripts post-install mettent en place les mises à jour sans mot de
+passe ainsi :
 
-1. Un helper de mise à jour root-owned dans `/opt/<App>/nucleus-update-helper`, et une policy polkit
-   scopée à ce binaire précis (`allow_active=yes`).
+1. Un helper de mise à jour **livré dans le paquet** en
+   `/opt/<App>/nucleus-update-helper` (pour que `dpkg -S` / `rpm -qf` l'attribuent au paquet).
+   afterInstall ne fait que durcir les permissions et installer une policy polkit scopée à ce
+   binaire (`allow_active=yes`) ; afterRemove retire la policy.
 2. Votre clé publique de signature, bundlée dans `/opt/<App>/resources/nucleus-update.pub.asc`.
 3. Au moment de la mise à jour, le runtime télécharge le paquet et sa signature détachée
-   `<file>.asc`, puis lance `pkexec <helper> <file>`.
+   `<file>.asc` (la CI upload les `*.asc` à côté des paquets quand les secrets GPG Linux sont
+   présents), résout le helper en remontant depuis `bin/`, puis lance `pkexec <helper> <file>`.
 4. Le helper vérifie la signature contre la clé bundlée, contrôle que le nom du paquet correspond à
    l'app installée, et seulement alors lance `dpkg -i` ou `rpm -U`.
+
+Les mises à jour AppImage remplacent le binaire en place pendant que l'ancien mount FUSE tient
+encore l'inode, attendent la sortie de l'ancien processus (verrou single-instance), et relancent
+avec un environnement nettoyé (`APPDIR`, `APPIMAGE`, `LD_LIBRARY_PATH`, … retirés) pour ne pas
+lier la nouvelle image au squashfs démonté.
 
 <Callout type="warn">
 La règle polkit `allow_active=yes` est scopée au seul binaire helper, et le helper refuse tout
 paquet dont la signature ne valide pas contre la clé bundlée : une install sans mot de passe ne peut
 donc pas installer un paquet arbitraire — il faudrait votre clé privée de signature. Si le helper ou le
-`<file>.asc` est absent, le runtime retombe sur l'install `pkexec` avec prompt de mot de passe.
-L'install sans mot de passe nécessite une session locale active.
+`<file>.asc` est absent, le runtime retombe sur l'install `pkexec` avec prompt de mot de passe et
+journalise la raison. L'install sans mot de passe nécessite une session locale active.
 </Callout>
 
 ## Référence de l'API
@@ -195,8 +253,19 @@ dessus — dialogue forcé pour les bumps majeurs, installation silencieuse pour
 
 ### Champs du builder
 
-`NucleusUpdater { }` configure un `UpdaterConfig` : `currentVersion`, `channel`, `provider`,
-`httpClient`, `allowDowngrade`, `allowPrerelease` et `executableType`.
+`NucleusUpdater { }` configure un `UpdaterConfig` :
+
+| Champ | Défaut | Notes |
+|-------|--------|-------|
+| `currentVersion` | depuis `NucleusApp` / jpackage / marker | Utilisé pour le canal et la comparaison |
+| `provider` | requis | `GitHubProvider`, `GenericProvider`, … |
+| `channel` | `"latest"` | Nom du canal de release |
+| `allowDowngrade` | `false` | |
+| `allowPrerelease` | `false` | Aussi `true` si `currentVersion` contient `-` |
+| `executableType` | auto | Override du type de paquet détecté |
+| `httpClient` | client JDK avec redirections | Utilisez `NativeHttpClient` pour les CA privées |
+| `differentialDownload` | `true` | Assemble depuis le cache + range requests ; sûr de laisser à `true` |
+| `cacheDir` | défaut plateforme sous `nucleus/updates/<appId>` | Artefact précédent + block map |
 
 ### Providers
 

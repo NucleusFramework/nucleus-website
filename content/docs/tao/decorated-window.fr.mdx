@@ -87,6 +87,45 @@ Pour les mises en page plein fenêtre, le chrome d'un design system, les sidebar
 ou le Mica/Acrylic Windows 11, utilisez [`WindowScaffold`](/docs/tao/window-scaffold) à la place
 (ou autour) du `TitleBar` stock. Les sites d'appel `TitleBar` existants restent valides.
 
+## Ouvrir une fenêtre depuis la composition
+
+`DecoratedWindow` / `DecoratedDialog` sont des extensions sur `NucleusApplicationScope`, un
+receiver qui n'existe qu'en tête de `main()`. Les fenêtres secondaires s'ouvrent en général
+depuis une destination de navigation ou une action de ligne, où ce receiver a disparu.
+
+Depuis 2.3, `nucleusApplication` fournit `LocalNucleusApplicationScope` sur **les deux**
+backends (et propage les locals parentes dans chaque scène Tao). Les surcharges sans receiver
+le lisent :
+
+```kotlin
+import androidx.compose.runtime.Composable
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.LocalNucleusApplicationScope
+
+@Composable
+fun EditorWindow(onClose: () -> Unit) {
+    // Pas de receiver d'application — lit LocalNucleusApplicationScope
+    DecoratedWindow(onCloseRequest = onClose, title = "Editor") {
+        EditorContent()
+    }
+}
+
+@Composable
+fun MaterialEditorWindow(onClose: () -> Unit) {
+    // Les wrappers de toolkit ont encore besoin du scope en receiver :
+    with(LocalNucleusApplicationScope.current) {
+        MaterialDecoratedWindow(onCloseRequest = onClose) {
+            EditorContent()
+        }
+    }
+}
+```
+
+Hors de `nucleusApplication { }`, lire le local lève une erreur. Préférez les surcharges sans
+receiver de `DecoratedWindow` / `DecoratedDialog` pour les API de base ; utilisez
+`LocalNucleusApplicationScope.current` explicitement pour les wrappers de toolkit
+(`MaterialDecoratedWindow`, Jewel, Fluent, …) qui restent des extensions de scope.
+
 ## Comment ça marche
 
 `nucleusApplication { }` résout le backend et expose `DecoratedWindow` sur

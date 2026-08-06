@@ -104,6 +104,55 @@ Hosting is configured in `nativeDistributions.publish { }` (see
 
 The `publish { }` block only generates electron-builder config — it does not upload. CI does the upload.
 
+### Differential downloads
+
+From 2.3, `downloadUpdate` tries a **differential** download before a full fetch. It matches
+electron-builder block maps of the new artifact against a cached copy of the previous one,
+copies unchanged blocks from disk, and fetches the rest with HTTP range requests. Blocks are
+matched by content, so jumps such as 1.0 → 1.7 are differential too — no pairwise delta files
+are ever produced.
+
+The Nucleus Gradle plugin already publishes the maps the runtime needs:
+
+| Format | Block map |
+|--------|-----------|
+| NSIS, macOS ZIP / DMG | Standalone gzipped `<artifact>.blockmap` next to the installer |
+| AppImage | Map appended in the AppImage trailer (`blockMapSize` in `latest-linux.yml`) |
+
+Behaviour:
+
+- **AppImage** — the running executable *is* the previous artifact, so the first update can
+  already be differential.
+- **Other formats** — the updater caches each successful download (and its map) under
+  `cacheDir` (default `%LOCALAPPDATA%/nucleus/updates/<appId>` on Windows,
+  `~/.cache/nucleus/updates/<appId>` elsewhere). The second update on is differential.
+- Any missing map, range-request failure, or digest mismatch **silently falls back** to a full
+  download.
+
+```kotlin
+val updater = NucleusUpdater {
+    provider = GitHubProvider(owner = "myorg", repo = "myapp")
+    differentialDownload = true   // default
+    // cacheDir = File("/var/cache/myapp/updates")  // optional override
+}
+
+updater.downloadUpdate(info).collect { progress ->
+    val kind = if (progress.isDifferential) "differential" else "full"
+    println(
+        "${progress.percent.toInt()}% " +
+            "(${progress.bytesDownloaded}/${progress.totalBytes}, $kind)",
+    )
+    progress.file?.let { installer = it }
+}
+```
+
+`DownloadProgress.bytesDownloaded` / `totalBytes` count **bytes transferred**, so for a
+differential download `totalBytes` is smaller than the artifact size and `percent` tracks
+wait time faithfully. `isDifferential` is `true` when the differential path completed.
+
+Set `differentialDownload = false` to force full downloads (for example when a CDN does not
+support HTTP ranges).
+
 ### Post-update detection
 
 After `installAndRestart` or `installAndQuit`, the updater writes a marker file in the platform's
@@ -146,22 +195,30 @@ linux {
 }
 ```
 
-The package's root post-install script then sets up passwordless updates as follows:
+The package payload and post-install scripts set up passwordless updates as follows:
 
-1. A root-owned update helper at `/opt/<App>/nucleus-update-helper`, and a polkit policy scoped to
-   that exact binary (`allow_active=yes`).
+1. A root-owned update helper **shipped inside the package** at
+   `/opt/<App>/nucleus-update-helper` (so `dpkg -S` / `rpm -qf` attribute it to the package).
+   afterInstall only hardens permissions and installs a polkit policy scoped to that exact
+   binary (`allow_active=yes`); afterRemove removes the policy.
 2. Your signing public key, bundled at `/opt/<App>/resources/nucleus-update.pub.asc`.
-3. At update time the runtime downloads the package and its detached `<file>.asc` signature, then
-   runs `pkexec <helper> <file>`.
+3. At update time the runtime downloads the package and its detached `<file>.asc` signature
+   (CI uploads `*.asc` next to the packages when Linux GPG secrets are present), resolves the
+   helper by walking up from `bin/`, then runs `pkexec <helper> <file>`.
 4. The helper verifies the signature against the bundled key, checks that the package name matches
    the installed app, and only then runs `dpkg -i` or `rpm -U`.
+
+AppImage updates replace the binary in place while the previous FUSE mount still holds the old
+inode, wait for the old process to exit (single-instance lock), and relaunch with a cleaned
+environment (`APPDIR`, `APPIMAGE`, `LD_LIBRARY_PATH`, … unset) so the new image is not bound to
+the unmounted squashfs.
 
 <Callout type="warn">
 The polkit `allow_active=yes` rule is scoped to the single helper binary, and the helper refuses any
 package whose signature does not verify against the bundled key, so a passwordless install cannot
 install an arbitrary package — an attacker would need your private signing key. If the helper or the
-`<file>.asc` is missing, the runtime falls back to the password-prompting `pkexec` install.
-Passwordless install requires an active local session.
+`<file>.asc` is missing, the runtime falls back to the password-prompting `pkexec` install and logs
+the reason. Passwordless install requires an active local session.
 </Callout>
 
 ## API reference
@@ -173,9 +230,10 @@ Passwordless install requires an active local session.
 - `suspend fun checkForUpdates(): UpdateResult` — returns `Available(info, level)`, `NotAvailable`,
   or `Error(exception)`.
 - `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>` — emits progress; the final
-  emission has `file != null`.
+  emission has `file != null`. Preferential differential path when maps and cache allow; see
+  [Differential downloads](#differential-downloads).
 - `fun installAndRestart(file: File)` — launches the installer, exits the process, relaunches after
-  install.
+  install (AppImage: replace-in-place + clean relaunch).
 - `fun installAndQuit(file: File)` — silent install, no relaunch. The update applies on the next
   manual launch.
 - `fun isUpdateSupported(): Boolean` — whether the current executable type can auto-update.
@@ -192,8 +250,19 @@ UI on it — force a dialog for major bumps, install patches silently.
 
 ### Builder fields
 
-`NucleusUpdater { }` configures a `UpdaterConfig`: `currentVersion`, `channel`, `provider`,
-`httpClient`, `allowDowngrade`, `allowPrerelease`, and `executableType`.
+`NucleusUpdater { }` configures a `UpdaterConfig`:
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `currentVersion` | from `NucleusApp` / jpackage / marker | Used for channel and compare |
+| `provider` | required | `GitHubProvider`, `GenericProvider`, … |
+| `channel` | `"latest"` | Release channel name |
+| `allowDowngrade` | `false` | |
+| `allowPrerelease` | `false` | Also true when `currentVersion` contains `-` |
+| `executableType` | auto | Override detected package type |
+| `httpClient` | JDK client with redirects | Use `NativeHttpClient` for private CAs |
+| `differentialDownload` | `true` | Assemble from cache + range requests; safe to leave on |
+| `cacheDir` | platform default under `nucleus/updates/<appId>` | Previous artifact + block map |
 
 ### Providers
 

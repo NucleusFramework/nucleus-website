@@ -1,0 +1,80 @@
+---
+title: Roadmap
+description: Ce qui est livré dans Nucleus 2.0–2.2, les modules prévus ensuite, et les pistes à l'étude.
+---
+
+Nucleus 2.0 fournit la base runtime et packaging. Les releases suivantes ajoutent des modules
+d'intégration OS pour des fonctions que les apps desktop JVM atteignent autrement via du
+JavaScript ou du code natif écrit à la main. Cette page liste ce qui est livré, ce qui est
+prévu, et ce qui reste spéculatif.
+
+## Livré en 2.0
+
+- Point d'entrée unifié `nucleusApplication { }` — single-instance, deep links, AOT, init GraalVM, priming AutoLaunch, AUMID Windows — tout automatique.
+- Backend Tao — Wayland natif, multi-touch, pression et tilt du stylet, popups natifs, `NativeView` embarqué, drag-and-drop avec diagnostics.
+- 18 formats de packaging depuis un seul DSL Gradle.
+- `updater-runtime` — auto-update compatible electron-builder, canaux, détection post-update.
+- GraalVM Native Image — pipeline de packaging bout-en-bout (DMG, NSIS, DEB), analyseur statique de réflexion, métadonnées de reachability par bibliothèque.
+- Liquid Glass macOS au SDK 26 — le patching `vtool` fait fonctionner n'importe quel JDK.
+- 40+ modules runtime : notifications, system tray, hotkeys globaux, contrôles média, progression taskbar, energy manager, system info, scheduler, autolaunch, dark mode, couleur système, SSL natif, HTTP natif, watcher de système de fichiers, fenêtres décorées avec quatre toolkits.
+
+## Livré en 2.1
+
+Outillage et native image, pas de nouveaux modules runtime :
+
+- **GraalVM Community Edition est la toolchain par défaut** (depuis la 2.1.7) — téléchargée et mise en cache automatiquement ; aucune clause de redistribution contre rémunération. Activez Oracle GraalVM pour la PGO, `-O3`, les profils inférés par ML et l'obfuscation avancée. Seul le backend AWT, déprécié, nécessite encore une installation locale de BellSoft Liberica NIK pour le support AWT/Swing en image native.
+- Compose Hot Reload — fonctionne out of the box. Appliquez le plugin `org.jetbrains.compose.hot-reload` et lancez `hotRun` ; Nucleus résout le point d'entrée depuis `nucleus.application.mainClass`. Pris en charge sur les backends AWT et Tao.
+- Optimisation guidée par profil (PGO) — enregistrez un profil avec `runWithPgoInstrument`, committez-le, et les builds natifs complets suivants l'appliquent automatiquement. Oracle GraalVM uniquement.
+- Images natives plus petites — `optimization = NativeImageOptimization.SIZE` (`-Os`), `march` type-safe, stripping automatique de l'exécutable, tas max adapté au bureau, et obfuscation avancée (Oracle).
+- Cache AOT portable entre CPU par défaut (métadonnées seules) avec un bloc explicite `aotCache { }`.
+- `CompressionLevel.Ultra` — recompression post-traitement supplémentaire (DMG LZMA, DEB `xz -9e`) pour des installeurs plus petits.
+- `--enable-native-access=ALL-UNNAMED` dans les arguments JVM par défaut et les images natives pour JDK 24+ (JEP 472).
+
+## Livré en 2.2
+
+Chrome de fenêtre, accessibilité et parité d'outillage :
+
+- **Scaffold de fenêtre et primitives de chrome** — `WindowScaffold` avec `TitleBarPlacement.Docked` / `Overlay`, `windowDragArea` / `noWindowDrag`, `WindowControls`, `windowGlassRegion` macOS, `WindowsBackdrop` Windows 11 (Mica / Acrylic / MicaAlt), `WindowBackground`, `WindowAppearance`. Voir [Scaffold de fenêtre](/docs/tao/window-scaffold).
+- **Transparence plein fenêtre sur Tao** — `DecoratedWindow(transparent = true)` pour les overlays « ghost » (à combiner avec `undecorated`).
+- **AccessKit sous Windows** — Windows et Linux partagent le chemin d'accessibilité AccessKit (UIA + AT-SPI).
+- **Surface de tâches GraalVM alignée sur le pipeline JVM** — `runGraalvmNative` (quick-build), `createGraalvmNativeDistributable`, `runGraalvmNativeDistributable`, `packageGraalvmNativeDistributionForCurrentOS`.
+- **Sélection typée du garbage collector** — `GarbageCollector` sur le chemin JVM et `NativeImageGarbageCollector` pour les images natives.
+- **`NucleusApplicationScope` implémente l'`ApplicationScope` de Compose** — les bibliothèques scopées au plain `ApplicationScope` se résolvent dans `nucleusApplication { }`.
+- Deep links scheme-only (`myapp:?query=…`), noms de bundle `.app` macOS cohérents, ombre CSD GTK native.
+
+## À venir
+
+Modules de sécurité et d'identité (toujours prévus ; hors de la release 2.2.0 centrée fenêtre/outillage) :
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `secure-storage` | Stockage de secrets adossé au hardware pour tokens, mots de passe, clés | Keychain | Credential Manager / DPAPI | Secret Service (`libsecret`) |
+| `biometric-auth` | Authentification par empreinte / visage | `LocalAuthentication` (Touch ID / Face ID) | Windows Hello | `fprintd` via D-Bus / polkit |
+
+Événements et IO au niveau OS :
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `share-sheet` | Share sheet OS (URL, fichier, texte) | `NSSharingService` | Windows `DataTransferManager` | xdg-desktop-portal `Share` |
+| `power-events` | Sleep / wake / lock / unlock / écran éteint / état batterie | Notifications `NSWorkspace` | `WM_POWERBROADCAST` / `WTSRegisterSessionNotification` | Signaux D-Bus `org.freedesktop.login1` |
+
+## À l'étude
+
+Spéculatif — pas d'engagement, pas d'ETA. Ouvrez une issue si vous voulez voir l'un d'eux arriver plus tôt :
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `clipboard` | Presse-papier riche — image, fichiers, HTML, RTF — plus watcher de changement | `NSPasteboard` | `OleGetClipboard` / Clipboard History API | `wl-clipboard` / sélections X11 |
+| `screen-capture` | Capture / enregistrement d'écran natif | `CGDisplayCreateImage` / ScreenCaptureKit | Windows Graphics Capture / DXGI | xdg-desktop-portal `Screenshot` |
+
+## Influencer l'ordre
+
+Ouvrez une issue décrivant votre cas d'usage, liez une app exemple qui a besoin du module, ou
+sponsorisez l'implémentation d'une plateforme précise. La complexité des modules natifs tient
+surtout au pont JNI par OS — plus il y a de monde qui en a besoin, plus vite ça sort.
+
+## Et ensuite
+
+- [Changelog](/docs/changelog) — les versions publiées et leur contenu.
+- [Modules](/docs/concepts/modules) — comment les modules runtime sont structurés et ajoutés à un build.
+- [Ecosystem](/docs/ecosystem) — les modules disponibles aujourd'hui.

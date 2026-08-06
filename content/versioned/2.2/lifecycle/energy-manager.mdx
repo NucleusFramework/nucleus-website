@@ -1,0 +1,140 @@
+---
+title: Energy manager
+description: Lower your app's OS scheduling priority and keep the display awake from Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `energy-manager` module lets you control two forms of power behavior from Kotlin: lowering
+your app's CPU, I/O, and timer priority when it runs in the background, and preventing the
+display and system from sleeping during a long task. Both work on Windows, macOS, and Linux
+through the `EnergyManager` object.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.energy-manager:<version>")
+}
+```
+
+## Throttle a background window
+
+Efficiency mode comes in two levels. Light mode deprioritizes CPU scheduling only; full mode
+also throttles I/O and, on macOS, network. Tie them to window state — light mode when the
+window loses focus, full mode when it is minimized:
+
+```kotlin
+import dev.nucleusframework.energymanager.EnergyManager
+
+LaunchedEffect(state.isMinimized, isWindowFocused) {
+    when {
+        state.isMinimized -> {
+            EnergyManager.disableLightEfficiencyMode()
+            EnergyManager.enableEfficiencyMode()       // full — CPU and I/O throttled
+        }
+        !isWindowFocused -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.enableLightEfficiencyMode()  // CPU only — I/O stays normal
+        }
+        else -> {
+            EnergyManager.disableEfficiencyMode()
+            EnergyManager.disableLightEfficiencyMode()
+        }
+    }
+}
+```
+
+## Run a coroutine with reduced priority
+
+`withEfficiencyMode` runs a block on a dedicated background-priority thread and disposes the
+thread when the block returns. `withLightEfficiencyMode` applies process-level light QoS for
+the duration of the block, without pinning it to a thread:
+
+```kotlin
+// Dedicated low-priority thread (thread-level efficiency), I/O not throttled
+val report = EnergyManager.withEfficiencyMode {
+    computeHeavyReport()
+}
+
+// Process-level light QoS for the block — useful for batch I/O work
+EnergyManager.withLightEfficiencyMode {
+    syncDataFromServer()
+    writeToDatabase()
+}
+```
+
+<Callout type="info">
+Both helpers restore the previous mode when the block returns, including when it throws. Manual
+`enable`/`disable` calls are not balanced for you, so pair them yourself.
+</Callout>
+
+## Keep the screen awake
+
+Prevent the display and system from sleeping while a task or presentation runs, then release
+the request when it finishes:
+
+```kotlin
+EnergyManager.keepScreenAwake()
+// ... long-running task or presentation
+EnergyManager.releaseScreenAwake()
+```
+
+## How it works
+
+Efficiency mode has two levels. Light mode leaves the app fully functional in the background:
+CPU scheduling is deprioritized through QoS hints, but I/O and network run at normal speed, so
+sync jobs and downloads still make progress. Full mode is meant for a minimized window where
+there is no UI to render — it adds I/O throttling and drops the process to the lowest priority
+class. Both are reversible immediately.
+
+Thread-level efficiency applies the same mechanism to the calling thread only. It confines one
+heavy coroutine to the slow lane without slowing the rest of the process, which keeps a
+responsive UI alongside background work. The `withEfficiencyMode` helper builds on this by
+running its block on a single pinned thread.
+
+Each platform maps these levels to native OS facilities:
+
+| OS | Full mode | Light mode | Screen awake |
+|---|---|---|---|
+| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (green leaf in Task Manager 22H2+) | EcoQoS only | `SetThreadExecutionState(ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` |
+| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (E-core confinement, I/O and network throttling on Apple Silicon) | `task_policy_set` Tier 5 only — CPU deprioritized, I/O unaffected | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` |
+| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` only | GNOME SessionManager DBus, logind `Inhibit("idle")`, or X11 `XScreenSaverSuspend` |
+
+Thread-level mode uses the per-thread form of these primitives on Linux,
+`pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` on macOS, and
+`SetThreadInformation`/`THREAD_PRIORITY_IDLE` on Windows.
+
+## API reference
+
+### EnergyManager
+
+| Method | Description |
+|---|---|
+| `isAvailable(): Boolean` | Whether the native bridge loaded on this platform. |
+| `enableEfficiencyMode()` / `disableEfficiencyMode()` | Full process mode. |
+| `enableLightEfficiencyMode()` / `disableLightEfficiencyMode()` | Light process mode. |
+| `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Per-thread; affects the calling thread only. |
+| `withEfficiencyMode { }` (suspend) | Runs the block on a dedicated thread with thread-level efficiency; the thread is disposed when the block returns. |
+| `withLightEfficiencyMode { }` (suspend) | Applies process-level light QoS for the block's lifetime; no thread pinning. |
+| `keepScreenAwake()` / `releaseScreenAwake()` | Prevent and restore display and system sleep. |
+| `isScreenAwakeActive(): Boolean` | Whether screen-awake is currently held. |
+
+Every `enable`/`disable` call and `keepScreenAwake`/`releaseScreenAwake` returns an
+`EnergyManager.Result` with `success: Boolean`, `errorCode: Int`, and `message: String`. On an
+unsupported platform the result is `success = false` with `errorCode = -1`.
+
+## Notes
+
+- On Linux, `libdbus-1`, `libX11`, and `libXss` are loaded through `dlopen()` at runtime.
+  Missing libraries degrade gracefully, and a private DBus connection is used so the module
+  does not interfere with the JVM's accessibility bus.
+- On Windows 10 1709+, EcoQoS applies only on battery; Windows 11+ honors it on AC power too.
+- For a long task that must also wake the device, hold `keepScreenAwake()` alongside a job from
+  the [scheduler](/docs/lifecycle/scheduler).
+
+## What's next
+
+- [Scheduler](/docs/lifecycle/scheduler) — run deferred and periodic background work.
+- [Taskbar progress](/docs/lifecycle/taskbar-progress) — surface long-running task progress on the taskbar.
+- [Auto-launch](/docs/lifecycle/auto-launch) — start your app at login.

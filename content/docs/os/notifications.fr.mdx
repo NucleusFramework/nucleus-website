@@ -40,7 +40,59 @@ val n = notification(
 n.send()
 ```
 
-`title` et `message`, tout comme les callbacks, sont des paramètres de la fonction `notification(...)`. Le bloc lambda final sert uniquement à déclarer les boutons d'action via `button(title, onClick)`.
+`title` et `message`, tout comme les callbacks, sont des paramètres de la fonction `notification(...)`. Le bloc lambda final déclare les boutons d'action via `button(title, onClick)` et, depuis 2.3, des blocs d'options optionnels par plateforme.
+
+## Options spécifiques à la plateforme
+
+Les sémantiques qui diffèrent entre OS restent dans les blocs `linux { }`, `macos { }` et
+`windows { }` du builder. Chaque bloc n'est appliqué que lorsque la notification est livrée sur
+cet OS ; sur les autres, c'est un no-op. Les champs partagés (title, message, image, buttons,
+callbacks) restent la base.
+
+```kotlin
+import dev.nucleusframework.notification.InterruptionLevel
+import dev.nucleusframework.notification.common.notification
+import dev.nucleusframework.notification.linux.Urgency
+import dev.nucleusframework.notification.windows.ToastDuration
+import dev.nucleusframework.notification.windows.ToastScenario
+
+val n = notification(
+    title = "Build failed",
+    message = "see logs",
+    onActivated = { openLogs() },
+) {
+    button("Open") { openLogs() }
+
+    linux {
+        urgency = Urgency.CRITICAL
+        transient = true
+        category = "device.error"
+    }
+    macos {
+        interruptionLevel = InterruptionLevel.TIME_SENSITIVE
+        relevanceScore = 0.9
+        subtitle = "CI"
+    }
+    windows {
+        scenario = ToastScenario.URGENT
+        duration = ToastDuration.LONG
+    }
+}
+
+n.send()
+```
+
+| Bloc | Type de scope | Propriétés |
+|------|---------------|------------|
+| `linux { }` | `LinuxNotificationScope` | `urgency` (`Urgency`), `category`, `transient`, `resident`, `expireTimeout` (ms ; `0` = jamais, non défini/`-1` = défaut serveur) |
+| `macos { }` | `MacNotificationScope` | `interruptionLevel` (`InterruptionLevel`), `relevanceScore` (`0.0..1.0`), `subtitle` |
+| `windows { }` | `WindowsNotificationScope` | `scenario` (`ToastScenario`), `duration` (`ToastDuration`) |
+
+`TIME_SENSITIVE` et `CRITICAL` sous macOS exigent l'entitlement Apple correspondant ; sans cela
+le système retombe sur `ACTIVE`. `ToastScenario.URGENT` nécessite Windows 11+ pour traverser
+Focus Assist. Pour les API plateforme plus profondes (planification, barres de progression,
+catégories), utilisez directement les modules [macOS](/docs/os/notification-macos),
+[Windows](/docs/os/notification-windows) ou [Linux](/docs/os/notification-linux).
 
 ## Fonctionnement
 

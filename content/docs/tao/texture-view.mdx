@@ -1,0 +1,278 @@
+---
+title: TextureView
+description: Composite an externally produced GPU texture into the Compose scene on the Tao backend without a CPU frame copy.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+`TextureView` composites an externally produced GPU texture inside the Compose scene on the
+Tao backend. Z-order, clipping, `Modifier.graphicsLayer` transforms, and scrolling apply to the
+texture the same way they do to any other composable. There is no CPU frame copy: the producer
+texture is imported on the window's GPU device (ANGLE shared D3D11 on Windows, Metal/`IOSurface`
+on macOS, DMA-BUF/`EGLImage` on Linux).
+
+It is the passive GPU-pixels counterpart of [`NativeView`](/docs/tao/native-views). Prefer
+`NativeView` for interactive native widgets; use `TextureView` when you already own a decoder or
+renderer that publishes GPU frames (video, camera, game engine, GPU compute).
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+`TextureView`, `TextureViewController`, and the platform source factories live in
+`dev.nucleusframework.window.tao`.
+
+## Show a texture
+
+1. Obtain a platform handle from your producer (shared DXGI handle, `IOSurface` pointer,
+   DMA-BUF fd, …).
+2. Wrap it with the matching factory into a `TextureViewSource`.
+3. Place a `TextureView` and, for live content, a `TextureViewController`.
+4. After each published frame, call `controller.markFrameAvailable()` (any thread). Only the
+   draw pass re-runs — no recomposition.
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.layout.ContentScale
+import dev.nucleusframework.window.tao.TextureView
+import dev.nucleusframework.window.tao.TextureViewController
+import dev.nucleusframework.window.tao.TextureViewSource
+import dev.nucleusframework.window.tao.rememberTextureViewController
+
+@Composable
+fun VideoPane(source: TextureViewSource?) {
+    val controller = rememberTextureViewController()
+    DisposableEffect(source) {
+        // Start your producer loop; call controller.markFrameAvailable() after each frame.
+        onDispose { /* stop producer */ }
+    }
+    TextureView(
+        source = source,
+        controller = controller,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.Low,
+    )
+}
+```
+
+`filterQuality` and `contentScale` mirror Compose `Image`. Content outside the composable
+bounds is clipped. When `source` is `null`, does not match the host platform, or the import
+fails, `TextureView` renders an empty `Box(modifier)`.
+
+## Platform sources
+
+Factories return a `TextureViewSource`. Pass only the factory that matches the OS you run on;
+other platforms treat an unmatched source as an empty box.
+
+<Tabs items={['Windows', 'macOS', 'Linux']}>
+<Tab value="Windows">
+
+```kotlin
+import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
+
+val source = nucleusD3D11SharedTextureSource(
+    sharedHandle = dxgiSharedHandle, // IDXGIResource::GetSharedHandle (legacy)
+    widthPx = width,
+    heightPx = height,
+)
+```
+
+- Handle must be a **legacy** DXGI shared handle (`GetSharedHandle`). NT handles
+  (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`) are not supported by ANGLE's import path.
+- Texture format: `R8G8B8A8_UNORM` (or compatible RGBA8) with premultiplied alpha;
+  `widthPx` / `heightPx` must match the D3D texture size.
+- Synchronization:
+  - `D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX` (recommended) — each `markFrameAvailable` pulls
+    under `AcquireSync(0)` / `ReleaseSync(0)` into a staging texture (tear-free, one GPU-GPU
+    copy). Bracket producer writes the same way.
+  - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
+    frame or a redraw may sample a partial frame.
+
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.0/examples/mediafoundation-demo)
+sample shows Media Foundation decode into a shared D3D11 texture.
+
+</Tab>
+<Tab value="macOS">
+
+```kotlin
+import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
+import dev.nucleusframework.window.tao.nucleusMetalTextureSource
+
+// Shareable buffer (cross-device / cross-process)
+val surfaceSource = nucleusIOSurfaceTextureSource(
+    ioSurface = ioSurfaceRefAsLong,
+    widthPx = width,
+    heightPx = height,
+)
+
+// Same-process Metal texture (or CVMetalTextureCache output via its IOSurface)
+val metalSource = nucleusMetalTextureSource(
+    metalTexture = mtlTextureAsLong,
+    widthPx = width,
+    heightPx = height,
+)
+```
+
+- Pixel format: 32-bit `BGRA` or `RGBA` (sRGB variants included), premultiplied alpha.
+- Surface / texture dimensions must match `widthPx` × `heightPx`.
+- Each frame is pulled with one GPU-GPU copy on the window's command queue. Finish producer
+  writes (`commit` + `waitUntilCompleted`, or double-buffer) **before**
+  `markFrameAvailable`.
+- A texture that is neither render-target-capable on the window's Metal device nor
+  `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
+
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.0/examples/avfoundation-demo)
+sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
+
+</Tab>
+<Tab value="Linux">
+
+```kotlin
+import dev.nucleusframework.window.tao.NucleusDmaBufPlane
+import dev.nucleusframework.window.tao.NucleusDrmFormat
+import dev.nucleusframework.window.tao.NucleusYuvColorSpace
+import dev.nucleusframework.window.tao.NucleusYuvFormat
+import dev.nucleusframework.window.tao.nucleusDmaBufTextureSource
+import dev.nucleusframework.window.tao.nucleusEglImageTextureSource
+import dev.nucleusframework.window.tao.nucleusYuvDmaBufTextureSource
+
+// Packed 32-bit RGB DMA-BUF
+val rgb = nucleusDmaBufTextureSource(
+    fd = dmaBufFd,
+    widthPx = width,
+    heightPx = height,
+    stride = stride,
+    fourcc = NucleusDrmFormat.ARGB8888,
+    offset = 0,
+    modifier = NucleusDrmFormat.MODIFIER_INVALID,
+)
+
+// Producer-owned EGLImage on the window's EGLDisplay
+val egl = nucleusEglImageTextureSource(eglImage = eglImageAsLong, widthPx = width, heightPx = height)
+
+// Planar YUV (I420 / YV12) — hardware decoder native layout
+val yuv = nucleusYuvDmaBufTextureSource(
+    widthPx = width,
+    heightPx = height,
+    format = NucleusYuvFormat.I420,
+    planes = listOf(
+        NucleusDmaBufPlane(fd = yFd, stride = yStride, offset = 0),
+        NucleusDmaBufPlane(fd = uFd, stride = uStride, offset = 0),
+        NucleusDmaBufPlane(fd = vFd, stride = vStride, offset = 0),
+    ),
+    colorSpace = NucleusYuvColorSpace.BT709_LIMITED,
+)
+```
+
+- Single-plane RGB uses DRM FourCC codes in `NucleusDrmFormat` (`ARGB8888`, `XRGB8888`,
+  `ABGR8888`, `XBGR8888`). The driver maps sampling to RGBA for app code.
+- `fd` stays owned by the caller; EGL takes its own reference at import time.
+- YUV supports **three-plane** 4:2:0 layouts only (`I420`, `YV12`). NV12/NV21 are not supported
+  yet (Skia has no two-channel GPU texture mapping for interleaved chroma).
+- For acquire fences instead of a CPU-side finish, call
+  `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
+  `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
+
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.0/examples/gstreamer-demo)
+sample feeds GStreamer frames as an `EGLImage`.
+
+</Tab>
+</Tabs>
+
+## How it works
+
+`TextureView` is a pure drawing surface. The producer owns its device, queue, and allocation;
+Nucleus only imports that allocation onto the window's GPU and samples it during Compose's
+draw pass. Several `TextureView`s that share one `TextureViewSource` share a single GPU import.
+
+Frame signalling goes through `TextureViewController`:
+
+- `markFrameAvailable()` increments an internal stamp that invalidates **draw only**.
+- Safe from any thread (decoder thread, render thread, pool).
+- Optional Linux overload `markFrameAvailable(acquireFenceFd)` transfers ownership of a
+  `sync_file` fd; the consumer GPU waits before sampling. Pass `TextureViewController.NO_FENCE`
+  (`-1`) for no fence.
+- `rememberTextureViewController()` releases any held fence when composition leaves.
+
+Input is not handled. Interactive native UI still uses `NativeView`.
+
+Test helpers (`D3D11TestTextureProducer`, `MetalTestTextureProducer`,
+`DmaBufTestTextureProducer`) ship in `decorated-window-tao` for demos and CI; production apps
+use their own producers and the public factories above.
+
+## API reference
+
+### TextureView
+
+```kotlin
+@Composable
+fun TextureView(
+    source: TextureViewSource?,
+    modifier: Modifier = Modifier,
+    controller: TextureViewController? = null,
+    filterQuality: FilterQuality = FilterQuality.Low,
+    contentScale: ContentScale = ContentScale.FillBounds,
+    alignment: Alignment = Alignment.Center,
+)
+```
+
+### TextureViewController
+
+```kotlin
+class TextureViewController {
+    fun markFrameAvailable()
+    fun markFrameAvailable(acquireFenceFd: Int)
+    companion object {
+        const val NO_FENCE: Int = -1
+    }
+}
+
+@Composable
+fun rememberTextureViewController(): TextureViewController
+```
+
+### Source factories
+
+| Factory | Platform | Handle |
+|---------|----------|--------|
+| `nucleusD3D11SharedTextureSource(sharedHandle, widthPx, heightPx)` | Windows | Legacy DXGI shared handle |
+| `nucleusIOSurfaceTextureSource(ioSurface, widthPx, heightPx)` | macOS | `IOSurfaceRef` as `Long` |
+| `nucleusMetalTextureSource(metalTexture, widthPx, heightPx)` | macOS | `id<MTLTexture>` as `Long` |
+| `nucleusDmaBufTextureSource(fd, widthPx, heightPx, stride, …)` | Linux | Single-plane DMA-BUF |
+| `nucleusEglImageTextureSource(eglImage, widthPx, heightPx)` | Linux | Producer-owned `EGLImageKHR` |
+| `nucleusYuvDmaBufTextureSource(widthPx, heightPx, format, planes, colorSpace)` | Linux | Planar YUV DMA-BUF |
+
+Supporting types: `NucleusDrmFormat`, `NucleusDmaBufPlane`, `NucleusYuvFormat`
+(`I420`, `YV12`), `NucleusYuvColorSpace` (`BT601_*`, `BT709_*`).
+
+## Notes
+
+- **Tao only.** There is no AWT/`SwingPanel` path for external GPU textures.
+- Import failure is silent at the UI level (empty box). Check producer logs and that dimensions /
+  formats match the contract above.
+- Do not call `markFrameAvailable` faster than the display can composite without also pacing
+  the producer — the stamp coalesces, but wasted GPU work does not.
+- Tray panels and popup layers keep their EGL binding neutral so a `TextureView` inside a
+  standalone tray panel still imports correctly.
+
+## What's next
+
+- [Native views](/docs/tao/native-views) — embed interactive `NSView` / `HWND` / `GtkWidget` content.
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — open windows that host `TextureView`.
+- [Drag and drop](/docs/tao/drag-and-drop) — file and content DnD on Tao.
+- [Tao backend overview](/docs/tao) — backends, Wayland, and related primitives.

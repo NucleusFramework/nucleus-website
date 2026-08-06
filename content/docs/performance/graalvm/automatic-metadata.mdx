@@ -54,6 +54,26 @@ including your own module's classes, and detects:
 - JNI superclass chains — parent classes needed for field access from native code.
 - `@Serializable` classes — emits the `Companion.serializer()` reflection entry.
 
+### Detect orphan project classes
+
+Annotation processors and naming-convention loaders (Room `*_Impl`, Dagger/Hilt `*_Factory`,
+Moshi adapters, …) produce classes that **no classpath bytecode references**. Literal
+`Class.forName` analysis and L1–L3 metadata never see them. From 2.3, a single pass inside the
+bytecode analyzer registers a public no-arg `<init>` for those orphans when:
+
+- the class is concrete and public with a public no-arg constructor, and
+- a supertype other than `Object` (or an interface) is referenced by app code.
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    detectOrphanProjectClasses = true    // default
+    // reflectionForProjectClasses = true  // opt-in: every project class with a public no-arg ctor
+}
+```
+
+Build logs emit `[orphan] fqcn` for each registration. Prefer the default detector; only enable
+`reflectionForProjectClasses` when you need a temporary sledgehammer (image growth is measurable).
+
 ## Level 5 — bundled runtime metadata
 
 The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
@@ -99,6 +119,19 @@ ones:
 The task compares your manual `reachability-metadata.json` against the combined baseline of
 Levels 1–4 and removes anything already managed, reporting which entries were removed and which
 remain.
+
+From 2.3 it also **reports** entries whose types resolve nowhere on the runtime classpath
+(typical agent noise: `kotlin.Any`, `kotlin.Int`, …). Default is report-only. To prune them:
+
+```shell
+./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.removeUnresolvable=true
+# Analyze without rewriting:
+./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.dryRun=true
+```
+
+Types under the configured `exactReachabilityMetadata` packages are never removed — a missing
+registration under exact mode is what restores a clear error. Remaining manual entries are listed
+as `kept — not covered by any managed source`.
 
 ## What's next
 

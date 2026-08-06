@@ -6,6 +6,122 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.3.0
+
+**Released: 2026-08-06**
+
+### Highlights
+
+- **`TextureView` — external GPU textures in the Compose scene.** Composite decoder or engine
+  frames with real z-order, clipping, and `graphicsLayer` transforms, and no CPU frame copy.
+  Windows uses ANGLE/D3D11 shared handles, macOS Metal/`IOSurface`, Linux DMA-BUF/`EGLImage`
+  (including planar YUV I420/YV12). Frame updates go through `TextureViewController.markFrameAvailable`
+  (draw-only invalidation). See [TextureView](/docs/tao/texture-view),
+  [platform sources](/docs/tao/texture-view#platform-sources), and
+  [how it works](/docs/tao/texture-view#how-it-works).
+- **Per-platform notification options on the common DSL.** `notification { }` accepts
+  `linux { }`, `macos { }`, and `windows { }` blocks applied only on the matching OS
+  (urgency, interruption level, toast scenario, …). See
+  [Platform-specific options](/docs/os/notifications#platform-specific-options).
+- **Differential auto-update downloads.** `updater-runtime` reassembles installers from the
+  previous artifact plus HTTP range requests for changed blocks (electron-builder block maps).
+  On by default via `differentialDownload`. See
+  [Differential downloads](/docs/packaging/auto-update#differential-downloads).
+- **`LocalNucleusApplicationScope` and receiver-less windows.** Open secondary
+  `DecoratedWindow` / `DecoratedDialog` from deep in the composition without threading the
+  application receiver. See
+  [Open a window from composition](/docs/tao/decorated-window#open-a-window-from-composition).
+- **Live `isSystemInDarkTheme()` under `nucleusApplication`.** Compose's `LocalSystemTheme` is
+  fed from `darkmode-detector`, so official and library call sites track OS theme changes.
+  See [Bridge to Compose `isSystemInDarkTheme`](/docs/os/dark-mode#bridge-to-compose-issystemindarktheme).
+
+### New features
+
+- **`TextureView` + platform source factories** (#429 / #338) — `TextureView`,
+  `TextureViewController`, `rememberTextureViewController`,
+  `nucleusD3D11SharedTextureSource`, `nucleusIOSurfaceTextureSource` /
+  `nucleusMetalTextureSource`, `nucleusDmaBufTextureSource` /
+  `nucleusEglImageTextureSource` / `nucleusYuvDmaBufTextureSource`, plus Linux acquire-fence
+  signalling. Samples: mediafoundation-demo, avfoundation-demo, gstreamer-demo. See
+  [TextureView](/docs/tao/texture-view#show-a-texture).
+- **Platform blocks on `notification { }`** (#436 / #397) — `LinuxNotificationScope`
+  (`urgency`, `category`, `transient`, `resident`, `expireTimeout`),
+  `MacNotificationScope` (`interruptionLevel`, `relevanceScore`, `subtitle`),
+  `WindowsNotificationScope` (`scenario`, `duration`). See
+  [Platform-specific options](/docs/os/notifications#platform-specific-options).
+- **Differential downloads in `NucleusUpdater`** (#428) — uses published `.blockmap` companions
+  (NSIS, macOS ZIP/DMG) and AppImage-embedded maps; `DownloadProgress.isDifferential`;
+  `UpdaterConfig.differentialDownload` (default `true`) and `cacheDir`. See
+  [Differential downloads](/docs/packaging/auto-update#differential-downloads) and
+  [Builder fields](/docs/packaging/auto-update#builder-fields).
+- **`LocalNucleusApplicationScope`** (#449 / #438) — CompositionLocal provided by
+  `nucleusApplication` on AWT and Tao; receiver-less `DecoratedWindow` / `DecoratedDialog`
+  overloads. See
+  [Open a window from composition](/docs/tao/decorated-window#open-a-window-from-composition).
+- **System theme bridge** (#463) — `ProvideNucleusSystemTheme` wires `isSystemInDarkMode()` into
+  `LocalSystemTheme`; `darkmode-detector` is an `api` dependency of `nucleus-application`. See
+  [Bridge to Compose `isSystemInDarkTheme`](/docs/os/dark-mode#bridge-to-compose-issystemindarktheme).
+- **Exact reachability metadata on the GraalVM dev loop** (#453 / #440) —
+  `graalvm { exactReachabilityMetadata = ExactReachabilityMetadata.APP_PACKAGES }` (default)
+  on `runGraalvmNative` only; `-Pnucleus.graalvm.missingRegistration=warn|exit|throw`. See
+  [Exact reachability on the dev loop](/docs/performance/graalvm/configuration#exact-reachability-on-the-dev-loop).
+- **Orphan project-class detection** (#460 / #441) —
+  `detectOrphanProjectClasses` (default `true`) registers public no-arg constructors for
+  reflectively-only types (Room `*_Impl`, …); opt-in `reflectionForProjectClasses`. See
+  [Detect orphan project classes](/docs/performance/graalvm/automatic-metadata#detect-orphan-project-classes).
+- **GraalVM innovation channel defaults to 25.2** (#432) — `GraalvmChannel.INNOVATION` resolves
+  to `25i2`. See [Provision the toolchain](/docs/performance/graalvm/configuration#provision-the-toolchain).
+
+### Improvements
+
+- **Silent DEB/RPM self-update packaging** (#457) — `nucleus-update-helper` ships in the package
+  payload so `dpkg -S` / `rpm -qf` attribute it; afterInstall only installs polkit; detached
+  `*.asc` uploaded next to packages. See
+  [Passwordless updates on Linux](/docs/packaging/auto-update#set-up-passwordless-updates-on-linux).
+- **AppImage post-update relaunch** (#465 / #178) — replace-in-place while the old mount holds,
+  clean environment on restart (`APPDIR` / `LD_LIBRARY_PATH` unset). See
+  [Supported formats](/docs/packaging/auto-update#supported-formats).
+- **Linux portal global hotkeys** (#455 / #264) — stable `shortcut_id` from modifiers+keyCode,
+  debounced `BindShortcuts`, `GlobalHotKeyManager.commitRegistrations()` and `portalShortcutId`.
+  See [Linux portal registrations](/docs/os/global-hotkey#linux-portal-registrations).
+- **Unresolvable cleanup metadata reporting** (#461 / #439) — `cleanupGraalvmMetadata` reports
+  types that resolve nowhere; optional
+  `-Pnucleus.graalvm.cleanup.removeUnresolvable=true`. See
+  [Clean up manual entries](/docs/performance/graalvm/automatic-metadata#clean-up-manual-entries).
+- **Metadata dirs as `nativeImageCompile` inputs** (#459 / #431) — editing reachability metadata
+  invalidates the native image task instead of serving a stale binary.
+- **`mlProfileInference = false` gated on Oracle** (#458 / #452) — community toolchains skip
+  `-H:-MLProfileInference` (unrecognized) with a warning. See
+  [graalvm { } reference](/docs/performance/graalvm/configuration#graalvm---reference).
+
+### Bug fixes
+
+- **Outbound OS drag freezes the Tao host** (#434) — Windows, macOS, and Linux keep the render
+  loop alive during `DoDragDrop` / AppKit / GTK drag via a shared `DragPump`. See
+  [Drag and drop](/docs/tao/drag-and-drop).
+- **Wayland resize flash / shift** (#462 / #444) — paint at last drawable size until
+  `wl_egl_window_resize` applies on the next present. See [Wayland](/docs/tao/wayland).
+- **Linux Compose subsurface opaque region** (#447 / #446) — `wl_surface.set_opaque_region`
+  with transparent corners preserved for the CSD shadow.
+- **Linux jpackage SIGSEGV on long classpaths** (#456 / #454) — after `jpackage`, multi-entry
+  `app.classpath` is collapsed into a pathing jar (JDK-8380085 workaround).
+- **FSEvents roots reached through a symlink** (#448 / #442) — macOS temp dirs under `/var` →
+  `/private/var` deliver events again. See [Filesystem watcher](/docs/lifecycle/fs-watcher).
+- **SLF4J no longer forced to build-time init** (#450 / #443) — avoids image-heap failures with
+  run-time SLF4J 2.x backends; opt in via `buildArgs` if you want build-time init. See
+  [Set build arguments](/docs/performance/graalvm/configuration#set-build-arguments).
+- **`runWithNativeAgent` toolchain mismatch** (#451 / #437) — forks through `JavaLauncher`
+  instead of a conflicting `executable` property.
+- **Linux popup / tray panel EGL neutrality** (TextureView series / #350) — popup layers and
+  tray panels no longer break the window EGL binding; Wayland popups offset by CSD content origin.
+
+### Samples
+
+- **mediafoundation-demo**, **avfoundation-demo**, **gstreamer-demo** — end-to-end video into
+  `TextureView` on Windows, macOS, and Linux (native-image builds for the GStreamer sample).
+
+---
+
 ## v2.2.0
 
 **Released: 2026-08-03**

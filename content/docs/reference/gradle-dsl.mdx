@@ -211,21 +211,24 @@ Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signi
 - `march: Property<NativeImageMarch>` — `NATIVE` / `COMPATIBILITY`; unset defaults per-platform (`COMPATIBILITY`, or `NATIVE` on Apple-Silicon macOS)
 - `optimization: Property<NativeImageOptimization>` — `QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE`; unset keeps `-O2`
 - `allCharsets: Property<Boolean>` (default `false`)
-- `mlProfileInference: Property<Boolean>` (default `true`)
+- `mlProfileInference: Property<Boolean>` (default `true`) — `false` only emits `-H:-MLProfileInference` on Oracle toolchains; Community skips with a warning
 - `advancedObfuscation: Property<Boolean>` (default `false`) — Oracle GraalVM only
 - `autoIncludeResources: Property<Boolean>` (default `true`) — include the project's own resources in the image
 - `maxHeapSizePercent: Property<Int>` (default `25`) — follows the selected collector (`MaximumHeapSizePercent` or `MaxRAMPercentage` under G1)
 - `maxHeapSize: Property<String>` — absolute max heap (e.g. `"2g"`); takes precedence over percent
 - `garbageCollector: Property<NativeImageGarbageCollector>` — `SERIAL` / `G1` / `EPSILON`; unset keeps Serial. `G1` is Oracle GraalVM + Linux only
-- `buildArgs: ListProperty<String>`
+- `exactReachabilityMetadata: Property<ExactReachabilityMetadata>` (default `APP_PACKAGES`) — `--exact-reachability-metadata` on `runGraalvmNative` only; `OFF` / `APP_PACKAGES` / `packages(...)`
+- `detectOrphanProjectClasses: Property<Boolean>` (default `true`) — register public no-arg `<init>` for naming-convention reflective types
+- `reflectionForProjectClasses: Property<Boolean>` (default `false`) — opt-in: every project class with a public no-arg constructor
+- `buildArgs: ListProperty<String>` — SLF4J is **not** forced to build-time init; add `--initialize-at-build-time=org.slf4j` yourself if needed
 - `javaLanguageVersion: Property<Int>` (default `25`) — only when `toolchain.autoDownload = false`
 - `jvmVendor: Property<JvmVendorSpec>` — only when `toolchain.autoDownload = false`
 - `nativeImageConfigBaseDir: DirectoryProperty`
 - `val toolchain: GraalvmToolchainSettings`:
   - `autoDownload: Property<Boolean> = true`
   - `distribution: Property<GraalvmDistribution> = COMMUNITY` — `COMMUNITY` / `ORACLE`; `ORACLE` logs a GFTC licensing warning
-  - `channel: Property<GraalvmChannel> = INNOVATION` — `INNOVATION` / `LTS`
-  - `version: Property<String>` — overrides `channel`
+  - `channel: Property<GraalvmChannel> = INNOVATION` — `INNOVATION` (defaults to `25i2` / GraalVM 25.2 from 2.3) / `LTS`
+  - `version: Property<String>` — overrides `channel` (`"25i2"`, `"25"`, `"25.0.1"`, …)
   - `macosIntelFallback: Property<Boolean> = true`
   - `installDir: DirectoryProperty` — default `<gradle-user-home>/nucleus/graalvm`
 - `val pgo: GraalvmPgoSettings` — Oracle GraalVM only; `runWithPgoInstrument` is not registered under `COMMUNITY`:
@@ -260,8 +263,9 @@ Currently macOS Kotlin/Native only.
 - `class JvmApplicationBuildTypes`
 - `class ProguardSettings`
 - `enum class CompressionLevel` — `Store`, `Normal`, `Maximum`, `Ultra`
-- `enum class GraalvmChannel` — `INNOVATION`, `LTS`
+- `enum class GraalvmChannel` — `INNOVATION` (`25i2`), `LTS`
 - `enum class GraalvmDistribution` — `COMMUNITY`, `ORACLE`
+- `class ExactReachabilityMetadata` — `OFF`, `APP_PACKAGES`, `packages(...)`
 - `enum class NativeImageMarch` — `NATIVE`, `COMPATIBILITY`
 - `enum class NativeImageOptimization` — `QUICK_BUILD`, `NONE`, `LEVEL_1`, `LEVEL_2`, `LEVEL_3`, `SIZE`
 - `enum class SigningAlgorithm`

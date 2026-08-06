@@ -7,6 +7,131 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.3.0
+
+**Sortie : 2026-08-06**
+
+### Faits marquants
+
+- **`TextureView` — textures GPU externes dans la scène Compose.** Composez des frames de
+  décodeur ou de moteur avec z-order, clipping et `graphicsLayer` réels, sans copie CPU.
+  Windows utilise des handles D3D11 partagés via ANGLE, macOS Metal/`IOSurface`, Linux
+  DMA-BUF/`EGLImage` (YUV planaire I420/YV12 inclus). Les mises à jour de frame passent par
+  `TextureViewController.markFrameAvailable` (invalidation draw uniquement). Voir
+  [TextureView](/docs/tao/texture-view),
+  [sources par plateforme](/docs/tao/texture-view#sources-par-plateforme) et
+  [fonctionnement](/docs/tao/texture-view#fonctionnement).
+- **Options de notification par plateforme sur le DSL commun.** `notification { }` accepte
+  les blocs `linux { }`, `macos { }` et `windows { }`, appliqués uniquement sur l'OS
+  correspondant (urgence, interruption level, scénario toast, …). Voir
+  [Options spécifiques à la plateforme](/docs/os/notifications#options-spécifiques-à-la-plateforme).
+- **Téléchargements différentiels pour l'auto-update.** `updater-runtime` réassemble les
+  installers à partir de l'artefact précédent plus des requêtes HTTP range pour les blocs
+  changés (block maps electron-builder). Activé par défaut via `differentialDownload`. Voir
+  [Téléchargements différentiels](/docs/packaging/auto-update#téléchargements-différentiels).
+- **`LocalNucleusApplicationScope` et fenêtres sans receiver.** Ouvrez un
+  `DecoratedWindow` / `DecoratedDialog` secondaire depuis le fond de la composition sans
+  propager le receiver d'application. Voir
+  [Ouvrir une fenêtre depuis la composition](/docs/tao/decorated-window#ouvrir-une-fenêtre-depuis-la-composition).
+- **`isSystemInDarkTheme()` live sous `nucleusApplication`.** Le `LocalSystemTheme` de
+  Compose est alimenté par `darkmode-detector`, donc les call sites officiels et bibliothèques
+  suivent le thème OS. Voir
+  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/dark-mode#pont-vers-compose-issystemindarktheme).
+
+### Nouvelles fonctionnalités
+
+- **`TextureView` + factories de sources** (#429 / #338) — `TextureView`,
+  `TextureViewController`, `rememberTextureViewController`,
+  `nucleusD3D11SharedTextureSource`, `nucleusIOSurfaceTextureSource` /
+  `nucleusMetalTextureSource`, `nucleusDmaBufTextureSource` /
+  `nucleusEglImageTextureSource` / `nucleusYuvDmaBufTextureSource`, plus signalement par
+  acquire fence sous Linux. Exemples : mediafoundation-demo, avfoundation-demo,
+  gstreamer-demo. Voir [TextureView](/docs/tao/texture-view#afficher-une-texture).
+- **Blocs plateforme sur `notification { }`** (#436 / #397) — `LinuxNotificationScope`
+  (`urgency`, `category`, `transient`, `resident`, `expireTimeout`),
+  `MacNotificationScope` (`interruptionLevel`, `relevanceScore`, `subtitle`),
+  `WindowsNotificationScope` (`scenario`, `duration`). Voir
+  [Options spécifiques à la plateforme](/docs/os/notifications#options-spécifiques-à-la-plateforme).
+- **Téléchargements différentiels dans `NucleusUpdater`** (#428) — block maps `.blockmap`
+  (NSIS, ZIP/DMG macOS) et maps embarquées AppImage ; `DownloadProgress.isDifferential` ;
+  `UpdaterConfig.differentialDownload` (défaut `true`) et `cacheDir`. Voir
+  [Téléchargements différentiels](/docs/packaging/auto-update#téléchargements-différentiels) et
+  [Champs du builder](/docs/packaging/auto-update#champs-du-builder).
+- **`LocalNucleusApplicationScope`** (#449 / #438) — CompositionLocal fourni par
+  `nucleusApplication` sur AWT et Tao ; surcharges `DecoratedWindow` / `DecoratedDialog` sans
+  receiver. Voir
+  [Ouvrir une fenêtre depuis la composition](/docs/tao/decorated-window#ouvrir-une-fenêtre-depuis-la-composition).
+- **Pont de thème système** (#463) — `ProvideNucleusSystemTheme` relie `isSystemInDarkMode()` à
+  `LocalSystemTheme` ; `darkmode-detector` est une dépendance `api` de `nucleus-application`.
+  Voir
+  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/dark-mode#pont-vers-compose-issystemindarktheme).
+- **Exact reachability metadata sur la boucle de dev GraalVM** (#453 / #440) —
+  `graalvm { exactReachabilityMetadata = ExactReachabilityMetadata.APP_PACKAGES }` (défaut)
+  sur `runGraalvmNative` uniquement ; `-Pnucleus.graalvm.missingRegistration=warn|exit|throw`.
+  Voir
+  [Exact reachability sur la boucle de dev](/docs/performance/graalvm/configuration#exact-reachability-sur-la-boucle-de-dev).
+- **Détection des classes projet orphelines** (#460 / #441) —
+  `detectOrphanProjectClasses` (défaut `true`) enregistre les constructeurs publics sans argument
+  des types purement réflexifs (Room `*_Impl`, …) ; `reflectionForProjectClasses` en opt-in.
+  Voir
+  [Détecter les classes projet orphelines](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-projet-orphelines).
+- **Le canal innovation GraalVM pointe sur 25.2** (#432) — `GraalvmChannel.INNOVATION`
+  résout `25i2`. Voir
+  [Provisionner le toolchain](/docs/performance/graalvm/configuration#provisionner-la-toolchain).
+
+### Améliorations
+
+- **Packaging silent-update DEB/RPM** (#457) — `nucleus-update-helper` est livré dans le payload
+  du paquet pour que `dpkg -S` / `rpm -qf` l'attribuent ; afterInstall n'installe que le polkit ;
+  `*.asc` détachés uploadés à côté des paquets. Voir
+  [Mises à jour sans mot de passe sous Linux](/docs/packaging/auto-update#mettre-en-place-les-mises-à-jour-sans-mot-de-passe-sur-linux).
+- **Relance AppImage après auto-update** (#465 / #178) — remplacement en place pendant que
+  l'ancien mount tient, environnement nettoyé au redémarrage (`APPDIR` / `LD_LIBRARY_PATH`
+  retirés). Voir [Formats pris en charge](/docs/packaging/auto-update#formats-pris-en-charge).
+- **Hotkeys portail Linux** (#455 / #264) — `shortcut_id` stable à partir de modifiers+keyCode,
+  `BindShortcuts` debouncé, `GlobalHotKeyManager.commitRegistrations()` et `portalShortcutId`.
+  Voir [Enregistrements portail Linux](/docs/os/global-hotkey#enregistrements-portail-linux).
+- **Rapport des entrées de metadata cleanup non résolvables** (#461 / #439) —
+  `cleanupGraalvmMetadata` signale les types introuvables ; option
+  `-Pnucleus.graalvm.cleanup.removeUnresolvable=true`. Voir
+  [Nettoyer les entrées manuelles](/docs/performance/graalvm/automatic-metadata#nettoyer-les-entrées-manuelles).
+- **Répertoires de metadata en inputs de `nativeImageCompile`** (#459 / #431) — éditer la
+  reachability metadata invalide la tâche d'image native au lieu de servir un binaire périmé.
+- **`mlProfileInference = false` réservé à Oracle** (#458 / #452) — les toolchains community
+  ignorent `-H:-MLProfileInference` (non reconnu) avec un avertissement. Voir
+  [Référence de graalvm { }](/docs/performance/graalvm/configuration#référence-de-graalvm--).
+
+### Corrections de bugs
+
+- **Drag OS sortant gèle l'hôte Tao** (#434) — Windows, macOS et Linux maintiennent la boucle
+  de rendu pendant `DoDragDrop` / AppKit / GTK via un `DragPump` partagé. Voir
+  [Glisser-déposer](/docs/tao/drag-and-drop).
+- **Flash / décalage au resize Wayland** (#462 / #444) — paint à la dernière taille drawable
+  jusqu'à ce que `wl_egl_window_resize` s'applique au present suivant. Voir
+  [Wayland](/docs/tao/wayland).
+- **Région opaque de la subsurface Compose sous Linux** (#447 / #446) —
+  `wl_surface.set_opaque_region` en préservant les coins transparents pour l'ombre CSD.
+- **SIGSEGV jpackage Linux sur longs classpaths** (#456 / #454) — après `jpackage`, le
+  `app.classpath` multi-entrées est réduit en pathing jar (contournement JDK-8380085).
+- **Racines FSEvents atteintes via un symlink** (#448 / #442) — les temp dirs macOS sous
+  `/var` → `/private/var` délivrent à nouveau les événements. Voir
+  [Observateur de fichiers](/docs/lifecycle/fs-watcher).
+- **SLF4J n'est plus forcé en init build-time** (#450 / #443) — évite les échecs d'image heap
+  avec les backends SLF4J 2.x run-time ; opt-in via `buildArgs` si besoin. Voir
+  [Définir des arguments de build](/docs/performance/graalvm/configuration#définir-les-arguments-de-build).
+- **Mismatch de toolchain `runWithNativeAgent`** (#451 / #437) — fork via `JavaLauncher` au
+  lieu d'une propriété `executable` en conflit.
+- **Neutralité EGL des popups / panneaux tray Linux** (série TextureView / #350) — les
+  couches popup et panneaux tray ne cassent plus la liaison EGL de la fenêtre ; popups
+  Wayland décalés par l'origine du contenu CSD.
+
+### Exemples
+
+- **mediafoundation-demo**, **avfoundation-demo**, **gstreamer-demo** — vidéo de bout en bout
+  dans `TextureView` sous Windows, macOS et Linux (builds native-image pour l'exemple GStreamer).
+
+---
+
 ## v2.2.0
 
 **Sortie : 2026-08-03**

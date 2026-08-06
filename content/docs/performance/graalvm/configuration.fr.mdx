@@ -69,7 +69,7 @@ graalvm {
 | `autoDownload` | `Property<Boolean>` | `true` | Mettez `false` pour résoudre via la machinerie de toolchain de Gradle (`javaLanguageVersion` / `jvmVendor`). |
 | `distribution` | `Property<GraalvmDistribution>` | `COMMUNITY` | `COMMUNITY` (GraalVM CE) ou `ORACLE` (Oracle GraalVM). Voir la note de licence ci-dessous. |
 | `channel` | `Property<GraalvmChannel>` | `INNOVATION` | `INNOVATION` (dernière release) ou `LTS`. Utilisé uniquement quand `version` n'est pas défini. S'applique aux deux distributions. |
-| `version` | `Property<String>` | non défini | Remplace `channel`. Accepte `"25i1"`, `"25"`, ou une version épinglée `"25.0.1"`. |
+| `version` | `Property<String>` | non défini | Remplace `channel`. Accepte `"25i2"`, `"25"`, ou une version épinglée `"25.0.1"`. Depuis 2.3, `INNOVATION` résout GraalVM **25.2** (`25i2`). |
 | `macosIntelFallback` | `Property<Boolean>` | `true` | Sur les Mac Intel (abandonnés par les deux distributions après 25.0.1), retombe sur BellSoft Liberica NIK. |
 | `installDir` | `DirectoryProperty` | `<gradle-user-home>/nucleus/graalvm` | Emplacement du cache de la toolchain téléchargée. |
 
@@ -119,12 +119,15 @@ Pour builder sur une autre toolchain communautaire (Liberica NIK, Mandrel), poin
 | `march` | `Property<NativeImageMarch>` | par plateforme | `NATIVE` cible le CPU de build ; `COMPATIBILITY` cible des CPU plus anciens. Non défini, retombe sur `COMPATIBILITY`, sauf macOS Apple Silicon qui retombe sur `NATIVE`. |
 | `optimization` | `Property<NativeImageOptimization>` | `-O2` de native-image | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` est réservé à Oracle GraalVM. |
 | `allCharsets` | `Property<Boolean>` | `false` | `true` émet `-H:+AddAllCharsets` (embarque tous les charsets du JDK ; uniquement pour les encodages hérités). |
-| `mlProfileInference` | `Property<Boolean>` | `true` | `false` émet `-H:-MLProfileInference`, désactivant la PGO inférée par ML d'Oracle. |
+| `mlProfileInference` | `Property<Boolean>` | `true` | `false` n'émet `-H:-MLProfileInference` que sur les toolchains **Oracle**. Sous Community, le flag n'est pas reconnu et est ignoré avec un warning (CE n'a déjà pas de passe ML). |
 | `advancedObfuscation` | `Property<Boolean>` | `false` | `true` émet `-H:AdvancedObfuscation=`, renommant les symboles dans le binaire. Oracle GraalVM uniquement ; ignoré avec un warning ailleurs. |
 | `autoIncludeResources` | `Property<Boolean>` | `true` | Embarque les ressources propres au projet (et celles des modules `project(...)`) dans l'image. |
 | `maxHeapSizePercent` | `Property<Int>` | `25` | Tas max par défaut en pourcentage de la RAM physique. Suit le collecteur choisi (`MaximumHeapSizePercent` pour Serial/Epsilon, `MaxRAMPercentage` pour G1). |
 | `maxHeapSize` | `Property<String>` | non défini | Tas max absolu (ex. `"2g"`, `"512m"`). Prioritaire sur `maxHeapSizePercent`. |
 | `garbageCollector` | `Property<NativeImageGarbageCollector>` | non défini | Inscrit `--gc=` (`SERIAL`, `G1`, `EPSILON`). Non défini : Serial de native-image. `G1` est Oracle GraalVM + Linux uniquement et se dégrade en warning ailleurs. |
+| `exactReachabilityMetadata` | `Property<ExactReachabilityMetadata>` | `APP_PACKAGES` | Boucle de dev uniquement (`runGraalvmNative`). Voir [Exact reachability](#exact-reachability-sur-la-boucle-de-dev). |
+| `detectOrphanProjectClasses` | `Property<Boolean>` | `true` | Enregistre un `<init>` public sans argument pour les classes projet chargées par convention de nom. Voir [Metadata automatique](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-projet-orphelines). |
+| `reflectionForProjectClasses` | `Property<Boolean>` | `false` | Opt-in massif : toute classe projet avec un constructeur public sans argument. |
 | `buildArgs` | `ListProperty<String>` | vide | Arguments supplémentaires passés à `native-image` (l'emportent sur les propriétés ci-dessus). |
 | `javaLanguageVersion` | `Property<Int>` | `25` | Version de langage de la toolchain — utilisée uniquement quand `toolchain { autoDownload = false }`. |
 | `jvmVendor` | `Property<JvmVendorSpec>` | non défini | Vendor de la toolchain — utilisé uniquement quand `toolchain { autoDownload = false }`. |
@@ -134,6 +137,36 @@ Pour builder sur une autre toolchain communautaire (Liberica NIK, Mandrel), poin
 | `macOS` | `GraalvmMacOSSettings` | — | Sous-bloc macOS (voir plus bas). |
 | `windows` | `GraalvmWindowsSettings` | — | Sous-bloc Windows (voir plus bas). |
 | `metadataRepository` | `MetadataRepositorySettings` | activé | Oracle Reachability Metadata Repository (voir plus bas). |
+
+## Exact reachability sur la boucle de dev
+
+`exactReachabilityMetadata` active le `--exact-reachability-metadata` de GraalVM sur
+**`runGraalvmNative` uniquement** (boucle quick-build). Les lookups réflexifs non enregistrés
+lèvent alors `MissingReflectionRegistrationError` en nommant l'élément manquant, au lieu d'une
+chaîne de `ClassNotFoundException` imbriqués. Les tâches distributable
+(`createGraalvmNativeDistributable`, `packageGraalvmNativeDistributionForCurrentOS`,
+`runGraalvmNativeDistributable`) n'ont jamais le flag — les sondes de dépendances optionnelles
+du code tiers cesseraient de prendre leur chemin de repli en mode exact.
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    // Défaut : scope sur le package de mainClass (et sous-packages)
+    exactReachabilityMetadata = ExactReachabilityMetadata.APP_PACKAGES
+
+    // App multi-racines :
+    // exactReachabilityMetadata = ExactReachabilityMetadata.packages(
+    //     "io.github.acme",
+    //     "com.acme.shared",
+    // )
+
+    // Opt-out :
+    // exactReachabilityMetadata = ExactReachabilityMetadata.OFF
+}
+```
+
+Au runtime, passez `-Pnucleus.graalvm.missingRegistration=warn|exit|throw` (défaut `warn`) pour
+qu'un run de dev remonte chaque enregistrement manquant. Les toolchains antérieures à JDK 23
+dégradent vers `-H:ThrowMissingRegistrationErrors=` ou sautent avec un warning.
 
 ## Choisir un garbage collector
 
@@ -173,6 +206,19 @@ type-safe. Préférez `optimization` à un `-Os`/`-O*` brut et `allCharsets` à
 |----------|------|
 | `-Djava.awt.headless=false` | Active le support GUI, requis pour les apps desktop. |
 | `-H:-IncludeMethodData` | Retire les métadonnées de méthodes, réduisant le binaire de plusieurs Mo. |
+
+Nucleus ne force **pas** SLF4J à s'initialiser au build time. L'API et le backend choisi par
+l'app s'initialisent tous deux au run time, pour que la découverte de provider, les niveaux de
+log et la config dépendante de l'environnement restent sous contrôle applicatif. Forcer
+`--initialize-at-build-time=org.slf4j` depuis un module runtime partagé place des objets de
+backend SLF4J 2.x dans le heap d'image alors que leurs classes restent initialisées au run time.
+Si vous avez un backend fixe et testé et voulez l'init au build time, optez-in explicitement :
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    buildArgs.add("--initialize-at-build-time=org.slf4j")
+}
+```
 
 <Callout type="info" title="Stripping automatique de l'exécutable">
 Sous Linux et macOS, l'exécutable natif principal est désormais strippé automatiquement,

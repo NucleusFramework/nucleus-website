@@ -66,6 +66,25 @@ Each `register(...)` call maps the portable `modifiers` bitmask to the native mo
 
 Listeners are invoked from the native message loop, not the UI thread. Marshal back to your UI or audio thread yourself before touching shared state.
 
+### Linux portal registrations
+
+On Wayland, the portal persists grants by `(app_id, shortcut_id)`. From 2.3 the Linux path
+derives a **stable** `shortcut_id` from modifiers + keyCode (`nucleus_m{mods}_k{keyCode}`) so
+the same chord keeps the same id across launches and registration order — without that, each
+start re-prompted the user.
+
+`register(...)` calls are also **debounced** into a single `BindShortcuts` dialog. After a
+loop of registrations, either wait for the flush or call `commitRegistrations()` to force it:
+
+```kotlin
+val a = GlobalHotKeyManager.register(KeyEvent.VK_K, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+val b = GlobalHotKeyManager.register(KeyEvent.VK_L, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+GlobalHotKeyManager.commitRegistrations() // one portal dialog for both
+
+// Debug: portal id for a handle (Linux only; null elsewhere)
+val id: String? = GlobalHotKeyManager.portalShortcutId(a)
+```
+
 ## API reference
 
 ### Register a key combination

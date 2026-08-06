@@ -40,7 +40,59 @@ val n = notification(
 n.send()
 ```
 
-`title` and `message`, along with the callbacks, are parameters of the `notification(...)` function. The trailing lambda block is only for declaring action buttons with `button(title, onClick)`.
+`title` and `message`, along with the callbacks, are parameters of the `notification(...)` function. The trailing lambda block declares action buttons with `button(title, onClick)` and, from 2.3, optional per-platform option blocks.
+
+## Platform-specific options
+
+Semantics that differ across OS stay in `linux { }`, `macos { }`, and `windows { }` blocks
+inside the builder. Each block is applied only when the notification is delivered on that OS;
+on every other platform it is a no-op. Shared fields (title, message, image, buttons, callbacks)
+remain the base.
+
+```kotlin
+import dev.nucleusframework.notification.InterruptionLevel
+import dev.nucleusframework.notification.common.notification
+import dev.nucleusframework.notification.linux.Urgency
+import dev.nucleusframework.notification.windows.ToastDuration
+import dev.nucleusframework.notification.windows.ToastScenario
+
+val n = notification(
+    title = "Build failed",
+    message = "see logs",
+    onActivated = { openLogs() },
+) {
+    button("Open") { openLogs() }
+
+    linux {
+        urgency = Urgency.CRITICAL
+        transient = true
+        category = "device.error"
+    }
+    macos {
+        interruptionLevel = InterruptionLevel.TIME_SENSITIVE
+        relevanceScore = 0.9
+        subtitle = "CI"
+    }
+    windows {
+        scenario = ToastScenario.URGENT
+        duration = ToastDuration.LONG
+    }
+}
+
+n.send()
+```
+
+| Block | Scope type | Properties |
+|-------|------------|------------|
+| `linux { }` | `LinuxNotificationScope` | `urgency` (`Urgency`), `category`, `transient`, `resident`, `expireTimeout` (ms; `0` = never, unset/`-1` = server default) |
+| `macos { }` | `MacNotificationScope` | `interruptionLevel` (`InterruptionLevel`), `relevanceScore` (`0.0..1.0`), `subtitle` |
+| `windows { }` | `WindowsNotificationScope` | `scenario` (`ToastScenario`), `duration` (`ToastDuration`) |
+
+`TIME_SENSITIVE` and `CRITICAL` on macOS require the matching Apple entitlement; without it the
+system falls back to `ACTIVE`. `ToastScenario.URGENT` needs Windows 11+ to break through Focus
+Assist. For deeper platform APIs (scheduling, progress bars, categories), use the
+[macOS](/docs/os/notification-macos), [Windows](/docs/os/notification-windows), or
+[Linux](/docs/os/notification-linux) modules directly.
 
 ## How it works
 
@@ -91,7 +143,8 @@ val n = notification(
 - `onDismissed: ((DismissReason) -> Unit)?` — the notification was dismissed. `DismissReason` is one of `USER_DISMISSED`, `TIMED_OUT`, `APPLICATION`, `UNKNOWN`.
 - `onFailed: (() -> Unit)?` — the notification failed to display.
 
-You can add up to five buttons; adding more throws.
+You can add up to five buttons; adding more throws. Platform blocks may be called more than
+once; later calls merge into the same scope instance for that platform.
 
 ### Send
 

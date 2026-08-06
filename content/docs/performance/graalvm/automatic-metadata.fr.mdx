@@ -57,6 +57,28 @@ compris les classes de votre propre module, et détecte :
   depuis le code natif.
 - Les classes `@Serializable` — émet l'entrée de réflexion `Companion.serializer()`.
 
+### Détecter les classes projet orphelines
+
+Les processeurs d'annotations et les loaders par convention de nom (Room `*_Impl`, Dagger/Hilt
+`*_Factory`, adaptateurs Moshi, …) produisent des classes qu'**aucun bytecode du classpath ne
+référence**. L'analyse littérale `Class.forName` et la metadata L1–L3 ne les voient jamais.
+Depuis 2.3, une seule passe dans l'analyseur de bytecode enregistre un `<init>` public sans
+argument pour ces orphelins quand :
+
+- la classe est concrète et publique avec un constructeur public sans argument, et
+- un supertype autre que `Object` (ou une interface) est référencé par le code applicatif.
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    detectOrphanProjectClasses = true    // défaut
+    // reflectionForProjectClasses = true  // opt-in : toute classe projet avec un ctor public sans arg
+}
+```
+
+Les logs de build émettent `[orphan] fqcn` pour chaque enregistrement. Préférez le détecteur par
+défaut ; n'activez `reflectionForProjectClasses` que comme massue temporaire (croissance d'image
+mesurable).
+
 ## Niveau 5 — metadata embarquée par le runtime
 
 Le module `nucleus.graalvm-runtime` embarque de la metadata GraalVM dans son JAR :
@@ -105,6 +127,20 @@ celles qui sont redondantes :
 La tâche compare votre `reachability-metadata.json` manuel à la baseline combinée des niveaux 1 à
 4 et retire tout ce qui est déjà géré, en indiquant quelles entrées ont été retirées et
 lesquelles restent.
+
+Depuis 2.3 elle **signale** aussi les entrées dont les types ne se résolvent nulle part sur le
+classpath runtime (bruit typique d'agent : `kotlin.Any`, `kotlin.Int`, …). Le défaut est
+report-only. Pour les purger :
+
+```shell
+./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.removeUnresolvable=true
+# Analyser sans réécrire :
+./gradlew cleanupGraalvmMetadata -Pnucleus.graalvm.cleanup.dryRun=true
+```
+
+Les types sous les packages configurés dans `exactReachabilityMetadata` ne sont jamais retirés —
+un enregistrement manquant en mode exact est ce qui restaure une erreur claire. Les entrées
+manuelles restantes sont listées comme `kept — not covered by any managed source`.
 
 ## Et ensuite
 

@@ -77,6 +77,11 @@ inside it, both share one native watch; events are still routed to each logical 
 reported against its `FsWatchSource`. Paths are reported relative to the root you registered, so
 a symlinked or resolved root still surfaces the path you asked for.
 
+On macOS, FSEvents always reports **canonical** paths. From 2.3, a root reached *through* a
+symlink (for example `Files.createTempDirectory()` under `/var` → `/private/var`) is treated as
+the same directory for event routing — matching no longer depends on `followSymlinks`. Without
+that, watches on temp dirs silently never fired.
+
 Events flow through a bounded buffer (`eventBufferCapacity`, default 64) and errors through a
 separate one (`errorBufferCapacity`, default 32). When a buffer fills — or the native backend
 reports it dropped notifications — the watcher emits `FsWatchEvent.Overflow` with

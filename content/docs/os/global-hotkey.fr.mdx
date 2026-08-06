@@ -66,6 +66,25 @@ Chaque appel à `register(...)` convertit le bitmask `modifiers` portable en dra
 
 Les listeners sont invoqués depuis la boucle de messages native, pas depuis le thread UI. Revenez vous-même sur votre thread UI ou audio avant de toucher à un état partagé.
 
+### Enregistrements portail Linux
+
+Sous Wayland, le portail persiste les grants par `(app_id, shortcut_id)`. Depuis 2.3 le chemin
+Linux dérive un `shortcut_id` **stable** à partir de modifiers + keyCode
+(`nucleus_m{mods}_k{keyCode}`) pour que le même accord conserve le même id entre lancements et
+ordres d'enregistrement — sans cela, chaque démarrage re-promptait l'utilisateur.
+
+Les appels `register(...)` sont aussi **debouncés** en un seul dialogue `BindShortcuts`. Après
+une boucle d'enregistrements, attendez le flush ou appelez `commitRegistrations()` pour le forcer :
+
+```kotlin
+val a = GlobalHotKeyManager.register(KeyEvent.VK_K, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+val b = GlobalHotKeyManager.register(KeyEvent.VK_L, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+GlobalHotKeyManager.commitRegistrations() // un dialogue portail pour les deux
+
+// Debug : id portail pour un handle (Linux uniquement ; null ailleurs)
+val id: String? = GlobalHotKeyManager.portalShortcutId(a)
+```
+
 ## Référence de l'API
 
 ### Enregistrer une combinaison de touches

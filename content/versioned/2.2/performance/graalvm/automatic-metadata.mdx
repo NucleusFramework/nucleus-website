@@ -1,0 +1,106 @@
+---
+title: Automatic metadata resolution
+description: How Nucleus resolves and merges GraalVM reachability metadata at build time so native images compile without hand-written configuration.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus resolves and merges GraalVM reachability metadata at build time, so
+`packageGraalvmNative` produces a working native binary without you writing reflection,
+resource, or JNI configuration by hand. The metadata comes from five sources. Each is
+generated into its own directory and passed to `native-image`, and the module's own metadata
+is discovered from the classpath.
+
+## Level 1 — per-library metadata
+
+The plugin ships 28 metadata files curated for the Kotlin desktop ecosystem, covering Compose,
+Skiko, ktor, kotlinx.serialization, SQLite JDBC, Coil, JNA, FileKit, SLF4J, Sentry, and others.
+Each file may declare a `matchPackages` condition. The `filterGraalvmLibraryMetadata` task reads
+these files from the plugin JAR and includes a file only when the corresponding packages are on
+the runtime classpath; files without a condition are always included. Libraries in the curated
+set are covered without extra configuration.
+
+## Level 2 — GraalVM Reachability Metadata Repository
+
+The `resolveGraalvmReachabilityMetadata` task resolves entries from the
+[Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
+for each dependency on your runtime classpath. Resolution is enabled by default and uses
+repository version `0.10.6`.
+
+<Callout type="info">
+Configure this source with the `metadataRepository { }` block: `enabled`, `version`,
+`excludedModules`, and `moduleToConfigVersion`. See
+[Configuration](/docs/performance/graalvm/configuration).
+</Callout>
+
+## Level 3 — platform-specific metadata
+
+The `generateGraalvmPlatformMetadata` task writes reflection metadata for the current operating
+system: `sun.awt.windows.*` on Windows, `sun.lwawt.macosx.*` on macOS, and `sun.awt.X11.*` on
+Linux, along with Java2D pipelines, font managers, and security providers. It also injects a
+reflection entry for your `main` class. No per-platform configuration is required in your build
+script.
+
+## Level 4 — static bytecode analysis
+
+The `analyzeGraalvmStaticMetadata` task scans every compiled class on the runtime classpath,
+including your own module's classes, and detects:
+
+- Native methods and their parameter and return types (JNI metadata).
+- `Class.forName()` and `MethodHandles.Lookup.findClass()` calls with literal class names
+  (reflection metadata).
+- `getResource()` and `getResourceAsStream()` calls with literal paths (resource metadata).
+- JNI callback parameters — classes passed to native code that call back into Java.
+- JNI superclass chains — parent classes needed for field access from native code.
+- `@Serializable` classes — emits the `Companion.serializer()` reflection entry.
+
+## Level 5 — bundled runtime metadata
+
+The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
+
+- A `reachability-metadata.json` with serialization entries.
+- A `native-image.properties` that registers resource patterns (`.svg`, `.ttf`, `.otf`,
+  `nucleus/.*`, `META-INF/services/.*`, and `composeResources/.*`).
+- SVM substitutions for the AWT font managers, the splash screen, and the X11 window class.
+
+`native-image` discovers all of it from the classpath, so no configuration is needed.
+
+## How the sources merge
+
+`packageGraalvmNative` runs the generation tasks and then passes each resulting directory to
+`native-image` through repeated `-H:ConfigurationFileDirectories=` arguments — the per-library
+output (Level 1), the resolved repository directories (Level 2), the platform metadata
+(Level 3), and the static-analysis output (Level 4). Any manual entries in your project's own
+config directory are included as well. Level 5 is read from the classpath by `native-image`
+itself. Most apps compile to a native binary without any hand-written metadata.
+
+## Fill gaps with the tracing agent
+
+The static sources can miss reflection driven by runtime values, dynamically loaded classes, or
+unusual library patterns. Run the agent once before a release to catch them:
+
+```shell
+./gradlew runWithNativeAgent
+```
+
+Exercise every screen and feature. The agent records reflection, JNI, resource, and proxy
+accesses into a temporary directory and merges them into your config without overwriting
+existing entries. In many cases it finds nothing new.
+
+## Clean up manual entries
+
+If you accumulated manual entries that the automatic sources now cover, remove the redundant
+ones:
+
+```shell
+./gradlew cleanupGraalvmMetadata
+```
+
+The task compares your manual `reachability-metadata.json` against the combined baseline of
+Levels 1–4 and removes anything already managed, reporting which entries were removed and which
+remain.
+
+## What's next
+
+- [Native access](/docs/performance/native-access) — resource patterns and font substitutions on top of this metadata system.
+- [Tasks & CI](/docs/performance/graalvm/tasks-ci) — the full GraalVM task graph.

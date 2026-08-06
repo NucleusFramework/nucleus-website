@@ -1,0 +1,116 @@
+---
+title: Runtimes
+description: Nucleus peut exécuter votre app empaquetée comme image native GraalVM ou sur la JVM avec un cache AOT, au choix depuis le build Gradle.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Une app Nucleus tourne sur l'un de deux runtimes : une image native GraalVM, ou la JVM avec un
+cache ahead-of-time (AOT). Les deux se construisent à partir du même code — vous choisissez le runtime
+dans votre build Gradle. Cette page décrit chaque runtime, leurs compromis, et comment détecter
+celui sous lequel votre app s'exécute.
+
+## Image native GraalVM
+
+Une image native compile votre app en amont dans un binaire unique et autonome. Elle n'embarque
+aucune JRE, donc l'installateur ne livre qu'un seul exécutable par système d'exploitation.
+
+Activez-la dans le DSL du plugin :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    graalvm {
+        isEnabled.set(true)
+        javaLanguageVersion.set(25)
+    }
+}
+```
+
+<Callout type="info">
+Une image native fonctionne en monde fermé : la reflection, le chargement dynamique de classes
+et JNI doivent être connus à la compilation. Nucleus résout les métadonnées de reachability
+automatiquement — pour vos bibliothèques tierces aussi, pas seulement ses propres modules —
+depuis un jeu curé, le repository Oracle et l'analyse statique du bytecode, si bien que la plupart
+des apps compilent sans configuration écrite à la main. Voir
+[la résolution automatique des métadonnées](/docs/performance/graalvm/automatic-metadata).
+</Callout>
+
+Comme il n'y a pas de préchauffage de la JVM, une image native atteint rapidement sa première
+frame. Le compromis, c'est la contrainte du monde fermé : pas de chargement de classes à
+l'exécution, pas d'agents Java, pas de JFR, pas de `ScriptEngine` dynamique. Si votre app charge des
+plugins ou génère des classes à l'exécution, utilisez plutôt le runtime JVM.
+
+## JVM avec cache AOT
+
+Le runtime JVM embarque le HotSpot complet et conserve toutes les fonctionnalités dynamiques :
+reflection, chargement dynamique de classes, agents, JFR et `ScriptEngine`. Le cache AOT
+pré-chauffe classes et profils pour que l'app démarre plus vite qu'une JVM à froid, pendant que
+le JIT HotSpot compile encore les hot paths.
+
+Activez le cache sous `nativeDistributions` :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        enableAotCache = true
+    }
+}
+```
+
+Le cache ajoute quelques mégaoctets à la distribution. Voir [AOT cache](/docs/performance/aot-cache)
+pour la façon dont les passes d'entraînement produisent le cache et ce qu'il contient.
+
+## Choisir un runtime
+
+Les deux runtimes arbitrent entre démarrage et taille du binaire d'un côté, capacités dynamiques
+de l'autre :
+
+| | Image native GraalVM | JVM + cache AOT |
+|---|---|---|
+| Compilation | Ahead-of-time, monde fermé | JIT HotSpot, cache AOT au démarrage |
+| Runtime embarqué | Aucun (binaire autonome) | JRE HotSpot complète |
+| Fonctionnalités dynamiques | Restreintes ; à déclarer en métadonnées de reachability | Disponibles |
+| Démarrage | Pas de préchauffage JVM | Plus lent à froid, amélioré par le cache AOT |
+| Débit | Compilé en AOT | Le JIT atteint un débit plus élevé sur les hot paths |
+
+Choisissez une image native pour une surface d'app figée où le démarrage et la taille de
+l'installateur priment. Choisissez le runtime JVM pour les hosts de plugins, l'outillage de
+développement, ou tout ce qui repose sur le dynamisme à l'exécution.
+
+## Détecter le runtime à l'exécution
+
+Le module [`aot-runtime`](/docs/performance/aot-cache) expose le mode AOT courant, et
+[`core-runtime`](/docs/lifecycle/executable-type) indique le format de paquet depuis lequel le
+processus a été lancé.
+
+```kotlin
+import dev.nucleusframework.aot.runtime.AotRuntime
+import dev.nucleusframework.aot.runtime.AotRuntimeMode
+import dev.nucleusframework.core.runtime.ExecutableRuntime
+import dev.nucleusframework.core.runtime.ExecutableType
+
+when (AotRuntime.mode()) {
+    AotRuntimeMode.TRAINING -> { /* passe d'entraînement AOT — ignorer le travail visible */ }
+    AotRuntimeMode.RUNTIME  -> { /* lancé avec un cache AOT déjà chauffé */ }
+    AotRuntimeMode.OFF      -> { /* JVM standard, ou image native GraalVM */ }
+}
+
+// Depuis quel format de paquet ce processus tourne-t-il ?
+val type: ExecutableType = ExecutableRuntime.type()
+// EXE, MSI, NSIS, NSIS_WEB, PORTABLE, APPX, DMG, PKG, DEB, RPM,
+// SNAP, FLATPAK, APPIMAGE, PACMAN, ZIP, TAR, SEVEN_Z, DEV
+
+// En cours d'exécution dans une image native GraalVM ?
+val isNative: Boolean = ExecutableRuntime.isGraalVmNativeImage
+```
+
+`AotRuntime.mode()` renvoie `OFF` sur une JVM standard comme dans une image native, car le cache
+AOT est un mécanisme propre à la JVM. `AotRuntime.isRuntime()` et `AotRuntime.isTraining()` sont
+des raccourcis pour les modes `RUNTIME` et `TRAINING`.
+
+## Et ensuite
+
+- [GraalVM](/docs/performance/graalvm) — métadonnées de reachability, arguments de build et intégration CI.
+- [AOT cache](/docs/performance/aot-cache) — passes d'entraînement, cycle de vie et contenu du cache.
+- [Executable type](/docs/lifecycle/executable-type) — l'API complète `ExecutableType` et `ExecutableRuntime`.
+- [Configuration](/docs/start/configuration) — le DSL Gradle complet.
