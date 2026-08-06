@@ -7,10 +7,11 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 The Tao backend exposes your UI to assistive technology by walking Compose's semantics tree
 and projecting it onto the native accessibility API of each operating system: NSAccessibility
-on macOS, UI Automation on Windows, and AT-SPI (through AccessKit) on Linux. You author
-accessibility with standard Compose semantics; the bridge does the projection. The
-`TaoA11yNode`, `TaoA11yRole`, `TaoA11yFlag`, and `TaoA11yAction` types in this module describe
-what the bridge emits, so you can inspect or assert on the projected tree.
+on macOS, and AccessKit on both Windows (UI Automation provider) and Linux (AT-SPI). From
+2.2, Windows and Linux share the same AccessKit wire and decode path. You author accessibility
+with standard Compose semantics; the bridge does the projection. The `TaoA11yNode`,
+`TaoA11yRole`, `TaoA11yFlag`, and `TaoA11yAction` types in this module describe what the bridge
+emits, so you can inspect or assert on the projected tree.
 
 ## Add the dependency
 
@@ -74,8 +75,9 @@ matching Compose; the native side converts to each platform's coordinate space o
 The walk is debounced and gated. When no assistive technology is attached, the backend skips
 the walk entirely so scrolling and animation stay smooth; the first query from a screen reader
 activates the projection and seeds the tree. On Linux, subsequent updates are sent as partial
-snapshots that carry only the changed nodes. On macOS and Windows every update is a full
-snapshot.
+snapshots that carry only the changed nodes. On macOS every update is a full snapshot. Windows
+uses the AccessKit UIA provider (with live PropertyChanged for out-of-process .NET clients);
+updates follow the same AccessKit tree path as Linux.
 
 Actions travel back the other way. When VoiceOver, Narrator, or Orca invokes an action such as
 a click, an increment, or a text edit, the native side calls back into the JVM, which resolves

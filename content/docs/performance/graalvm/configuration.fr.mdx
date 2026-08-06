@@ -121,6 +121,10 @@ Pour builder sur une autre toolchain communautaire (Liberica NIK, Mandrel), poin
 | `allCharsets` | `Property<Boolean>` | `false` | `true` émet `-H:+AddAllCharsets` (embarque tous les charsets du JDK ; uniquement pour les encodages hérités). |
 | `mlProfileInference` | `Property<Boolean>` | `true` | `false` émet `-H:-MLProfileInference`, désactivant la PGO inférée par ML d'Oracle. |
 | `advancedObfuscation` | `Property<Boolean>` | `false` | `true` émet `-H:AdvancedObfuscation=`, renommant les symboles dans le binaire. Oracle GraalVM uniquement ; ignoré avec un warning ailleurs. |
+| `autoIncludeResources` | `Property<Boolean>` | `true` | Embarque les ressources propres au projet (et celles des modules `project(...)`) dans l'image. |
+| `maxHeapSizePercent` | `Property<Int>` | `25` | Tas max par défaut en pourcentage de la RAM physique. Suit le collecteur choisi (`MaximumHeapSizePercent` pour Serial/Epsilon, `MaxRAMPercentage` pour G1). |
+| `maxHeapSize` | `Property<String>` | non défini | Tas max absolu (ex. `"2g"`, `"512m"`). Prioritaire sur `maxHeapSizePercent`. |
+| `garbageCollector` | `Property<NativeImageGarbageCollector>` | non défini | Inscrit `--gc=` (`SERIAL`, `G1`, `EPSILON`). Non défini : Serial de native-image. `G1` est Oracle GraalVM + Linux uniquement et se dégrade en warning ailleurs. |
 | `buildArgs` | `ListProperty<String>` | vide | Arguments supplémentaires passés à `native-image` (l'emportent sur les propriétés ci-dessus). |
 | `javaLanguageVersion` | `Property<Int>` | `25` | Version de langage de la toolchain — utilisée uniquement quand `toolchain { autoDownload = false }`. |
 | `jvmVendor` | `Property<JvmVendorSpec>` | non défini | Vendor de la toolchain — utilisé uniquement quand `toolchain { autoDownload = false }`. |
@@ -130,6 +134,34 @@ Pour builder sur une autre toolchain communautaire (Liberica NIK, Mandrel), poin
 | `macOS` | `GraalvmMacOSSettings` | — | Sous-bloc macOS (voir plus bas). |
 | `windows` | `GraalvmWindowsSettings` | — | Sous-bloc Windows (voir plus bas). |
 | `metadataRepository` | `MetadataRepositorySettings` | activé | Oracle Reachability Metadata Repository (voir plus bas). |
+
+## Choisir un garbage collector
+
+Le collecteur est fixé au build pour les images natives. Laissez-le non défini pour Serial (le
+bon défaut pour un tas de taille desktop). Ne choisissez G1 que lorsque le tas dépasse ce que
+Serial peut collecter sans pauses visibles, et uniquement sous Oracle GraalVM Linux :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    // Distribution JVM HotSpot (launcher + tâche run)
+    garbageCollector = GarbageCollector.Z
+
+    graalvm {
+        // Inscrit dans l'image native (--gc=)
+        garbageCollector = NativeImageGarbageCollector.G1
+    }
+}
+```
+
+| `NativeImageGarbageCollector` | Flag | Notes |
+|-------------------------------|------|-------|
+| `SERIAL` | `--gc=serial` | Défaut. Petits tas, pauses qui croissent avec la taille du tas. |
+| `G1` | `--gc=G1` | Oracle GraalVM + Linux uniquement. Ailleurs : warning + Serial. |
+| `EPSILON` | `--gc=epsilon` | Aucune récupération — benchmarks / processus courts uniquement. |
+
+Valeurs JVM de `GarbageCollector` : `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`.
+Les flags sont préfixés pour qu'un `-XX:+Use…GC` explicite dans `jvmArgs` l'emporte encore.
+Non défini : ergonomie du JDK.
 
 ## Définir les arguments de build
 
@@ -167,8 +199,10 @@ graalvm {
 
 1. Enregistrer : `./gradlew runWithPgoInstrument` construit une image instrumentée, l'exécute
    et écrit le profil dans `profile` à la sortie. Exercez les chemins chauds avant de quitter.
-2. Committez le fichier `.iprof`. Les builds `packageGraalvmNative` / `runGraalvmNative`
-   suivants l'appliquent automatiquement en `--pgo=<profile>`.
+2. Committez le fichier `.iprof`. Les builds complets (`createGraalvmNativeDistributable`,
+   `runGraalvmNativeDistributable`, tâches de packaging) l'appliquent automatiquement en
+   `--pgo=<profile>`. Le chemin quick-build `runGraalvmNative` saute la PGO et l'obfuscation
+   avancée.
 
 Désactivez un profil enregistré pour un seul build avec `-Pnucleus.graalvm.pgo=off`. Sur les
 toolchains communautaires (GraalVM CE, Liberica NIK, Mandrel), `--pgo` n'est pas disponible :
@@ -240,8 +274,9 @@ graalvm {
 ## Pas de variant release
 
 Contrairement aux build types JVM, GraalVM n'a pas de variant release : il n'existe ni
-`packageReleaseGraalvmNative` ni `runReleaseGraalvmNative`. Les tâches natives sont
-`packageGraalvmNative` et `runGraalvmNative`. C'est volontaire :
+`packageReleaseGraalvmNative` ni `runReleaseGraalvmNative`. Les tâches natives publiques
+suivent le pipeline JVM (`runGraalvmNative`, `createGraalvmNativeDistributable`, …). C'est
+volontaire :
 
 - L'élimination de code mort de ProGuard est redondante. `native-image` fait déjà une
   élimination de code mort en monde fermé au moment de la compilation.

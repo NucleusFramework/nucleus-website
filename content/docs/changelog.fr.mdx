@@ -7,6 +7,52 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.2.0
+
+**Sortie : 2026-08-03**
+
+### Faits marquants
+
+- **Scaffold de fenêtre et primitives de chrome.** Mises en page plein fenêtre sans abandonner le drag natif, les zones de caption ni les insets des feux de circulation. Composez le contenu via `WindowScaffold` avec `TitleBarPlacement.Docked` ou `Overlay`, et reconstruisez le chrome à partir d'API publiques : `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls`, `windowGlassRegion` (macOS), `WindowsBackdrop` Windows 11 (Mica / Acrylic / MicaAlt), `WindowBackground` et `WindowAppearance`. Voir [Scaffold de fenêtre](/docs/tao/window-scaffold).
+- **Les tâches GraalVM reflètent le pipeline JVM.** `runGraalvmNative` est la boucle de dev rapide (`-Ob` quick-build) ; l'optimisation configurée vit sur `runGraalvmNativeDistributable`. Les nouvelles tâches `createGraalvmNativeDistributable` et `packageGraalvmNativeDistributionForCurrentOS` correspondent à `createDistributable` / `packageDistributionForCurrentOS`. Le dossier d'app native atterrit sous `compose/binaries/<app>/graalvm-app`.
+- **Sélection typée du garbage collector.** `garbageCollector = GarbageCollector.Z` sur le chemin JVM et `graalvm { garbageCollector = NativeImageGarbageCollector.G1 }` pour les images natives. G1 est Oracle GraalVM + Linux uniquement et se dégrade avec un avertissement ailleurs. Les flags de pourcentage de tas suivent le collecteur choisi.
+
+### Nouvelles fonctionnalités
+
+- **`WindowScaffold` + `TitleBarPlacement`** (#412, #129) — hôte de chrome indépendant du design system. `Docked` conserve la barre au-dessus du contenu ; `Overlay` remplit le contenu sur toute la hauteur et renvoie la hauteur mesurée de la barre en `PaddingValues` supérieur. Options `autoHideInFullscreen` et `passThroughToContent` sur `Overlay` pour les barres immersives et le hit-test traversant (#423).
+- **Primitives de chrome pour barres de titre personnalisées** (#412) — `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls` + `WindowControlsRenderer`, `WindowDoubleClickAction`, et `LocalWindowChromeInsets` pour placer le contenu autour des feux de circulation et du padding de bord KDE.
+- **Matériaux de plateforme** (#412) — `Modifier.windowGlassRegion` (panneaux sidebar/content/inspector à la System Settings sous macOS), `WindowsBackdrop` (Mica / Acrylic / MicaAlt DWM avec pin de tier), `WindowBackground` (couleur de clear depuis l'arbre de contenu), `WindowAppearance` (force clair/sombre sur les surfaces natives).
+- **`DecoratedWindow(transparent = true)` sur Tao** (#419) — transparence plein fenêtre pour les overlays « ghost ». À combiner avec `undecorated = true` pour des fenêtres sans cadre. AWT hors périmètre ; appeler le `DecoratedWindow` Tao (par ex. via `taoApplication`).
+- **Ombre portée CSD GTK native** (#422) — les décorations côté client Linux suivent le motif hidden-titlebar pour que l'ombre suive correctement la fenêtre, y compris pendant un déplacement interactif.
+- **AccessKit sous Windows** (#420) — l'accessibilité Windows partage désormais le chemin filaire AccessKit avec Linux (provider UIA). Crates AccessKit mises à jour sur les deux plateformes ; les sondes AT-SPI Linux ont la même sévérité que sous Windows.
+- **`garbageCollector` dans le DSL JVM et native** (#408) — `GarbageCollector` (`SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`) pour HotSpot ; `NativeImageGarbageCollector` (`SERIAL`, `G1`, `EPSILON`) pour `--gc=`. Non défini : ergonomie JVM / Serial de native-image.
+- **`NucleusApplicationScope` implémente `ApplicationScope` de Compose** (#372) — les bibliothèques scopées au plain `ApplicationScope` (par exemple ComposeNativeTray) se résolvent dans `nucleusApplication { }` sans jeu de surcharges séparé.
+
+### Améliorations
+
+- **Cohérence du nom de bundle `.app` macOS** (#409) — chaque artefact (DMG, ZIP, …) livre le même nom de bundle dérivé de `appName`, si bien que l'auto-update ne supprime plus un chemin pour échouer à en ouvrir un autre quand `appName != packageName`.
+- **Bascule plein écran Windows sans glitch** et parité de rampe de transition plein écran macOS (#412 / #413).
+- **Suivi du facteur de scale d'affichage macOS** quand la fenêtre change d'écran (#412).
+
+### Corrections de bugs
+
+- **`setBounds` / resize de NsView sur les changements de layout** (#421) — les vues natives macOS embarquées mettent à jour leurs frames quand le layout Compose change.
+- **URI de deep link scheme-only** (#425 / #414) — `DeepLinkHandler` accepte les formes opaques du type `myapp:?query=…` (courantes via `xdg-open`), pas seulement les formes `scheme://` avec autorité. Les chemins de lecteur Windows restent rejetés.
+- **Le gate hot-reload correspond au nom d'artefact Tao publié** (#424 / #415).
+
+---
+
+## v2.1.10
+
+**Sortie : 2026-07-26**
+
+### Corrections de bugs
+
+- **Résolution des library jars du JDK sur les JDK sans JMOD** (#407) — l'empaquetage ProGuard en release échouait sur les JDK qui ne livrent plus de répertoire `jmods` (Temurin 25+ après JEP 493). La tâche retombe sur l'extraction de l'image runtime avec `jimage extract` et passe une racine de classes par module. Les JDK qui livrent encore `jmods` gardent le chemin précédent.
+- **Arrêt du tracing d'ombre CSD pendant le drag de fenêtre** (#393 / #383) — l'ombre de la décoration côté client Linux ne laisse plus de traînée pendant un déplacement interactif.
+
+---
+
 ## v2.1.9
 
 **Sortie : 2026-07-26**

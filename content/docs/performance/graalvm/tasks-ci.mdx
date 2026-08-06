@@ -6,17 +6,32 @@ description: The Gradle tasks the Nucleus plugin adds for GraalVM native image, 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 The Nucleus Gradle plugin registers a task graph for building and packaging your app
-as a GraalVM native image, plus per-format packaging tasks (`packageGraalvmDeb`,
-`packageGraalvmDmg`, `packageGraalvmNsis`). Most tasks are wired as dependencies of
-`packageGraalvmNative` and run automatically. This page lists the tasks, shows where
-their output lands, and covers running them on each target OS in CI.
+as a GraalVM native image. From 2.2 the public task surface mirrors the JVM distribution
+pipeline (`run` / `createDistributable` / `runDistributable` /
+`packageDistributionForCurrentOS`), plus per-format packaging tasks (`packageGraalvmDeb`,
+`packageGraalvmDmg`, `packageGraalvmNsis`). Most tasks are wired as dependencies of the
+internal `packageGraalvmNative` assembler and run automatically. This page lists the tasks,
+shows where their output lands, and covers running them on each target OS in CI.
 
 ## Gradle tasks
 
+### Public surface (aligned with the JVM pipeline)
+
+| Task | JVM counterpart | Description |
+|------|-----------------|-------------|
+| `runGraalvmNative` | `run` | Fast dev loop: forces native-image quick-build (`-Ob`), then runs the binary. Overrides the configured `optimization`. |
+| `createGraalvmNativeDistributable` | `createDistributable` | Build the self-contained native app folder for the current OS (no installer). |
+| `runGraalvmNativeDistributable` | `runDistributable` | Build with the configured optimization (full packaging) and run the app folder. |
+| `packageGraalvmNativeDistributionForCurrentOS` | `packageDistributionForCurrentOS` | Package the native distribution for the current OS. |
+
+`runGraalvmNative` and the distributable tasks record a `quickBuild` compile input, so
+switching between them re-compiles rather than serving a stale binary from the other mode.
+
+### Metadata, installers, and helpers
+
 | Task | Description |
 |------|-------------|
-| `packageGraalvmNative` | Compile and package the app as a native binary. This is the main task. |
-| `runGraalvmNative` | Build and run the native image directly. |
+| `packageGraalvmNative` | Internal assembler: compile the image and layout the app folder (binary + Skiko/AWT libs + icons). Prefer the public tasks above. |
 | `runWithNativeAgent` | Run the app with the GraalVM `native-image-agent` to collect reflection metadata. |
 | `resolveGraalvmReachabilityMetadata` | Resolve reachability metadata from the Oracle repository for runtime dependencies. Runs automatically. |
 | `analyzeGraalvmStaticMetadata` | Statically analyze bytecode to detect reflection, JNI, and resource usage. Runs automatically. |
@@ -40,11 +55,17 @@ A task name is the format's enum constant, so `TargetFormat.Deb` produces `packa
 ## Run the tasks
 
 ```shell
-# Compile the native binary; triggers every automatic metadata task
-./gradlew packageGraalvmNative
-
-# Build and run the binary
+# Fast local iteration (quick-build -Ob)
 ./gradlew runGraalvmNative
+
+# Full-optimization app folder, then run it
+./gradlew runGraalvmNativeDistributable
+
+# Build the self-contained native app folder only
+./gradlew createGraalvmNativeDistributable
+
+# Package for the current OS
+./gradlew packageGraalvmNativeDistributionForCurrentOS
 
 # Platform installers
 ./gradlew packageGraalvmDeb     # Linux
@@ -58,38 +79,38 @@ A task name is the format's enum constant, so `TargetFormat.Deb` produces `packa
 ./gradlew cleanupGraalvmMetadata
 ```
 
-The plugin defaults the native-image target architecture (`graalvm.march`) to `native`,
-which produces a binary tuned for the build machine's CPU. To build a portable binary,
-set `march = "compatibility"` in the DSL:
+The plugin defaults the native-image target architecture (`graalvm.march`) per platform
+(`COMPATIBILITY` everywhere, `NATIVE` on Apple-Silicon macOS). To force a portable binary
+everywhere, set the type-safe enum:
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
     graalvm {
-        march = "compatibility"
+        march = NativeImageMarch.COMPATIBILITY
     }
 }
 ```
 
 <Callout type="info">
 The Nucleus sample builds map `graalvm.march` to a Gradle property so you can override it
-on the command line: `march = providers.gradleProperty("nativeMarch").getOrElse("native")`.
-With that wiring, `./gradlew packageGraalvmNative -PnativeMarch=compatibility` selects the
-portable target. The `-PnativeMarch` flag only works if your build script reads the property.
+on the command line. With that wiring,
+`./gradlew packageGraalvmNative -PnativeMarch=compatibility` selects the portable target.
+The `-PnativeMarch` flag only works if your build script reads the property.
 </Callout>
 
 ## Output locations
 
-The native binary and its companion libraries land under the app's temp directory:
+The native app folder lands next to the JVM distributable layout (from 2.2):
 
 ```
-<project>/build/compose/tmp/<app>/graalvm/output/
+<project>/build/compose/binaries/<app>/graalvm-app/
 ```
 
 | Platform | Output |
 |----------|--------|
-| **macOS** | `output/<app>.app/` — a full `.app` bundle with `Info.plist`, icons, and signed dylibs |
-| **Windows** | `output/<app>.exe` plus companion DLLs (`awt.dll`, `jvm.dll`, `jawt.dll`, `skiko.dll`, …) |
-| **Linux** | `output/<app>` plus companion `.so` files (`libawt.so`, `libjvm.so`, `libjawt.so`, `libskiko.so`, …) |
+| **macOS** | `graalvm-app/<packageName>/<app>.app/` — full `.app` bundle with `Info.plist`, icons, and signed dylibs |
+| **Windows** | `graalvm-app/<packageName>/<app>.exe` plus companion DLLs |
+| **Linux** | `graalvm-app/<packageName>/<app>` plus companion `.so` files |
 
 Per-format installers land under the binaries directory, one folder per format:
 

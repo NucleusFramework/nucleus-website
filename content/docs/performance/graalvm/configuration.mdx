@@ -119,6 +119,10 @@ set `autoDownload = false` and pick a `jvmVendor`.
 | `allCharsets` | `Property<Boolean>` | `false` | `true` emits `-H:+AddAllCharsets` (embed every JDK charset; only for legacy encodings). |
 | `mlProfileInference` | `Property<Boolean>` | `true` | `false` emits `-H:-MLProfileInference`, opting out of Oracle's ML-inferred PGO. |
 | `advancedObfuscation` | `Property<Boolean>` | `false` | `true` emits `-H:AdvancedObfuscation=`, renaming symbols inside the binary. Oracle GraalVM only; ignored with a warning elsewhere. |
+| `autoIncludeResources` | `Property<Boolean>` | `true` | Bundle the project's own resources (and `project(...)` module resources) into the image. |
+| `maxHeapSizePercent` | `Property<Int>` | `25` | Default max heap as a percent of physical RAM. Follows the selected collector (`MaximumHeapSizePercent` for Serial/Epsilon, `MaxRAMPercentage` for G1). |
+| `maxHeapSize` | `Property<String>` | unset | Absolute max heap (e.g. `"2g"`, `"512m"`). Takes precedence over `maxHeapSizePercent`. |
+| `garbageCollector` | `Property<NativeImageGarbageCollector>` | unset | Bakes `--gc=` (`SERIAL`, `G1`, `EPSILON`). Unset keeps native-image Serial. `G1` is Oracle GraalVM + Linux only and degrades to a warning elsewhere. |
 | `buildArgs` | `ListProperty<String>` | empty | Extra arguments passed to `native-image` (win over the properties above). |
 | `javaLanguageVersion` | `Property<Int>` | `25` | Toolchain language version — used only when `toolchain { autoDownload = false }`. |
 | `jvmVendor` | `Property<JvmVendorSpec>` | unset | Toolchain vendor — used only when `toolchain { autoDownload = false }`. |
@@ -128,6 +132,34 @@ set `autoDownload = false` and pick a `jvmVendor`.
 | `macOS` | `GraalvmMacOSSettings` | — | macOS sub-block (see below). |
 | `windows` | `GraalvmWindowsSettings` | — | Windows sub-block (see below). |
 | `metadataRepository` | `MetadataRepositorySettings` | enabled | Oracle Reachability Metadata Repository (see below). |
+
+## Choose a garbage collector
+
+The collector is fixed at build time for native images. Leave it unset for Serial (the right
+default for a desktop-sized heap). Set G1 only when the heap outgrows what Serial can collect
+without visible pauses, and only on Oracle GraalVM Linux:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    // HotSpot JVM distribution (launcher + run task)
+    garbageCollector = GarbageCollector.Z
+
+    graalvm {
+        // Baked into the native image (--gc=)
+        garbageCollector = NativeImageGarbageCollector.G1
+    }
+}
+```
+
+| `NativeImageGarbageCollector` | Flag | Notes |
+|-------------------------------|------|-------|
+| `SERIAL` | `--gc=serial` | Default. Small heaps, pauses grow with heap size. |
+| `G1` | `--gc=G1` | Oracle GraalVM + Linux only. Elsewhere: warning + Serial. |
+| `EPSILON` | `--gc=epsilon` | No reclamation — benchmarks / short-lived processes only. |
+
+JVM-side `GarbageCollector` values: `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`.
+Flags are prepended so an explicit `-XX:+Use…GC` in `jvmArgs` still wins. Unset keeps the
+JDK's own ergonomics.
 
 ## Set build arguments
 
@@ -164,8 +196,10 @@ graalvm {
 
 1. Record: `./gradlew runWithPgoInstrument` builds an instrumented image, runs it, and writes
    the profile to `profile` on exit. Exercise the hot paths before quitting.
-2. Commit the `.iprof` file. Later `packageGraalvmNative` / `runGraalvmNative` builds apply it
-   automatically as `--pgo=<profile>`.
+2. Commit the `.iprof` file. Later full builds (`createGraalvmNativeDistributable`,
+   `runGraalvmNativeDistributable`, packaging tasks) apply it automatically as
+   `--pgo=<profile>`. The quick-build `runGraalvmNative` path skips PGO and advanced
+   obfuscation.
 
 Disable a recorded profile for one build with `-Pnucleus.graalvm.pgo=off`. On community
 toolchains (GraalVM CE, Liberica NIK, Mandrel) `--pgo` is unavailable: a recorded profile is
@@ -236,8 +270,9 @@ graalvm {
 ## No release variant
 
 Unlike the JVM build types, GraalVM has no release variant: there is no
-`packageReleaseGraalvmNative` and no `runReleaseGraalvmNative`. The native tasks are
-`packageGraalvmNative` and `runGraalvmNative`. This is intentional:
+`packageReleaseGraalvmNative` and no `runReleaseGraalvmNative`. The public native tasks
+follow the JVM pipeline (`runGraalvmNative`, `createGraalvmNativeDistributable`, …). This
+is intentional:
 
 - ProGuard's dead-code elimination is redundant. `native-image` already does closed-world
   dead-code elimination at compile time.

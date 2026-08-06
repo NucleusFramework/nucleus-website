@@ -6,18 +6,34 @@ description: Les tâches Gradle que le plugin Nucleus ajoute pour GraalVM native
 import { Callout } from 'fumadocs-ui/components/callout';
 
 Le plugin Gradle Nucleus enregistre un graphe de tâches pour compiler et empaqueter votre
-application en image native GraalVM, plus des tâches de packaging par format
-(`packageGraalvmDeb`, `packageGraalvmDmg`, `packageGraalvmNsis`). La plupart des tâches
-sont câblées en dépendance de `packageGraalvmNative` et s'exécutent automatiquement.
-Cette page liste les tâches, montre où leur sortie atterrit, et explique comment les
-lancer sur chaque OS cible en CI.
+application en image native GraalVM. Depuis la 2.2, la surface de tâches publique reflète le
+pipeline de distribution JVM (`run` / `createDistributable` / `runDistributable` /
+`packageDistributionForCurrentOS`), plus les tâches de packaging par format
+(`packageGraalvmDeb`, `packageGraalvmDmg`, `packageGraalvmNsis`). La plupart des tâches sont
+câblées en dépendance de l'assembleur interne `packageGraalvmNative` et s'exécutent
+automatiquement. Cette page liste les tâches, montre où leur sortie atterrit, et explique
+comment les lancer sur chaque OS cible en CI.
 
 ## Tâches Gradle
 
+### Surface publique (alignée sur le pipeline JVM)
+
+| Tâche | Pendant JVM | Description |
+|-------|-------------|-------------|
+| `runGraalvmNative` | `run` | Boucle de dev rapide : force le quick-build native-image (`-Ob`), puis lance le binaire. Surcharge l'`optimization` configurée. |
+| `createGraalvmNativeDistributable` | `createDistributable` | Construit le dossier d'app native autonome pour l'OS courant (sans installateur). |
+| `runGraalvmNativeDistributable` | `runDistributable` | Build avec l'optimisation configurée (packaging complet) et lance le dossier d'app. |
+| `packageGraalvmNativeDistributionForCurrentOS` | `packageDistributionForCurrentOS` | Empaquette la distribution native pour l'OS courant. |
+
+`runGraalvmNative` et les tâches distributable enregistrent une entrée de compile
+`quickBuild`, si bien que le basculement entre elles recompile au lieu de servir un binaire
+périmé de l'autre mode.
+
+### Metadata, installateurs et helpers
+
 | Tâche | Description |
 |-------|-------------|
-| `packageGraalvmNative` | Compile et empaquette l'application en binaire natif. C'est la tâche principale. |
-| `runGraalvmNative` | Build et lance directement l'image native. |
+| `packageGraalvmNative` | Assembleur interne : compile l'image et pose le dossier d'app (binaire + libs Skiko/AWT + icônes). Préférez les tâches publiques ci-dessus. |
 | `runWithNativeAgent` | Lance l'application avec le `native-image-agent` de GraalVM pour collecter la metadata de réflexion. |
 | `resolveGraalvmReachabilityMetadata` | Résout la metadata de reachability du dépôt Oracle pour les dépendances runtime. S'exécute automatiquement. |
 | `analyzeGraalvmStaticMetadata` | Analyse statiquement le bytecode pour détecter l'usage de réflexion, JNI et ressources. S'exécute automatiquement. |
@@ -42,11 +58,17 @@ format : `TargetFormat.Deb` produit `packageGraalvmDeb`, `TargetFormat.Nsis` pro
 ## Lancer les tâches
 
 ```shell
-# Compile le binaire natif ; déclenche toutes les tâches de metadata automatiques
-./gradlew packageGraalvmNative
-
-# Build et lance le binaire
+# Itération locale rapide (quick-build -Ob)
 ./gradlew runGraalvmNative
+
+# Dossier d'app en optimisation configurée, puis lancement
+./gradlew runGraalvmNativeDistributable
+
+# Construire uniquement le dossier d'app native autonome
+./gradlew createGraalvmNativeDistributable
+
+# Empaqueter pour l'OS courant
+./gradlew packageGraalvmNativeDistributionForCurrentOS
 
 # Installateurs par plateforme
 ./gradlew packageGraalvmDeb     # Linux
@@ -60,40 +82,38 @@ format : `TargetFormat.Deb` produit `packageGraalvmDeb`, `TargetFormat.Nsis` pro
 ./gradlew cleanupGraalvmMetadata
 ```
 
-Le plugin fixe par défaut l'architecture cible de native-image (`graalvm.march`) à
-`native`, ce qui produit un binaire optimisé pour le CPU de la machine de build. Pour un
-binaire portable, mettez `march = "compatibility"` dans le DSL :
+Le plugin fixe par défaut l'architecture cible de native-image (`graalvm.march`) par plateforme
+(`COMPATIBILITY` partout, `NATIVE` sous macOS Apple Silicon). Pour forcer un binaire portable
+partout, utilisez l'enum typé :
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
     graalvm {
-        march = "compatibility"
+        march = NativeImageMarch.COMPATIBILITY
     }
 }
 ```
 
 <Callout type="info">
 Les builds d'exemple Nucleus mappent `graalvm.march` sur une propriété Gradle pour que vous
-puissiez la surcharger en ligne de commande :
-`march = providers.gradleProperty("nativeMarch").getOrElse("native")`. Avec ce câblage,
+puissiez la surcharger en ligne de commande. Avec ce câblage,
 `./gradlew packageGraalvmNative -PnativeMarch=compatibility` sélectionne la cible portable.
 Le flag `-PnativeMarch` ne fonctionne que si votre script de build lit cette propriété.
 </Callout>
 
 ## Emplacements de sortie
 
-Le binaire natif et ses bibliothèques compagnonnes atterrissent dans le répertoire temporaire
-de l'application :
+Le dossier d'app native atterrit à côté du layout de distribution JVM (depuis la 2.2) :
 
 ```
-<project>/build/compose/tmp/<app>/graalvm/output/
+<project>/build/compose/binaries/<app>/graalvm-app/
 ```
 
 | Plateforme | Sortie |
 |------------|--------|
-| **macOS** | `output/<app>.app/` — un bundle `.app` complet avec `Info.plist`, icônes et dylibs signés |
-| **Windows** | `output/<app>.exe` plus les DLLs compagnonnes (`awt.dll`, `jvm.dll`, `jawt.dll`, `skiko.dll`, …) |
-| **Linux** | `output/<app>` plus les fichiers `.so` compagnons (`libawt.so`, `libjvm.so`, `libjawt.so`, `libskiko.so`, …) |
+| **macOS** | `graalvm-app/<packageName>/<app>.app/` — bundle `.app` complet avec `Info.plist`, icônes et dylibs signés |
+| **Windows** | `graalvm-app/<packageName>/<app>.exe` plus les DLLs compagnonnes |
+| **Linux** | `graalvm-app/<packageName>/<app>` plus les fichiers `.so` compagnons |
 
 Les installateurs par format atterrissent sous le répertoire des binaires, un dossier par format :
 

@@ -81,6 +81,10 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 The `TitleBar` slot handles title-bar press-and-drag internally, so the window moves when
 you drag empty title-bar space. You don't wire up a drag modifier yourself.
 
+For full-window layouts, custom design-system chrome, macOS glass sidebars, or Windows 11
+Mica/Acrylic, use [`WindowScaffold`](/docs/tao/window-scaffold) instead of (or around) the
+stock `TitleBar`. Existing `TitleBar` call sites stay valid.
+
 ## How it works
 
 `nucleusApplication { }` resolves the backend and exposes `DecoratedWindow` on
@@ -113,10 +117,16 @@ provides them through composition locals. The same theme works whether the depen
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Standard window flags. |
 | `undecorated` | `Boolean` | Borderless window with no controls. Honored by Tao; ignored by AWT. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. |
+| `nativePopupLayers` | `Boolean` | Default `false`. Materialise Compose `Popup` layers as native transparent windows (NSPanel / WS_POPUP HWND). Tao only. |
 | `hiddenFromDock` | `Boolean` | Default `false`. Hide this window from the OS taskbar/Dock. Honored by Tao; ignored by AWT. |
 | `minimumSize` | `DpSize?` | Enforced after the first layout pass. |
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Return `true` to consume the event. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot plus your UI. |
+
+The Tao-native `DecoratedWindow` (via `taoApplication` or the Tao `ApplicationScope` overload)
+also accepts `transparent: Boolean = false` for full-window transparency. At 2.2.0 the umbrella
+`NucleusApplicationScope.DecoratedWindow` does not forward that flag — see
+[transparent overlays](/docs/tao/window-scaffold#transparent-and-borderless-overlays).
 
 ### Hiding from the taskbar/Dock
 
@@ -177,11 +187,23 @@ interface NucleusWindow {
 - `Modifier.macOSLargeCornerRadius()` — opt into macOS 26+ rounded corners.
 - `Modifier.newFullscreenControls()` — relayout the title bar buttons for fullscreen.
 
+### Scaffold and chrome (2.2+)
+
+Prefer these when the stock `TitleBar` layout is too rigid:
+
+- `WindowScaffold` / `TitleBarPlacement` — full-window and overlay chrome layouts.
+- `Modifier.windowDragArea` / `noWindowDrag` — declare (or exclude) native move regions.
+- `WindowControls` — system min/max/close outside `TitleBar`.
+- `WindowBackground` / `WindowAppearance` — clear colour and native light/dark from inside the tree.
+- `Modifier.windowGlassRegion` (macOS) / `WindowsBackdrop` (Windows 11) — platform materials.
+
+Full reference: [Window scaffold and chrome](/docs/tao/window-scaffold).
+
 <Callout type="tip">
 `TitleBar` is a single extension on `DecoratedWindowScope`. The `nucleusApplication` scope
 (`NucleusDecoratedWindowScope`) and the Tao-native `taoApplication` scope
 (`TaoDecoratedWindowScope`) both implement it, so the same `TitleBar` call works whichever
-entry point you start from.
+entry point you start from. The same holds for `WindowScaffold` and the chrome primitives.
 </Callout>
 
 ## Notes
@@ -189,9 +211,15 @@ entry point you start from.
 - macOS requires `-XstartOnFirstThread`. The Nucleus Gradle plugin adds it for you.
 - For multi-window apps, call `DecoratedWindow` several times from the same
   `nucleusApplication` block. Each window gets its own `NucleusWindow`.
+- Linux CSD windows draw a native GTK drop shadow (hidden-titlebar pattern) that tracks the
+  window during interactive moves.
+- `NucleusApplicationScope` implements Compose's `ApplicationScope`, so libraries scoped to the
+  plain Compose receiver (for example system-tray composables) resolve inside
+  `nucleusApplication { }`.
 
 ## What's next
 
+- [Window scaffold and chrome](/docs/tao/window-scaffold) — full-window layouts and materials.
 - [The Tao backend](/docs/tao) — what the no-AWT backend covers.
 - [DecoratedWindow across backends](/docs/window) — the shared window API.
 - [Multi-touch and trackpad gestures](/docs/tao/multi-touch) — read Tao input events.

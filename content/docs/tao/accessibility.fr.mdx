@@ -7,8 +7,10 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 Le backend Tao expose votre interface aux technologies d'assistance en parcourant l'arbre de
 sémantique de Compose et en le projetant sur l'API d'accessibilité native de chaque système :
-NSAccessibility sur macOS, UI Automation sur Windows et AT-SPI (via AccessKit) sur Linux. Vous
-décrivez l'accessibilité avec la sémantique Compose standard ; le pont s'occupe de la projection.
+NSAccessibility sur macOS, et AccessKit sous Windows (provider UI Automation) comme sous Linux
+(AT-SPI). Depuis la 2.2, Windows et Linux partagent le même chemin filaire et de décodage
+AccessKit. Vous décrivez l'accessibilité avec la sémantique Compose standard ; le pont s'occupe
+de la projection.
 Les types `TaoA11yNode`, `TaoA11yRole`, `TaoA11yFlag` et `TaoA11yAction` de ce module décrivent
 ce que le pont émet, afin que vous puissiez inspecter l'arbre projeté ou écrire des assertions
 dessus.
@@ -78,8 +80,10 @@ Le parcours est déclenché avec un délai (debounce) et conditionné. Quand auc
 d'assistance n'est attachée, le backend saute complètement le parcours pour que le défilement et
 les animations restent fluides ; la première requête d'un lecteur d'écran active la projection
 et amorce l'arbre. Sur Linux, les mises à jour suivantes sont envoyées sous forme de snapshots
-partiels qui ne portent que les nœuds modifiés. Sur macOS et Windows, chaque mise à jour est un
-snapshot complet.
+partiels qui ne portent que les nœuds modifiés. Sur macOS, chaque mise à jour est un snapshot
+complet. Windows utilise le provider UIA d'AccessKit (avec PropertyChanged en direct pour les
+clients .NET hors processus) ; les mises à jour suivent le même chemin d'arbre AccessKit que
+sous Linux.
 
 Les actions circulent dans l'autre sens. Quand VoiceOver, Narrator ou Orca déclenche une action
 — un clic, un incrément, une modification de texte — le côté natif rappelle la JVM, qui résout

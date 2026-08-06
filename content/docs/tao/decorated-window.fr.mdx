@@ -83,6 +83,10 @@ Le slot `TitleBar` gère en interne l'appui-glisser sur la barre de titre : la f
 déplace quand vous glissez une zone vide de la barre. Vous n'avez pas de modifier de drag à
 brancher vous-même.
 
+Pour les mises en page plein fenêtre, le chrome d'un design system, les sidebars en verre macOS
+ou le Mica/Acrylic Windows 11, utilisez [`WindowScaffold`](/docs/tao/window-scaffold) à la place
+(ou autour) du `TitleBar` stock. Les sites d'appel `TitleBar` existants restent valides.
+
 ## Comment ça marche
 
 `nucleusApplication { }` résout le backend et expose `DecoratedWindow` sur
@@ -115,10 +119,16 @@ fonctionne que la dépendance soit `-tao`, `-jbr` ou `-jni`.
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Flags de fenêtre standard. |
 | `undecorated` | `Boolean` | Fenêtre sans cadre ni contrôles. Pris en compte par Tao ; ignoré par AWT. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao uniquement : attache la fenêtre comme popup superposée à une autre. |
+| `nativePopupLayers` | `Boolean` | Défaut `false`. Matérialise les couches Compose `Popup` en fenêtres natives transparentes (NSPanel / WS_POPUP HWND). Tao uniquement. |
 | `hiddenFromDock` | `Boolean` | Défaut `false`. Masque la fenêtre de la barre des tâches / du Dock de l'OS. Pris en compte par Tao ; ignoré par AWT. |
 | `minimumSize` | `DpSize?` | Appliqué après la première passe de layout. |
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Renvoie `true` pour consommer l'événement. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Slot barre de titre plus votre UI. |
+
+Le `DecoratedWindow` natif Tao (via `taoApplication` ou la surcharge de scope Tao) accepte aussi
+`transparent: Boolean = false` pour la transparence plein fenêtre. En 2.2.0, l'umbrella
+`NucleusApplicationScope.DecoratedWindow` ne retransmet pas ce flag — voir
+[overlays transparents](/docs/tao/window-scaffold#overlays-transparents-et-sans-cadre).
 
 ### Masquer de la barre des tâches / du Dock
 
@@ -181,11 +191,24 @@ interface NucleusWindow {
 - `Modifier.macOSLargeCornerRadius()` — active les coins arrondis de macOS 26+.
 - `Modifier.newFullscreenControls()` — réagence les boutons de la barre de titre en plein écran.
 
+### Scaffold et chrome (2.2+)
+
+Préférez ceux-ci quand le layout du `TitleBar` stock est trop rigide :
+
+- `WindowScaffold` / `TitleBarPlacement` — mises en page plein fenêtre et chrome en overlay.
+- `Modifier.windowDragArea` / `noWindowDrag` — déclarer (ou exclure) les zones de move natives.
+- `WindowControls` — min/max/fermer système hors de `TitleBar`.
+- `WindowBackground` / `WindowAppearance` — couleur de clear et clair/sombre natif depuis l'arbre.
+- `Modifier.windowGlassRegion` (macOS) / `WindowsBackdrop` (Windows 11) — matériaux de plateforme.
+
+Référence complète : [Scaffold de fenêtre et chrome](/docs/tao/window-scaffold).
+
 <Callout type="tip">
 `TitleBar` est une seule extension sur `DecoratedWindowScope`. Le scope de
 `nucleusApplication` (`NucleusDecoratedWindowScope`) et le scope Tao natif de
 `taoApplication` (`TaoDecoratedWindowScope`) l'implémentent tous les deux : le même appel à
-`TitleBar` fonctionne quel que soit le point d'entrée d'où vous partez.
+`TitleBar` fonctionne quel que soit le point d'entrée d'où vous partez. Idem pour
+`WindowScaffold` et les primitives de chrome.
 </Callout>
 
 ## Notes
@@ -193,9 +216,15 @@ interface NucleusWindow {
 - macOS exige `-XstartOnFirstThread`. Le plugin Gradle Nucleus l'ajoute pour vous.
 - Pour les apps multi-fenêtres, appelez `DecoratedWindow` plusieurs fois depuis le même
   bloc `nucleusApplication`. Chaque fenêtre obtient son propre `NucleusWindow`.
+- Les fenêtres CSD Linux dessinent une ombre portée GTK native (motif hidden-titlebar) qui suit
+  la fenêtre pendant les déplacements interactifs.
+- `NucleusApplicationScope` implémente l'`ApplicationScope` de Compose, si bien que les
+  bibliothèques scopées au receiver Compose plain (par exemple les composables system-tray) se
+  résolvent dans `nucleusApplication { }`.
 
 ## Et ensuite
 
+- [Scaffold de fenêtre et chrome](/docs/tao/window-scaffold) — mises en page plein fenêtre et matériaux.
 - [Le backend Tao](/docs/tao) — ce que couvre le backend sans AWT.
 - [DecoratedWindow sur tous les backends](/docs/window) — l'API de fenêtre partagée.
 - [Multi-touch et gestes du trackpad](/docs/tao/multi-touch) — lire les événements d'entrée Tao.
