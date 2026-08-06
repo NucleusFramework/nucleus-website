@@ -200,6 +200,31 @@ sudo snap install snapcraft --classic
 
 In CI, use `setup-nucleus` with `snap: 'true'`.
 
+## Native libraries
+
+### Module reports `isAvailable == false` or silent no-ops
+
+**Symptom.** System tray, system color, notifications, or another OS-integration module
+does nothing on a platform where you expect it to work. Public APIs return `null` /
+`false`, or `isAvailable` is `false`.
+
+**Cause.** The JNI shared library for that module did not load. Common reasons: no binary
+for this OS/arch in the dependency JAR, the module is missing from the runtime classpath,
+or extraction into the content-addressed cache failed.
+
+**Fix.** Confirm the module dependency is on the runtime classpath and that the JAR
+contains `/nucleus/native/<os>-<arch>/…` for your platform. Clear the loader cache and
+relaunch if an upgrade left a partial extract:
+
+| Platform | Cache path |
+|----------|------------|
+| macOS | `~/Library/Caches/nucleus/native/` |
+| Linux | `~/.cache/nucleus/native/` (or `$XDG_CACHE_HOME/nucleus/native/`) |
+| Windows | `%LOCALAPPDATA%\nucleus\native\` |
+
+See [Native library loader](/docs/performance/native-library-loader) for the full load
+order, JAR layout, and sidecar rules.
+
 ## Rendering
 
 ### Wayland on NVIDIA: black window or garbled output
