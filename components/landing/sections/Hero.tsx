@@ -12,7 +12,9 @@ interface HeroProps {
 }
 
 export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
-  const installHref = lang === 'fr' ? '/fr/docs/start/install' : '/en/docs/start/install';
+  const base = lang === 'fr' ? '/fr' : '/en';
+  const installHref = `${base}/docs/start/install`;
+  const migrateHref = `${base}/docs/migrate/from-jb-compose`;
   return (
     <section className="hero">
       <div className="hero-bg-aurora" aria-hidden="true" />
@@ -20,6 +22,7 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
 
       <div className="hero-inner">
         <div className="hero-copy">
+          <p className="hero-eyebrow">{pick(heroT.eyebrow, lang)}</p>
           <h1 className="hero-h1">{pick(heroT.h1, lang)}</h1>
 
           <p className="hero-sub">{pick(heroT.sub, lang)}</p>
@@ -30,6 +33,9 @@ export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
+            </Link>
+            <Link href={migrateHref} className="btn btn-ghost">
+              {pick(heroT.ctaSecondary, lang)}
             </Link>
             <a
               href="https://github.com/NucleusFramework/Nucleus"

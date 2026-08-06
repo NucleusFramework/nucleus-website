@@ -2,9 +2,9 @@ import { NUCLEUS_LABEL } from './nucleus-version';
 
 export const SITE = {
   name: 'Nucleus',
-  title: 'Nucleus — the Kotlin framework for native desktop apps',
+  title: 'Nucleus — Compose Desktop, production-ready',
   description:
-    `${NUCLEUS_LABEL} — Built on Compose Multiplatform, GraalVM native image, and the Tao backend. Native on every OS, with the simplicity of Kotlin.`,
+    `${NUCLEUS_LABEL} — The production desktop layer for Kotlin teams on Compose Multiplatform: native chrome, OS APIs, packaging, and stores — without leaving Kotlin.`,
   url: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://nucleusframework.dev',
   ogImage: '/og.png',
   github: 'https://github.com/NucleusFramework/Nucleus',
@@ -14,7 +14,10 @@ export const SITE = {
     'Nucleus',
     'Kotlin',
     'Compose Multiplatform',
+    'Compose Desktop',
     'desktop framework',
+    'Kotlin Multiplatform',
+    'Android to desktop',
     'GraalVM Native Image',
     'cross-platform desktop',
     'Tao',

@@ -34,40 +34,42 @@ export const navT = {
 // Hero
 // =====================================================================
 export const heroT = {
+  eyebrow: {
+    en: 'Compose Desktop, production-ready',
+    fr: 'Compose Desktop, prêt pour la prod',
+  } as Bi<string>,
   h1: {
     en: React.createElement(React.Fragment, null,
-      'The Kotlin framework', React.createElement('br'),
-      'for ',
-      React.createElement('span', { className: 'hero-grad' }, 'cross-platform native'),
-      ' desktop apps.',
+      'Ship desktop with the ',
+      React.createElement('span', { className: 'hero-grad' }, 'Kotlin team'),
+      ' you already have.',
     ),
     fr: React.createElement(React.Fragment, null,
-      'Le framework Kotlin', React.createElement('br'),
-      'pour les apps desktop ',
-      React.createElement('span', { className: 'hero-grad' }, 'natives multiplateformes'),
-      '.',
+      'Shippe le desktop avec l\'équipe ',
+      React.createElement('span', { className: 'hero-grad' }, 'Kotlin'),
+      ' que tu as déjà.',
     ),
   } as Bi,
   sub: {
     en: React.createElement(React.Fragment, null,
-      'Real cross-platform — not just macOS, Windows and Linux, but the same Kotlin codebase as your ',
+      'Compose Multiplatform draws the UI. Nucleus makes it a real desktop app — native chrome, OS APIs, packaging, and stores. Same Kotlin codebase as your ',
       React.createElement('span', { className: 'hero-sub-em' }, 'Android'), ', ',
       React.createElement('span', { className: 'hero-sub-em' }, 'iOS'), ' and ',
       React.createElement('span', { className: 'hero-sub-em' }, 'web'),
       ' apps. ',
-      React.createElement('span', { className: 'hero-sub-dim' }, 'One language, every screen, every architecture.'),
+      React.createElement('span', { className: 'hero-sub-dim' }, 'No second stack. No JNI circus.'),
     ),
     fr: React.createElement(React.Fragment, null,
-      'Du vrai multiplateforme — pas seulement macOS, Windows et Linux, mais la même base Kotlin que les apps ',
+      'Compose Multiplatform dessine l\'UI. Nucleus en fait une vraie app desktop — chrome natif, APIs OS, packaging et stores. La même base Kotlin que tes apps ',
       React.createElement('span', { className: 'hero-sub-em' }, 'Android'), ', ',
       React.createElement('span', { className: 'hero-sub-em' }, 'iOS'), ' et ',
       React.createElement('span', { className: 'hero-sub-em' }, 'web'),
       '. ',
-      React.createElement('span', { className: 'hero-sub-dim' }, 'Un langage, tous les écrans, toutes les architectures.'),
+      React.createElement('span', { className: 'hero-sub-dim' }, 'Pas de seconde stack. Pas de JNI circus.'),
     ),
   } as Bi,
   ctaPrimary: { en: 'Get started', fr: 'Démarrer' } as Bi<string>,
-  ctaSecondary: { en: 'Install the demo', fr: 'Installer la démo' } as Bi<string>,
+  ctaSecondary: { en: 'Migrate from Compose Desktop', fr: 'Migrer depuis Compose Desktop' } as Bi<string>,
   stars: { en: 'stars', fr: 'étoiles' } as Bi<string>,
   coldStart: { en: 'Cold start', fr: 'Démarrage à froid' } as Bi<string>,
   ram: { en: 'RAM', fr: 'RAM' } as Bi<string>,
@@ -92,23 +94,21 @@ export const pitchT = {
   sub: {
     en: React.createElement(React.Fragment, null,
       'On ', React.createElement('span', { className: 'pitch-em' }, 'Android'),
-      ', Kotlin and Compose are first-class citizens. On ',
+      ', Kotlin and Compose are first-class. On ',
       React.createElement('span', { className: 'pitch-em' }, 'iOS'),
-      ', Kotlin/Native reaches every UIKit and Foundation API while Compose renders like a true native app. On the ',
+      ' and the ',
       React.createElement('span', { className: 'pitch-em' }, 'web'),
-      ', Kotlin/JS and Wasm draw Compose UIs with the full browser API surface. Desktop had only half of that — you could render a window, but reaching the OS meant ',
-      React.createElement('span', { className: 'pitch-em' }, 'juggling pointers, compiling native libraries per platform, wiring JNI or FFM bridges, and learning a different native API for every OS'),
-      " — a wall most Kotlin developers couldn't climb. Nucleus closes the gap.",
+      ', the same story. Desktop had Compose for the UI — and left you to invent the rest: native chrome, OS APIs, signing, auto-update, stores. Vanilla Compose Desktop stops at the window. ',
+      React.createElement('span', { className: 'pitch-em' }, 'Nucleus is the production layer your Kotlin team was missing.'),
     ),
     fr: React.createElement(React.Fragment, null,
       'Sur ', React.createElement('span', { className: 'pitch-em' }, 'Android'),
       ', Kotlin et Compose sont citoyens de première classe. Sur ',
       React.createElement('span', { className: 'pitch-em' }, 'iOS'),
-      ', Kotlin/Native touche chaque API UIKit et Foundation, et Compose s\'affiche comme une vraie app native. Sur le ',
+      ' et le ',
       React.createElement('span', { className: 'pitch-em' }, 'web'),
-      ', Kotlin/JS et Wasm peignent des UI Compose avec toute la surface des APIs du navigateur. Le desktop n\'avait que la moitié de tout ça — tu pouvais dessiner une fenêtre, mais atteindre l\'OS, ça voulait dire ',
-      React.createElement('span', { className: 'pitch-em' }, 'jongler avec des pointeurs, compiler des bibliothèques natives par plateforme, brancher des ponts JNI ou FFM, et apprendre une API native différente pour chaque OS'),
-      ' — un mur que la plupart des développeurs Kotlin ne pouvaient pas franchir. Nucleus comble l\'écart.',
+      ', même histoire. Le desktop avait Compose pour l\'UI — et te laissait inventer le reste : chrome natif, APIs OS, signature, auto-update, stores. Compose Desktop vanilla s\'arrête à la fenêtre. ',
+      React.createElement('span', { className: 'pitch-em' }, 'Nucleus est la couche de production qui manquait à ton équipe Kotlin.'),
     ),
   } as Bi,
 };
@@ -160,19 +160,25 @@ export const kmpT = {
 };
 
 // =====================================================================
-// OneLanguageBar
+// OneLanguageBar — vanilla CMP vs Nucleus gap
 // =====================================================================
 export const oneLangT = {
-  themTag: { en: 'Hybrid stack', fr: 'Stack hybride' } as Bi<string>,
+  themTag: { en: 'Vanilla Compose Desktop', fr: 'Compose Desktop vanilla' } as Bi<string>,
   themCap: {
-    en: 'Web UI in one language, native core in another, OS bindings per platform — every boundary becomes an IPC bridge, a serialization step, and a context switch in your head.',
-    fr: 'UI dans un langage, cœur natif dans un autre, bindings par OS — chaque frontière devient un pont IPC, une étape de sérialisation, et un changement de contexte mental.',
+    en: 'Skia window, thin tray/notifications, six jpackage formats. You own the native chrome, OS glue, signing scripts, auto-update, and store pipelines.',
+    fr: 'Fenêtre Skia, tray/notifications légers, six formats jpackage. À toi le chrome natif, la glue OS, les scripts de signature, l\'auto-update et les pipelines store.',
   } as Bi<string>,
-  usTag: { en: 'Nucleus + Compose', fr: 'Nucleus + Compose' } as Bi<string>,
+  usTag: { en: 'Compose + Nucleus', fr: 'Compose + Nucleus' } as Bi<string>,
   usCap: {
-    en: 'Compose for UI, Kotlin for logic, OS calls and packaging — one language top to bottom, no IPC, one mindset, one call graph.',
-    fr: 'Compose pour l\'UI, Kotlin pour la logique, les appels OS et le packaging — un seul langage de bout en bout, pas d\'IPC, un seul état d\'esprit, un seul graphe d\'appel.',
+    en: 'Same Compose UI — plus native decorated windows, 40+ Kotlin OS modules, 18 packaging formats, auto-update, and store-ready CI. Drop-in on the JetBrains plugin.',
+    fr: 'La même UI Compose — plus fenêtres décorées natives, 40+ modules OS Kotlin, 18 formats de packaging, auto-update et CI prête pour les stores. Drop-in sur le plugin JetBrains.',
   } as Bi<string>,
+  themPill1: { en: 'UI + Skia', fr: 'UI + Skia' } as Bi<string>,
+  themPill2: { en: '6 formats', fr: '6 formats' } as Bi<string>,
+  themPill3: { en: 'You build the rest', fr: 'Le reste, à toi' } as Bi<string>,
+  usPill1: { en: 'Native chrome', fr: 'Chrome natif' } as Bi<string>,
+  usPill2: { en: '40+ OS modules', fr: '40+ modules OS' } as Bi<string>,
+  usPill3: { en: 'Ship & stores', fr: 'Ship & stores' } as Bi<string>,
 };
 
 // =====================================================================
@@ -532,8 +538,8 @@ export const installT = {
 // =====================================================================
 export const footerT = {
   tagline: {
-    en: 'The Kotlin framework for native desktop apps. Built on Compose, GraalVM and Tao.',
-    fr: 'Le framework Kotlin pour les apps desktop natives. Bâti sur Compose, GraalVM et Tao.',
+    en: 'The production desktop layer for Compose Multiplatform. Native OS, same Kotlin.',
+    fr: 'La couche desktop de production pour Compose Multiplatform. OS natif, même Kotlin.',
   } as Bi<string>,
   docs: { en: 'Docs', fr: 'Docs' } as Bi<string>,
   gettingStarted: { en: 'Getting started', fr: 'Premiers pas' } as Bi<string>,

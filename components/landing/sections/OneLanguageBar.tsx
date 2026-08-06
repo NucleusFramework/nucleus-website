@@ -11,9 +11,9 @@ export function OneLanguageBar({ lang }: OneLanguageBarProps) {
       <div className="one-lang-side one-lang-them">
         <span className="one-lang-tag">{pick(oneLangT.themTag, lang)}</span>
         <div className="one-lang-langs">
-          <span className="one-lang-pill" data-lang="js">JS / TS / Dart</span>
-          <span className="one-lang-bridge">IPC</span>
-          <span className="one-lang-pill" data-lang="rs">Rust / C++ / Swift</span>
+          <span className="one-lang-pill" data-lang="cmp">{pick(oneLangT.themPill1, lang)}</span>
+          <span className="one-lang-pill" data-lang="pkg">{pick(oneLangT.themPill2, lang)}</span>
+          <span className="one-lang-pill" data-lang="diy">{pick(oneLangT.themPill3, lang)}</span>
         </div>
         <div className="one-lang-cap">{pick(oneLangT.themCap, lang)}</div>
       </div>
@@ -25,7 +25,9 @@ export function OneLanguageBar({ lang }: OneLanguageBarProps) {
       <div className="one-lang-side one-lang-us">
         <span className="one-lang-tag one-lang-tag-hero">{pick(oneLangT.usTag, lang)}</span>
         <div className="one-lang-langs">
-          <span className="one-lang-pill one-lang-pill-hero" data-lang="kt">Kotlin</span>
+          <span className="one-lang-pill one-lang-pill-hero" data-lang="kt">{pick(oneLangT.usPill1, lang)}</span>
+          <span className="one-lang-pill one-lang-pill-hero" data-lang="kt">{pick(oneLangT.usPill2, lang)}</span>
+          <span className="one-lang-pill one-lang-pill-hero" data-lang="kt">{pick(oneLangT.usPill3, lang)}</span>
         </div>
         <div className="one-lang-cap">{pick(oneLangT.usCap, lang)}</div>
       </div>

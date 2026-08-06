@@ -1,67 +1,67 @@
 ---
 title: Pourquoi Nucleus
-description: Nucleus fournit les intégrations desktop natives et l'empaquetage pour les applications Compose Multiplatform écrites en Kotlin.
+description: Ce que Nucleus ajoute à Compose Multiplatform pour les équipes Kotlin qui shippent de vraies apps desktop.
 ---
 
-Kotlin et Compose tournent sur Android, iOS et le web. Sur le desktop, Compose Multiplatform
-rend l'interface, mais atteindre les fonctionnalités du système d'exploitation imposait de
-passer par JNI, l'API Foreign Function & Memory ou des bibliothèques natives propres à chaque
-plateforme — une API différente sur chaque OS. Nucleus fournit ces intégrations sous forme
-d'APIs Kotlin, avec l'outillage d'empaquetage et de distribution dont une application desktop
-a besoin.
+Kotlin et Compose règnent déjà sur Android. Ils atteignent iOS et le web. Sur le desktop, Compose
+Multiplatform rend l'interface — mais livrer un vrai produit demande encore chrome natif, intégration OS,
+packaging, signature, auto-update et pipelines store que le plugin par défaut ne fournit pas.
 
-## Ce que Nucleus ajoute à Compose Multiplatform
+Nucleus est cette couche de production. Même Compose. Même équipe Kotlin. Le reste du stack desktop,
+déjà construit.
 
-Compose Multiplatform rend l'interface desktop. En revanche, il ne fournit pas les décorations
-de fenêtre natives, les menus dock, les system trays, les pipelines de signature, les deep
-links, l'auto-update ni les installateurs. C'est ce que Nucleus ajoute : des Composables
-agnostiques du backend côté interface, et un plugin Gradle ainsi que des modules runtime côté
-plateforme.
+## Le trou que Compose Desktop laisse ouvert
 
-Chaque API native conserve toute sa surface. Windows Toast Notifications, macOS
-UserNotifications, StatusNotifierItem de FreeDesktop et Win32 ITaskbarList3 ont chacune leur
-propre modèle de threading et leurs conventions. Nucleus les expose via un DSL Kotlin de même
-forme sur tous les OS, et les APIs sous-jacentes restent accessibles au besoin.
+Compose Multiplatform est la bonne fondation UI. Ce n'est pas un stack desktop produit complet.
+
+| | Compose Desktop vanilla | Nucleus |
+|---|---|---|
+| **UI** | Compose + Skia | Même Compose + Skia |
+| **Chrome de fenêtre** | Basique / look Material | Décorations natives (Liquid Glass, Fluent, Yaru, Jewel) |
+| **APIs OS** | Légères (`Tray`, `Notification`) | 40+ modules Kotlin (tray, dock, hotkeys, média, dark mode, …) |
+| **Packaging** | 6 formats jpackage | **18** formats, y compris les canaux store |
+| **Auto-update** | Aucun | Intégré (`updater-runtime`) |
+| **Signature / CI** | À construire | Signature, notarisation, GitHub Actions réutilisables |
+| **Runtimes** | JVM | GraalVM Native Image **ou** JVM + cache AOT |
+| **Migration** | — | Drop-in sur le plugin Compose JetBrains |
+
+Si tu n'as besoin que d'une fenêtre et d'un DMG/MSI/DEB, CMP vanilla suffit. Dès qu'il faut un look
+natif, de la distribution store, de l'auto-update, ou de la vraie intégration OS sans écrire du JNI
+par plateforme — c'est Nucleus.
+
+Détail : [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default).
+
+## Pensé pour les équipes qui écrivent déjà du Kotlin
+
+Nucleus n'est pas un pari sur un nouveau langage. C'est pour les équipes qui shippent déjà Android
+(ou KMP) et ont besoin d'une surface desktop sans recruter une seconde stack.
+
+- **Même bassin d'embauche** — les compétences Compose se transfèrent. Pas d'équipe Rust/JS/Electron.
+- **Même chemin de codebase** — domaine, réseau, et une grande partie de l'UI vivent en `commonMain`.
+- **Même monde Gradle** — un DSL, hot reload, CI familière.
+- **Migration drop-in** — renomme `compose.desktop.application` → `nucleus.application` et continue
+  de shipper. Voir [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose).
 
 ## Ce que fournit Nucleus
 
-- **Fenêtre décorée native** — un `DecoratedWindow` qui respecte les conventions de barre de
-  titre macOS/Windows/Linux, servi par le [backend Tao](/docs/concepts/backends).
-- **Modules runtime** — plus de 40 modules couvrant les notifications, le system tray, les
-  hotkeys globaux, la progression dans la barre des tâches, le dark mode, la couleur
-  d'accentuation, les menus dock, les jump lists, les contrôles média, l'auto-launch, le
-  scheduler, l'auto-update, les informations système et les file dialogs. Chacun est optionnel
-  et écrit en Kotlin.
-- **Deux runtimes** — GraalVM Native Image produit un binaire autonome (environ 40 Mo en
-  installateur NSIS avec compression maximale, démarrant en environ 0,2 s) ; JVM avec un cache
-  AOT tourne sur HotSpot pour les charges longues. Les métadonnées de reachability — pour vos
-  bibliothèques tierces aussi, pas seulement Nucleus — sont résolues automatiquement à la
-  compilation depuis un jeu curé, le repository Oracle et l'analyse statique du bytecode, si bien
-  que la plupart des images natives compilent sans configuration de reflection écrite à la main.
-  Une seule ligne Gradle permet de basculer entre les deux.
+- **Fenêtre décorée native** — un `DecoratedWindow` qui respecte les conventions de barre de titre
+  macOS/Windows/Linux, servi par le [backend Tao](/docs/concepts/backends).
+- **Modules runtime** — plus de 40 modules : notifications, system tray, hotkeys globaux, progression
+  barre des tâches, dark mode, couleur d'accentuation, menus dock, jump lists, contrôles média,
+  auto-launch, scheduler, auto-update, infos système et file dialogs. Chacun est optionnel et écrit
+  en Kotlin.
+- **Deux runtimes** — GraalVM Native Image produit un binaire autonome (environ 40 Mo en installateur
+  NSIS avec compression maximale, démarrant en environ 0,2 s) ; JVM avec cache AOT pour les charges
+  longues. Les métadonnées de reachability — y compris pour tes libs tierces — sont résolues
+  automatiquement à la compilation. Une ligne Gradle bascule entre les deux.
 - **18 formats d'empaquetage** — DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX/MSIX, DEB, RPM,
   AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR et 7Z, avec signature et notarisation.
-- **Prise en charge de la CI** — actions GitHub réutilisables, builds en matrice
-  multi-plateforme, binaires universels macOS et bundles MSIX.
-
-## Comparé à Tauri et Electron
-
-| | Tauri / Electron | Nucleus |
-|---|---|---|
-| **Stack de langages** | JavaScript + Rust + Swift + Kotlin/Java | Kotlin |
-| **Runtime UI** | Moteur de navigateur (Chromium / WebView) | Compose Multiplatform sur Skia GPU |
-| **Appels OS** | Pont IPC entre langages | Direct, dans le process |
-| **Intégration UI native** | Une web view dans une fenêtre | Fenêtre et widgets natifs via `NativeView` |
-| **Partage avec le mobile** | Bundle web | Le même module Kotlin qu'Android et iOS |
-
-Tauri utilise Rust avec un front end WebView en JavaScript, en communiquant par un pont IPC.
-Electron embarque un moteur de navigateur avec chaque application. Nucleus utilise Kotlin pour
-l'interface, la logique métier, les appels OS et l'empaquetage, dans un seul process.
+- **Prise en charge CI** — actions GitHub réutilisables, builds matriciels multi-plateforme, binaires
+  universels macOS et bundles MSIX.
 
 ## Et ensuite
 
-- [Architecture](/docs/concepts/architecture) — le modèle en couches, de votre application
-  jusqu'au JDK ou à GraalVM.
+- [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default) — le tableau de décision pour les équipes Kotlin.
+- [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose) — étapes drop-in.
 - [Quickstart](/docs/start/quickstart) — construire et lancer une fenêtre Tao.
-- [Runtimes](/docs/concepts/runtimes) — choisir entre GraalVM Native Image et JVM avec un cache
-  AOT.
+- [Architecture](/docs/concepts/architecture) — les couches, de ton app jusqu'à la JVM ou GraalVM.
