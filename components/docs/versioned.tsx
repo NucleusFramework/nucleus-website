@@ -11,7 +11,6 @@ import { i18n } from '@/lib/i18n';
 import { baseOptionsFor } from '@/app/layout.config';
 import { Version } from '@/components/docs/Version';
 import { VersionSwitcher } from '@/components/docs/VersionSwitcher';
-import { DocsLayoutWithNewBadges } from '@/components/docs/SidebarNew';
 
 interface Params {
   lang: string;
@@ -106,37 +105,20 @@ async function DocsLayoutForVersion({
   params: Promise<{ lang: string }>;
   children: ReactNode;
 }) {
-  const { source, baseUrl, latest } = getDocVersion(versionId);
+  const { source, baseUrl } = getDocVersion(versionId);
   const { lang } = await params;
   const tree =
     (source.pageTree as Record<string, unknown>)[lang] ??
     (source.pageTree as Record<string, unknown>)['en'] ??
     source.pageTree;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const treeProp = tree as any;
-  const switcher = (
-    <VersionSwitcher lang={lang} current={baseUrl} versions={switcherVersions(lang)} />
-  );
-  const base = baseOptionsFor(lang);
-
-  // Latest uses a client layout so sidebar "New" badges can use hooks; archives
-  // stay on the plain server DocsLayout with no badge components.
-  if (latest) {
-    return (
-      <DocsLayoutWithNewBadges
-        tree={treeProp}
-        i18n
-        lang={lang}
-        sidebarBanner={switcher}
-        {...base}
-      >
-        {children}
-      </DocsLayoutWithNewBadges>
-    );
-  }
-
   return (
-    <DocsLayout tree={treeProp} i18n sidebar={{ banner: switcher }} {...base}>
+    <DocsLayout
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tree={tree as any}
+      i18n
+      sidebar={{ banner: <VersionSwitcher lang={lang} current={baseUrl} versions={switcherVersions(lang)} /> }}
+      {...baseOptionsFor(lang)}
+    >
       {children}
     </DocsLayout>
   );
