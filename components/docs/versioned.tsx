@@ -11,6 +11,7 @@ import { i18n } from '@/lib/i18n';
 import { baseOptionsFor } from '@/app/layout.config';
 import { Version } from '@/components/docs/Version';
 import { VersionSwitcher } from '@/components/docs/VersionSwitcher';
+import { createNewSidebarComponents } from '@/components/docs/SidebarNew';
 
 interface Params {
   lang: string;
@@ -105,7 +106,7 @@ async function DocsLayoutForVersion({
   params: Promise<{ lang: string }>;
   children: ReactNode;
 }) {
-  const { source, baseUrl } = getDocVersion(versionId);
+  const { source, baseUrl, latest } = getDocVersion(versionId);
   const { lang } = await params;
   const tree =
     (source.pageTree as Record<string, unknown>)[lang] ??
@@ -116,7 +117,11 @@ async function DocsLayoutForVersion({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tree={tree as any}
       i18n
-      sidebar={{ banner: <VersionSwitcher lang={lang} current={baseUrl} versions={switcherVersions(lang)} /> }}
+      sidebar={{
+        banner: <VersionSwitcher lang={lang} current={baseUrl} versions={switcherVersions(lang)} />,
+        // "New" badges only on the live docs tree — archived lines stay unmarked.
+        ...(latest ? { components: createNewSidebarComponents(lang) } : {}),
+      }}
       {...baseOptionsFor(lang)}
     >
       {children}
