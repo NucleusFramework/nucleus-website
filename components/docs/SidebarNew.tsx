@@ -1,7 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import type * as PageTree from 'fumadocs-core/page-tree';
+import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import {
   SidebarFolder,
   SidebarFolderContent,
@@ -24,7 +25,7 @@ function withBadge(name: ReactNode, show: boolean, lang: string) {
   );
 }
 
-export function createNewSidebarComponents(lang: string) {
+function createNewSidebarComponents(lang: string) {
   return {
     Item({ item }: { item: PageTree.Item }) {
       return (
@@ -37,7 +38,6 @@ export function createNewSidebarComponents(lang: string) {
     Folder({
       item,
       children,
-      level,
     }: {
       item: PageTree.Folder;
       level: number;
@@ -45,10 +45,6 @@ export function createNewSidebarComponents(lang: string) {
     }) {
       const path = useTreePath();
       const defaultOpen = (item.defaultOpen ?? false) || path.includes(item);
-      // Fumadocs also opens folders when defaultOpenLevel >= level — keep that
-      // behaviour via the layout's defaultOpenLevel; we only force open when
-      // the folder is on the active path or marked defaultOpen.
-      void level;
       const showNew = isNewDocFolder(item.$id);
 
       return (
@@ -78,4 +74,32 @@ export function createNewSidebarComponents(lang: string) {
       );
     },
   };
+}
+
+type DocsLayoutProps = ComponentProps<typeof DocsLayout>;
+
+/**
+ * Client DocsLayout for the live (latest) docs tree — attaches "New" sidebar
+ * badges. Must stay a Client Component: sidebar item renderers use hooks.
+ */
+export function DocsLayoutWithNewBadges({
+  lang,
+  sidebarBanner,
+  sidebar,
+  ...props
+}: DocsLayoutProps & {
+  lang: string;
+  sidebarBanner?: ReactNode;
+}) {
+  const { banner: _ignored, components: _c, ...sidebarRest } = sidebar ?? {};
+  return (
+    <DocsLayout
+      {...props}
+      sidebar={{
+        ...sidebarRest,
+        banner: sidebarBanner ?? sidebar?.banner,
+        components: createNewSidebarComponents(lang),
+      }}
+    />
+  );
 }
