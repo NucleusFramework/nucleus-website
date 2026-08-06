@@ -2,7 +2,10 @@
 // Freezes the current `content/docs` (the latest, actively-maintained docs) into
 // an immutable, version-numbered snapshot so past releases stay browsable forever.
 //
-//   npm run snapshot-docs 2.0
+//   npm run snapshot-docs 2.2
+//
+// Run this BEFORE rewriting content/docs for a new minor/major. Full checklist:
+//   .docs-versioning.md
 //
 // It does two things:
 //   1. Copies content/docs -> content/versioned/<version>
@@ -10,8 +13,8 @@
 //
 // After running, wire the snapshot in two spots (the script prints the exact
 // lines): a `defineDocs` export in source.config.ts and a DOC_VERSIONS entry in
-// lib/source.ts. Everything else — routing, sidebar, the version switcher —
-// picks it up automatically.
+// lib/source.ts — and bump the latest label (e.g. "2.3 (latest)"). Everything
+// else (routing, sidebar switcher, sitemap) picks it up from DOC_VERSIONS.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -79,11 +82,20 @@ export function generateMetadata(props: { params: Promise<Params> }) {
 console.log(`[snapshot] scaffolded ${path.relative(root, routeDir)}/`);
 
 console.log(`
-[snapshot] Done. Two lines left to wire ${version}:
+[snapshot] Done. Finish wiring ${version} (see .docs-versioning.md):
 
   1. source.config.ts — add:
        export const ${collection} = defineDocs({ dir: 'content/versioned/${version}' });
 
-  2. lib/source.ts — add to DOC_VERSIONS (after 'latest'):
+  2. lib/source.ts — DOC_VERSIONS (newest first, latest stays index 0):
+       // bump the live line label, e.g. "2.3 (latest)"
+       version({ id: 'latest', label: '<next> (latest)', baseUrl: '/docs', collection: Source.docs, latest: true }),
        version({ id: '${version}', label: '${version}', baseUrl: '/docs/${version}', collection: Source.${collection} }),
+       // … keep older archives after that
+
+  3. npx fumadocs-mdx   # or npm run dev — regenerates .source/
+
+  4. Edit content/docs/ for the new line (changelog, features, …)
+
+  5. Smoke: switcher shows ${version} + latest; /docs/${version}/ serves the freeze
 `);

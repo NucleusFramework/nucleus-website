@@ -49,8 +49,8 @@ function version(opts: {
   };
 }
 
-// Newest first; `latest` must stay index 0. To archive a release run
-// `npm run snapshot-docs <version>` and add the printed entry here.
+// Newest first; `latest` must stay index 0.
+// Archive procedure: .docs-versioning.md — `npm run snapshot-docs <X.Y>` then wire here.
 export const DOC_VERSIONS: DocVersion[] = [
   version({ id: 'latest', label: '2.2 (latest)', baseUrl: '/docs', collection: Source.docs, latest: true }),
   version({ id: '2.1', label: '2.1', baseUrl: '/docs/2.1', collection: Source.docs_2_1 }),

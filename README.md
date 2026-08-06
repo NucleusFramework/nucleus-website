@@ -24,20 +24,43 @@ npm start          # serve production build
 app/
   [lang]/
     (landing)/     # marketing site
-    docs/          # Fumadocs docs
-content/docs/      # MDX content (EN + FR)
+    docs/          # Fumadocs docs (latest + /2.0 + /2.1 + …)
+content/docs/      # MDX content for latest (EN + FR)
+content/versioned/ # Frozen archives per minor line (2.0, 2.1, …)
 components/
   landing/         # landing page sections
+  docs/            # version switcher, shared docs layout
 lib/
-  source.ts        # Fumadocs source loader
+  source.ts        # DOC_VERSIONS + Fumadocs loaders
   i18n.ts          # EN/FR config
   site.ts          # site-wide metadata
+scripts/
+  snapshot-docs.mjs    # freeze latest → content/versioned/<X.Y>
+  fetch-versions.mjs   # lib/versions.json for snippet injection
 styles/            # landing CSS
 ```
 
 ## Adding a page
 
 Drop a `.mdx` file under `content/docs/<section>/`. Add its slug to the matching `meta.json`. Provide a French translation as `name.fr.mdx`.
+
+## Versioning the docs (2.0 / 2.1 / 2.2 / …)
+
+When Nucleus ships a **new minor or major** and you rewrite the live docs, **archive the previous line first**, then relabel latest.
+
+Full procedure (happy path, late recovery from git, checklist):
+
+→ **[`.docs-versioning.md`](.docs-versioning.md)**
+
+Short form when `content/docs/` is still the line to freeze:
+
+```bash
+npm run snapshot-docs 2.2          # copies content/docs → content/versioned/2.2 + scaffolds routes
+# then wire source.config.ts + lib/source.ts (script prints the exact lines)
+# bump latest label to "2.3 (latest)", write new docs under content/docs/
+```
+
+Do **not** snapshot for patch releases (2.1.9 → 2.1.10): keep editing latest.
 
 ## SEO
 
