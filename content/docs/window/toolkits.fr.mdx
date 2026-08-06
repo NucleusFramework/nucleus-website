@@ -1,39 +1,116 @@
 ---
-title: Quatre looks natifs
-description: Les modules de toolkit Nucleus restylent le même DecoratedWindow pour coller au langage de design de chaque bureau.
+title: Design systems natifs
+description: macOS 26, Fluent, Yaru, Jewel et Material restylent la même fenêtre Nucleus pour le langage de design de chaque bureau.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
-Nucleus dessine le chrome de la fenêtre — la barre de titre, les boutons de contrôle et les effets
-de bord — via des modules de toolkit. Chaque toolkit restyle le même `DecoratedWindow` pour un
-langage de design de bureau différent. Vous choisissez le look en ajoutant un module, pas en modifiant
-votre UI.
+Nucleus ouvre la fenêtre OS ; les design systems stylent le chrome et les widgets. macOS 26,
+Fluent et Yaru sont des bibliothèques Compose Multiplatform open-source séparées sur Maven
+Central, chacune avec une fenêtre décorée basée sur Nucleus pour le desktop. Jewel et Material
+restent dans le dépôt Nucleus.
 
 ## Les toolkits
 
-| Toolkit    | Natif sur      | Module                              | Statut        |
-|------------|----------------|-------------------------------------|---------------|
-| macOS 26   | macOS Tahoe    | `nucleus.decorated-window-macos26`  | Prochainement |
-| Fluent     | Windows 11     | `nucleus.decorated-window-fluent`   | Prochainement |
-| Yaru       | Ubuntu / GNOME | `nucleus.decorated-window-yaru`     | Prochainement |
-| Jewel      | Multiplateforme| `nucleus.decorated-window-jewel`    | Disponible    |
-| Material 2 | Repli          | `nucleus.decorated-window-material2`| Disponible    |
-| Material 3 | Repli          | `nucleus.decorated-window-material3`| Disponible    |
+| Toolkit | Natif sur | Artefacts / module | Statut |
+|---------|-----------|--------------------|--------|
+| [macOS 26](https://github.com/NucleusFramework/compose-macos-26-ui) | macOS Tahoe | `dev.nucleusframework:compose-macos-ui` | Disponible (v1.0.0) |
+| [Fluent](https://github.com/NucleusFramework/compose-fluent-ui) | Windows 11 | `dev.nucleusframework.composefluent:fluent` + `decorated-window-fluent` | Disponible (v1.0.0) |
+| [Yaru](https://github.com/NucleusFramework/yaru-compose-ui) | Ubuntu / GNOME | `dev.nucleusframework.yarucompose:yaru` + `yaru-decorated-window` | Disponible (v1.0.1) |
+| Jewel | Multiplateforme | `nucleus.decorated-window-jewel` | Disponible (avec Nucleus) |
+| Material 2 | Repli | `nucleus.decorated-window-material2` | Disponible (avec Nucleus) |
+| Material 3 | Repli | `nucleus.decorated-window-material3` | Disponible (avec Nucleus) |
 
-<Callout type="info">
-Les packs macOS, Fluent et Yaru arrivent prochainement et ne sont pas encore publiés. Les
-artifact ids ci-dessus sont provisoires et peuvent changer à la sortie. Jewel, Material 2 et
-Material 3 sont disponibles aujourd'hui.
-</Callout>
+Les trois dépôts de design system sont versionnés **indépendamment** de Nucleus. Épinglez-les
+séparément ; ils dépendent de Nucleus 2.2+ pour la fenêtre Tao sur desktop.
+
+Galeries live :
+
+- [compose-macos-26-ui](https://nucleusframework.github.io/compose-macos-26-ui/)
+- [compose-fluent-ui](https://nucleusframework.github.io/compose-fluent-ui/)
+- [yaru-compose-ui](https://nucleusframework.github.io/yaru-compose-ui/)
 
 ## Choisir un toolkit
 
-Ajoutez le module de toolkit à côté de `nucleus-application` et d'un backend, puis enveloppez votre
-contenu dans le `DecoratedWindow` du toolkit.
+<Tabs items={['macOS 26', 'Fluent', 'Yaru', 'Jewel', 'Material 3']}>
+<Tab value="macOS 26">
 
-<Tabs items={['Jewel', 'Material 3', 'Material 2']}>
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework")
+}
+dependencies {
+    implementation("dev.nucleusframework:compose-macos-ui:1.0.0")
+}
+```
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.macoscompose.window.MacosDecoratedWindow
+
+fun main() = nucleusApplication {
+    MacosDecoratedWindow(onCloseRequest = ::exitApplication, title = "Mail") {
+        // MacosTheme + composants à l'intérieur du contenu de la fenêtre
+        App()
+    }
+}
+```
+
+Voir [toolkit macOS 26](/docs/window/toolkit-macos) et le
+[README du dépôt](https://github.com/NucleusFramework/compose-macos-26-ui).
+
+</Tab>
+<Tab value="Fluent">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework.composefluent:fluent:1.0.0")
+    implementation("dev.nucleusframework.composefluent:decorated-window-fluent:1.0.0")
+}
+```
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.fluent.FluentDecoratedWindow
+import dev.nucleusframework.window.fluent.FluentTitleBar
+
+fun main() = nucleusApplication {
+    FluentDecoratedWindow(onCloseRequest = ::exitApplication, title = "Paramètres") {
+        FluentTitleBar { /* … */ }
+        App()
+    }
+}
+```
+
+Voir [toolkit Fluent](/docs/window/toolkit-fluent) et
+[compose-fluent-ui](https://github.com/NucleusFramework/compose-fluent-ui).
+
+</Tab>
+<Tab value="Yaru">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework.yarucompose:yaru-decorated-window:1.0.1")
+}
+```
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.yarucompose.window.YaruDecoratedWindow
+
+fun main() = nucleusApplication {
+    YaruDecoratedWindow(onCloseRequest = ::exitApplication, title = "Paramètres") {
+        // YaruTheme doit être dans le contenu de la fenêtre
+        App()
+    }
+}
+```
+
+Voir [toolkit Yaru](/docs/window/toolkit-yaru) et
+[yaru-compose-ui](https://github.com/NucleusFramework/yaru-compose-ui).
+
+</Tab>
 <Tab value="Jewel">
 
 ```kotlin title="build.gradle.kts"
@@ -50,7 +127,7 @@ import dev.nucleusframework.window.jewel.JewelDecoratedWindow
 import dev.nucleusframework.window.jewel.JewelTitleBar
 
 fun main() = nucleusApplication {
-    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
+    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Outils") {
         JewelTitleBar { state -> /* … */ }
         MyContent()
     }
@@ -82,68 +159,28 @@ fun main() = nucleusApplication {
 ```
 
 </Tab>
-<Tab value="Material 2">
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
-    implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
-}
-```
-
-```kotlin
-import dev.nucleusframework.application.nucleusApplication
-import dev.nucleusframework.window.material2.MaterialDecoratedWindow
-import dev.nucleusframework.window.material2.MaterialTitleBar
-
-fun main() = nucleusApplication {
-    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "App") {
-        MaterialTitleBar { state -> /* … */ }
-        MyContent()
-    }
-}
-```
-
-</Tab>
 </Tabs>
 
-Le module Material 3 se trouve dans le package `dev.nucleusframework.window.material`, pas
-`window.material3`. Pour changer de toolkit, remplacez la dépendance et l'`import`. Le contenu de la
-fenêtre reste identique.
+## Comment ça marche
 
-## Matrice de couverture
+macOS, Fluent et Yaru sont des **design systems complets** (widgets, thème, icônes) plus un
+module de fenêtre desktop optionnel qui enveloppe le `DecoratedWindow` / Tao de Nucleus. Jewel
+et Material dans ce dépôt sont uniquement des **adaptateurs de chrome** — vous choisissez
+toujours la bibliothèque de widgets.
 
-| Capacité                  | macOS 26       | Fluent         | Yaru            | Jewel           | Material 3      |
-|---------------------------|----------------|----------------|-----------------|-----------------|-----------------|
-| Look natif sur l'OS hôte  | macOS          | Windows        | Ubuntu          | N'importe (IDE) | N'importe       |
-| Translucidité / effets    | Liquid Glass   | Mica / Acrylic | libadwaita      | Suit le thème   | Tons de surface |
-| Boutons de barre de titre | Traffic lights | Min/Max/Close  | Headerbar GNOME | IntelliJ        | Material        |
-| Suit le mode sombre de l'OS | Oui          | Oui            | Oui             | Oui             | Oui             |
-| Backend                   | Tao            | Tao            | Tao             | Tao             | Tao             |
-
-## Fonctionnement
-
-Chaque module de toolkit enveloppe le même `DecoratedWindow` de `nucleus-application` et fournit
-ses propres `TitleBarStyle` et `DecoratedWindowStyle`. Les Composables de vos écrans ne changent
-pas ; seul le wrapper en haut de l'arbre change. Changer de toolkit ne touche donc que le chrome
-de la fenêtre : un build Fluent pour les captures d'écran et un build natif pour les utilisateurs
-partagent le même contenu.
-
-Les styles sont de simples data classes de `decorated-window-core`, dans le package
-`dev.nucleusframework.window.styling` : `TitleBarStyle` et `TitleBarColors`, `DecoratedWindowStyle`
-et `DecoratedWindowMetrics`. Chaque toolkit les dérive de sa propre source de vérité. Jewel expose
-`rememberJewelWindowStyle()` et `rememberJewelTitleBarStyle()` ; Material 3 expose
-`rememberMaterialWindowStyle(colorScheme)` et `rememberMaterialTitleBarStyle(colorScheme)`.
-Material 2 mappe ses `Colors` en interne.
+Sur desktop, placez le `Theme` du design system **à l'intérieur** du contenu de la fenêtre
+décorée pour que les surfaces natives (verre, caption, Mica) suivent le thème de l'app.
 
 <Callout type="info">
-Les toolkits stylent le chrome de la fenêtre. Les widgets à l'intérieur — boutons, listes, champs
-texte — restent à votre choix : Material 3, Jewel, ou votre propre design system.
+Pour une mise en page plein fenêtre sans pack de design system, utilisez
+[`WindowScaffold`](/docs/tao/window-scaffold) sur Tao.
 </Callout>
 
 ## Et ensuite
 
-- [Jewel pour le tooling](/docs/window/toolkit-jewel) — le toolkit de style IntelliJ.
-- [Material 2 / 3 (repli)](/docs/window/toolkit-material) — le défaut multiplateforme.
-- [Le backend Tao](/docs/tao) — le fenêtrage natif en Rust qui dessine le chrome.
+- [Toolkit macOS 26](/docs/window/toolkit-macos)
+- [Toolkit Fluent](/docs/window/toolkit-fluent)
+- [Toolkit Yaru](/docs/window/toolkit-yaru)
+- [Jewel pour les outils](/docs/window/toolkit-jewel)
+- [Material 2 / 3](/docs/window/toolkit-material)
+- [Scaffold de fenêtre](/docs/tao/window-scaffold)

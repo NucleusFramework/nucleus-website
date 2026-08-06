@@ -2,7 +2,7 @@ export const SITE = {
   name: 'Nucleus',
   title: 'Nucleus — the Kotlin framework for native desktop apps',
   description:
-    'Nucleus 2.0 — Built on Compose Multiplatform, GraalVM native image, and the Tao backend. Native on every OS, with the simplicity of Kotlin.',
+    'Nucleus 2.2 — Built on Compose Multiplatform, GraalVM native image, and the Tao backend. Native on every OS, with the simplicity of Kotlin.',
   url: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://nucleusframework.dev',
   ogImage: '/og.png',
   github: 'https://github.com/NucleusFramework/Nucleus',

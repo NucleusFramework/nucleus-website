@@ -5,7 +5,7 @@ import { isLang, type Lang } from '@/lib/landing-i18n';
 import { fetchGitHubStars } from '@/lib/site';
 
 export const metadata: Metadata = {
-  description: 'Nucleus 2.0 — Built on Compose Multiplatform, GraalVM native image, and the Tao backend.',
+  description: 'Nucleus 2.2 — Built on Compose Multiplatform, GraalVM native image, and the Tao backend.',
 };
 
 export function generateStaticParams() {

@@ -266,10 +266,10 @@ export const toolkitsT = {
     ),
   } as Bi,
   subtitle: {
-    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel, or cross-platform Material 3. Each toolkit ships with a matching DecoratedWindow. macOS, Yaru and Material 3 are made by Nucleus; Jewel is JetBrains\' official toolkit (the go-to for cross-platform IDE-like apps); Fluent comes from the open-source community.',
-    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel ou Material 3 multiplateforme. Chaque toolkit embarque un DecoratedWindow assorti. macOS, Yaru et Material 3 sont faits par Nucleus ; Jewel est le toolkit officiel de JetBrains (le choix naturel pour les apps de type IDE cross-platform) ; Fluent vient de la communauté open-source.',
+    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS 26 Liquid Glass, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel, or cross-platform Material 3. macOS, Fluent and Yaru ship as open-source design systems on Maven Central (with Nucleus-backed decorated windows); Jewel is JetBrains\' toolkit; Material 3 is the Nucleus fallback.',
+    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS 26 Liquid Glass, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel ou Material 3 multiplateforme. macOS, Fluent et Yaru sont des design systems open-source sur Maven Central (avec fenêtres décorées basées sur Nucleus) ; Jewel est le toolkit JetBrains ; Material 3 est le repli Nucleus.',
   } as Bi<string>,
-  isNew: { en: 'Coming soon', fr: 'Prochainement' } as Bi<string>,
+  isNew: { en: 'Available', fr: 'Disponible' } as Bi<string>,
   macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,
   fluentOs: { en: 'Windows 11', fr: 'Windows 11' } as Bi<string>,
   yaruStyle: { en: 'GTK · LibAdwaita', fr: 'GTK · LibAdwaita' } as Bi<string>,
@@ -553,5 +553,5 @@ export const footerT = {
     en: '© 2026 Nucleus Framework. MIT licensed.',
     fr: '© 2026 Nucleus Framework. Sous licence MIT.',
   } as Bi<string>,
-  version: { en: 'v2.0.0 · Tao backend preview', fr: 'v2.0.0 · backend Tao en preview' } as Bi<string>,
+  version: { en: 'v2.2.0 · Tao backend', fr: 'v2.2.0 · backend Tao' } as Bi<string>,
 };

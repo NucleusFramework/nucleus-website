@@ -11,14 +11,13 @@ interface ToolkitCardProps {
   style: string;
   os: string;
   module: string;
-  isNew?: boolean;
-  newLabel: string;
+  href?: string;
   children?: React.ReactNode;
   onHover: (id: string | null) => void;
   hovered: string | null;
 }
 
-function ToolkitCard({ id, name, style, os, module: mod, isNew, newLabel, children, onHover, hovered }: ToolkitCardProps) {
+function ToolkitCard({ id, name, style, os, module: mod, href, children, onHover, hovered }: ToolkitCardProps) {
   return (
     <div
       className={`tk-card tk-card-${id} ${hovered === id ? 'is-hovered' : ''} ${hovered && hovered !== id ? 'is-dimmed' : ''}`}
@@ -30,8 +29,13 @@ function ToolkitCard({ id, name, style, os, module: mod, isNew, newLabel, childr
       </div>
       <div className="tk-meta">
         <div className="tk-meta-line">
-          <span className="tk-meta-name">{name}</span>
-          {isNew && <span className="tk-meta-new">{newLabel}</span>}
+          {href ? (
+            <a className="tk-meta-name tk-meta-link" href={href} target="_blank" rel="noreferrer">
+              {name}
+            </a>
+          ) : (
+            <span className="tk-meta-name">{name}</span>
+          )}
         </div>
         <div className="tk-meta-style">{style}</div>
         <div className="tk-meta-bottom">
@@ -227,7 +231,6 @@ interface ToolkitsProps {
 
 export function Toolkits({ lang }: ToolkitsProps) {
   const [hovered, setHovered] = useState<string | null>(null);
-  const newLabel = pick(toolkitsT.isNew, lang);
 
   return (
     <section className="toolkits" id="toolkits">
@@ -244,9 +247,8 @@ export function Toolkits({ lang }: ToolkitsProps) {
             name="macOS 26"
             style="Liquid Glass"
             os={pick(toolkitsT.macOsName, lang)}
-            module="decorated-window-macos26"
-            isNew
-            newLabel={newLabel}
+            module="compose-macos-ui"
+            href="https://github.com/NucleusFramework/compose-macos-26-ui"
             onHover={setHovered}
             hovered={hovered}
           >
@@ -258,9 +260,8 @@ export function Toolkits({ lang }: ToolkitsProps) {
             name="Fluent"
             style="Mica · Acrylic"
             os={pick(toolkitsT.fluentOs, lang)}
-            module="decorated-window-fluent"
-            isNew
-            newLabel={newLabel}
+            module="composefluent"
+            href="https://github.com/NucleusFramework/compose-fluent-ui"
             onHover={setHovered}
             hovered={hovered}
           >
@@ -272,9 +273,8 @@ export function Toolkits({ lang }: ToolkitsProps) {
             name="Yaru"
             style={pick(toolkitsT.yaruStyle, lang)}
             os={pick(toolkitsT.yaruOs, lang)}
-            module="decorated-window-yaru"
-            isNew
-            newLabel={newLabel}
+            module="yarucompose"
+            href="https://github.com/NucleusFramework/yaru-compose-ui"
             onHover={setHovered}
             hovered={hovered}
           >
@@ -287,7 +287,6 @@ export function Toolkits({ lang }: ToolkitsProps) {
             style={pick(toolkitsT.jewelStyle, lang)}
             os={pick(toolkitsT.jewelOs, lang)}
             module="decorated-window-jewel"
-            newLabel={newLabel}
             onHover={setHovered}
             hovered={hovered}
           >
@@ -300,7 +299,6 @@ export function Toolkits({ lang }: ToolkitsProps) {
             style={pick(toolkitsT.m3Style, lang)}
             os={pick(toolkitsT.m3Os, lang)}
             module="decorated-window-material3"
-            newLabel={newLabel}
             onHover={setHovered}
             hovered={hovered}
           >
@@ -308,6 +306,7 @@ export function Toolkits({ lang }: ToolkitsProps) {
           </ToolkitCard>
         </div>
 
+        <p className="tk-footnote">{pick(toolkitsT.footnote, lang)}</p>
       </div>
     </section>
   );
