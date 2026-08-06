@@ -1,0 +1,112 @@
+---
+title: Résolution automatique de la metadata
+description: Comment Nucleus résout et fusionne la metadata de reachability GraalVM au build pour que les images natives compilent sans configuration écrite à la main.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus résout et fusionne la metadata de reachability GraalVM au moment du build, pour que
+`packageGraalvmNative` produise un binaire natif fonctionnel sans que vous écriviez à la main la
+moindre configuration de réflexion, de ressources ou de JNI. La metadata provient de cinq
+sources. Chacune est générée dans son propre répertoire et passée à `native-image`, et la
+metadata embarquée par le module est découverte depuis le classpath.
+
+## Niveau 1 — metadata par bibliothèque
+
+Le plugin embarque 28 fichiers de metadata curés pour l'écosystème Kotlin desktop, couvrant
+Compose, Skiko, ktor, kotlinx.serialization, SQLite JDBC, Coil, JNA, FileKit, SLF4J, Sentry et
+d'autres. Chaque fichier peut déclarer une condition `matchPackages`. La tâche
+`filterGraalvmLibraryMetadata` lit ces fichiers depuis le JAR du plugin et n'inclut un fichier
+que si les packages correspondants sont présents sur le classpath runtime ; les fichiers sans
+condition sont toujours inclus. Les bibliothèques de l'ensemble curé sont couvertes sans
+configuration supplémentaire.
+
+## Niveau 2 — Reachability Metadata Repository GraalVM
+
+La tâche `resolveGraalvmReachabilityMetadata` résout les entrées du
+[Reachability Metadata Repository GraalVM d'Oracle](https://github.com/oracle/graalvm-reachability-metadata)
+pour chaque dépendance de votre classpath runtime. La résolution est activée par défaut et
+utilise la version `0.10.6` du dépôt.
+
+<Callout type="info">
+Configurez cette source avec le bloc `metadataRepository { }` : `enabled`, `version`,
+`excludedModules` et `moduleToConfigVersion`. Voir
+[Configuration](/docs/performance/graalvm/configuration).
+</Callout>
+
+## Niveau 3 — metadata spécifique à la plateforme
+
+La tâche `generateGraalvmPlatformMetadata` écrit la metadata de réflexion pour le système
+d'exploitation courant : `sun.awt.windows.*` sous Windows, `sun.lwawt.macosx.*` sous macOS et
+`sun.awt.X11.*` sous Linux, avec les pipelines Java2D, les gestionnaires de polices et les
+security providers. Elle injecte aussi une entrée de réflexion pour votre classe `main`. Aucune
+configuration par plateforme n'est nécessaire dans votre build script.
+
+## Niveau 4 — analyse statique du bytecode
+
+La tâche `analyzeGraalvmStaticMetadata` scanne chaque classe compilée du classpath runtime, y
+compris les classes de votre propre module, et détecte :
+
+- Les méthodes natives et leurs types de paramètres et de retour (metadata JNI).
+- Les appels `Class.forName()` et `MethodHandles.Lookup.findClass()` avec un nom de classe
+  littéral (metadata de réflexion).
+- Les appels `getResource()` et `getResourceAsStream()` avec un chemin littéral (metadata de
+  ressources).
+- Les paramètres de callback JNI — les classes passées au code natif qui rappelle Java.
+- Les chaînes de superclasses JNI — les classes parentes nécessaires à l'accès aux champs
+  depuis le code natif.
+- Les classes `@Serializable` — émet l'entrée de réflexion `Companion.serializer()`.
+
+## Niveau 5 — metadata embarquée par le runtime
+
+Le module `nucleus.graalvm-runtime` embarque de la metadata GraalVM dans son JAR :
+
+- Un `reachability-metadata.json` avec des entrées de sérialisation.
+- Un `native-image.properties` qui enregistre des patterns de ressources (`.svg`, `.ttf`,
+  `.otf`, `nucleus/.*`, `META-INF/services/.*` et `composeResources/.*`).
+- Des substitutions SVM pour les gestionnaires de polices AWT, l'écran de démarrage et la
+  classe de fenêtre X11.
+
+`native-image` découvre tout cela depuis le classpath, donc aucune configuration n'est requise.
+
+## Fusion des sources
+
+`packageGraalvmNative` lance les tâches de génération puis passe chaque répertoire produit à
+`native-image` via des arguments `-H:ConfigurationFileDirectories=` répétés — la sortie par
+bibliothèque (niveau 1), les répertoires résolus du dépôt (niveau 2), la metadata de plateforme
+(niveau 3) et la sortie de l'analyse statique (niveau 4). Les éventuelles entrées manuelles de
+votre propre répertoire de config sont incluses également. Le niveau 5 est lu depuis le classpath
+par `native-image` lui-même. La plupart des apps compilent en binaire natif sans aucune metadata
+écrite à la main.
+
+## Combler les manques avec l'agent de tracing
+
+Les sources statiques peuvent rater la réflexion pilotée par des valeurs runtime, les classes
+chargées dynamiquement ou les patterns de bibliothèques inhabituels. Lancez l'agent une fois
+avant une release pour les capturer :
+
+```shell
+./gradlew runWithNativeAgent
+```
+
+Parcourez chaque écran et chaque fonctionnalité. L'agent enregistre les accès de réflexion, JNI,
+ressources et proxies dans un répertoire temporaire et les fusionne dans votre config sans écraser
+les entrées existantes. La plupart du temps, il ne trouve rien de nouveau.
+
+## Nettoyer les entrées manuelles
+
+Si vous avez accumulé des entrées manuelles que les sources automatiques couvrent désormais, retirez
+celles qui sont redondantes :
+
+```shell
+./gradlew cleanupGraalvmMetadata
+```
+
+La tâche compare votre `reachability-metadata.json` manuel à la baseline combinée des niveaux 1 à
+4 et retire tout ce qui est déjà géré, en indiquant quelles entrées ont été retirées et
+lesquelles restent.
+
+## Et ensuite
+
+- [Accès natif](/docs/performance/native-access) — patterns de ressources et substitutions de polices au-dessus de ce système de metadata.
+- [Tâches & CI](/docs/performance/graalvm/tasks-ci) — le graphe complet des tâches GraalVM.

@@ -1,0 +1,133 @@
+---
+title: macOS 26 — Liquid Glass
+description: Style a Nucleus DecoratedWindow for macOS 26 (Tahoe) with the modern window treatment, rounded content corners, and native traffic lights.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+On macOS 26 ("Tahoe"), the system draws windows with a modern treatment: an attached
+`NSToolbar`, a larger content corner radius, and the translucent material Apple calls
+Liquid Glass. The Nucleus macOS toolkit opts a `DecoratedWindow` into that treatment on
+top of the Tao backend and `decorated-window-core`, and falls back to the classic chrome
+on older releases.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-core:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-macos26:<version>") [FORWARD-LOOKING: not yet published]
+}
+```
+
+<Callout type="info">
+The dedicated `decorated-window-macos26` style pack is coming soon and has no artifact yet.
+Until it ships, get the macOS 26 treatment through the Tao backend and style the title bar
+with `decorated-window-core`, as shown below.
+</Callout>
+
+## Style a window for macOS 26
+
+The recommended, backend-agnostic way to opt into the rounded content geometry is
+`Modifier.macOSLargeCornerRadius()` on the `TitleBar`. Make the title bar background
+transparent so the system material shows through:
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.NucleusDecoratedWindowTheme
+import dev.nucleusframework.window.TitleBar
+import dev.nucleusframework.window.macOSLargeCornerRadius
+import dev.nucleusframework.window.styling.TitleBarColors
+import dev.nucleusframework.window.styling.TitleBarMetrics
+import dev.nucleusframework.window.styling.TitleBarStyle
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color.Transparent,        // let the system material show through
+            inactiveBackground = Color.Transparent,
+            content = Color(0xFFE6E6E6),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 38.dp),
+    )
+
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+    ) {
+        NucleusDecoratedWindowTheme(isDark = true, titleBarStyle = titleBarStyle) {
+            TitleBar(modifier = Modifier.macOSLargeCornerRadius()) {
+                Text("MyApp")
+            }
+            Box(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+## How it works
+
+`Modifier.macOSLargeCornerRadius()` rounds the content under the title bar to match the
+geometry the system applies on macOS 26. It works the same across backends, which is why it
+is the preferred entry point. The traffic-light buttons — close, minimize, fullscreen — are
+drawn by AppKit; you do not render them yourself, and `TitleBar` reserves the native inset on
+the left for them.
+
+The imperative counterpart is the `MacOSStyle` enum, a construction-time parameter of the Tao
+backend's `DecoratedWindow`. It defaults to `MacOSStyle.Classic`. `MacOSStyle.Auto` selects the
+modern treatment on macOS 26+ and the classic chrome elsewhere; `MacOSStyle.Modern` forces the
+modern treatment regardless of the OS version.
+
+Liquid Glass itself is a Cocoa-level material the OS applies only when the launcher binary
+advertises the macOS 26 SDK in its Mach-O load commands. The Nucleus Gradle plugin patches
+this at packaging time from the `macOsSdkVersion` distribution setting (default `"26.0"`).
+
+## API reference
+
+### Round the content corners
+
+`fun Modifier.macOSLargeCornerRadius(enabled: Boolean = true): Modifier` — rounds the content
+under the title bar to the macOS 26 geometry. Apply it to the `TitleBar` modifier.
+
+### Relayout controls in fullscreen
+
+`fun Modifier.newFullscreenControls(newControls: Boolean = true): Modifier` — relayouts the
+title bar controls when the window enters fullscreen.
+
+### Select the window treatment
+
+`enum class MacOSStyle { Auto, Classic, Modern }` — passed as the `macOSStyle` parameter of the
+Tao backend's `DecoratedWindow` (default `MacOSStyle.Classic`).
+
+### Style the title bar
+
+- `TitleBarStyle(colors, metrics)` — the title bar style provided through `NucleusDecoratedWindowTheme`.
+- `TitleBarColors(background, inactiveBackground, content, border, …)` — set `background` to
+  `Color.Transparent` to let the system material show through.
+- `TitleBarMetrics(height, …)` — title bar height and related dimensions.
+
+## Notes
+
+<Callout type="warn">
+The Liquid Glass material requires macOS 26 at runtime **and** a launcher that advertises SDK 26.
+The Nucleus Gradle plugin sets `macOsSdkVersion = "26.0"` in the macOS distribution by default.
+On older macOS versions, the window falls back to the classic chrome.
+</Callout>
+
+## What's next
+
+- [Toolkits overview](/docs/window/toolkits) — how the window toolkits fit together.
+- [Backends](/docs/concepts/backends) — Tao and the deprecated AWT backend.
+- [Package for macOS](/docs/packaging/macos) — signing, notarization, and the SDK version setting.
+- [Jewel toolkit](/docs/window/toolkit-jewel) — the IntelliJ-styled window toolkit.

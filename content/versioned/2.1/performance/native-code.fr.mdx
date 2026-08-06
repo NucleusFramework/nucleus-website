@@ -1,0 +1,132 @@
+---
+title: Du code natif en Kotlin
+description: Écrivez le côté natif en Kotlin/Native et appelez-le depuis la JVM comme une simple API Kotlin. NucleusNativeAccess génère le bridge FFM, les proxies JVM et la metadata GraalVM pour vous.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Quand une API plateforme n'a aucun module runtime Nucleus (CoreGraphics, IOKit, Win32, GTK4, une bibliothèque C du système), vous écrivez ce côté-là en Kotlin/Native et vous l'appelez depuis la JVM comme une dépendance Kotlin normale. NucleusNativeAccess parse votre API `nativeMain`, génère le bridge C et les classes proxy JVM par-dessus la Foreign Function & Memory API (FFM), et embarque les bibliothèques partagées compilées dans votre JAR — pas de JNI écrit à la main, pas de boilerplate C.
+
+<Callout type="info" title="Dépôt séparé — versionné indépendamment">
+L'accès natif est livré depuis [`NucleusFramework/NucleusNativeAccess`](https://github.com/NucleusFramework/NucleusNativeAccess) avec son propre cycle de release, comme le [system tray](/docs/os/system-tray) et le [lecteur PDF](/docs/pdf). C'est un plugin Gradle, `dev.nucleusframework.nna`, versionné indépendamment de Nucleus et sous licence MIT.
+<Version module="nna" />
+</Callout>
+
+## Ajouter le plugin
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("multiplatform") version "2.3.20"
+    id("dev.nucleusframework.nna") version "<version>"
+}
+
+kotlin {
+    jvmToolchain(25) // FFM est stable depuis le JDK 22 ; 25 recommandé
+    jvm()
+    linuxX64()
+    // macosArm64()
+    // mingwX64()
+}
+
+kotlinNativeExport {
+    nativeLibName = "mylib" // produit libmylib.so / .dylib / .dll
+    buildType = "release"   // "release" (défaut) ou "debug"
+}
+```
+
+Le plugin cible `linuxX64()`, `macosArm64()` et `mingwX64()`. Le côté JVM exige le JDK 22+ (FFM finalisée par le JEP 454) et `--enable-native-access=ALL-UNNAMED` au runtime, câblé automatiquement pour les tests.
+
+## Écrivez une fois, appelez des deux côtés
+
+Écrivez la classe native dans `nativeMain`. Seule l'API publique est exportée :
+
+```kotlin title="src/nativeMain/kotlin/com/example/Calculator.kt"
+package com.example
+
+class Calculator(initial: Int = 0) {
+    private var acc = initial
+
+    fun add(value: Int): Int { acc += value; return acc }
+    fun subtract(value: Int): Int { acc -= value; return acc }
+    val current: Int get() = acc
+    fun describe(): String = "Calculator(current=$acc)"
+}
+```
+
+Appelez-la depuis `jvmMain` comme un objet Kotlin ordinaire. Le proxy est `AutoCloseable` ; le fermer libère l'objet natif :
+
+```kotlin title="src/jvmMain/kotlin/com/example/Main.kt"
+package com.example
+
+fun main() {
+    Calculator(0).use { calc -> // alloue l'objet natif
+        calc.add(5)             // downcall FFM vers le natif
+        calc.add(3)
+        println(calc.current)   // 8
+        println(calc.describe()) // "Calculator(current=8)"
+    }                           // libère l'objet natif
+}
+```
+
+## Comment ça marche
+
+Le plugin exécute un pipeline au moment du build sur vos sources natives :
+
+1. Parse l'API publique de `nativeMain` avec le PSI Kotlin.
+2. Génère des fonctions bridge `@CName` côté natif, en suivant la durée de vie des objets avec `StableRef`.
+3. Génère des classes proxy JVM qui traversent la frontière via des downcalls FFM `MethodHandle`.
+4. Compile en bibliothèque partagée (`.so` / `.dylib` / `.dll`) et l'embarque sous `kne/native/{os}-{arch}/` dans le JAR.
+5. Émet la metadata de reachability GraalVM pour les proxies générés.
+
+Au runtime, la JVM charge la bibliothèque via une stratégie à trois niveaux — d'abord `java.library.path`, puis extraction du JAR vers `~/.cache/kne/`, puis le lookup du loader native-image de GraalVM. Les objets natifs sont libérés à la fermeture du proxy, et tout handle fuité est nettoyé via un `Cleaner`.
+
+## Ce qui traverse la frontière
+
+Le bridge gère bien plus que les primitives :
+
+| Catégorie | Support |
+| --------- | ------- |
+| Primitives | `Int`, `Long`, `Double`, `Float`, `Boolean`, `Byte`, `Short` — direct, sans conversion |
+| `String` | UTF-8, buffers null-terminés dans les deux sens |
+| Collections | `List`, `Set`, `Map` (encodage pointeur + count), nullable via un count sentinelle `-1` |
+| Data classes & enums | Décomposition des champs par valeur ; enums mappés par ordinal |
+| Nullabilité | Basée sur des sentinelles (ex. `Long.MIN_VALUE` pour un `Long?` null) |
+| Objets | Handles opaques via `StableRef`, nettoyés au GC par un `Cleaner` |
+| `suspend fun` | Mappée vers une `suspend fun` JVM, annulation bidirectionnelle |
+| `Flow<T>` | `channelFlow` par-dessus des callbacks `onNext`/`onError`/`onComplete`, auto-annulé à l'arrêt de la collecte |
+| Callbacks / lambdas | `(T) -> R` traversent via des upcall stubs FFM |
+| Exceptions | Propagées en `KotlinNativeException` côté JVM |
+
+Classes, héritage, interfaces, classes scellées, companion objects, constructeurs avec paramètres par défaut et fonctions d'extension passent tous la frontière. Non supporté : les génériques, les types de *retour* interface ou scellés (retourne des types concrets), la surcharge d'opérateurs, les fonctions infix, `ByteArray` dans des collections, et le sous-classement d'un type natif depuis la JVM.
+
+## Envelopper une bibliothèque C
+
+Comme le côté natif est du Kotlin/Native, vous pouvez tirer une bibliothèque C avec `cinterop` et l'exposer à la JVM via le même bridge généré — c'est ainsi que vous atteignez CoreGraphics, Win32, GTK4, ou n'importe quelle bibliothèque système depuis du code JVM :
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    linuxX64().compilations["main"].cinterops {
+        val libnotify by creating {
+            defFile(project.file("src/nativeInterop/cinterop/libnotify.def"))
+        }
+    }
+}
+```
+
+Écrivez un fin wrapper Kotlin/Native par-dessus les bindings C dans `nativeMain`, et le plugin l'exporte vers la JVM comme n'importe quelle autre classe native.
+
+## GraalVM
+
+Le plugin écrit la metadata de reachability sous `META-INF/native-image/kne/{libName}/` :
+
+- `reflect-config.json` — les classes proxy générées et leurs constructeurs.
+- `resource-config.json` — les bibliothèques natives embarquées sous `kne/native/…`.
+- `reachability-metadata.json` — les descripteurs de downcall et d'upcall FFM, plus réflexion et ressources.
+
+Le pipeline GraalVM de Nucleus les récupère comme une source de metadata de plus (voir [accès natif](/docs/performance/native-access)), si bien que `./gradlew packageGraalvmNative` lie la bibliothèque partagée et ses descripteurs sans aucun JSON écrit à la main.
+
+## Et ensuite
+
+- [Accès natif](/docs/performance/native-access) — comment Nucleus assemble la metadata de reachability, y compris les descripteurs que ce plugin émet.
+- [System tray](/docs/os/system-tray) — un autre composant Nucleus livré depuis son propre dépôt.
+- [Lecteur PDF](/docs/pdf) — une seule API PDF sur Android, iOS, web et desktop.

@@ -1,0 +1,127 @@
+---
+title: Quickstart
+description: Build and run your first Nucleus desktop app, then package it as a native installer.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+In this tutorial, you'll create a Nucleus desktop app from scratch, run it as a native
+Tao window, and package it into an installer for your current operating system. The whole
+app is two files: a Gradle build script and a Kotlin `main` function.
+
+## Before you start
+
+Nucleus builds on Compose Multiplatform and requires:
+
+- **JDK 17 or later** on your `PATH`.
+- **Kotlin 2.0 or later** and **Gradle 8.x**.
+
+## Create the build script
+
+In an empty project directory, create `build.gradle.kts` and apply the Nucleus plugin:
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("jvm") version "2.4.0"
+    id("org.jetbrains.compose") version "1.11.1"
+    id("dev.nucleusframework") version "<version>"
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+    // The entry-point module — provides nucleusApplication and DecoratedWindow
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    // Enable the Tao backend (Rust-native windowing)
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+    }
+}
+```
+
+Already have a Compose Desktop app? Nucleus extends `org.jetbrains.compose`, so switching is a
+rename — drop the vanilla `compose.desktop.application { }` block and point it at Nucleus:
+
+```diff
+-compose.desktop.application {
++nucleus.application {
+     mainClass = "com.example.MainKt"
+     // nativeDistributions { ... } stays the same
+ }
+```
+
+The entry point in `main` follows the same swap: `application { Window(...) }` becomes
+`nucleusApplication { DecoratedWindow(...) }`. See [Migrating from Compose Desktop](/docs/migrate/from-jb-compose).
+
+## Write the application
+
+Create `src/main/kotlin/com/example/Main.kt`:
+
+```kotlin
+package com.example
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.Text
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Text("Hello from Nucleus")
+        }
+    }
+}
+```
+
+The `nucleusApplication` entry point starts the Nucleus runtime and opens a `DecoratedWindow` —
+a Compose window with a native title bar.
+
+<Callout type="info">
+`NucleusBackend.Auto` (the default) picks Tao when `decorated-window-tao` is on the classpath,
+and falls back to the deprecated AWT backend otherwise. Force a backend with `NucleusBackend.Tao`.
+See [Backends](/docs/concepts/backends).
+</Callout>
+
+## Run the app
+
+```shell
+./gradlew run
+```
+
+A native window opens with a custom title bar — drawn by Tao on Linux and Windows, and by
+the system on macOS.
+
+## Package the app
+
+```shell
+./gradlew packageDistributionForCurrentOS
+```
+
+The installer is written to `build/compose/binaries/main/<format>/`: a `.dmg` on macOS, an
+`.msi` on Windows, and a `.deb` on Linux. Add formats by extending `targetFormats(...)`.
+See [Configuration](/docs/start/configuration).
+
+## What's next
+
+- [Project setup](/docs/start/project-setup) — multi-module layout, Gradle properties, and JDK config.
+- [Configuration](/docs/start/configuration) — the full `nucleus { }` DSL.
+- [Architecture](/docs/concepts/architecture) — what runs under your `main` function.

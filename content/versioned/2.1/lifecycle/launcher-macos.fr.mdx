@@ -1,0 +1,120 @@
+---
+title: Launcher (macOS)
+description: Remplissez le menu clic droit du Dock d'une app macOS avec des items, des sous-menus et des séparateurs, et gérez les clics depuis Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`launcher-macos` vous permet de remplir le menu clic droit du Dock d'une app macOS depuis Kotlin.
+Vous définissez les entrées du menu — sous-menus, séparateurs et items désactivés compris — et vous
+recevez un callback sur l'EDT Swing lorsque l'utilisateur clique sur l'une d'elles.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-macos:<version>")
+}
+```
+
+## Remplir le menu du Dock
+
+Appelez `MacOsDockMenu.setDockMenu(...)` avec les items à afficher, puis définissez un `listener`
+pour gérer les clics. Chaque item porte un `id` numérique que le listener reçoit.
+
+```kotlin
+import dev.nucleusframework.launcher.macos.DockMenuItem
+import dev.nucleusframework.launcher.macos.DockMenuListener
+import dev.nucleusframework.launcher.macos.MacOsDockMenu
+
+MacOsDockMenu.setDockMenu(listOf(
+    DockMenuItem(id = 1, title = "Nouvelle fenêtre"),
+    DockMenuItem(id = 2, title = "Ouvrir un fichier..."),
+    DockMenuItem.separator(id = 3),
+    DockMenuItem(
+        id = 4,
+        title = "Récents",
+        children = listOf(
+            DockMenuItem(id = 41, title = "project.kt"),
+            DockMenuItem(id = 42, title = "build.gradle.kts"),
+        ),
+    ),
+    DockMenuItem(id = 5, title = "Préférences"),
+))
+
+MacOsDockMenu.listener = DockMenuListener { id ->
+    when (id) {
+        1 -> openNewWindow()
+        2 -> openFile()
+        in 40..49 -> openRecent(id)
+        5 -> showPreferences()
+    }
+}
+```
+
+Appelez `MacOsDockMenu.clearDockMenu()` pour retirer le menu et restaurer le comportement par
+défaut du Dock.
+
+<Callout type="info">
+Toutes les méthodes sont sans effet hors macOS et lorsque la bibliothèque native ne se charge
+pas. Vérifiez `MacOsDockMenu.isAvailable` avant de construire le menu.
+</Callout>
+
+## Fonctionnement
+
+Le premier appel à `setDockMenu(...)` installe un method swizzle sur le `NSApplicationDelegate`
+actif pour intercepter `applicationDockMenu:`. À partir de là, AppKit demande le menu à Nucleus
+à chaque clic droit (ou Ctrl-clic) sur la tuile du Dock.
+
+Les callbacks de clic sont livrés sur l'EDT Swing : vous pouvez donc muter l'état Compose
+directement depuis le listener, sans passer par un autre thread.
+
+macOS retire les images des items de menu du Dock. Seuls le texte, les séparateurs, les
+sous-menus et l'état activé/désactivé sont rendus — c'est le process du Dock qui dessine, pas
+votre app.
+
+Pour glisser des fichiers sur l'icône du Dock, AWT expose déjà `Desktop.setOpenFileHandler`
+(et `Desktop.setOpenURIHandler` pour les deep links). `launcher-macos` ne duplique pas ça.
+
+## Référence de l'API
+
+### `MacOsDockMenu`
+
+Le point d'entrée. Un objet unique avec un seul listener global.
+
+| Membre | Notes |
+|---|---|
+| `isAvailable: Boolean` | `false` hors macOS ou si la bibliothèque native n'a pas chargé. |
+| `listener: DockMenuListener?` | Un listener global ; fais le dispatch par `id` à l'intérieur. |
+| `setDockMenu(items: List<DockMenuItem>)` | Remplace le menu. Installe le swizzle au premier appel. |
+| `clearDockMenu()` | Retire le menu ; l'OS reprend la main. |
+
+### `DockMenuItem`
+
+Une `data class` qui décrit une entrée.
+
+| Propriété | Défaut | Notes |
+|---|---|---|
+| `id: Int` | requis, `> 0` | Identifiant transmis au listener. |
+| `title: String` | `""` | Texte affiché. |
+| `enabled: Boolean` | `true` | Item cliquable ou non. |
+| `children: List<DockMenuItem>` | `emptyList()` | Une liste non vide transforme l'item en sous-menu. |
+
+`DockMenuItem.separator(id)` construit une entrée séparateur.
+
+### `DockMenuListener`
+
+Une `fun interface` avec une seule méthode, `onItemClicked(itemId: Int)`, invoquée sur l'EDT Swing.
+
+## Notes
+
+- Testez sur un build packagé ou `runDistributable`. L'icône `java` affichée par `./gradlew run`
+  n'a pas de bundle identifier et n'affichera pas le menu correctement.
+- ProGuard / GraalVM : gardez `dev.nucleusframework.launcher.macos.NativeMacOsDockMenuBridge`
+  accessible. Le module embarque les metadata.
+
+## Et ensuite
+
+- [Taskbar progress](/docs/lifecycle/taskbar-progress) — badge, rebond et état de progression du Dock.
+- [Deep links](/docs/lifecycle/deep-links) — gérer les événements d'URL via `Desktop.setOpenURIHandler`.
+- [Launcher (Windows)](/docs/lifecycle/launcher-windows) — jump lists et barres d'outils de vignettes.

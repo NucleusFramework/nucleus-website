@@ -1,0 +1,260 @@
+---
+title: Configuration
+description: Reference for the graalvm { } DSL block that configures GraalVM native-image builds, including toolchain, image name, build arguments, metadata repository, and per-OS settings.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The `graalvm { }` block inside `nucleus.application { }` configures GraalVM native-image
+builds: the toolchain, the output binary, the arguments passed to `native-image`, the
+reachability metadata, and the macOS and Windows settings. Every property is lazy and
+`Property`-typed. The block is defined on `JvmApplication`, so it sits alongside `mainClass`
+and `nativeDistributions`.
+
+## Enable a native image
+
+Set `isEnabled = true`. Nucleus provisions the toolchain for you — a minimal configuration
+looks like this:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    graalvm {
+        isEnabled = true
+        imageName = "myapp"
+
+        // Optional: optimize the image for size instead of the default -O2.
+        optimization = NativeImageOptimization.SIZE
+
+        metadataRepository {
+            enabled = true           // default
+            version = "1.1.4"        // default
+            excludedModules.add("com.example:my-lib")
+        }
+    }
+}
+```
+
+<Callout type="info" title="New in 2.1">
+The toolchain is downloaded automatically (see below) and defaults to GraalVM Community
+Edition, `march` and `optimization` are now type-safe enums, and Profile-Guided Optimization is
+built in. In 2.0 you installed a GraalVM toolchain yourself and passed size flags through
+`buildArgs`.
+</Callout>
+
+## Provision the toolchain
+
+By default Nucleus downloads and caches **GraalVM Community Edition** under
+`<gradle-user-home>/nucleus/graalvm` — no local install and no `graalvm/setup-graalvm` step
+needed. The download happens only when a native-image task actually runs: listing tasks or
+syncing the IDE never pulls a JDK. A `GRAALVM_HOME` environment variable takes precedence,
+provided it matches the requested distribution. The `toolchain { }` sub-block maps to
+`GraalvmToolchainSettings`.
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    toolchain {
+        autoDownload = true                              // default
+        distribution = GraalvmDistribution.COMMUNITY     // default
+        channel = GraalvmChannel.INNOVATION              // default; LTS for the long-term-support line
+        // version = "25"                                // optional; overrides channel
+    }
+}
+```
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `autoDownload` | `Property<Boolean>` | `true` | Set `false` to resolve via Gradle's toolchain machinery (`javaLanguageVersion` / `jvmVendor`) instead. |
+| `distribution` | `Property<GraalvmDistribution>` | `COMMUNITY` | `COMMUNITY` (GraalVM CE) or `ORACLE` (Oracle GraalVM). See the licensing note below. |
+| `channel` | `Property<GraalvmChannel>` | `INNOVATION` | `INNOVATION` (latest release) or `LTS`. Used only when `version` is unset. Applies to both distributions. |
+| `version` | `Property<String>` | unset | Overrides `channel`. Accepts `"25i1"`, `"25"`, or a pinned `"25.0.1"`. |
+| `macosIntelFallback` | `Property<Boolean>` | `true` | On Intel Macs (dropped by both distributions after 25.0.1), fall back to BellSoft Liberica NIK. |
+| `installDir` | `DirectoryProperty` | `<gradle-user-home>/nucleus/graalvm` | Cache location for the downloaded toolchain. |
+
+### Choose a distribution
+
+<Callout type="warn" title="Oracle GraalVM changes your redistribution terms">
+GraalVM CE is licensed under GPLv2 with the Classpath Exception, which places no restriction on
+shipping it inside a paid application. Oracle GraalVM is governed by the
+[GraalVM Free Terms and Conditions](https://www.oracle.com/downloads/licenses/graal-free-license.html)
+(GFTC), which permit production and commercial use but only allow redistributing the Program
+"provided that You do not charge Your licensees any fees associated with such distribution or
+use". Nucleus copies GraalVM runtime libraries (`libjvm`, `libawt`, …) next to the packaged
+executable, so this clause applies to your app bundle. Selecting `ORACLE` logs a build warning.
+Review the GFTC before shipping a paid application.
+</Callout>
+
+Opt into Oracle GraalVM when you need its exclusive optimizations — Profile-Guided
+Optimization, `optimization = NativeImageOptimization.LEVEL_3` (`-O3`), ML-inferred profiles,
+and `advancedObfuscation`:
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    toolchain {
+        distribution = GraalvmDistribution.ORACLE
+    }
+}
+```
+
+Under the default community toolchain those Oracle-only features degrade gracefully: `-O3`,
+`--pgo` and `-H:AdvancedObfuscation` are skipped with a warning instead of failing the build,
+and the `runWithPgoInstrument` task is not registered at all.
+
+Install directories embed the distribution (`graalvm-community-jdk-*` vs `graalvm-jdk-*`), so
+switching never reuses the other build's download, and a `GRAALVM_HOME` whose distribution
+disagrees with the DSL is ignored with a warning.
+
+To build on another community toolchain (Liberica NIK, Mandrel), point `GRAALVM_HOME` at it, or
+set `autoDownload = false` and pick a `jvmVendor`.
+
+## graalvm { } reference
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `isEnabled` | `Property<Boolean>` | `false` | Master switch for the native-image build. |
+| `imageName` | `Property<String>` | package name | Output binary name. |
+| `march` | `Property<NativeImageMarch>` | per-platform | `NATIVE` targets the build CPU; `COMPATIBILITY` targets older CPUs. Unset defaults to `COMPATIBILITY`, except Apple-Silicon macOS which defaults to `NATIVE`. |
+| `optimization` | `Property<NativeImageOptimization>` | native-image `-O2` | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` is Oracle GraalVM only. |
+| `allCharsets` | `Property<Boolean>` | `false` | `true` emits `-H:+AddAllCharsets` (embed every JDK charset; only for legacy encodings). |
+| `mlProfileInference` | `Property<Boolean>` | `true` | `false` emits `-H:-MLProfileInference`, opting out of Oracle's ML-inferred PGO. |
+| `advancedObfuscation` | `Property<Boolean>` | `false` | `true` emits `-H:AdvancedObfuscation=`, renaming symbols inside the binary. Oracle GraalVM only; ignored with a warning elsewhere. |
+| `buildArgs` | `ListProperty<String>` | empty | Extra arguments passed to `native-image` (win over the properties above). |
+| `javaLanguageVersion` | `Property<Int>` | `25` | Toolchain language version — used only when `toolchain { autoDownload = false }`. |
+| `jvmVendor` | `Property<JvmVendorSpec>` | unset | Toolchain vendor — used only when `toolchain { autoDownload = false }`. |
+| `nativeImageConfigBaseDir` | `DirectoryProperty` | — | Directory of app-specific `reachability-metadata.json`. Rarely needed. |
+| `toolchain` | `GraalvmToolchainSettings` | auto-download | Toolchain provisioning (see above). |
+| `pgo` | `GraalvmPgoSettings` | enabled | Profile-Guided Optimization (see below). |
+| `macOS` | `GraalvmMacOSSettings` | — | macOS sub-block (see below). |
+| `windows` | `GraalvmWindowsSettings` | — | Windows sub-block (see below). |
+| `metadataRepository` | `MetadataRepositorySettings` | enabled | Oracle Reachability Metadata Repository (see below). |
+
+## Set build arguments
+
+`buildArgs` are forwarded verbatim to `native-image` and win over the type-safe properties.
+Prefer `optimization` over a raw `-Os`/`-O*` and `allCharsets` over `-H:+AddAllCharsets`; reach
+for `buildArgs` for anything without a dedicated property:
+
+| Argument | Purpose |
+|----------|---------|
+| `-Djava.awt.headless=false` | Enables GUI support, required for desktop apps. |
+| `-H:-IncludeMethodData` | Drops method metadata, reducing binary size by several MB. |
+
+<Callout type="info" title="Automatic executable stripping">
+On Linux and macOS the main native executable is now stripped automatically, reclaiming tens
+of MB. Combine with `optimization = NativeImageOptimization.SIZE` for the smallest image.
+</Callout>
+
+## Optimize with a PGO profile
+
+Profile-Guided Optimization (Oracle GraalVM only) records how the app actually runs and feeds
+that profile back into the next build. It requires
+`toolchain { distribution = GraalvmDistribution.ORACLE }`; under the default community
+toolchain `runWithPgoInstrument` is not registered. The `pgo { }` sub-block maps to
+`GraalvmPgoSettings`.
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    pgo {
+        enabled = true                                                    // default
+        profile = layout.projectDirectory.file("graalvm/pgo/default.iprof") // default
+    }
+}
+```
+
+1. Record: `./gradlew runWithPgoInstrument` builds an instrumented image, runs it, and writes
+   the profile to `profile` on exit. Exercise the hot paths before quitting.
+2. Commit the `.iprof` file. Later `packageGraalvmNative` / `runGraalvmNative` builds apply it
+   automatically as `--pgo=<profile>`.
+
+Disable a recorded profile for one build with `-Pnucleus.graalvm.pgo=off`. On community
+toolchains (GraalVM CE, Liberica NIK, Mandrel) `--pgo` is unavailable: a recorded profile is
+ignored with a warning, and the `runWithPgoInstrument` task does not exist.
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `enabled` | `Property<Boolean>` | `true` | Apply the profile automatically when the file exists. |
+| `profile` | `RegularFileProperty` | `graalvm/pgo/default.iprof` | Recorded profile location. |
+
+## Configure the metadata repository
+
+The Nucleus plugin downloads the
+[Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
+and resolves entries for every runtime dependency on the classpath. The `metadataRepository { }`
+sub-block maps to `MetadataRepositorySettings`.
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `enabled` | `Property<Boolean>` | `true` | Set to `false` to skip the repository entirely. |
+| `version` | `Property<String>` | `"1.1.4"` | Repository artifact version. |
+| `excludedModules` | `SetProperty<String>` | empty | `group:artifact` coordinates to skip. |
+| `moduleToConfigVersion` | `MapProperty<String, String>` | empty | Pins the metadata directory version for a given module. |
+
+```kotlin title="build.gradle.kts"
+metadataRepository {
+    moduleToConfigVersion.put("io.ktor:ktor-client-core", "3.0.0")
+    excludedModules.add("group:noisy-lib")
+}
+```
+
+## Configure macOS settings
+
+On macOS (arm64), native images on the default Tao backend build on the auto-provisioned
+toolchain (GraalVM CE by default). The deprecated AWT backend still requires BellSoft Liberica
+NIK. Intel Macs fall back to Liberica NIK.
+
+The `macOS { }` sub-block maps to `GraalvmMacOSSettings`.
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `cStubsSrc` | `RegularFileProperty` | — | File of additional C stubs linked into the binary. |
+| `minimumSystemVersion` | `Property<String>` | `"12.0"` | Patches the Mach-O `LC_VERSION_MIN_MACOSX` load command. |
+| `macOsSdkVersion` | `Property<String>` | `"26.0"` | SDK version stamped into the launcher's Mach-O headers, which controls Liquid Glass eligibility. |
+
+## Configure Windows settings
+
+The `windows { }` sub-block maps to `GraalvmWindowsSettings`. GraalVM native images on
+Windows are dynamically linked against the Visual C++ runtime, which is not part of a clean
+Windows install. Bundling the runtime DLLs next to the executable lets the app start without
+the Visual C++ Redistributable.
+
+| Property | Type | Default | Notes |
+|----------|------|---------|-------|
+| `bundleCRuntime` | `Property<Boolean>` | `true` | Copies the MSVC runtime DLLs next to the `.exe`. |
+| `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` | DLL file names copied when `bundleCRuntime` is enabled. |
+| `sourceDir` | `DirectoryProperty` | toolchain `bin` | Directory the DLLs are copied from. Point it at the MSVC redistributable if a DLL is missing from the toolchain. |
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    windows {
+        bundleCRuntime = true
+        dlls.add("vcruntime140.dll")
+    }
+}
+```
+
+## No release variant
+
+Unlike the JVM build types, GraalVM has no release variant: there is no
+`packageReleaseGraalvmNative` and no `runReleaseGraalvmNative`. The native tasks are
+`packageGraalvmNative` and `runGraalvmNative`. This is intentional:
+
+- ProGuard's dead-code elimination is redundant. `native-image` already does closed-world
+  dead-code elimination at compile time.
+- ProGuard can rename classes that are still referenced by `reachability-metadata.json`,
+  which breaks the build silently.
+
+Use `optimization = NativeImageOptimization.SIZE` for size optimization instead of ProGuard.
+
+<Callout type="info" title="nativeImageConfigBaseDir is usually empty">
+Nucleus ships all generic and platform-specific metadata automatically. You only need
+`nativeImageConfigBaseDir` for app-specific entries the automatic layers don't cover, which
+is rare. See [Automatic metadata](/docs/performance/graalvm/automatic-metadata) for the five layers.
+</Callout>
+
+## What's next
+
+- [GraalVM overview](/docs/performance/graalvm) — what native-image gives a Nucleus app.
+- [Automatic metadata](/docs/performance/graalvm/automatic-metadata) — the five metadata layers Nucleus assembles for you.
+- [Tasks and CI](/docs/performance/graalvm/tasks-ci) — the Gradle tasks and CI setup for native builds.
+- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` surface.

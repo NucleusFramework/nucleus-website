@@ -1,0 +1,162 @@
+---
+title: Scheduler testing
+description: Test doubles for the scheduler that run background tasks in memory, with virtual time and controllable constraints.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The scheduler-testing module provides test doubles for the [scheduler](/docs/lifecycle/scheduler)
+so you can exercise background tasks in unit and integration tests without touching the OS
+scheduler. It runs your `DesktopTask` implementations in memory, advances a virtual clock to
+fire periodic schedules, and lets you simulate constraint failures.
+
+## Add the dependency
+
+Add the artifact on the test classpath. It brings in the `scheduler` module transitively.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    testImplementation("dev.nucleusframework:nucleus.scheduler-testing:<version>")
+}
+```
+
+## Test a task in isolation
+
+To unit-test a single task, call `TestTaskRunner.runTask()`. It invokes your task's `doWork()`
+with a fabricated `TaskContext` and returns the `TaskResult`, with no scheduler or OS involved.
+
+```kotlin
+import dev.nucleusframework.scheduler.TaskData
+import dev.nucleusframework.scheduler.TaskId
+import dev.nucleusframework.scheduler.TaskResult
+import dev.nucleusframework.scheduler.testing.TestTaskRunner
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class SyncTaskTest {
+    @Test
+    fun `sync succeeds`() = runTest {
+        val result = TestTaskRunner.runTask(
+            task = SyncTask(),
+            taskId = TaskId("sync"),
+            inputData = TaskData.of(SyncInput(endpoint = "https://test.api")),
+        )
+        assertEquals(TaskResult.Success, result)
+    }
+}
+```
+
+`taskId`, `inputData`, and `runAttemptCount` all have defaults, so a bare
+`TestTaskRunner.runTask(task = SyncTask())` works when your `doWork()` reads none of them. Set
+`runAttemptCount` to exercise retry-aware logic.
+
+## How it works
+
+`TestDesktopTaskScheduler` implements the same internal `PlatformScheduler` interface that the
+real backend uses. Calling `install()` routes every `DesktopTaskScheduler` call — `enqueue()`,
+`cancel()`, `getTaskInfo()`, and the rest — to the in-memory instance instead of launchd, Task
+Scheduler, or systemd. `uninstall()` (also called by `close()`) restores the platform default.
+
+The test scheduler holds its own virtual clock. Enqueuing records the task and its enqueue
+time; `advanceTimeBy()` walks the clock forward and fires each periodic task at every interval
+boundary crossed, in chronological order. Each firing runs `doWork()` through the same code path
+as `runTask()` and appends an `ExecutionRecord` to the task's history, so you can assert on run
+counts, attempt numbers, and results after the fact.
+
+`TestConstraintChecker` replaces the production constraint checker with mutable fields that
+stand in for system state — network, battery, charging, idle time, and storage. When a task
+carries `Constraints`, the checker decides whether `doWork()` runs or the firing is recorded as
+`LastTaskResult.ConstraintsNotMet`.
+
+## API reference
+
+### Test a single task's doWork()
+
+`TestTaskRunner` is an object with one function.
+
+| Member | Signature | Behavior |
+|---|---|---|
+| `runTask(...)` | `suspend (task: DesktopTask, taskId: TaskId = TaskId("test-task"), inputData: TaskData = TaskData.EMPTY, runAttemptCount: Int = 1): TaskResult` | Runs `task.doWork()` with a `TaskContext` built from the arguments and returns its result. |
+
+### Run tasks through the scheduler
+
+`TestDesktopTaskScheduler(constraintChecker: TestConstraintChecker? = null)` implements the
+scheduler backend and is `Closeable`. Use it with `use { }` so the platform default is always
+restored.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopTaskScheduler
+import dev.nucleusframework.scheduler.LastTaskResult
+import dev.nucleusframework.scheduler.TaskRequest
+import dev.nucleusframework.scheduler.testing.TestDesktopTaskScheduler
+import kotlin.time.Duration.Companion.hours
+
+TestDesktopTaskScheduler().use { testScheduler ->
+    testScheduler.install()
+
+    DesktopTaskScheduler.enqueue(TaskRequest.periodic(SyncId, 2.hours))
+
+    // Advance six hours — the 2-hour task fires three times
+    val fired = testScheduler.advanceTimeBy(6.hours, registry)
+    assertEquals(3, fired.size)
+
+    val history = testScheduler.getExecutionHistory(SyncId)
+    assertEquals(LastTaskResult.Success, history.last().result)
+}
+```
+
+| Member | Signature | Behavior |
+|---|---|---|
+| `install()` | `Unit` | Routes `DesktopTaskScheduler` calls to this instance. Installs `constraintChecker` if set. |
+| `uninstall()` | `Unit` | Restores the platform default backend (and constraint checker). Called by `close()`. |
+| `runTask(taskId, registry)` | `suspend (TaskId, TaskRegistry): TaskResult?` | Runs one enqueued task now. Returns `null` and records `ConstraintsNotMet` if its constraints fail. Throws if the task is not enqueued. |
+| `advanceTimeBy(duration, registry)` | `suspend (Duration, TaskRegistry): List<ExecutionRecord>` | Advances virtual time and fires every periodic task whose interval elapsed. Skips calendar and on-boot tasks. |
+| `currentVirtualTimeMs` | `Long` | The current virtual time. |
+| `getExecutionHistory(taskId)` | `(TaskId): List<ExecutionRecord>` | Chronological execution history for one task. |
+| `getAllExecutionHistory()` | `(): List<ExecutionRecord>` | Chronological execution history across all tasks. |
+| `getEnqueuedRequest(taskId)` | `(TaskId): TaskRequest?` | The stored request for a task, or `null`. |
+| `getEnqueuedRequests()` | `(): List<TaskRequest>` | Every currently enqueued request. |
+| `constraintChecker` | `TestConstraintChecker?` | The checker passed to the constructor, if any. |
+
+Each `ExecutionRecord` is a data class exposing `taskId: TaskId`, `result: LastTaskResult`,
+`runAttemptCount: Int`, and `virtualTimeMs: Long`.
+
+<Callout type="info">
+`advanceTimeBy()` only fires periodic tasks. Trigger a calendar or on-boot task explicitly with
+`runTask(taskId, registry)`.
+</Callout>
+
+### Simulate constraints
+
+`TestConstraintChecker()` is a `Closeable` checker with mutable fields for the system state that
+`Constraints` are evaluated against. Pass it to `TestDesktopTaskScheduler` to have its lifecycle
+co-managed, or call `install()` / `uninstall()` yourself.
+
+```kotlin
+import dev.nucleusframework.scheduler.testing.TestConstraintChecker
+import dev.nucleusframework.scheduler.testing.TestDesktopTaskScheduler
+
+val checker = TestConstraintChecker()
+TestDesktopTaskScheduler(constraintChecker = checker).use { testScheduler ->
+    testScheduler.install()
+    checker.networkConnected = false
+
+    // A task that requires network is skipped and recorded as ConstraintsNotMet
+    val result = testScheduler.runTask(SyncId, registry)
+    assertNull(result)
+}
+```
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `networkConnected` | `Boolean` | `true` | Whether any network is active. |
+| `networkUnmetered` | `Boolean` | `true` | Whether the active network is unmetered (only when connected). |
+| `batteryLevel` | `Float?` | `1.0f` | Charge level `0.0`–`1.0`; `null` simulates no battery. |
+| `isCharging` | `Boolean` | `false` | Whether the device is plugged in. |
+| `idleTimeSeconds` | `Long` | `0L` | User idle time in seconds; `-1` simulates unavailable. |
+| `availableStorageBytes` | `Long` | `Long.MAX_VALUE` | Free disk space in bytes. |
+
+## What's next
+
+- [Scheduler](/docs/lifecycle/scheduler) — register tasks, build requests, and configure constraints and retries.
+- [Lifecycle overview](/docs/lifecycle) — the rest of the OS-facing lifecycle modules.

@@ -1,0 +1,98 @@
+---
+title: Why Nucleus
+description: How Nucleus compares with Electron, Tauri, and vanilla Compose Multiplatform for building desktop apps in Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Kotlin already runs on Android, on iOS through Kotlin/Native, and on the web through Kotlin/JS and Wasm. On the desktop you can render a Compose window, but reaching the operating system has meant compiling native libraries per platform, wiring JNI or FFM bridges, and learning a different native API for each OS. Nucleus lets you build the whole desktop app in Kotlin — UI, business logic, OS calls, and packaging — in a single process.
+
+This page compares that approach with Electron, Tauri, and vanilla Compose Multiplatform (CMP).
+
+## Comparison
+
+| | **Nucleus** | Electron | Tauri | CMP default |
+|--|------------|----------|-------|-------------|
+| Language(s) | Kotlin | JS + Node (+ C++ for natives) | JS + Rust | Kotlin |
+| UI tech | Compose + Skia GPU | Chromium (Blink + V8) | OS WebView | Compose + Skia GPU |
+| OS APIs | 40+ Kotlin modules, single process | Node `child_process` / native modules | Rust commands over IPC | Limited (`Tray`, `Notification`, no decorated window) |
+| Packaging formats | **18** (DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX, DEB, RPM, AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z) | 5–7 via electron-builder | 5 via tauri-bundler | 6 (DMG, PKG, MSI, EXE, DEB, RPM) |
+| Auto-update | Built-in (`updater-runtime`) | electron-updater | Tauri Updater plugin | None |
+| Cold start | ~0.2 s (GraalVM) · ~1.0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
+| RAM idle | 30–120 MB* | 200–500 MB | ~87 MB* | 200 MB |
+| Binary size | 40 MB (GraalVM) · 60 MB (JVM)* | 150–200 MB | 5–20 MB | 80–120 MB |
+| Native window decorations | Yes — Liquid Glass, Fluent, Yaru, Jewel | Limited (Chromium chrome) | Yes (OS chrome) | Limited |
+| Model | One language end-to-end | Two runtimes, IPC bridge | Web frontend + Rust backend | One language, fewer built-ins |
+
+## Measured: startup, RAM, and process count
+
+We built the same Hello-World window in four stacks and measured each one identically on the
+same Windows 11 machine — wall-clock time from process launch to the first window handle, and
+the **private working set** (the figure Task Manager shows) once the window settled.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (private WS) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0.17 s | ~0.10 s | **~30 MB** | 1 |
+| WinUI 3 | .NET 9 + Windows App SDK | ~0.20 s | ~0.28 s | ~32 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0.28 s | ~0.28 s | ~33 MB | 1 |
+| Tauri | Rust + WebView2 | ~0.74 s | ~0.12 s | ~87 MB | 7 |
+
+Two results worth calling out:
+
+- **Task Manager under-reports WebView2 apps.** The Tauri process itself shows ~4 MB — but the
+  real footprint (~87 MB) lives in six separate `msedgewebview2.exe` processes that Task
+  Manager lists elsewhere. Nucleus runs as a single self-contained process, so the number you
+  see is the number it costs, and there's no reliance on a system-installed WebView.
+- **Nucleus lands in the same ~30 MB class as native WinUI 3 and Flutter** — while staying pure
+  Kotlin/Compose — and uses roughly a third of Tauri's memory. Native/AOT is what buys both the
+  low RAM and the sub-0.2 s start.
+
+### macOS
+
+Same protocol on a macOS 26 machine (Apple silicon) — wall-clock time from process launch to
+the first on-screen window, and total **RSS across every process the app spawns** once the
+window settled. RSS includes shared framework pages, so these figures are not directly
+comparable with the Windows private-working-set column — compare within the table.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (RSS, all processes) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0.32 s | ~0.20 s | ~115 MB | 1 |
+| SwiftUI | native reference | ~0.14 s | ~0.14 s | ~78 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0.79 s | ~0.17 s | ~100 MB | 1 |
+| Tauri | Rust + WKWebView | ~0.91 s | ~0.19 s | ~173 MB | 4 |
+
+- **The WKWebView story mirrors WebView2.** The Tauri main process shows ~97 MB, but WebKit
+  renders in three separate helper processes (`WebContent`, `GPU`, `Networking`) that add
+  another ~76 MB — all counted in the table.
+- **Nucleus sits between the native SwiftUI reference and Tauri** — ~35 % less RAM than Tauri
+  and a cold start nearly 3× faster, in a single process.
+
+## One language across the stack
+
+Electron and Tauri split the stack across languages. You write the UI in JavaScript, the native parts in Rust, C++, or Swift, and connect them through an IPC bridge. Nucleus keeps the whole stack in Kotlin — UI, business logic, OS calls, and packaging — with the same call graph, memory model, and debugger.
+
+When you need to drop down to a platform — embed a SwiftUI view, call into Win32 directly, or use a Linux-only D-Bus interface — the [Tao backend](/docs/tao) exposes `NativeView`, and [native-access](/docs/performance/native-access) provides typed FFI without leaving Kotlin source.
+
+## When to choose each tool
+
+- **Electron** — the largest ecosystem and hiring pool. Choose it when shipping speed and JavaScript familiarity matter more than RAM, binary size, or native look and feel.
+- **Tauri** — the smallest binaries in this comparison. Choose it when you accept the platform-specific WebView and the Rust/JavaScript context switch.
+- **vanilla CMP** — the foundation Nucleus builds on. Choose it when you want Compose without the additional surface Nucleus adds, and you're prepared to write your own packaging, signing, updater, and decorated-window code.
+- **Nucleus** — choose it when you want one language across the stack, native window decorations, the JVM ecosystem in-process, and a packaging pipeline that covers 18 formats and four stores.
+
+## Notes
+
+The performance numbers above are typical for a Hello-World class app. Real-world cold start and RAM scale with what your app loads. Nucleus has two runtime targets: GraalVM native image for cold start and binary size, and JVM + AOT cache for throughput. See [performance](/docs/performance) for details.
+
+<Callout type="info">
+In the comparison table, the Electron figures are drawn from public benchmarks. The Nucleus,
+WinUI 3, Tauri, and JVM numbers — including Tauri's RAM — were measured first-hand on a single
+Windows 11 machine (warm runs unless noted); see the **Measured** section above.
+*Nucleus RAM was measured on Windows 11 with a Hello World build; binary size is the NSIS
+installer with maximum compression.
+</Callout>
+
+## What's next
+
+- [Packaging — 18 formats vs the rest](/docs/compare/packaging) — how the packaging pipeline compares.
+- [Nucleus vs vanilla Compose Multiplatform](/docs/compare/cmp-default) — what Nucleus adds on top of CMP.

@@ -22,11 +22,11 @@ function buildSource(baseUrl: string, collection: Collection) {
 }
 
 export interface DocVersion {
-  /** Stable id and, for archived versions, the URL segment: 'latest' | '2.0'. */
+  /** Stable id and, for archived versions, the URL segment: 'latest' | '2.1' | '2.0'. */
   id: string;
   /** Label shown in the version switcher. */
   label: string;
-  /** Route prefix: '/docs' for latest, '/docs/2.0' for archived. */
+  /** Route prefix: '/docs' for latest, '/docs/2.1' / '/docs/2.0' for archived. */
   baseUrl: string;
   /** The unversioned, actively-maintained docs. */
   latest: boolean;
@@ -53,6 +53,7 @@ function version(opts: {
 // `npm run snapshot-docs <version>` and add the printed entry here.
 export const DOC_VERSIONS: DocVersion[] = [
   version({ id: 'latest', label: '2.2 (latest)', baseUrl: '/docs', collection: Source.docs, latest: true }),
+  version({ id: '2.1', label: '2.1', baseUrl: '/docs/2.1', collection: Source.docs_2_1 }),
   version({ id: '2.0', label: '2.0', baseUrl: '/docs/2.0', collection: Source.docs_2_0 }),
 ];
 

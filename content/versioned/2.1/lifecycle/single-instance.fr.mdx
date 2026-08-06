@@ -1,0 +1,141 @@
+---
+title: Une app, un seul process
+description: Garantissez une seule instance de votre app et transférez les arguments d'un second lancement vers le process principal.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`SingleInstanceManager` limite votre app à une seule instance en cours d'exécution. Quand un second
+lancement est détecté, il transfère cette invocation — arguments CLI ou URI de deep link — vers le
+process en cours au lieu de démarrer un doublon. Il est fourni par `core-runtime` et utilise le
+même mécanisme sur macOS, Windows et Linux.
+
+## Ajouter la dépendance
+
+`SingleInstanceManager` est fourni par `core-runtime`, dont `nucleus-application` dépend déjà.
+Ne l'ajoutez explicitement que si vous l'utilisez sans `nucleus-application` :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+## Garantir une seule instance
+
+Quand vous démarrez votre app avec `nucleusApplication`, la gestion de l'instance unique est active par
+défaut. Le second lancement se termine immédiatement et la fenêtre principale revient au premier
+plan :
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(onCloseRequest = ::exitApplication) { /* ... */ }
+}
+```
+
+<Callout type="info">
+`enableSingleInstance` vaut `true` par défaut. Si l'app gère aussi les deep links, l'URI de
+l'instance secondaire est transféré au process principal via
+[`DeepLinkHandler`](/docs/lifecycle/deep-links) sans câblage supplémentaire.
+</Callout>
+
+## Câbler manuellement
+
+Quand vous pilotez vous-même le `application { }` de Compose, appelez
+`SingleInstanceManager.isSingleInstance` et quittez quand il renvoie `false` :
+
+```kotlin
+import dev.nucleusframework.core.runtime.SingleInstanceManager
+
+fun main() = application {
+    var restoreRequested by remember { mutableStateOf(false) }
+
+    val isPrimary = remember {
+        SingleInstanceManager.isSingleInstance(
+            onRestoreFileCreated = {
+                // S'exécute sur la seconde instance. `this` est le Path du fichier de
+                // restore-request ; écrivez ce que vous voulez que la primaire lise.
+            },
+            onRestoreRequest = {
+                // S'exécute sur la primaire quand un autre lancement est détecté.
+                restoreRequested = true
+            },
+        )
+    }
+
+    if (!isPrimary) {
+        exitApplication()
+        return@application
+    }
+
+    Window(onCloseRequest = ::exitApplication) {
+        LaunchedEffect(restoreRequested) {
+            if (restoreRequested) {
+                window.toFront()
+                window.requestFocus()
+                restoreRequested = false
+            }
+        }
+    }
+}
+```
+
+`onRestoreFileCreated` est optionnel. Omettez-le quand le second lancement n'a aucune donnée à passer.
+
+## Fonctionnement
+
+`SingleInstanceManager` détient un fichier de verrou dans `Configuration.lockFilesDir` (le dossier
+temporaire du système par défaut) et l'acquiert avec `java.nio.channels.FileLock`. Le verrou est
+géré par le noyau et libéré à la sortie ou au crash de la JVM, donc une primaire tuée de force ne
+bloque pas l'app.
+
+Quand le verrou est déjà tenu, le second lancement écrit un fichier de restore-request à côté du
+verrou. La primaire surveille ce dossier avec un `WatchService` et appelle `onRestoreRequest` quand
+le fichier apparaît. C'est un seul mécanisme pour les trois plateformes — pas de LaunchServices
+macOS, de named mutex Windows ni d'ownership de nom D-Bus Linux à câbler par OS.
+
+Les deux callbacks forment le canal IPC. `onRestoreFileCreated` s'exécute sur la seconde instance
+et reçoit le `Path` du restore-request comme récepteur, donc elle y écrit une charge utile —
+typiquement un URI de deep link via [`DeepLinkHandler.writeUriTo`](/docs/lifecycle/deep-links).
+`onRestoreRequest` s'exécute sur la primaire avec le même `Path` et le relit.
+
+## Référence de l'API
+
+### SingleInstanceManager
+
+| Membre | Signature | Notes |
+|---|---|---|
+| `isSingleInstance` | `(onRestoreFileCreated: (Path.() -> Unit)? = null, onRestoreRequest: Path.() -> Unit): Boolean` | Renvoie `true` sur la primaire, `false` quand une autre instance tient le verrou. `onRestoreFileCreated` s'exécute sur la secondaire ; `onRestoreRequest` sur la primaire. |
+| `configuration` | `var Configuration` | Affectez-la avant le premier appel à `isSingleInstance` ; la modifier ensuite lève une `IllegalStateException`. |
+
+### Configuration
+
+`Configuration` est une `data class` à deux paramètres de constructeur. Les noms de fichiers et les
+chemins en sont dérivés et sont en lecture seule.
+
+| Propriété | Type / défaut | Description |
+|---|---|---|
+| `lockFilesDir` | `Path` = `java.io.tmpdir` | Dossier contenant les fichiers de verrou et de restore-request. |
+| `lockIdentifier` | `String` = `AppIdProvider.appId()` | Nom de base servant à dériver les noms de fichiers. Changez-le pour isoler le verrou. |
+| `lockFileName` | `String` (dérivé) | `"$lockIdentifier.lock"`. |
+| `restoreRequestFileName` | `String` (dérivé) | `"$lockIdentifier.restore_request"`. |
+| `lockFilePath` / `restoreRequestFilePath` | `Path` (dérivé) | Les deux noms de fichiers résolus sous `lockFilesDir`. |
+
+## Notes
+
+- Désactivez avec `nucleusApplication(args, enableSingleInstance = false)`.
+- Le `lockIdentifier` par défaut est l'ID d'app résolu par `AppIdProvider.appId()` — le même ID que
+  le plugin Gradle injecte via `nucleus.app.id`, donc deux apps ne partagent jamais un verrou.
+- Le fichier de verrou vit dans le dossier temporaire par utilisateur, donc deux utilisateurs
+  différents sur la même machine peuvent chacun lancer l'app.
+- Si le fichier de verrou est périmé ou illisible, `SingleInstanceManager` le supprime et réessaie
+  une fois. S'il n'arrive toujours pas à l'acquérir, il traite le process comme la primaire plutôt
+  que de bloquer l'utilisateur.
+
+## Et ensuite
+
+- [Deep links](/docs/lifecycle/deep-links) — transférez les URL `myapp://...` d'un second lancement vers la primaire.
+- [Métadonnées de l'app](/docs/lifecycle/app-metadata) — d'où vient l'ID d'app qui nomme le verrou.
+- [Vue d'ensemble du cycle de vie](/docs/lifecycle) — le reste des API de cycle de vie du runtime.

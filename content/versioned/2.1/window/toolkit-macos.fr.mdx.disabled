@@ -1,0 +1,134 @@
+---
+title: macOS 26 — Liquid Glass
+description: Style une DecoratedWindow Nucleus pour macOS 26 (Tahoe) avec le traitement moderne des fenêtres, les coins de contenu arrondis et les traffic lights natifs.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Sur macOS 26 (« Tahoe »), le système dessine les fenêtres avec un traitement moderne : une
+`NSToolbar` attachée, un rayon de coin de contenu plus grand et le matériau translucide
+qu'Apple appelle Liquid Glass. Le toolkit macOS de Nucleus fait basculer une `DecoratedWindow`
+dans ce traitement, par-dessus le backend Tao et `decorated-window-core`, et retombe sur le
+chrome classique sur les versions plus anciennes.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-core:<version>")
+    // implementation("dev.nucleusframework:nucleus.decorated-window-macos26:<version>") [FORWARD-LOOKING: pas encore publié]
+}
+```
+
+<Callout type="info">
+Le pack de style dédié `decorated-window-macos26` arrive prochainement et n'a pas encore
+d'artifact. En attendant, obtiens le traitement macOS 26 via le backend Tao et style la
+barre de titre avec `decorated-window-core`, comme ci-dessous.
+</Callout>
+
+## Styler une fenêtre pour macOS 26
+
+La façon recommandée et indépendante du backend d'activer la géométrie de contenu arrondie est
+`Modifier.macOSLargeCornerRadius()` sur la `TitleBar`. Rends le fond de la barre de titre
+transparent pour laisser passer le matériau du système :
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.NucleusDecoratedWindowTheme
+import dev.nucleusframework.window.TitleBar
+import dev.nucleusframework.window.macOSLargeCornerRadius
+import dev.nucleusframework.window.styling.TitleBarColors
+import dev.nucleusframework.window.styling.TitleBarMetrics
+import dev.nucleusframework.window.styling.TitleBarStyle
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    val titleBarStyle = TitleBarStyle(
+        colors = TitleBarColors(
+            background = Color.Transparent,        // laisser passer le matériau du système
+            inactiveBackground = Color.Transparent,
+            content = Color(0xFFE6E6E6),
+            border = Color.Transparent,
+        ),
+        metrics = TitleBarMetrics(height = 38.dp),
+    )
+
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+    ) {
+        NucleusDecoratedWindowTheme(isDark = true, titleBarStyle = titleBarStyle) {
+            TitleBar(modifier = Modifier.macOSLargeCornerRadius()) {
+                Text("MyApp")
+            }
+            Box(Modifier.fillMaxSize()) { /* contenu */ }
+        }
+    }
+}
+```
+
+## Fonctionnement
+
+`Modifier.macOSLargeCornerRadius()` arrondit le contenu sous la barre de titre pour correspondre
+à la géométrie appliquée par le système sur macOS 26. Il fonctionne à l'identique entre backends,
+ce qui en fait le point d'entrée à privilégier. Les traffic lights — fermer, minimiser, plein
+écran — sont dessinés par AppKit ; tu n'as pas à les rendre, et `TitleBar` leur réserve
+l'insertion native à gauche.
+
+Le pendant impératif est l'enum `MacOSStyle`, un paramètre de construction de la `DecoratedWindow`
+du backend Tao. Sa valeur par défaut est `MacOSStyle.Classic`. `MacOSStyle.Auto` sélectionne le
+traitement moderne sur macOS 26+ et le chrome classique ailleurs ; `MacOSStyle.Modern` force le
+traitement moderne quelle que soit la version de l'OS.
+
+Liquid Glass est lui-même un matériau au niveau de Cocoa que l'OS n'applique que si le binaire
+lanceur annonce le SDK macOS 26 dans ses load commands Mach-O. Le plugin Gradle de Nucleus applique
+ce patch au moment du packaging, à partir du réglage de distribution `macOsSdkVersion`
+(par défaut `"26.0"`).
+
+## Référence de l'API
+
+### Arrondir les coins du contenu
+
+`fun Modifier.macOSLargeCornerRadius(enabled: Boolean = true): Modifier` — arrondit le contenu sous
+la barre de titre selon la géométrie de macOS 26. À appliquer au modifier de la `TitleBar`.
+
+### Réagencer les contrôles en plein écran
+
+`fun Modifier.newFullscreenControls(newControls: Boolean = true): Modifier` — réagence les contrôles
+de la barre de titre lorsque la fenêtre passe en plein écran.
+
+### Choisir le traitement de fenêtre
+
+`enum class MacOSStyle { Auto, Classic, Modern }` — passé via le paramètre `macOSStyle` de la
+`DecoratedWindow` du backend Tao (par défaut `MacOSStyle.Classic`).
+
+### Styler la barre de titre
+
+- `TitleBarStyle(colors, metrics)` — le style de barre de titre fourni via `NucleusDecoratedWindowTheme`.
+- `TitleBarColors(background, inactiveBackground, content, border, …)` — mets `background` à
+  `Color.Transparent` pour laisser passer le matériau du système.
+- `TitleBarMetrics(height, …)` — hauteur de la barre de titre et dimensions associées.
+
+## Notes
+
+<Callout type="warn">
+Le matériau Liquid Glass exige macOS 26 au runtime **et** un lanceur annonçant le SDK 26. Le plugin
+Gradle de Nucleus pose `macOsSdkVersion = "26.0"` par défaut dans la distribution macOS. Sur les
+versions antérieures de macOS, la fenêtre retombe sur le chrome classique.
+</Callout>
+
+## Et ensuite
+
+- [Vue d'ensemble des toolkits](/docs/window/toolkits) — comment les toolkits de fenêtre s'articulent.
+- [Backends](/docs/concepts/backends) — Tao et le backend AWT déprécié.
+- [Empaqueter pour macOS](/docs/packaging/macos) — signature, notarisation et le réglage de version du SDK.
+- [Toolkit Jewel](/docs/window/toolkit-jewel) — le toolkit de fenêtre au style IntelliJ.

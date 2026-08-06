@@ -1,0 +1,107 @@
+---
+title: How was I launched?
+description: Detect at runtime how the app was packaged and launched, from a DMG or Snap to a plain ./gradlew run.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`ExecutableRuntime` reports how the current process was packaged and launched: a DMG, an APPX,
+a Flatpak, a Snap, an AppImage, an `.exe` installer, or a plain `./gradlew run`. Read it when
+your code needs to branch on the packaging format, for example to pick an auto-update channel,
+resolve a writable path, or detect a sandbox.
+
+## Add the dependency
+
+`ExecutableRuntime` and `ExecutableType` ship in `core-runtime`, which the Nucleus umbrella
+already pulls in. Add it explicitly only when you depend on the module on its own:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
+}
+```
+
+The `aot-runtime` module re-exports both types as type aliases, so AOT-only code can depend on
+it alone.
+
+## Detect the packaging format
+
+Call `ExecutableRuntime.type()` and branch on the returned `ExecutableType`:
+
+```kotlin
+import dev.nucleusframework.core.runtime.ExecutableRuntime
+import dev.nucleusframework.core.runtime.ExecutableType
+
+when (ExecutableRuntime.type()) {
+    ExecutableType.APPX    -> showMicrosoftStoreUpdate()
+    ExecutableType.SNAP    -> showSnapStoreUpdate()
+    ExecutableType.FLATPAK -> showFlathubUpdate()
+    ExecutableType.PKG     -> showMacAppStoreUpdate()
+    else                   -> checkForUpdatesDirectly()
+}
+```
+
+For a single format, use the matching `is*()` check:
+
+```kotlin
+if (ExecutableRuntime.isAppX()) {
+    // Sandboxed: write to per-package state, not arbitrary HOME paths
+}
+```
+
+## How it works
+
+The Nucleus Gradle plugin records the packaging format at build time. For packaged JVM apps it
+sets `-Dnucleus.executable.type=<kind>` in the launcher's `.cfg` file; for GraalVM native-image
+builds, where that system property is unavailable, it writes a `.nucleus-executable-type` marker
+file next to the executable.
+
+`ExecutableRuntime.type()` reads the system property first and falls back to the marker file.
+Detection matches your packaging pipeline exactly, and does not rely on filesystem heuristics
+such as checking whether `/snap/` is in the path.
+
+When neither source is present, as with `./gradlew run` or any unpackaged run, `type()` returns
+`ExecutableType.DEV`. Treat that as your dev-mode signal.
+
+<Callout type="info">
+Features that need accurate packaging detection short-circuit in dev mode to avoid false
+positives. For example, [`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/auto-launch)
+returns `false` whenever `ExecutableRuntime.isDev()` is `true`.
+</Callout>
+
+## API reference
+
+### ExecutableRuntime
+
+| Member | Returns | Notes |
+|---|---|---|
+| `type()` | `ExecutableType` | Reads the `nucleus.executable.type` property, then the marker file. |
+| `type(propertyName)` | `ExecutableType` | Reads the format from a custom system property. |
+| `parseType(rawValue)` | `ExecutableType` | Parses a raw string; unknown input maps to `DEV`. |
+| `markerVersion()` | `String?` | App version from the marker file (native-image builds). |
+| `isGraalVmNativeImage` | `Boolean` | `true` when running as a GraalVM native image. |
+| `isExe()`, `isMsi()`, `isNsis()`, `isNsisWeb()`, `isPortable()`, `isAppX()`, `isDmg()`, `isPkg()`, `isDeb()`, `isRpm()`, `isSnap()`, `isFlatpak()`, `isAppImage()`, `isPacman()`, `isZip()`, `isTar()`, `isSevenZ()`, `isDev()` | `Boolean` | One check per `ExecutableType` value. |
+
+### ExecutableType
+
+An enum with one value per supported packaging format:
+
+- Windows: `EXE`, `MSI`, `NSIS`, `NSIS_WEB`, `PORTABLE`, `APPX`
+- macOS: `DMG`, `PKG`
+- Linux: `DEB`, `RPM`, `SNAP`, `FLATPAK`, `APPIMAGE`, `PACMAN`
+- Archives: `ZIP`, `TAR`, `SEVEN_Z`
+- Dev: `DEV`
+
+## Notes
+
+- `DEV` covers `./gradlew run` and any other unpackaged run. It is also the fallback for an
+  unknown or missing type, so a `DEV` result does not distinguish "in the IDE" from
+  "misconfigured packaging".
+- `ExecutableRuntime` only knows the packaging format, not the app contents. For the running
+  version, use [`NucleusApp.version`](/docs/lifecycle/app-metadata).
+
+## What's next
+
+- [App metadata](/docs/lifecycle/app-metadata) — read the app id, version, and vendor at runtime.
+- [Auto-launch](/docs/lifecycle/auto-launch) — start the app at login, gated on the packaging format.
+- [Auto-update](/docs/packaging/auto-update) — choose an update strategy per distribution channel.

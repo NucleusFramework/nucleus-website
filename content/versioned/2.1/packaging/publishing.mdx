@@ -1,0 +1,184 @@
+---
+title: Publishing
+description: Configure Nucleus to publish signed installers and auto-update metadata to GitHub Releases, S3, or a generic HTTP host.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+In this tutorial, you'll configure a publishing backend so your signed installers and their
+auto-update metadata land in one place — GitHub Releases, an S3 bucket, or any HTTP host. You'll
+pick a release channel and type, control when publishing runs, and see what each desktop store
+expects for submission. The configuration lives in the same `nucleus { }` DSL as the rest of your
+build.
+
+## Before you start
+
+- Working installers for your target platforms. See [Configuration](/docs/start/configuration)
+  for the `targetFormats(...)` setup.
+- Signed builds for the platforms you distribute. See [code signing](/docs/packaging/code-signing).
+- A hosting target: a GitHub repository, an S3 bucket, or an HTTP server you control.
+
+## Configure a publishing backend
+
+Add a `publish { }` block inside `nativeDistributions { }` and enable one backend. The block only
+generates configuration and the update YAML; the upload itself runs in CI.
+
+<Tabs items={['GitHub Releases', 'S3', 'Generic HTTP']}>
+<Tab value="GitHub Releases">
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            publish {
+                github {
+                    enabled = true
+                    owner = "myorg"
+                    repo = "myapp"
+                    token = System.getenv("GITHUB_TOKEN")
+                    channel = ReleaseChannel.Latest
+                    releaseType = ReleaseType.Release
+                }
+            }
+        }
+    }
+}
+```
+
+A release ends up with the installers and their auto-update YAML side by side:
+
+```
+v1.0.0 (Release)
+├── MyApp-1.0.0-macos-arm64.dmg
+├── MyApp-1.0.0-macos-universal.dmg
+├── MyApp-1.0.0-windows-amd64.exe
+├── MyApp-1.0.0-windows.msixbundle
+├── MyApp-1.0.0-linux-amd64.deb
+├── MyApp-1.0.0-linux-amd64.AppImage
+├── latest-mac.yml
+├── latest.yml
+└── latest-linux.yml
+```
+
+The token needs the `contents: write` permission. In GitHub Actions, set `permissions: contents: write`
+on the job.
+
+</Tab>
+<Tab value="S3">
+
+Use an S3 bucket, optionally fronted by a CDN, for self-hosted distribution:
+
+```kotlin title="build.gradle.kts"
+publish {
+    s3 {
+        enabled = true
+        bucket = "my-updates-bucket"
+        region = "us-east-1"
+        path = "releases/myapp"
+        acl = "public-read"
+    }
+}
+```
+
+Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` in the environment.
+
+</Tab>
+<Tab value="Generic HTTP">
+
+Any static host works — Nginx, Caddy, Cloudflare R2, or S3 with public access. The plugin
+generates the YAML metadata for your base URL; you upload the files yourself:
+
+```kotlin title="build.gradle.kts"
+publish {
+    generic {
+        enabled = true
+        url = "https://updates.example.com/releases/"
+        channel = ReleaseChannel.Latest
+        useMultipleRangeRequest = true
+    }
+}
+```
+
+`useMultipleRangeRequest` enables differential downloads and works only if your server honors
+HTTP `Range` requests.
+
+</Tab>
+</Tabs>
+
+## Choose a release channel and type
+
+The channel selects which YAML file the auto-updater reads, and the tag pattern it maps to:
+
+| Channel | YAML | Tag pattern |
+|---------|------|-------------|
+| `ReleaseChannel.Latest` | `latest-*.yml` | `v1.0.0` |
+| `ReleaseChannel.Beta` | `beta-*.yml` | `v1.0.0-beta.1` |
+| `ReleaseChannel.Alpha` | `alpha-*.yml` | `v1.0.0-alpha.1` |
+
+For GitHub Releases, the release type controls visibility:
+
+| Type | Behavior |
+|------|----------|
+| `ReleaseType.Release` | Public on the releases page |
+| `ReleaseType.Draft` | Hidden until manually published |
+| `ReleaseType.Prerelease` | Marked as a pre-release |
+
+## Set the publish mode
+
+`publishMode` decides when publishing runs. It defaults to `PublishMode.Never`:
+
+```kotlin title="build.gradle.kts"
+publish {
+    publishMode = PublishMode.Auto
+    // github { ... }
+}
+```
+
+- `PublishMode.Never` — do not publish. The `latest-*.yml` metadata is still generated locally for
+  every updatable format.
+- `PublishMode.Auto` — publish when the build runs from a git tag.
+- `PublishMode.Always` — publish on every build, tag or not.
+
+<Callout type="info">
+The `publish { }` block writes electron-builder publisher settings; it does not upload anything by
+itself. The actual upload runs in your CI workflow (`gh release create` for GitHub, `aws s3 cp` for
+S3, your own copy step for generic). See [release CI](/docs/packaging/ci-cd#release) for the standard
+path.
+</Callout>
+
+## Submit to a desktop store
+
+Store distribution goes through each vendor's portal rather than the `publish { }` block. Build the
+store format, then upload the artifact:
+
+- **Mac App Store** — submit the PKG via Transporter or `xcrun altool`. Provisioning profiles
+  ([sandboxing](/docs/packaging/sandboxing)) and the store category (`appCategory`) are set at build
+  time. Apple reviews the build; App Store builds are not notarized.
+- **Microsoft Store** — upload the `.msixbundle` to [Partner Center](https://partner.microsoft.com/).
+  The identity must match the reservation (`identityName`, `publisher = CN=<GUID>`,
+  `publisherDisplayName`). See [Windows targets](/docs/packaging/windows#appx-msix).
+- **Snapcraft** — run `snapcraft upload` from CI. The Snap Store accepts `strict` and `classic`
+  confinement; `classic` requires approval. Set the grade with `linux.snap { grade = SnapGrade.Stable }`.
+- **Flathub** — submit a manifest pull request to the [Flathub repo](https://github.com/flathub/flathub).
+  Your `flatpak` block produces the bundle; Flathub builds from source via your manifest.
+- **GitHub Releases / direct download** — the default path. Pair it with
+  [auto-update](/docs/packaging/auto-update) for self-distributed apps.
+
+## Reference
+
+- `publish { publishMode = … }`
+- `publish.github { enabled, owner, repo, token, channel, releaseType }`
+- `publish.s3 { enabled, bucket, region, path, acl }`
+- `publish.generic { enabled, url, channel, useMultipleRangeRequest }`
+- `enum class PublishMode { Never, Auto, Always }`
+- `enum class ReleaseChannel { Latest, Beta, Alpha }`
+- `enum class ReleaseType { Release, Draft, Prerelease }`
+
+See the [Gradle DSL reference](/docs/reference/gradle-dsl) for the full surface.
+
+## What's next
+
+- [Auto-update](/docs/packaging/auto-update) — how the published YAML drives in-app updates.
+- [Release CI](/docs/packaging/ci-cd) — the workflow that builds, signs, and uploads.
+- [Code signing](/docs/packaging/code-signing) — sign builds before you publish them.

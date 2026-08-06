@@ -1,0 +1,203 @@
+---
+title: Accessibility
+description: The Tao accessibility bridge projects your Compose semantics tree onto the native accessibility API of each operating system.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Tao backend exposes your UI to assistive technology by walking Compose's semantics tree
+and projecting it onto the native accessibility API of each operating system: NSAccessibility
+on macOS, UI Automation on Windows, and AT-SPI (through AccessKit) on Linux. You author
+accessibility with standard Compose semantics; the bridge does the projection. The
+`TaoA11yNode`, `TaoA11yRole`, `TaoA11yFlag`, and `TaoA11yAction` types in this module describe
+what the bridge emits, so you can inspect or assert on the projected tree.
+
+## Add the dependency
+
+The bridge ships inside the Tao backend — there is no separate artifact. Add
+`decorated-window-tao` and the projection is installed per window automatically.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+The public accessibility types live in `dev.nucleusframework.window.tao`.
+
+## Make your UI accessible
+
+You do not build accessibility nodes by hand. Attach Compose semantics to your composables and
+the bridge translates them into native accessibility nodes:
+
+```kotlin
+import androidx.compose.foundation.Image
+import androidx.compose.material.Button
+import androidx.compose.material.Text
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+
+Button(onClick = { count++ }) {
+    Text("Increment")
+}
+
+Image(
+    painter = painterResource("logo.png"),
+    contentDescription = "Company logo",
+)
+
+Text(
+    "Loading",
+    modifier = Modifier.semantics { contentDescription = "Loading, please wait" },
+)
+```
+
+The `Button` is projected as a `TaoA11yRole.Button` node that advertises the
+`TaoA11yAction.CLICK` action; the `Image` becomes a `TaoA11yRole.Image` node with its
+`contentDescription` as the label. A screen reader reads these directly with no extra wiring.
+
+<Callout type="info">
+Nodes marked `InvisibleToUser` or `HideFromAccessibility` in Compose are pruned before
+projection, so they never reach the OS accessibility tree.
+</Callout>
+
+## How it works
+
+Each decorated window installs a `SemanticsOwnerListener` when it is created. When the
+semantics tree changes, the backend walks the `SemanticsOwner`, produces a flat list of
+`TaoA11yNode` values, serializes them to a compact binary wire format, and pushes them to the
+native side over JNI. Frame coordinates are window-local logical points with a top-left origin,
+matching Compose; the native side converts to each platform's coordinate space on demand.
+
+The walk is debounced and gated. When no assistive technology is attached, the backend skips
+the walk entirely so scrolling and animation stay smooth; the first query from a screen reader
+activates the projection and seeds the tree. On Linux, subsequent updates are sent as partial
+snapshots that carry only the changed nodes. On macOS and Windows every update is a full
+snapshot.
+
+Actions travel back the other way. When VoiceOver, Narrator, or Orca invokes an action such as
+a click, an increment, or a text edit, the native side calls back into the JVM, which resolves
+the target node and runs the matching Compose `SemanticsActions` handler on the UI thread. This
+is why authoring standard Compose semantics is sufficient — the action set advertised on each
+node (`TaoA11yAction`) is derived from the semantics actions you declared.
+
+## API reference
+
+All types are in `dev.nucleusframework.window.tao`.
+
+### Inspect a projected node
+
+`TaoA11yNode` is the descriptor the bridge produces for a single element. It is a `data class`,
+so equality drives the partial-update diff on Linux.
+
+```kotlin
+data class TaoA11yNode(
+    val nodeId: Long,
+    val parentId: Long,
+    val role: TaoA11yRole,
+    val flags: Int,          // bitmask of TaoA11yFlag
+    val extraFlags: Int = 0, // bitmask of TaoA11yExtraFlag
+    val actions: Int,        // bitmask of TaoA11yAction
+    val frameX: Float,
+    val frameY: Float,
+    val frameW: Float,
+    val frameH: Float,
+    val minValue: Float = 0f,
+    val maxValue: Float = 0f,
+    val numericValue: Float = 0f,
+    val selectionStart: Int = 0,
+    val selectionEnd: Int = 0,
+    val hScrollMax: Float = 0f,
+    val hScrollValue: Float = 0f,
+    val vScrollMax: Float = 0f,
+    val vScrollValue: Float = 0f,
+    val label: String = "",
+    val valueString: String = "",
+    val customActions: List<String> = emptyList(),
+    val testTag: String = "",
+    val children: List<Long> = emptyList(),
+)
+```
+
+`label` is the accessible name and `valueString` its spoken value. `customActions` holds the
+labels of Compose custom accessibility actions, dispatched back by index. `testTag` carries the
+Compose `Modifier.testTag(...)` value; it maps to `AXIdentifier` on macOS,
+`UIA_AutomationIdPropertyId` on Windows, and AccessKit's author id on Linux, so UI automation
+can find widgets by a stable identifier instead of by visible label.
+
+### Identify the node kind
+
+`TaoA11yRole` is the projected element role. Compose roles and node kinds map onto these values.
+
+```kotlin
+enum class TaoA11yRole(val code: Int) {
+    Unknown, Group, Button, StaticText, Checkbox, RadioButton, Switch,
+    TextField, TextArea, Slider, Progress, Image, ScrollArea, Heading,
+    Tab, PopupMenu, Table, Outline, Row, Cell, SpinButton, TabPanel, Tooltip,
+}
+```
+
+### Read node state
+
+`TaoA11yFlag` holds the state bits packed into `TaoA11yNode.flags`. Test them with a bitwise
+`and`.
+
+```kotlin
+if (node.flags and TaoA11yFlag.CHECKED != 0) { /* the element is checked */ }
+```
+
+| Flag | Meaning |
+|---|---|
+| `IS_ELEMENT` | Node is an accessibility element, not a pure container. |
+| `ENABLED` | Element is enabled. |
+| `FOCUSED` | Element currently holds accessibility focus. |
+| `SELECTED` | Element is selected. |
+| `CHECKED` | Toggle/checkbox is on. |
+| `MIXED` | Toggle is in the indeterminate state. |
+| `HEADING` | Element is a heading. |
+| `PASSWORD` | Text field is a password field. |
+| `MULTILINE` | Text field accepts multiple lines. |
+| `MODAL` | Container is modal. |
+| `LIVE_REGION_POLITE` | Live region announced politely. |
+| `LIVE_REGION_ASSERTIVE` | Live region announced assertively. |
+| `MULTI_SELECTABLE` | Container allows multiple selection (Linux/AT-SPI only). |
+| `EXPANDED_TRUE` | Expandable element is expanded (Linux/AT-SPI only). |
+| `EXPANDED_FALSE` | Expandable element is collapsed (Linux/AT-SPI only). |
+| `HIDDEN` | Reserved; not currently emitted. |
+
+`TaoA11yExtraFlag` carries additional bits in `TaoA11yNode.extraFlags`.
+
+| Flag | Meaning |
+|---|---|
+| `READ_ONLY` | Text field is read-only; the `SET_TEXT` action is dropped. |
+| `INVALID` | Form field holds an invalid value. |
+
+### Check supported actions
+
+`TaoA11yAction` holds the action bits packed into `TaoA11yNode.actions`. Each bit corresponds to
+a Compose semantics action the element declared, and to the callback the native side may invoke.
+
+```kotlin
+if (node.actions and TaoA11yAction.CLICK != 0) { /* the element can be activated */ }
+```
+
+| Action | Triggered by |
+|---|---|
+| `CLICK` | Activating the element. |
+| `INCREMENT` | Stepping a slider or spin button up. |
+| `DECREMENT` | Stepping a slider or spin button down. |
+| `SET_TEXT` | Replacing the text of an editable field. |
+| `REQUEST_FOCUS` | Moving accessibility focus to the element. |
+| `SCROLL_UP` | Scrolling the region up. |
+| `SCROLL_DOWN` | Scrolling the region down. |
+| `SCROLL_LEFT` | Scrolling the region left. |
+| `SCROLL_RIGHT` | Scrolling the region right. |
+| `DISMISS` | Dismissing a popup or dialog. |
+
+## What's next
+
+- [Decorated window](/docs/tao/decorated-window) — the Tao window and its title bar.
+- [The Tao backend](/docs/tao) — what the Tao backend provides.
+- [Wayland](/docs/tao/wayland) — Linux windowing behavior, where AT-SPI is bridged through AccessKit.

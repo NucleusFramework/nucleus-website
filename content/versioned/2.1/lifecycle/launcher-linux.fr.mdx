@@ -1,0 +1,174 @@
+---
+title: Launcher (Linux)
+description: Affichez des badges de compte, des barres de progression, un drapeau d'urgence et des menus quicklist sur le launcher Linux depuis Kotlin.
+---
+
+`launcher-linux` mappe l'interface D-Bus `com.canonical.Unity.LauncherEntry` et le protocole
+`com.canonical.dbusmenu` vers Kotlin. Vous l'utilisez pour dessiner des badges de compte, des
+barres de progression et un drapeau d'urgence sur l'icône du launcher, et pour attacher un menu
+quicklist au clic droit. Les shells de bureau qui implémentent l'interface incluent Unity, KDE
+Plasma, Plank et budgie-panel.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-linux:<version>")
+}
+```
+
+## Afficher badges et progression
+
+Construisez l'URI du launcher à partir de l'id de votre fichier `.desktop`, puis fixez les
+propriétés une par une ou toutes en un seul signal :
+
+```kotlin
+import dev.nucleusframework.launcher.linux.LauncherProperties
+import dev.nucleusframework.launcher.linux.LinuxLauncherEntry
+
+val appUri = LinuxLauncherEntry.appUri("myapp.desktop")
+
+// Badge de compte
+LinuxLauncherEntry.setCount(appUri, 42)
+
+// Barre de progression (0.0..1.0)
+LinuxLauncherEntry.setProgress(appUri, 0.65)
+
+// Plusieurs propriétés en un seul signal
+LinuxLauncherEntry.update(
+    appUri,
+    LauncherProperties(
+        count = 5,
+        countVisible = true,
+        progress = 0.8,
+        progressVisible = true,
+        urgent = false,
+    ),
+)
+```
+
+`setCount` et `setProgress` enveloppent `update` : un seul appel qui fixe plusieurs propriétés
+émet un unique signal D-Bus.
+
+## Ajouter un menu quicklist
+
+Une quicklist est le menu du clic droit sur l'icône du launcher. Créez un `LinuxQuicklist` sur un
+chemin d'objet D-Bus, installez un listener de clic, posez le menu, puis faites pointer l'entrée du
+launcher vers le chemin de la quicklist :
+
+```kotlin
+import dev.nucleusframework.freedesktop.icons.FreedesktopIcon
+import dev.nucleusframework.launcher.linux.DbusmenuItem
+import dev.nucleusframework.launcher.linux.LauncherProperties
+import dev.nucleusframework.launcher.linux.LinuxLauncherEntry
+import dev.nucleusframework.launcher.linux.LinuxQuicklist
+
+val quicklist = LinuxQuicklist("/com/example/MyApp/Menu")
+
+quicklist.listener = LinuxQuicklist.Listener { id ->
+    when (id) {
+        1 -> openNewWindow()
+        2 -> openFile()
+        8 -> exitApp()
+    }
+}
+
+quicklist.setMenu(
+    listOf(
+        DbusmenuItem(id = 1, label = "Nouvelle fenêtre", icon = FreedesktopIcon.Action.WINDOW_NEW),
+        DbusmenuItem(id = 2, label = "Ouvrir un fichier", icon = FreedesktopIcon.Action.DOCUMENT_OPEN),
+        DbusmenuItem.separator(id = 3),
+        DbusmenuItem(
+            id = 8,
+            label = "Quitter",
+            icon = FreedesktopIcon.Action.APPLICATION_EXIT,
+            disposition = DbusmenuItem.Disposition.ALERT,
+        ),
+    ),
+)
+
+LinuxLauncherEntry.update(appUri, LauncherProperties(quicklist = quicklist.objectPath))
+```
+
+Les icônes utilisent [`freedesktop-icons`](/docs/os/freedesktop-icons) pour les noms
+symboliques.
+
+À l'arrêt, retirez la quicklist et libérez le serveur D-Bus :
+
+```kotlin
+LinuxLauncherEntry.update(appUri, LauncherProperties(quicklist = ""))
+quicklist.dispose()
+```
+
+## Fonctionnement
+
+L'API Unity Launcher est un protocole à signaux D-Bus. Vous émettez un signal `Update` sur
+`com.canonical.Unity.LauncherEntry` qui porte l'URI de votre fichier `.desktop` et un
+dictionnaire de propriétés (count, progress, urgent, chemin de la quicklist). Les shells de
+bureau s'abonnent au signal et rendent les changements sur l'icône du launcher. Nucleus dialogue
+avec D-Bus via GIO/GDBus à travers un unique bridge natif, sans bibliothèque Java D-Bus.
+
+Chaque `LinuxQuicklist` enregistre son propre objet `com.canonical.dbusmenu`. Le shell interroge
+cet objet pour obtenir le layout, et les clics sur les items sont renvoyés sur le thread de
+dispatch Swing avec `SwingUtilities.invokeLater`.
+
+Le nom du fichier `.desktop` détermine quelle icône reçoit les signaux. Le nom dérivé de
+`NucleusApp.appId` convient en général ; passez un autre id à
+`LinuxLauncherEntry.appUri("custom.desktop")` si votre packaging utilise un nom différent.
+
+## Référence de l'API
+
+### Mettre à jour l'entrée du launcher
+
+`LinuxLauncherEntry` est un objet.
+
+| Membre | Description |
+|---|---|
+| `isAvailable: Boolean` | `false` hors Linux ou quand la bibliothèque native n'a pas pu charger. |
+| `appUri(desktopFileId: String): String` | Construit l'URI `application://<id>` qui sert de sujet au signal. |
+| `update(appUri, properties: LauncherProperties): Boolean` | Émet un seul signal `Update` avec tous les champs non nuls. |
+| `setCount` / `clearCount` / `setProgress` / `clearProgress` / `setUrgent` / `setUpdating` | Enveloppes autour d'`update`. |
+| `registerQueryHandler(appUri)` / `unregister()` | Enregistre un handler `Query` pour l'état de l'entrée, puis le libère à l'arrêt. |
+
+### Décrire les propriétés
+
+`LauncherProperties` possède `count`, `countVisible`, `progress`, `progressVisible`, `urgent`,
+`quicklist` (le chemin d'objet du serveur de menu, ou une chaîne vide pour le retirer) et
+`updating`. Tous les champs sont nullables, et les champs nuls sont ignorés à l'émission du
+signal.
+
+### Construire une quicklist
+
+| Membre | Description |
+|---|---|
+| `objectPath: String` | Le chemin D-Bus que vous avez bindé. Passez-le à `LauncherProperties(quicklist = ...)`. |
+| `listener: Listener?` | Callback de clic ; `Listener` est une `fun interface` avec `onItemClicked(itemId: Int)`. |
+| `setMenu(items: List<DbusmenuItem>): Boolean` | Remplace le layout du menu et enregistre l'objet D-Bus. |
+| `dispose()` | Détruit le serveur D-Bus. |
+
+### Construire un item de menu
+
+`DbusmenuItem` possède `id`, `label` (`_` marque un mnémonique), `icon` (un `FreedesktopIcon`),
+`enabled`, `visible`, `type` (`ItemType.STANDARD` ou `ItemType.SEPARATOR`), `toggleType`
+(`ToggleType.NONE`, `CHECKBOX` ou `RADIO`), `toggleState` (`-1` indéterminé, `0` décoché, `1`
+coché), `shortcut`, `disposition` (`Disposition.NORMAL`, `INFORMATIONAL`, `WARNING` ou `ALERT`)
+et `children`.
+
+`DbusmenuItem.separator(id)` construit un séparateur.
+
+## Notes
+
+- Le protocole dbusmenu est sans état côté serveur ; le shell re-interroge le layout à chaque
+  ouverture. Pour changer l'état coché d'un toggle, rappelez `setMenu(...)` avec le nouveau
+  `toggleState`.
+- Pour des barres de progression cross-platform, voyez
+  [`taskbar-progress`](/docs/lifecycle/taskbar-progress), qui délègue à `launcher-linux` sur
+  Linux.
+- XFCE sans le `docklike-plugin` n'implémente pas l'API Unity. La détection réussit, mais rien
+  n'est rendu.
+
+## Et ensuite
+
+- [Taskbar progress](/docs/lifecycle/taskbar-progress) — progression et badges cross-platform.
+- [Freedesktop icons](/docs/os/freedesktop-icons) — noms d'icônes symboliques pour les items de menu.
+- [Launcher (macOS)](/docs/lifecycle/launcher-macos) — l'équivalent du menu du Dock sur macOS.

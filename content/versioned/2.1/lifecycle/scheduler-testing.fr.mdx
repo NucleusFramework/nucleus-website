@@ -1,0 +1,166 @@
+---
+title: Scheduler testing
+description: Doublures de test pour le scheduler qui exécutent les tâches en mémoire, avec un temps virtuel et des contraintes contrôlables.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module scheduler-testing fournit des doublures de test pour le
+[scheduler](/docs/lifecycle/scheduler), afin d'exercer vos tâches d'arrière-plan dans des tests
+unitaires et d'intégration sans passer par le scheduler du système. Il exécute vos
+implémentations de `DesktopTask` en mémoire, avance une horloge virtuelle pour déclencher les
+planifications périodiques, et vous permet de simuler des échecs de contraintes.
+
+## Ajouter la dépendance
+
+Ajoutez l'artefact au classpath de test. Il tire le module `scheduler` de façon transitive.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    testImplementation("dev.nucleusframework:nucleus.scheduler-testing:<version>")
+}
+```
+
+## Tester une tâche isolément
+
+Pour tester unitairement une seule tâche, appelez `TestTaskRunner.runTask()`. La fonction
+invoque le `doWork()` de votre tâche avec un `TaskContext` fabriqué et renvoie le `TaskResult`, sans
+scheduler ni système d'exploitation.
+
+```kotlin
+import dev.nucleusframework.scheduler.TaskData
+import dev.nucleusframework.scheduler.TaskId
+import dev.nucleusframework.scheduler.TaskResult
+import dev.nucleusframework.scheduler.testing.TestTaskRunner
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class SyncTaskTest {
+    @Test
+    fun `sync succeeds`() = runTest {
+        val result = TestTaskRunner.runTask(
+            task = SyncTask(),
+            taskId = TaskId("sync"),
+            inputData = TaskData.of(SyncInput(endpoint = "https://test.api")),
+        )
+        assertEquals(TaskResult.Success, result)
+    }
+}
+```
+
+`taskId`, `inputData` et `runAttemptCount` ont tous une valeur par défaut : un simple
+`TestTaskRunner.runTask(task = SyncTask())` suffit quand votre `doWork()` n'en lit aucun. Ajustez
+`runAttemptCount` pour exercer une logique sensible aux tentatives.
+
+## Fonctionnement
+
+`TestDesktopTaskScheduler` implémente la même interface interne `PlatformScheduler` que le
+backend réel. Appeler `install()` redirige chaque appel de `DesktopTaskScheduler` — `enqueue()`,
+`cancel()`, `getTaskInfo()` et les autres — vers l'instance en mémoire au lieu de launchd, Task
+Scheduler ou systemd. `uninstall()` (appelé aussi par `close()`) rétablit le backend par défaut.
+
+Le scheduler de test tient sa propre horloge virtuelle. L'enfilement enregistre la tâche et son
+heure d'enfilement ; `advanceTimeBy()` avance l'horloge et déclenche chaque tâche périodique à
+chaque limite d'intervalle franchie, dans l'ordre chronologique. Chaque déclenchement exécute
+`doWork()` par le même chemin de code que `runTask()` et ajoute un `ExecutionRecord` à
+l'historique de la tâche : vous pouvez ainsi vérifier le nombre d'exécutions, le numéro de tentative
+et les résultats après coup.
+
+`TestConstraintChecker` remplace le vérificateur de contraintes de production par des champs
+modifiables qui représentent l'état du système — réseau, batterie, charge, temps d'inactivité et
+stockage. Quand une tâche porte des `Constraints`, le vérificateur décide si `doWork()` s'exécute
+ou si le déclenchement est enregistré comme `LastTaskResult.ConstraintsNotMet`.
+
+## Référence de l'API
+
+### Tester le doWork() d'une seule tâche
+
+`TestTaskRunner` est un objet avec une seule fonction.
+
+| Membre | Signature | Comportement |
+|---|---|---|
+| `runTask(...)` | `suspend (task: DesktopTask, taskId: TaskId = TaskId("test-task"), inputData: TaskData = TaskData.EMPTY, runAttemptCount: Int = 1): TaskResult` | Exécute `task.doWork()` avec un `TaskContext` construit à partir des arguments et renvoie son résultat. |
+
+### Exécuter des tâches via le scheduler
+
+`TestDesktopTaskScheduler(constraintChecker: TestConstraintChecker? = null)` implémente le
+backend du scheduler et est `Closeable`. Utilisez-le avec `use { }` pour toujours rétablir le
+backend par défaut.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopTaskScheduler
+import dev.nucleusframework.scheduler.LastTaskResult
+import dev.nucleusframework.scheduler.TaskRequest
+import dev.nucleusframework.scheduler.testing.TestDesktopTaskScheduler
+import kotlin.time.Duration.Companion.hours
+
+TestDesktopTaskScheduler().use { testScheduler ->
+    testScheduler.install()
+
+    DesktopTaskScheduler.enqueue(TaskRequest.periodic(SyncId, 2.hours))
+
+    // Avance de six heures — la tâche de 2 heures se déclenche trois fois
+    val fired = testScheduler.advanceTimeBy(6.hours, registry)
+    assertEquals(3, fired.size)
+
+    val history = testScheduler.getExecutionHistory(SyncId)
+    assertEquals(LastTaskResult.Success, history.last().result)
+}
+```
+
+| Membre | Signature | Comportement |
+|---|---|---|
+| `install()` | `Unit` | Redirige les appels de `DesktopTaskScheduler` vers cette instance. Installe `constraintChecker` s'il est défini. |
+| `uninstall()` | `Unit` | Rétablit le backend par défaut (et le vérificateur de contraintes). Appelé par `close()`. |
+| `runTask(taskId, registry)` | `suspend (TaskId, TaskRegistry): TaskResult?` | Exécute maintenant une tâche enfilée. Renvoie `null` et enregistre `ConstraintsNotMet` si ses contraintes échouent. Lève une exception si la tâche n'est pas enfilée. |
+| `advanceTimeBy(duration, registry)` | `suspend (Duration, TaskRegistry): List<ExecutionRecord>` | Avance le temps virtuel et déclenche chaque tâche périodique dont l'intervalle s'est écoulé. Ignore les tâches calendaires et on-boot. |
+| `currentVirtualTimeMs` | `Long` | Le temps virtuel courant. |
+| `getExecutionHistory(taskId)` | `(TaskId): List<ExecutionRecord>` | Historique d'exécution chronologique d'une tâche. |
+| `getAllExecutionHistory()` | `(): List<ExecutionRecord>` | Historique d'exécution chronologique de toutes les tâches. |
+| `getEnqueuedRequest(taskId)` | `(TaskId): TaskRequest?` | La requête stockée pour une tâche, ou `null`. |
+| `getEnqueuedRequests()` | `(): List<TaskRequest>` | Toutes les requêtes actuellement enfilées. |
+| `constraintChecker` | `TestConstraintChecker?` | Le vérificateur passé au constructeur, le cas échéant. |
+
+Chaque `ExecutionRecord` est une data class exposant `taskId: TaskId`, `result: LastTaskResult`,
+`runAttemptCount: Int` et `virtualTimeMs: Long`.
+
+<Callout type="info">
+`advanceTimeBy()` ne déclenche que les tâches périodiques. Déclenchez une tâche calendaire ou
+on-boot explicitement avec `runTask(taskId, registry)`.
+</Callout>
+
+### Simuler des contraintes
+
+`TestConstraintChecker()` est un vérificateur `Closeable` doté de champs modifiables pour l'état
+système par rapport auquel les `Constraints` sont évaluées. Passez-le à
+`TestDesktopTaskScheduler` pour que son cycle de vie soit géré conjointement, ou appelez
+`install()` / `uninstall()` vous-même.
+
+```kotlin
+import dev.nucleusframework.scheduler.testing.TestConstraintChecker
+import dev.nucleusframework.scheduler.testing.TestDesktopTaskScheduler
+
+val checker = TestConstraintChecker()
+TestDesktopTaskScheduler(constraintChecker = checker).use { testScheduler ->
+    testScheduler.install()
+    checker.networkConnected = false
+
+    // Une tâche qui exige le réseau est ignorée et enregistrée comme ConstraintsNotMet
+    val result = testScheduler.runTask(SyncId, registry)
+    assertNull(result)
+}
+```
+
+| Champ | Type | Défaut | Signification |
+|---|---|---|---|
+| `networkConnected` | `Boolean` | `true` | Si un réseau est actif. |
+| `networkUnmetered` | `Boolean` | `true` | Si le réseau actif est illimité (uniquement quand connecté). |
+| `batteryLevel` | `Float?` | `1.0f` | Niveau de charge `0.0`–`1.0` ; `null` simule l'absence de batterie. |
+| `isCharging` | `Boolean` | `false` | Si l'appareil est branché. |
+| `idleTimeSeconds` | `Long` | `0L` | Temps d'inactivité en secondes ; `-1` simule une valeur indisponible. |
+| `availableStorageBytes` | `Long` | `Long.MAX_VALUE` | Espace disque libre en octets. |
+
+## Et ensuite
+
+- [Scheduler](/docs/lifecycle/scheduler) — enregistrez des tâches, construisez des requêtes, et configurez contraintes et tentatives.
+- [Vue d'ensemble du lifecycle](/docs/lifecycle) — les autres modules du cycle de vie face au système.

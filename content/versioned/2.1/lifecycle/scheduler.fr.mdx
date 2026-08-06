@@ -1,0 +1,235 @@
+---
+title: Scheduler — des cron jobs qui survivent aux reboots
+description: Exécutez des tâches périodiques, calendaires et on-boot depuis Kotlin, que l'OS déclenche à l'heure même quand votre app est fermée.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module scheduler vous permet d'exécuter des tâches en arrière-plan selon un horaire depuis
+Kotlin, même quand votre app est fermée. Vous enregistrez une tâche une fois et l'OS — launchd sur
+macOS, Task Scheduler sur Windows, les timers systemd utilisateur sur Linux — la déclenche à
+l'heure dite et gère les réveils et la persistance. Les tâches prennent trois formes :
+périodique, calendaire et on-boot.
+
+<Callout type="warn">
+`DesktopTaskScheduler` n'est pas supporté dans les builds Mac App Store sandboxés (`.pkg`), car
+il écrit des plists launchd au runtime, ce que la sandbox interdit. Utilisez plutôt
+[Service Management](/docs/lifecycle/service-management) dans ce cas.
+</Callout>
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("plugin.serialization") version "<kotlin version>"
+}
+
+dependencies {
+    implementation("dev.nucleusframework:nucleus.scheduler:<version>")
+}
+```
+
+`kotlinx-serialization-json` est exposé transitivement, donc vous pouvez annoter l'input d'une
+tâche avec `@Serializable` sans l'ajouter vous-même.
+
+## Planifier une tâche
+
+### 1. Définir une tâche et un registry
+
+Implémentez `DesktopTask`, donnez-lui un `TaskId`, et enregistrez une factory. L'OS relance votre
+binaire pour exécuter une tâche : le registry sert à retrouver votre code à partir d'un ID.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopTask
+import dev.nucleusframework.scheduler.TaskContext
+import dev.nucleusframework.scheduler.TaskId
+import dev.nucleusframework.scheduler.TaskRegistry
+import dev.nucleusframework.scheduler.TaskResult
+
+val SyncId = TaskId("sync")
+
+class SyncTask : DesktopTask {
+    override suspend fun doWork(context: TaskContext): TaskResult {
+        performSync()
+        return TaskResult.Success
+    }
+}
+
+val registry = TaskRegistry.Builder()
+    .register(SyncId) { SyncTask() }
+    .build()
+```
+
+### 2. Intercepter les invocations du scheduler dans main()
+
+Quand l'OS déclenche une tâche, il relance votre binaire avec un flag scheduler. Vérifiez-le tout
+en haut de `main()` et passez la main à `DesktopBootReceiver`, qui exécute la tâche puis quitte.
+
+```kotlin
+import dev.nucleusframework.scheduler.DesktopBootReceiver
+
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args = args, registry = registry)
+        return
+    }
+
+    // Démarrage normal de l'UI
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+<Callout type="warn">
+Cette vérification doit précéder toute construction d'UI. Sinon, chaque déclenchement du
+scheduler ouvre une fenêtre.
+</Callout>
+
+### 3. Mettre une requête en file
+
+Construisez une `TaskRequest` avec l'une des trois factories et mettez-la en file. L'enqueue est
+idempotent par défaut — voir [`ExistingTaskPolicy`](#taskrequest) pour changer ce comportement.
+
+```kotlin
+import dev.nucleusframework.scheduler.CronExpression
+import dev.nucleusframework.scheduler.DesktopTaskScheduler
+import dev.nucleusframework.scheduler.TaskRequest
+import java.time.LocalTime
+import kotlin.time.Duration.Companion.hours
+
+val scheduler = DesktopTaskScheduler.getInstance()
+
+// Toutes les heures, à partir de l'enqueue
+scheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours))
+
+// Tous les jours à 09:00, heure murale
+scheduler.enqueue(TaskRequest.calendar(ReportId, CronExpression.everyDayAt(LocalTime.of(9, 0))))
+
+// À la connexion système/utilisateur
+scheduler.enqueue(TaskRequest.onBoot(StartupCheckId))
+```
+
+## Fonctionnement
+
+Les schedulers des OS ne savent pas exécuter une fonction Kotlin — ils n'exécutent que des
+binaires. Le scheduler enregistre donc le binaire de votre application auprès du système de
+timer/job de la plateforme et passe `--nucleus-scheduler-run <taskId>` en ligne de commande.
+Au déclenchement, votre `main()` tourne, `DesktopBootReceiver.isSchedulerInvocation(args)` renvoie
+`true`, et le receiver :
+
+1. Charge le `TaskContext` persisté (input data et compteur de tentatives) depuis le fichier de métadonnées de la tâche.
+2. Vérifie les contraintes enregistrées face à l'état système courant via [`system-info`](/docs/os/system-info).
+3. Si elles sont satisfaites, appelle votre `doWork(context)`.
+4. Enregistre le résultat — `Success`, `Failure`, `Retry` ou `ConstraintsNotMet` — et programme un backoff en cas de `Retry`.
+
+| Plateforme | Mécanisme | Emplacement du plist / de l'unité |
+|---|---|---|
+| macOS | plists launchd | `~/Library/LaunchAgents/dev.nucleusframework.<appId>.<taskId>.plist` |
+| Linux | service + timer systemd utilisateur via D-Bus vers `org.freedesktop.systemd1.Manager` | `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` |
+| Windows | API COM Task Scheduler 2.0 (`ITaskService`) | `\Nucleus\<appId>\<taskId>` |
+
+Sur Linux et Windows, le scheduler n'enregistre pas le binaire directement — il écrit un petit
+wrapper (`.sh` / `.vbs`) qui vérifie que le binaire existe toujours. Si l'utilisateur désinstalle
+l'app sans nettoyer, le wrapper s'autodétruit : il dé-enregistre le timer/la tâche, supprime ses
+métadonnées et se supprime lui-même. macOS n'a pas cette astuce, car l'entrée launchd doit
+pointer directement sur le binaire pour s'afficher correctement dans les Réglages Système. Le
+nettoyage des orphelins repose alors sur votre appel à `DesktopTaskScheduler.cancelAll()` dans vos
+flux de déconnexion ou de réinitialisation.
+
+## Référence de l'API
+
+### DesktopTaskScheduler
+
+Récupérez le singleton avec `DesktopTaskScheduler.getInstance()`, ou appelez les méthodes
+directement sur l'objet.
+
+| Méthode | Renvoie | Description |
+|---|---|---|
+| `isAvailable()` | `Boolean` | Indique si le backend de la plateforme est disponible. |
+| `enqueue(request)` | `Boolean` | Enregistre une tâche ; `true` si planifiée ou déjà présente. |
+| `cancel(taskId)` | `Boolean` | Supprime une tâche ; `true` si elle a été trouvée. |
+| `cancelAll()` | `Unit` | Supprime toutes les tâches enregistrées par cette app. |
+| `isScheduled(taskId)` | `Boolean` | Indique si la tâche est actuellement planifiée. |
+| `getTaskInfo(taskId)` | `TaskInfo?` | État, dernière/prochaine exécution, nombre d'exécutions et dernier résultat. |
+| `getAllTasks()` | `List<TaskInfo>` | Infos de toutes les tâches enregistrées par cette app. |
+
+### TaskRequest
+
+Créez les requêtes avec les factories `periodic(taskId, interval)`, `calendar(taskId, expression)`
+et `onBoot(taskId)`. Chacune prend un lambda builder optionnel :
+
+```kotlin
+import dev.nucleusframework.scheduler.ExistingTaskPolicy
+import dev.nucleusframework.scheduler.NetworkType
+import dev.nucleusframework.scheduler.RetryPolicy
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+
+TaskRequest.periodic(SyncId, 1.hours) {
+    inputData(SyncInput(endpoint = "https://api.example.com"))
+    retryPolicy(RetryPolicy.ExponentialBackoff(initialDelay = 30.minutes, maxAttempts = 3))
+    runImmediately()
+    constraints {
+        requiredNetworkType = NetworkType.UNMETERED
+        requiresBatteryNotLow = true
+    }
+    existingTaskPolicy(ExistingTaskPolicy.REPLACE)
+}
+```
+
+L'intervalle périodique minimum est de 15 minutes ; une valeur plus courte lève une exception.
+
+| Méthode builder | Description |
+|---|---|
+| `inputData(value)` | Attache un payload `@Serializable`, persisté en JSON. |
+| `retryPolicy(policy)` | `RetryPolicy.Linear` ou `RetryPolicy.ExponentialBackoff`. |
+| `runImmediately()` | Exécute une fois à l'enregistrement, en plus de l'intervalle (périodique uniquement). |
+| `constraints { ... }` | Conditions de réseau, charge, inactivité et stockage. |
+| `existingTaskPolicy(policy)` | `KEEP` (défaut), `UPDATE_DATA` ou `REPLACE`. |
+
+### CronExpression
+
+`everyDayAt(time)`, `everyWeekdayAt(time)` (du lundi au vendredi), `everyWeekdayAt(day, time)` et
+`everyHour()`. Les heures utilisent `java.time.LocalTime` ; les jours utilisent
+`java.time.DayOfWeek`. Les expressions correspondent à la syntaxe `OnCalendar=` de systemd sur
+toutes les plateformes.
+
+### TaskResult
+
+Renvoie l'une de ces valeurs depuis `doWork` :
+
+- `TaskResult.Success`
+- `TaskResult.Failure(message)` — définitif, pas de réessai.
+- `TaskResult.Retry(message)` — réessayé selon la `RetryPolicy` de la tâche.
+
+### Constraints
+
+Se définissent dans le bloc `constraints { }` ; toutes sont vérifiées à l'exécution.
+
+| Propriété | Type | Description |
+|---|---|---|
+| `requiredNetworkType` | `NetworkType` | `NOT_REQUIRED`, `CONNECTED` ou `UNMETERED`. |
+| `requiresBatteryNotLow` | `Boolean` | Exige une batterie au-dessus de 15 %. |
+| `requiresCharging` | `Boolean` | Exige que l'appareil soit branché. |
+| `requiresDeviceIdle` | `Boolean` | Exige aucune saisie utilisateur pendant au moins 5 minutes. |
+| `minimumStorageBytes` | `Long?` | Espace disque libre minimum sur la partition de l'app. |
+
+Un déclenchement périodique non satisfait est ignoré silencieusement et revérifié au prochain
+tir. Un déclenchement calendaire ou on-boot non satisfait programme un réessai avec backoff.
+
+## Notes
+
+- Ne mettez pas de secrets dans `inputData` — c'est persisté en JSON clair dans le fichier de
+  métadonnées de la tâche. Stockez-y des références et résolvez les identifiants depuis le keychain
+  au runtime.
+- `CronExpression.everyHour()` signifie le top de l'heure en heure murale, pas « une heure après
+  l'enqueue ». Pour une cadence fixe relative à l'heure d'enqueue, utilisez
+  `TaskRequest.periodic(id, 1.hours)`.
+- Pour les tests, le module `scheduler-testing` fournit `TestTaskRunner` pour des tests unitaires
+  isolés et `TestDesktopTaskScheduler` avec temps virtuel, historique d'exécution et un
+  `TestConstraintChecker`.
+
+## Et ensuite
+
+- [Service Management](/docs/lifecycle/service-management) — agents et daemons d'arrière-plan pour les builds macOS sandboxés.
+- [System info](/docs/os/system-info) — les signaux que le scheduler lit pour évaluer les contraintes.
+- [Auto-launch](/docs/lifecycle/auto-launch) — lancer votre app elle-même au login, pas seulement une tâche.

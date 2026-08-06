@@ -9,6 +9,10 @@ export const docs = defineDocs({
 // Archived documentation snapshots (frozen at release time by
 // scripts/snapshot-docs.mjs). One export per past version — the script prints
 // the exact line to add. Also register it in lib/source.ts DOC_VERSIONS.
+export const docs_2_1 = defineDocs({
+  dir: 'content/versioned/2.1',
+});
+
 export const docs_2_0 = defineDocs({
   dir: 'content/versioned/2.0',
 });

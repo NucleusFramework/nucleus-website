@@ -1,0 +1,102 @@
+---
+title: Pourquoi Nucleus
+description: Comment Nucleus se compare à Electron, Tauri et Compose Multiplatform vanilla pour créer des applications desktop en Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Kotlin tourne déjà sur Android, sur iOS via Kotlin/Native, et sur le web via Kotlin/JS et Wasm. Sur le desktop, vous pouvez afficher une fenêtre Compose, mais atteindre le système d'exploitation supposait jusqu'ici de compiler des bibliothèques natives par plateforme, de câbler des ponts JNI ou FFM, et d'apprendre une API native différente pour chaque OS. Nucleus vous permet de construire toute l'application desktop en Kotlin — UI, logique métier, appels OS et packaging — dans un seul process.
+
+Cette page compare cette approche à Electron, Tauri et Compose Multiplatform vanilla (CMP).
+
+## Comparaison
+
+| | **Nucleus** | Electron | Tauri | CMP par défaut |
+|--|------------|----------|-------|----------------|
+| Langage(s) | Kotlin | JS + Node (+ C++ pour le natif) | JS + Rust | Kotlin |
+| UI | Compose + Skia GPU | Chromium (Blink + V8) | WebView OS | Compose + Skia GPU |
+| API OS | 40+ modules Kotlin, mono-process | Node `child_process` / modules natifs | Commandes Rust via IPC | Limité (`Tray`, `Notification`, pas de fenêtre décorée) |
+| Formats de packaging | **18** (DMG, PKG, Exe, MSI, NSIS, NSIS Web, Portable, AppX, DEB, RPM, AppImage, RawAppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z) | 5–7 via electron-builder | 5 via tauri-bundler | 6 (DMG, PKG, MSI, EXE, DEB, RPM) |
+| Auto-update | Intégré (`updater-runtime`) | electron-updater | Plugin Tauri Updater | Aucun |
+| Cold start | ~0,2 s (GraalVM) · ~1,0 s (JVM+AOT) | 2–3 s | &lt; 1 s | 1–2 s |
+| RAM au repos | 30–120 MB* | 200–500 MB | ~87 MB* | 200 MB |
+| Taille binaire | 40 MB (GraalVM) · 60 MB (JVM)* | 150–200 MB | 5–20 MB | 80–120 MB |
+| Décorations natives | Oui — Liquid Glass, Fluent, Yaru, Jewel | Limité (chrome Chromium) | Oui (chrome OS) | Limité |
+| Modèle | Un langage bout en bout | Deux runtimes, pont IPC | Frontend web + backend Rust | Un langage, moins d'éléments intégrés |
+
+## Mesuré : démarrage, RAM et nombre de process
+
+Nous avons construit la même fenêtre Hello-World dans quatre stacks et mesuré chacune de
+façon identique sur la même machine Windows 11 — temps réel entre le lancement du process et
+l'apparition de la première fenêtre, et le **working set privé** (le chiffre affiché par le
+Gestionnaire des tâches) une fois la fenêtre stabilisée.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (WS privé) | Process |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0,17 s | ~0,10 s | **~30 MB** | 1 |
+| WinUI 3 | .NET 9 + Windows App SDK | ~0,20 s | ~0,28 s | ~32 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0,28 s | ~0,28 s | ~33 MB | 1 |
+| Tauri | Rust + WebView2 | ~0,74 s | ~0,12 s | ~87 MB | 7 |
+
+Deux résultats à souligner :
+
+- **Le Gestionnaire des tâches sous-estime les applis WebView2.** Le process Tauri lui-même
+  affiche ~4 MB — mais l'empreinte réelle (~87 MB) se trouve dans six process
+  `msedgewebview2.exe` distincts, rangés ailleurs par le Gestionnaire. Nucleus tourne en un
+  seul process autonome : le chiffre que vous voyez est ce qu'il coûte réellement, sans
+  dépendre d'une WebView installée sur le système.
+- **Nucleus se situe dans la même classe des ~30 MB que WinUI 3 et Flutter natifs** — tout en
+  restant 100 % Kotlin/Compose — et utilise environ un tiers de la mémoire de Tauri. C'est le
+  natif/AOT qui procure à la fois la RAM basse et le démarrage sous 0,2 s.
+
+### macOS
+
+Même protocole sur une machine macOS 26 (Apple silicon) — temps réel entre le lancement du
+process et la première fenêtre à l'écran, et **RSS totale de tous les process de l'appli**
+une fois la fenêtre stabilisée. La RSS inclut les pages des frameworks partagés : ces chiffres
+ne sont pas directement comparables à la colonne « working set privé » de Windows — comparez
+à l'intérieur du tableau.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (RSS, tous process) | Process |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0,32 s | ~0,20 s | ~115 MB | 1 |
+| SwiftUI | référence native | ~0,14 s | ~0,14 s | ~78 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0,79 s | ~0,17 s | ~100 MB | 1 |
+| Tauri | Rust + WKWebView | ~0,91 s | ~0,19 s | ~173 MB | 4 |
+
+- **WKWebView rejoue le scénario WebView2.** Le process principal Tauri affiche ~97 MB, mais
+  WebKit rend la page dans trois process séparés (`WebContent`, `GPU`, `Networking`) qui
+  ajoutent ~76 MB — comptés dans le tableau.
+- **Nucleus se place entre la référence native SwiftUI et Tauri** — ~35 % de RAM en moins que
+  Tauri et un cold start près de 3× plus rapide, en un seul process.
+
+## Un seul langage sur toute la pile
+
+Electron et Tauri répartissent la pile sur plusieurs langages. Vous écrivez l'UI en JavaScript, les parties natives en Rust, C++ ou Swift, et vous les reliez par un pont IPC. Nucleus garde toute la pile en Kotlin — UI, logique métier, appels OS et packaging — avec le même call graph, le même modèle mémoire et le même debugger.
+
+Quand vous avez besoin de descendre au niveau d'une plateforme — intégrer une vue SwiftUI, appeler Win32 directement, ou utiliser une interface D-Bus propre à Linux — le [backend Tao](/docs/tao) expose `NativeView`, et [native-access](/docs/performance/native-access) fournit du FFI typé sans quitter le source Kotlin.
+
+## Quand choisir chaque outil
+
+- **Electron** — l'écosystème et le bassin d'embauche les plus larges. Choisissez-le quand la vitesse de livraison et la familiarité avec JavaScript comptent plus que la RAM, la taille du binaire ou le rendu natif.
+- **Tauri** — les plus petits binaires de cette comparaison. Choisissez-le quand vous acceptez la WebView propre à chaque plateforme et le changement de contexte Rust/JavaScript.
+- **CMP vanilla** — la fondation sur laquelle repose Nucleus. Choisissez-le quand vous voulez Compose sans la surface supplémentaire qu'ajoute Nucleus, et que vous êtes prêt à écrire vous-même le packaging, la signature, l'updater et la fenêtre décorée.
+- **Nucleus** — choisissez-le quand vous voulez un seul langage sur toute la pile, des décorations de fenêtre natives, l'écosystème JVM in-process, et une pipeline de packaging qui couvre 18 formats et quatre stores.
+
+## Notes
+
+Les chiffres de performance ci-dessus sont typiques d'une application de type Hello-World. Le cold start et la RAM réels varient selon ce que votre application charge. Nucleus dispose de deux cibles runtime : GraalVM native image pour le cold start et la taille du binaire, et JVM + cache AOT pour le débit. Voir [performance](/docs/performance) pour les détails.
+
+<Callout type="info">
+Dans le tableau de comparaison, les chiffres d'Electron proviennent de benchmarks publics. Les
+chiffres Nucleus, WinUI 3, Tauri et JVM — y compris la RAM de Tauri — ont été relevés de
+première main sur une seule machine Windows 11 (runs à chaud sauf mention contraire) ; voir la
+section **Mesuré** ci-dessus.
+*La RAM de Nucleus a été mesurée sur Windows 11 avec un build Hello World ; la taille du
+binaire correspond à l'installateur NSIS avec compression maximale.
+</Callout>
+
+## Et ensuite
+
+- [Packaging — 18 formats vs le reste](/docs/compare/packaging) — comment se compare la pipeline de packaging.
+- [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default) — ce que Nucleus ajoute par-dessus CMP.

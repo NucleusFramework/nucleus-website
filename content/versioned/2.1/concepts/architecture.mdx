@@ -1,0 +1,102 @@
+---
+title: Architecture
+description: The four layers that make up a Nucleus application and how they fit together.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A Nucleus application is built from four layers: your code, the Nucleus runtime, Compose
+Multiplatform, and the JVM or native runtime underneath. Each layer has a distinct job, and each
+one can be swapped without rewriting the layer above it. This page describes what each layer does
+and how a frame reaches the screen.
+
+## The four layers
+
+### Your application
+
+Compose UI, view-models, and business logic, written in Kotlin. To share this code with Android
+and iOS, place it in a Kotlin Multiplatform `commonMain` source set.
+
+```kotlin
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+// Pure Kotlin — runs on every platform Compose targets.
+class CounterViewModel {
+    var count by mutableStateOf(0)
+        private set
+
+    fun increment() { count++ }
+}
+```
+
+### The Nucleus runtime
+
+More than 40 runtime modules, grouped by intent:
+
+- **OS integration** — decorated windows (Tao backend), notifications, system tray, dock and
+  launcher menus, dark-mode detection, global hotkeys, media controls, and system colors.
+- **Performance** — GraalVM Native Image, the AOT cache (JDK 25+), the energy manager, and native
+  HTTP/SSL.
+- **Distribution** — 18 packaging formats, code signing and notarization, auto-update, deep links,
+  auto-launch, and reusable CI actions.
+
+Every module is optional and written in Kotlin. You add the ones you need as Gradle dependencies —
+see [Modules](/docs/concepts/modules).
+
+The Gradle plugin (`dev.nucleusframework`) is the build-time half of this layer. It selects
+packaging formats, wires up GraalVM, injects reachability metadata, and generates
+`nucleus-app.properties` so that `NucleusApp` in `core-runtime` can read your application's
+identity at runtime.
+
+### Compose Multiplatform
+
+A type-safe, reactive UI toolkit rendered on Skia, with hot reload, Compose Resources, and a
+unified pointer and keyboard event model.
+
+Nucleus does not replace Compose; it plugs into it. Every `DecoratedWindow` is a Compose
+`@Composable`, and every Nucleus module that touches the UI — `isSystemInDarkMode()`,
+`systemAccentColor()`, `NativeMenuBar`, and others — is a composable too.
+
+### Kotlin Multiplatform
+
+Shared modules, coroutines, `StateFlow`, `kotlinx.serialization`, and Ktor: the same Kotlin
+Multiplatform stack you already use for Android and iOS. The Nucleus runtime modules are JVM-only,
+but the layers above them stay multiplatform.
+
+### The JVM or native runtime
+
+A Nucleus application runs on one of three runtimes:
+
+- **OpenJDK 17+** — the broadest compatibility, works with the Tao backend on stock JDKs.
+- **JetBrains Runtime (JBR)** — an OpenJDK fork required only by the deprecated AWT backend (see
+  [Backends](/docs/concepts/backends)).
+- **GraalVM Native Image** — a closed-world, ahead-of-time compile that produces a self-contained
+  binary with no bundled JRE.
+
+Switching runtimes is a one-line DSL change — see [Runtimes](/docs/concepts/runtimes).
+
+<Callout type="info">
+A Nucleus application requires JDK 17 or later. The runtime modules themselves compile to Java 11
+bytecode, so code that embeds them stays compatible with older toolchains.
+</Callout>
+
+## How a frame is drawn
+
+When the user clicks a button:
+
+1. The OS — or the [Tao](/docs/tao) Rust layer — emits an input event.
+2. The active backend module ([`decorated-window-tao`](/docs/concepts/backends)) translates it
+   into a Compose `PointerEvent`.
+3. Compose recomposes, asks Skia to draw the affected layers, and hands the GPU surface back to
+   the backend.
+4. The backend swaps buffers through the OS compositor (Wayland, DWM, or Quartz).
+
+Your code stays in Kotlin the whole way down.
+
+## What's next
+
+- [Runtimes](/docs/concepts/runtimes) — choosing GraalVM Native Image versus the JVM with the AOT cache.
+- [Backends](/docs/concepts/backends) — Tao, and the deprecated AWT backend, under your `DecoratedWindow`.
+- [Modules](/docs/concepts/modules) — how the runtime modules compose.

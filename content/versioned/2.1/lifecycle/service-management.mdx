@@ -1,0 +1,175 @@
+---
+title: Service Management (macOS)
+description: Register login items, launch agents, and launch daemons through the macOS SMAppService API from Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`service-management-macos` lets you register login items, launch agents, and launch daemons
+through Apple's `SMAppService` API (macOS 13+) from Kotlin. It pairs with the Gradle plugin's
+`launchAgents { }` DSL, which embeds the corresponding plists in the app bundle at build time,
+so the services also work inside the Mac App Store sandbox where writing plists at runtime is
+not allowed.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.service-management-macos:<version>")
+}
+```
+
+`AppServiceManager.isAvailable` returns `false` on macOS versions below 13 and when the native
+library is not loaded. Check it before you register a service.
+
+## Launch the app at login
+
+`MainApp` registers the app itself as a login item. It maps to `SMAppService.mainApp`, so no
+plist is required:
+
+```kotlin
+import dev.nucleusframework.servicemanagement.AppService
+import dev.nucleusframework.servicemanagement.AppServiceManager
+import dev.nucleusframework.servicemanagement.AppServiceStatus
+
+AppServiceManager.register(AppService.MainApp)
+
+when (AppServiceManager.status(AppService.MainApp)) {
+    AppServiceStatus.ENABLED -> { /* launches at next login */ }
+    AppServiceStatus.REQUIRES_APPROVAL -> AppServiceManager.openSystemSettingsLoginItems()
+    else -> {}
+}
+```
+
+<Callout type="tip">
+For a cross-platform "launch at login", use [`AutoLaunch`](/docs/lifecycle/auto-launch) — it
+routes to `AppService.MainApp` on macOS. Use `service-management-macos` directly when you need
+agents or daemons.
+</Callout>
+
+## Register a background agent
+
+A launch agent runs in the user session on a schedule, independent of the main app window.
+
+1. Declare the agent in `build.gradle.kts`:
+
+   ```kotlin title="build.gradle.kts"
+   nucleus.application {
+       nativeDistributions {
+           macOS {
+               launchAgents {
+                   agent("com.myapp.background-sync") {
+                       arguments("--sync")
+                       startInterval(900) // 15 minutes
+                   }
+               }
+           }
+       }
+   }
+   ```
+
+   The plugin generates `com.myapp.background-sync.plist` and embeds it in
+   `Contents/Library/LaunchAgents/`.
+
+2. Handle the agent argument in `main()`:
+
+   ```kotlin
+   fun main(args: Array<String>) {
+       if ("--sync" in args) {
+           performSync()
+           return
+       }
+       nucleusApplication(args) { /* ... */ }
+   }
+   ```
+
+3. Register the agent from your UI. macOS does not run the embedded plist until the app
+   registers it and the user approves it:
+
+   ```kotlin
+   val agent = AppService.Agent("com.myapp.background-sync")
+   AppServiceManager.register(agent)
+   ```
+
+The first registration shows a system notification ("MyApp wants to run in the background").
+The user approves it there, or later from System Settings → General → Login Items.
+
+## How it works
+
+`SMAppService` replaces the deprecated `SMLoginItemSetEnabled` and direct `launchctl` plist
+writes. Every background item is gated by user approval, listed in System Settings, and tied to
+a plist that ships inside the app bundle, so the entry is removed when the user deletes the app.
+
+The Gradle plugin's `launchAgents { }` DSL writes the plist with the expected keys (`Label`,
+`ProgramArguments`, `StartInterval` or `StartCalendarInterval`, `RunAtLoad`, `KeepAlive`,
+`ProcessType`) to `Contents/Library/LaunchAgents/<label>.plist`. The bundle program path is
+resolved from `packageName` when you omit `bundleProgram`.
+
+Calendar intervals map to a `StartCalendarInterval` array. Call `calendar { ... }` more than
+once to fire on several wall-clock moments (launchd weekday convention: 0 = Sunday, 1 = Monday):
+
+```kotlin
+agent("com.myapp.weekly-cleanup") {
+    arguments("--cleanup")
+    calendar { weekday = 1; hour = 18; minute = 0 } // Monday at 18:00
+    calendar { weekday = 5; hour = 18; minute = 0 } // Friday at 18:00
+}
+```
+
+Compared to the [scheduler](/docs/lifecycle/scheduler), this approach works inside the App Store
+sandbox because the plists are embedded at build time rather than written at runtime. In return
+it has no constraints DSL, no input-data layer, and the set of agents is fixed at build time. Use
+the scheduler for dynamic schedules outside the sandbox, and service management for static,
+sandboxed services.
+
+## API reference
+
+### Register and query a service
+
+| Member | Returns | Description |
+|---|---|---|
+| `isAvailable` | `Boolean` | `true` on macOS 13+ with the native library loaded. |
+| `register(service)` | `Result<Unit>` | Registers the service so it is eligible to run. |
+| `unregister(service, callback)` | `Unit` | Unregisters the service asynchronously; `callback` receives an error string, or `null` on success. |
+| `status(service)` | `AppServiceStatus` | Current registration state. |
+| `openSystemSettingsLoginItems()` | `Boolean` | Opens the Login Items pane in System Settings. |
+
+### Service kinds — `AppService`
+
+| Variant | Use |
+|---|---|
+| `MainApp` | The app itself as a login item. No plist required. |
+| `LoginItem(bundleIdentifier)` | Helper app under `Contents/Library/LoginItems/`. |
+| `Agent(label)` | Launch agent under `Contents/Library/LaunchAgents/`. The `.plist` suffix is added if missing. |
+| `Daemon(label)` | Launch daemon under `Contents/Library/LaunchDaemons/`. The `.plist` suffix is added if missing. |
+
+### Registration state — `AppServiceStatus`
+
+`NOT_REGISTERED`, `ENABLED`, `REQUIRES_APPROVAL`, `NOT_FOUND`. Approval is user-driven through
+System Settings; call `openSystemSettingsLoginItems()` when `status` returns `REQUIRES_APPROVAL`.
+
+### Declare an agent — `launchAgents { agent(label) { ... } }`
+
+| Method | Description |
+|---|---|
+| `bundleProgram(path)` | Executable inside the bundle. Resolved from `packageName` when omitted. |
+| `arguments(vararg)` | Extra arguments passed to the program. |
+| `startInterval(seconds)` | Fixed interval in seconds (recommended minimum 900 = 15 minutes). |
+| `calendar { ... }` | Wall-clock trigger (`month`, `day`, `weekday`, `hour`, `minute`). Call multiple times for an array. |
+| `runAtLoad(enabled)` | Run the agent immediately when launchd loads it. |
+| `keepAlive(enabled)` | Restart the agent if it exits. |
+| `processType(type)` | `"Background"` (default), `"Standard"`, or `"Adaptive"`. |
+
+## Notes
+
+- Use the same label in `AppService.Agent("...")` and the Gradle `agent("...")` block.
+- Bundle layout: agent plists live at `MyApp.app/Contents/Library/LaunchAgents/`, daemons under
+  `LaunchDaemons/`, and login-item helpers under `LoginItems/`.
+- ProGuard: keep the runtime types with `-keep class dev.nucleusframework.servicemanagement.** { *; }`.
+
+## What's next
+
+- [Auto-launch](/docs/lifecycle/auto-launch) — cross-platform launch at login.
+- [Scheduler](/docs/lifecycle/scheduler) — dynamic background tasks with constraints.
+- [Gradle DSL](/docs/reference/gradle-dsl) — the full `nucleus { }` configuration.
+- [Packaging for macOS](/docs/packaging/macos) — signing and distributing the bundle.

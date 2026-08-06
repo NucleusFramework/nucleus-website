@@ -1,0 +1,211 @@
+---
+title: Accessibilité
+description: Le pont d'accessibilité de Tao projette votre arbre de sémantique Compose sur l'API d'accessibilité native de chaque système d'exploitation.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le backend Tao expose votre interface aux technologies d'assistance en parcourant l'arbre de
+sémantique de Compose et en le projetant sur l'API d'accessibilité native de chaque système :
+NSAccessibility sur macOS, UI Automation sur Windows et AT-SPI (via AccessKit) sur Linux. Vous
+décrivez l'accessibilité avec la sémantique Compose standard ; le pont s'occupe de la projection.
+Les types `TaoA11yNode`, `TaoA11yRole`, `TaoA11yFlag` et `TaoA11yAction` de ce module décrivent
+ce que le pont émet, afin que vous puissiez inspecter l'arbre projeté ou écrire des assertions
+dessus.
+
+## Ajouter la dépendance
+
+Le pont fait partie du backend Tao — il n'y a pas d'artefact séparé. Ajoutez
+`decorated-window-tao` et la projection est installée automatiquement pour chaque fenêtre.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Les types d'accessibilité publics se trouvent dans `dev.nucleusframework.window.tao`.
+
+## Rendre votre interface accessible
+
+Vous ne construisez pas les nœuds d'accessibilité à la main. Attachez la sémantique Compose à vos
+composables et le pont la traduit en nœuds d'accessibilité natifs :
+
+```kotlin
+import androidx.compose.foundation.Image
+import androidx.compose.material.Button
+import androidx.compose.material.Text
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+
+Button(onClick = { count++ }) {
+    Text("Increment")
+}
+
+Image(
+    painter = painterResource("logo.png"),
+    contentDescription = "Company logo",
+)
+
+Text(
+    "Loading",
+    modifier = Modifier.semantics { contentDescription = "Loading, please wait" },
+)
+```
+
+Le `Button` est projeté comme un nœud `TaoA11yRole.Button` qui annonce l'action
+`TaoA11yAction.CLICK` ; l'`Image` devient un nœud `TaoA11yRole.Image` dont le
+`contentDescription` sert d'étiquette. Un lecteur d'écran les lit directement, sans câblage
+supplémentaire.
+
+<Callout type="info">
+Les nœuds marqués `InvisibleToUser` ou `HideFromAccessibility` dans Compose sont élagués avant
+la projection, ils n'atteignent donc jamais l'arbre d'accessibilité du système.
+</Callout>
+
+## Fonctionnement
+
+Chaque fenêtre décorée installe un `SemanticsOwnerListener` à sa création. Quand l'arbre de
+sémantique change, le backend parcourt le `SemanticsOwner`, produit une liste plate de valeurs
+`TaoA11yNode`, les sérialise dans un format binaire compact et les pousse vers le côté natif via
+JNI. Les coordonnées de cadre sont des points logiques locaux à la fenêtre avec origine en haut
+à gauche, comme dans Compose ; le côté natif convertit vers l'espace de coordonnées de chaque
+plateforme à la demande.
+
+Le parcours est déclenché avec un délai (debounce) et conditionné. Quand aucune technologie
+d'assistance n'est attachée, le backend saute complètement le parcours pour que le défilement et
+les animations restent fluides ; la première requête d'un lecteur d'écran active la projection
+et amorce l'arbre. Sur Linux, les mises à jour suivantes sont envoyées sous forme de snapshots
+partiels qui ne portent que les nœuds modifiés. Sur macOS et Windows, chaque mise à jour est un
+snapshot complet.
+
+Les actions circulent dans l'autre sens. Quand VoiceOver, Narrator ou Orca déclenche une action
+— un clic, un incrément, une modification de texte — le côté natif rappelle la JVM, qui résout
+le nœud cible et exécute le gestionnaire `SemanticsActions` Compose correspondant sur le thread
+UI. C'est pourquoi il suffit de décrire la sémantique Compose standard : l'ensemble d'actions
+annoncé sur chaque nœud (`TaoA11yAction`) est dérivé des actions de sémantique que vous avez
+déclarées.
+
+## Référence de l'API
+
+Tous les types sont dans `dev.nucleusframework.window.tao`.
+
+### Inspecter un nœud projeté
+
+`TaoA11yNode` est le descripteur que le pont produit pour un élément. C'est une `data class`, si
+bien que l'égalité pilote le diff des mises à jour partielles sous Linux.
+
+```kotlin
+data class TaoA11yNode(
+    val nodeId: Long,
+    val parentId: Long,
+    val role: TaoA11yRole,
+    val flags: Int,          // masque de bits TaoA11yFlag
+    val extraFlags: Int = 0, // masque de bits TaoA11yExtraFlag
+    val actions: Int,        // masque de bits TaoA11yAction
+    val frameX: Float,
+    val frameY: Float,
+    val frameW: Float,
+    val frameH: Float,
+    val minValue: Float = 0f,
+    val maxValue: Float = 0f,
+    val numericValue: Float = 0f,
+    val selectionStart: Int = 0,
+    val selectionEnd: Int = 0,
+    val hScrollMax: Float = 0f,
+    val hScrollValue: Float = 0f,
+    val vScrollMax: Float = 0f,
+    val vScrollValue: Float = 0f,
+    val label: String = "",
+    val valueString: String = "",
+    val customActions: List<String> = emptyList(),
+    val testTag: String = "",
+    val children: List<Long> = emptyList(),
+)
+```
+
+`label` est le nom accessible et `valueString` sa valeur énoncée. `customActions` contient les
+étiquettes des actions d'accessibilité personnalisées de Compose, rappelées par index. `testTag`
+porte la valeur `Modifier.testTag(...)` de Compose ; elle est mappée sur `AXIdentifier` sur
+macOS, `UIA_AutomationIdPropertyId` sur Windows et l'author id d'AccessKit sur Linux, ce qui
+permet à l'automatisation d'interface de retrouver les widgets par un identifiant stable plutôt
+que par leur étiquette visible.
+
+### Identifier le type de nœud
+
+`TaoA11yRole` est le rôle de l'élément projeté. Les rôles Compose et les types de nœud sont
+mappés sur ces valeurs.
+
+```kotlin
+enum class TaoA11yRole(val code: Int) {
+    Unknown, Group, Button, StaticText, Checkbox, RadioButton, Switch,
+    TextField, TextArea, Slider, Progress, Image, ScrollArea, Heading,
+    Tab, PopupMenu, Table, Outline, Row, Cell, SpinButton, TabPanel, Tooltip,
+}
+```
+
+### Lire l'état d'un nœud
+
+`TaoA11yFlag` contient les bits d'état empaquetés dans `TaoA11yNode.flags`. Testez-les avec un
+`and` bit à bit.
+
+```kotlin
+if (node.flags and TaoA11yFlag.CHECKED != 0) { /* l'élément est coché */ }
+```
+
+| Flag | Signification |
+|---|---|
+| `IS_ELEMENT` | Le nœud est un élément d'accessibilité, pas un simple conteneur. |
+| `ENABLED` | L'élément est activé. |
+| `FOCUSED` | L'élément détient le focus d'accessibilité. |
+| `SELECTED` | L'élément est sélectionné. |
+| `CHECKED` | La bascule / case est active. |
+| `MIXED` | La bascule est dans l'état indéterminé. |
+| `HEADING` | L'élément est un titre. |
+| `PASSWORD` | Le champ de texte est un champ de mot de passe. |
+| `MULTILINE` | Le champ de texte accepte plusieurs lignes. |
+| `MODAL` | Le conteneur est modal. |
+| `LIVE_REGION_POLITE` | Région live annoncée poliment. |
+| `LIVE_REGION_ASSERTIVE` | Région live annoncée de façon assertive. |
+| `MULTI_SELECTABLE` | Le conteneur autorise la sélection multiple (Linux/AT-SPI uniquement). |
+| `EXPANDED_TRUE` | L'élément extensible est déplié (Linux/AT-SPI uniquement). |
+| `EXPANDED_FALSE` | L'élément extensible est replié (Linux/AT-SPI uniquement). |
+| `HIDDEN` | Réservé ; non émis actuellement. |
+
+`TaoA11yExtraFlag` porte des bits supplémentaires dans `TaoA11yNode.extraFlags`.
+
+| Flag | Signification |
+|---|---|
+| `READ_ONLY` | Champ de texte en lecture seule ; l'action `SET_TEXT` est retirée. |
+| `INVALID` | Le champ de formulaire contient une valeur invalide. |
+
+### Vérifier les actions prises en charge
+
+`TaoA11yAction` contient les bits d'action empaquetés dans `TaoA11yNode.actions`. Chaque bit
+correspond à une action de sémantique Compose déclarée par l'élément, et au callback que le côté
+natif peut invoquer.
+
+```kotlin
+if (node.actions and TaoA11yAction.CLICK != 0) { /* l'élément peut être activé */ }
+```
+
+| Action | Déclenchée par |
+|---|---|
+| `CLICK` | L'activation de l'élément. |
+| `INCREMENT` | L'incrément d'un slider ou d'un spin button. |
+| `DECREMENT` | Le décrément d'un slider ou d'un spin button. |
+| `SET_TEXT` | Le remplacement du texte d'un champ éditable. |
+| `REQUEST_FOCUS` | Le déplacement du focus d'accessibilité vers l'élément. |
+| `SCROLL_UP` | Le défilement de la région vers le haut. |
+| `SCROLL_DOWN` | Le défilement de la région vers le bas. |
+| `SCROLL_LEFT` | Le défilement de la région vers la gauche. |
+| `SCROLL_RIGHT` | Le défilement de la région vers la droite. |
+| `DISMISS` | La fermeture d'un popup ou d'une boîte de dialogue. |
+
+## Et ensuite
+
+- [Fenêtre décorée](/docs/tao/decorated-window) — la fenêtre Tao et sa barre de titre.
+- [Le backend Tao](/docs/tao) — ce que fournit le backend Tao.
+- [Wayland](/docs/tao/wayland) — le comportement de fenêtrage sous Linux, où AT-SPI est ponté via AccessKit.

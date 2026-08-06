@@ -1,0 +1,67 @@
+---
+title: Native file dialogs
+description: Use FileKit for native open, save, and folder pickers, with GraalVM metadata bundled by the Nucleus plugin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Compose Multiplatform doesn't include file dialogs, and Nucleus doesn't add its own. Use [FileKit](https://github.com/vinceglb/FileKit) for native open, save, and folder pickers. The Nucleus Gradle plugin ships GraalVM reachability metadata for FileKit, so the pickers run under `native-image` without extra configuration.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("io.github.vinceglb:filekit-compose:<version>")
+}
+```
+
+## Show a file picker
+
+Create a launcher with `rememberFilePickerLauncher` and call `launch()` from a click handler:
+
+```kotlin
+val launcher = rememberFilePickerLauncher(
+    type = PickerType.File(extensions = listOf("png", "jpg")),
+    title = "Pick an image",
+) { file ->
+    // file: PlatformFile?
+}
+
+Button(onClick = { launcher.launch() }) {
+    Text("Pick image")
+}
+```
+
+The callback receives a `PlatformFile?`, which is null when the user cancels. `PlatformFile` is FileKit's cross-platform file handle, with read, write, and metadata helpers.
+
+## How it works
+
+FileKit calls the native dialog on each operating system:
+
+- **macOS** — `NSOpenPanel` and `NSSavePanel` through Cocoa.
+- **Windows** — `IFileOpenDialog` and `IFileSaveDialog` through JNA COM.
+- **Linux** — the xdg-desktop-portal `FileChooser`, with GTK and zenity fallbacks.
+
+It supports type filters with descriptions; single-file, multi-file, folder, and save modes; and a Compose API (`rememberFilePickerLauncher`) built around the `PlatformFile` handle.
+
+## Run under GraalVM native image
+
+The Nucleus Gradle plugin bundles reachability metadata for FileKit as part of its [library metadata bundle](/docs/performance/graalvm/automatic-metadata). The metadata is included only when `io.github.vinceglb.filekit` is on the runtime classpath, and covers:
+
+- macOS Foundation proxy and callback types (`FoundationLibrary`, `ID`, runnable callbacks).
+- Windows JNA COM bindings (`FileDialog`, `FileOpenDialog`, `FileSaveDialog`, `ShellItem`, `Shell32`, `COMDLG_FILTERSPEC`, `PROPERTYKEY`).
+- The Linux xdg-desktop-portal D-Bus proxy (`FileChooserDbusInterface`).
+
+<Callout type="info">
+When you build with the Nucleus plugin and target `native-image`, the dialogs run without a manual `reachability-metadata.json` or a tracing-agent pass.
+</Callout>
+
+## Notes
+
+FileKit already wraps each native dialog and integrates with Compose state, so Nucleus depends on it instead of reimplementing the same surface.
+
+## What's next
+
+- [Automatic GraalVM metadata](/docs/performance/graalvm/automatic-metadata) — how the plugin bundles reachability metadata for known libraries.
+- [Native spell check](/docs/ecosystem/spell-check) — another native-backed ecosystem library.
+- [Ecosystem overview](/docs/ecosystem) — libraries that pair with Nucleus.
