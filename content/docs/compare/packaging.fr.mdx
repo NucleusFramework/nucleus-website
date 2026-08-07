@@ -48,8 +48,12 @@ ci-dessus : `Exe` (un installateur Windows natif à jpackage, distinct de NSIS),
 | jDeploy | Intégré | Non | Non |
 | jpackage / Compose MP | Aucun | — | — |
 
-Conveyor est le seul outil comparé avec des mises à jour delta (environ 31 KB sur macOS via
-Sparkle 2). Nucleus télécharge le fichier complet et expose une API runtime pour le flow de
+Nucleus et Conveyor supportent tous deux les mises à jour delta. Nucleus (depuis 2.3) fait
+des téléchargements différentiels : il confronte les block maps d'electron-builder du nouvel
+artefact à une copie en cache du précédent, copie les blocs inchangés depuis le disque et ne
+récupère le reste qu'avec des requêtes HTTP range — les sauts comme 1.0 → 1.7 sont aussi
+différentiels, sans aucun fichier delta paire-à-paire. Conveyor fournit les mises à jour delta
+via Sparkle 2 (environ 31 KB sur macOS). Nucleus expose aussi une API runtime pour le flow de
 progression, le changement de canal, la détection post-update et le redémarrage après mise à
 jour.
 
@@ -91,7 +95,7 @@ AppX/MSIX (Microsoft Store), Snap (Snap Store) et Flatpak (Flathub).
 
 | Là où Nucleus est fort | Là où les concurrents gagnent |
 |------------------------|-------------------------------|
-| Le plus de formats. Auto-update, signature et CI dans un seul plugin. Packaging GraalVM Native Image intégré. Apache 2 / MIT. | Conveyor : mises à jour delta, signature HSM plus large, builds mono-machine. install4j : stable, payant, support de longue durée. jpackage : aucune dépendance nouvelle. |
+| Le plus de formats. Auto-update, signature et CI dans un seul plugin. Packaging GraalVM Native Image intégré. Apache 2 / MIT. | Conveyor : signature HSM plus large, builds mono-machine. install4j : stable, payant, support de longue durée. jpackage : aucune dépendance nouvelle. |
 
 <Callout type="info">
 Nucleus construit chaque OS sur son propre runner CI — il n'y a pas de cross-compilation. Il
@@ -100,8 +104,8 @@ fonctionne uniquement avec Gradle et il est plus jeune que Conveyor et install4j
 
 ## Quand choisir quoi
 
-- Un petit CLI ou une app mono-fenêtre qui a besoin de mises à jour delta et de signature HSM
-  cloud — **Conveyor**.
+- Un petit CLI ou une app mono-fenêtre qui a besoin des backends de signature HSM les plus
+  larges et de builds mono-machine — **Conveyor**.
 - Un installateur d'entreprise avec dialogues personnalisés et support payant — **install4j**.
 - Un DMG, un MSI ou un DEB directement depuis jpackage — **Compose Multiplatform** ou
   **jpackage** directement.

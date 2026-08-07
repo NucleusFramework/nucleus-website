@@ -47,9 +47,13 @@ also selectable directly as a `targetFormats` entry).
 | jDeploy | Built-in | No | No |
 | jpackage / Compose MP | None | — | — |
 
-Conveyor is the only compared tool with delta updates (about 31 KB on macOS via Sparkle 2).
-Nucleus downloads the full file and exposes a runtime API for progress flow, channel
-switching, post-update detection, and restart-on-update.
+Both Nucleus and Conveyor support delta updates. Nucleus (from 2.3) does differential
+downloads: it matches electron-builder block maps of the new artifact against a cached copy
+of the previous one, copies unchanged blocks from disk, and fetches the rest with HTTP range
+requests — jumps such as 1.0 → 1.7 are differential too, with no pairwise delta files ever
+produced. Conveyor ships delta updates via Sparkle 2 (about 31 KB on macOS). Nucleus also
+exposes a runtime API for progress flow, channel switching, post-update detection, and
+restart-on-update.
 
 ## Code signing and notarization
 
@@ -89,7 +93,7 @@ Snap (Snap Store), and Flatpak (Flathub).
 
 | Where Nucleus is strong | Where competitors win |
 |-------------------------|----------------------|
-| Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: delta updates, broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
+| Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
 
 <Callout type="info">
 Nucleus builds each OS on its own CI runner — there is no cross-compilation. It is Gradle-only
@@ -98,7 +102,7 @@ and younger than Conveyor and install4j.
 
 ## When to pick what
 
-- A small CLI or single-window app that needs delta updates and cloud HSM signing — **Conveyor**.
+- A small CLI or single-window app that needs the widest HSM signing backends and single-machine builds — **Conveyor**.
 - An enterprise installer with custom dialogs and paid support — **install4j**.
 - A DMG, MSI, or DEB straight from jpackage — **Compose Multiplatform** or **jpackage** directly.
 - One Kotlin codebase covering every format and store, with auto-update, AOT, and GraalVM —
