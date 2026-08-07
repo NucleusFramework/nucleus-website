@@ -123,6 +123,58 @@ Outside `nucleusApplication { }`, reading the local throws. Prefer the receiver-
 `LocalNucleusApplicationScope.current` explicitly for toolkit wrappers
 (`MaterialDecoratedWindow`, Jewel, Fluent, …) that remain scope extensions.
 
+From 2.3.2, each secondary Tao scene also re-provides `LocalTaoWindow` and
+`LocalTitleBarInfo` for **that** window after parent locals are bridged in. Title-bar
+drag, double-click maximize, and system controls therefore target the child window, not
+the parent that opened it. `BasicTitleBar` binds drag with
+`Modifier.windowDragArea(window)` so it stays correct even if a parent
+`LocalTaoWindow` is still visible in the composition tree.
+
+### Hosted windows
+
+Libraries and navigation layers should not hard-code Compose Desktop's AWT
+`androidx.compose.ui.window.Window` / `Dialog` (unsupported under Tao) or a specific
+design-system window type. From 2.3.2, `nucleusApplication` also provides
+`LocalNucleusWindowHost` and `LocalNucleusDialogHost`. The defaults open a plain
+`DecoratedWindow` / `DecoratedDialog` (full parameter parity, including Tao knobs such as
+`popupFor`, `nativePopupLayers`, and `hiddenFromDock`). Call sites use `HostedWindow` /
+`HostedDialog`:
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.HostedWindow
+import dev.nucleusframework.application.LocalNucleusWindowHost
+import dev.nucleusframework.window.TitleBar
+
+@Composable
+fun DeepSearchDestination(onBack: () -> Unit) {
+    HostedWindow(
+        onCloseRequest = onBack,
+        state = rememberWindowState(size = DpSize(1200.dp, 800.dp)),
+        title = "Deep search",
+    ) {
+        TitleBar { /* … */ }
+        DeepSearchContent()
+    }
+}
+
+// App chrome: one override, every HostedWindow call site picks it up
+@Composable
+fun AppRoot() {
+    CompositionLocalProvider(LocalNucleusWindowHost provides myMaterialHost) {
+        NavigationGraph()
+    }
+}
+```
+
+Override the host when the app wraps every secondary window in Material, Jewel, or custom
+chrome without teaching every library or navigation destination about that wrapper. Direct
+`DecoratedWindow` / `DecoratedDialog` calls remain valid when you want the concrete type.
+
 ## How it works
 
 `nucleusApplication { }` resolves the backend and exposes `DecoratedWindow` on
@@ -154,7 +206,7 @@ provides them through composition locals. The same theme works whether the depen
 | `resizable` | `Boolean` | Default `true`. |
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Standard window flags. |
 | `undecorated` | `Boolean` | Borderless window with no controls. Honored by Tao; ignored by AWT. |
-| `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. |
+| `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. On native Wayland, positions are in the parent **content** area (hidden-titlebar CSD origin is applied inside `setOuterPosition`). |
 | `nativePopupLayers` | `Boolean` | Default `false`. Materialise Compose `Popup` layers as native transparent windows (NSPanel / WS_POPUP HWND). Tao only. |
 | `hiddenFromDock` | `Boolean` | Default `false`. Hide this window from the OS taskbar/Dock. Honored by Tao; ignored by AWT. |
 | `minimumSize` | `DpSize?` | Enforced after the first layout pass. |
