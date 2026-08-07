@@ -47,6 +47,15 @@ const ITEMS: FeatureItem[] = [
     new: true,
   },
   {
+    name: { en: 'Task Scheduler', fr: 'Task Scheduler' },
+    desc: {
+      en: 'WorkManager for desktop — periodic, cron, and on-boot tasks the OS runs even when the app is closed. launchd, Task Scheduler, systemd.',
+      fr: 'Le WorkManager du desktop — tâches périodiques, cron et au boot que l\'OS lance même app fermée. launchd, Task Scheduler, systemd.',
+    },
+    icon: 'scheduler',
+    href: '/docs/lifecycle/scheduler',
+  },
+  {
     name: { en: 'Decorated Window', fr: 'Fenêtre décorée' },
     desc: {
       en: 'Custom title bar, native controls, theme-aware. Tao backend by default.',
@@ -161,6 +170,7 @@ function FeatIcon({ name }: { name: string }) {
     case 'key': return <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="12" rx="2" stroke={c} strokeWidth={sw}/><path d="M6 10v0M10 10v0M14 10v0M18 10v0M6 14h12" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
     case 'progress': return <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="10" width="18" height="4" rx="2" stroke={c} strokeWidth={sw}/><path d="M5 12h9" stroke={c} strokeWidth="2.5" strokeLinecap="round"/></svg>;
     case 'update': return <svg viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/><path d="M8 12h3l2 3 3-6 2 3h2" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/></svg>;
+    case 'scheduler': return <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke={c} strokeWidth={sw}/><path d="M12 8v4l3 2" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/><path d="M5 4l2 2M19 4l-2 2" stroke={c} strokeWidth={sw} strokeLinecap="round" opacity="0.55"/></svg>;
     case 'link': return <svg viewBox="0 0 24 24" fill="none"><path d="M10 14l4-4M9 7l1-1a4 4 0 015.7 5.7l-1 1M15 17l-1 1a4 4 0 01-5.7-5.7l1-1" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
     case 'shield': return <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M9 12l2 2 4-4" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case 'chip': return <svg viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" stroke={c} strokeWidth={sw}/><rect x="9" y="9" width="6" height="6" stroke={c} strokeWidth={sw}/><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
