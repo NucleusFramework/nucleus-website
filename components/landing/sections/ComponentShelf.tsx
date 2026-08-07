@@ -20,10 +20,9 @@ const COMPONENTS: ShippedComponent[] = [
   },
   {
     api: 'WebView(state)',
-    pkg: 'dev.nucleusframework:webview',
+    pkg: 'dev.nucleusframework:composewebview',
     name: { en: 'WebView', fr: 'WebView' },
     replaces: ['WebView', 'WKWebView', 'iframe', 'WebView2'],
-    comingSoon: true,
   },
 ];
 

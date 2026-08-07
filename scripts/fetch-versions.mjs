@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Writes lib/versions.json (gitignored) for MDX `<version>` injection and the
-// <Version/> badge. Independently-versioned modules (tray / pdf / nna) are
-// fetched from GitHub Releases. **core always comes from lib/nucleus-version.ts**
+// <Version/> badge. Independently-versioned modules (tray / pdf / webview / nna)
+// are fetched from GitHub Releases. **core always comes from lib/nucleus-version.ts**
 // so a docs bump (tag + NUCLEUS_VERSION) is visible before the GitHub Release is
 // published — never leave snippets stuck on a stale GitHub "latest".
 import fs from 'node:fs';
@@ -10,7 +10,12 @@ import path from 'node:path';
 const OUT = path.join(process.cwd(), 'lib/versions.json');
 const VER_TS = path.join(process.cwd(), 'lib/nucleus-version.ts');
 // core is filled from NUCLEUS_VERSION — not from this map.
-const REPOS = { tray: 'ComposeNativeTray', pdf: 'ComposePdfReader', nna: 'NucleusNativeAccess' };
+const REPOS = {
+  tray: 'ComposeNativeTray',
+  pdf: 'ComposePdfReader',
+  webview: 'ComposeNativeWebview',
+  nna: 'NucleusNativeAccess',
+};
 
 function readNucleusVersion() {
   if (!fs.existsSync(VER_TS)) return null;

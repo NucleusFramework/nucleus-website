@@ -5,7 +5,7 @@ const LABEL = { en: 'Latest release', fr: 'Dernière version' } as const;
 
 // Reads the version written by scripts/fetch-versions.mjs (same lib/versions.json
 // the MDX injection uses, so the badge and the code snippets always agree). Keyed
-// by module: core | tray | pdf | nna. Renders nothing if the version is missing.
+// by module: core | tray | pdf | webview | nna. Renders nothing if the version is missing.
 function readVersions(): Record<string, string | null> {
   try {
     return JSON.parse(fs.readFileSync(path.join(process.cwd(), 'lib/versions.json'), 'utf8'));

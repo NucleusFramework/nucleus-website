@@ -51,6 +51,7 @@ if (nucleusVersion) VERSIONS.core = nucleusVersion;
 function versionForLine(line: string) {
   if (line.includes('composenativetray')) return VERSIONS.tray;
   if (line.includes(':pdfium')) return VERSIONS.pdf;
+  if (line.includes(':composewebview')) return VERSIONS.webview;
   if (line.includes('nucleusframework.nna')) return VERSIONS.nna;
   if (line.includes('dev.nucleusframework')) return VERSIONS.core;
   return null; // third-party coordinate: leave the placeholder
