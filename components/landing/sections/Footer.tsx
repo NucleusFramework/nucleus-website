@@ -1,7 +1,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { type Lang, footerT, pick } from '@/lib/landing-i18n';
-import { asset } from '@/lib/site';
+import { SITE, asset } from '@/lib/site';
 
 interface FooterProps {
   lang: Lang;
@@ -35,7 +35,8 @@ export function Footer({ lang }: FooterProps) {
         </div>
         <div className="footer-col">
           <h4>{pick(footerT.community, lang)}</h4>
-          <a href="https://github.com/NucleusFramework/Nucleus" target="_blank" rel="noreferrer">{pick(footerT.github, lang)}</a>
+          <a href={SITE.github} target="_blank" rel="noreferrer">{pick(footerT.github, lang)}</a>
+          <a href={SITE.websiteGithub} target="_blank" rel="noreferrer">{pick(footerT.websiteSource, lang)}</a>
           <a href="#">{pick(footerT.releases, lang)}</a>
           <a href="#">{pick(footerT.roadmap, lang)}</a>
           <a href="#">{pick(footerT.discord, lang)}</a>
@@ -48,7 +49,12 @@ export function Footer({ lang }: FooterProps) {
         </div>
       </div>
       <div className="footer-bottom">
-        <span>{pick(footerT.copyright, lang)}</span>
+        <span>
+          {pick(footerT.copyright, lang)}{' '}
+          <a className="footer-oss" href={SITE.websiteGithub} target="_blank" rel="noreferrer">
+            {pick(footerT.openSource, lang)} ↗
+          </a>
+        </span>
         <span>{pick(footerT.version, lang)}</span>
       </div>
     </footer>

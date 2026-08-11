@@ -9,6 +9,8 @@ export const SITE = {
   ogImage: '/og.png',
   /** Product repository (landing / nav GitHub link). */
   github: 'https://github.com/NucleusFramework/Nucleus',
+  /** This website's repository (footer open-source link). */
+  websiteGithub: 'https://github.com/NucleusFramework/nucleus-website',
   /**
    * Docs website repository — “Edit on GitHub” for latest content under content/docs/.
    * Archived versions do not get an edit link.

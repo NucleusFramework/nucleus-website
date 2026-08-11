@@ -615,9 +615,14 @@ export const footerT = {
   license: { en: 'License (MIT)', fr: 'Licence (MIT)' } as Bi<string>,
   trademark: { en: 'Trademark', fr: 'Marque' } as Bi<string>,
   security: { en: 'Security', fr: 'Sécurité' } as Bi<string>,
+  websiteSource: { en: 'Website source', fr: 'Source du site' } as Bi<string>,
   copyright: {
     en: '© 2026 Nucleus Framework. MIT licensed.',
     fr: '© 2026 Nucleus Framework. Sous licence MIT.',
+  } as Bi<string>,
+  openSource: {
+    en: 'This site is open source',
+    fr: 'Ce site est open source',
   } as Bi<string>,
   version: {
     en: `${NUCLEUS_VTAG} · Tao backend`,
