@@ -6,7 +6,7 @@ Source: https://nucleusframework.dev/docs
 
 ---
 
-# Welcome to Nucleus 2.3
+# Welcome to Nucleus 2.4
 
 URL: https://nucleusframework.dev/docs
 
@@ -22,7 +22,7 @@ If you already ship Android or KMP, Nucleus is how the same team ships desktop �
 ## Features
 
 - **One language across platforms.** Share Kotlin code with your Android, iOS, and web apps, with Compose UI on top.
-- **Native windowing (Tao).** Wayland support, multi-touch, pen input, [window scaffold](/docs/tao/window-scaffold), and [TextureView](/docs/tao/texture-view) for external GPU frames.
+- **Native windowing (Tao).** Wayland support, multi-touch, pen input, [window scaffold](/docs/tao/window-scaffold), [TextureView](/docs/tao/texture-view) for external GPU frames, and [GPU render context](/docs/tao/gpu-render-context) for in-process renderers.
 - **Two runtimes, one DSL.** Run as a GraalVM Native Image, or on the JVM with an AOT cache (JDK 25+).
 - **Over 40 OS integration modules.** Notifications, system tray, dock menus, dark mode, global hotkeys, and taskbar integration, each added as an opt-in dependency.
 - **18 packaging formats.** DMG, PKG, MSI, AppX, DEB, RPM, AppImage, Snap, and Flatpak among them, with code signing, notarization, and [differential auto-update](/docs/packaging/auto-update#differential-downloads).
@@ -30,12 +30,13 @@ If you already ship Android or KMP, Nucleus is how the same team ships desktop �
 
 To build your first app, follow the [quickstart](/docs/start/quickstart).
 
-## What's new in 2.3
+## What's new in 2.4
 
-- **`TextureView`.** External GPU textures composited in the Compose scene (D3D11 / Metal / DMA-BUF). See [TextureView](/docs/tao/texture-view).
-- **Differential auto-update.** Download only changed blocks via electron-builder block maps. See [Auto-update](/docs/packaging/auto-update#differential-downloads).
-- **Notification platform DSL**, **`LocalNucleusApplicationScope`**, and live **`isSystemInDarkTheme()`** under `nucleusApplication`.
-- **GraalVM 25.2** on the innovation channel, exact reachability on the dev loop, orphan project-class detection.
+- **`TaoGpuRenderContext`.** In-process GPU renderers allocate on the scene's own Skia device — no second GPU, no per-frame copy. See [GPU render context](/docs/tao/gpu-render-context).
+- **`AwakeMode`.** Keep the system awake for long jobs without forcing the screen on. See [Energy manager](/docs/lifecycle/energy-manager#keep-the-system-awake).
+- **Aligned MSI install scope** with `windows.msi { perMachine }`. See [Windows packaging](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+- **Public ABI freeze** on published runtime modules (`explicitApi` + binary-compatibility-validator).
+- Resize and frame-pacing fixes across macOS, Windows, and Linux Tao.
 
 Full list: [Changelog](/docs/changelog).
 
@@ -141,7 +142,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.3.2           | 2.4.0+         | 1.11.1          |
+| 2.4.0           | 2.4.0+         | 1.11.1          |
 
 ## Apply the plugin
 
@@ -547,7 +548,7 @@ nucleus.application {
         isEnabled.set(true)
         javaLanguageVersion.set(25)
         imageName.set("myapp")
-        march.set("native")
+        march.set(NativeImageMarch.NATIVE)
         buildArgs.add("-O2")
     }
 }
@@ -724,11 +725,11 @@ Accepts PEM or DER. The certificates are imported into the bundled JDK's `cacert
 | `javaLanguageVersion` | `25` | GraalVM JDK to use. |
 | `jvmVendor` | (auto) | Override the toolchain vendor. |
 | `imageName` | (auto) | Output binary name. |
-| `march` | `"native"` | Target CPU architecture. |
+| `march` | `NativeImageMarch.COMPATIBILITY` (`NATIVE` on macOS arm64) | Target CPU instruction set. |
 | `buildArgs` | `[]` | Extra `native-image` flags. |
 | `nativeImageConfigBaseDir` | (build dir) | Where to write reflection and resource configs. |
 | `metadataRepository.enabled` | `true` | Use the GraalVM Reachability Metadata Repository. |
-| `metadataRepository.version` | `"0.10.6"` | Repository version. |
+| `metadataRepository.version` | `"1.1.4"` | Repository version. |
 | `metadataRepository.excludedModules` | `[]` | Skip metadata for specific modules. |
 | `macOS.minimumSystemVersion` | `"12.0"` | Minimum macOS target. |
 | `macOS.macOsSdkVersion` | `"26.0"` | macOS SDK linked into the launcher. |
@@ -1256,7 +1257,8 @@ fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
 does not change when you switch backends. For full-window layouts and custom chrome on Tao,
 use [`WindowScaffold`](/docs/tao/window-scaffold). To composite decoder or engine frames as
 GPU textures inside Compose (z-order, clipping, no CPU copy), use
-[`TextureView`](/docs/tao/texture-view).
+[`TextureView`](/docs/tao/texture-view). For in-process renderers that can share the scene's
+GPU device, use [`TaoGpuRenderContext`](/docs/tao/gpu-render-context).
 
 ## How it works
 
@@ -1288,6 +1290,9 @@ The Tao-specific API lives in `dev.nucleusframework.window.tao`:
 - `TaoWindow` — imperative window handle. Reach it through `LocalTaoWindow` or
   `nucleusWindow.unsafe.taoWindow`.
 - `NativeView` — embed any native view (`NSView` / `HWND` / `GtkWidget`) in Compose.
+- `TextureView` / `rememberTaoGpuRenderContext` — external GPU frames and in-process GPU
+  renderers on the scene's device. See [TextureView](/docs/tao/texture-view) and
+  [GPU render context](/docs/tao/gpu-render-context).
 - `MacOSStyle` — window chrome on macOS: `Auto` (modern Tahoe chrome on macOS 26+, classic
   chrome otherwise), `Classic` (the default), or `Modern`.
 - `TaoCursorIcon`, `TaoTrackpadGesture`, `TaoTrackpadPhase`, `TaoMouseButton`, `TaoEventCode` —
@@ -1524,7 +1529,7 @@ provides them through composition locals. The same theme works whether the depen
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot plus your UI. |
 
 The Tao-native `DecoratedWindow` (via `taoApplication` or the Tao `ApplicationScope` overload)
-also accepts `transparent: Boolean = false` for full-window transparency. At 2.2.0 the umbrella
+also accepts `transparent: Boolean = false` for full-window transparency. The umbrella
 `NucleusApplicationScope.DecoratedWindow` does not forward that flag — see
 [transparent overlays](/docs/tao/window-scaffold#transparent-and-borderless-overlays).
 
@@ -1850,7 +1855,7 @@ attribute; Windows 10 falls back to acrylic when available. Silent no-op on macO
 ## Transparent and borderless overlays
 
 Full-window transparency is a creation-time flag on the **Tao** `DecoratedWindow` (AWT out of scope).
-At 2.2.0 the umbrella `NucleusApplicationScope.DecoratedWindow` does not forward it — use
+The umbrella `NucleusApplicationScope.DecoratedWindow` does not forward it — use
 `taoApplication` or the Tao-scope overload:
 
 ```kotlin
@@ -2097,7 +2102,9 @@ on macOS, DMA-BUF/`EGLImage` on Linux).
 
 It is the passive GPU-pixels counterpart of [`NativeView`](/docs/tao/native-views). Prefer
 `NativeView` for interactive native widgets; use `TextureView` when you already own a decoder or
-renderer that publishes GPU frames (video, camera, game engine, GPU compute).
+renderer that publishes GPU frames (video, camera, game engine, GPU compute). For **in-process**
+renderers that can allocate on the scene's own GPU device, use
+[`TaoGpuRenderContext`](/docs/tao/gpu-render-context) instead of importing a foreign texture.
 
 ## Add the dependency
 
@@ -2349,10 +2356,149 @@ Supporting types: `NucleusDrmFormat`, `NucleusDmaBufPlane`, `NucleusYuvFormat`
 
 ## What's next
 
+- [GPU render context](/docs/tao/gpu-render-context) — in-process renderers on the scene's device.
 - [Native views](/docs/tao/native-views) — embed interactive `NSView` / `HWND` / `GtkWidget` content.
 - [DecoratedWindow on Tao](/docs/tao/decorated-window) — open windows that host `TextureView`.
-- [Drag and drop](/docs/tao/drag-and-drop) — file and content DnD on Tao.
 - [Tao backend overview](/docs/tao) — backends, Wayland, and related primitives.
+
+---
+
+# GPU render context
+
+URL: https://nucleusframework.dev/docs/tao/gpu-render-context
+
+Give in-process GPU renderers the scene's Skia DirectContext and native device so they can composite without a second GPU or per-frame copy.
+
+`TaoGpuRenderContext` publishes the GPU context of the enclosing Compose surface on the Tao
+backend: the Skia `DirectContext` the scene draws with, plus the native device behind it
+(Metal on macOS, ANGLE GLES on Windows, native EGL/GLES on Linux). An in-process renderer —
+a map engine, 3D viewport, or charting library — allocates its render targets **on that same
+device** and lets Compose sample them with no second GPU, no shareable handle, and no per-frame
+cross-device copy.
+
+It is the complement of [`TextureView`](/docs/tao/texture-view), not a replacement.
+`TextureView` is the contract for **foreign** producers (out-of-process engines, hardware
+decoders on their own device). Use `TaoGpuRenderContext` when your renderer can create its
+GPU objects on the scene's context.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Types live in `dev.nucleusframework.window.tao`.
+
+## Obtain the context
+
+Call `rememberTaoGpuRenderContext()` inside a surface that owns a GPU context
+(`DecoratedWindow` content, a native popup layer, a `NativeView` overlay, or a tray panel).
+It returns `null` during bring-up, teardown, or a non-hardware environment:
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import dev.nucleusframework.window.tao.TaoGpuRenderContext
+import dev.nucleusframework.window.tao.TaoOpenGlRenderContext
+import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
+
+@Composable
+fun MapViewport() {
+    val renderContext = rememberTaoGpuRenderContext() ?: return
+    // Key renderer state on the instance: a rebuilt context is a new identity.
+    val renderer = remember(renderContext) { MapEngineRenderer(renderContext) }
+    DisposableEffect(renderer) {
+        onDispose { renderer.close() }
+    }
+    LaunchedEffect(renderer) {
+        while (true) {
+            // GPU work inside withFrameNanos — see Frame pacing below.
+            withFrameNanos { renderer.renderFrame() }
+        }
+    }
+    // … sample the engine output in Compose
+}
+```
+
+## Backends
+
+| Type | Platforms | Extra API |
+|------|-----------|-----------|
+| `TaoMetalRenderContext` | macOS | `metalDevicePtr` — borrowed `id<MTLDevice>` |
+| `TaoOpenGlRenderContext` | Linux, Windows | `withContextCurrent { }` — bind the surface GL context |
+
+Both expose:
+
+| Member | Description |
+|--------|-------------|
+| `backend: TaoRenderBackend` | `METAL` or `OPENGL` |
+| `skiaContext: DirectContext` | Skia context the scene paints with (borrowed) |
+| `runOnGpuThread { }` | Exclusive access for Skia / GPU work (Metal hops to the render thread; GL runs inline on the event-loop thread after a thread check) |
+
+On Windows, `OPENGL` is ANGLE-on-D3D11 GLES — not desktop OpenGL. Resolve entry points
+through ANGLE's `eglGetProcAddress`, the same way Skia does for the scene.
+
+## Ownership and lifetime
+
+Every handle is **borrowed**. Do not retain, release, or free them. Stop using a context the
+moment the surface publishes a different one (or `null`).
+
+`rememberTaoGpuRenderContext()` returns a **new instance** whenever the underlying context is
+rebuilt — window detach, a Wayland hide/show cycle (full EGL stack rebuild), popup or tray
+panel teardown. Key renderer state on that instance:
+
+```kotlin
+val renderer = remember(renderContext) { EngineRenderer(renderContext) }
+DisposableEffect(renderContext) {
+    onDispose {
+        renderContext.runOnGpuThread { renderer.releaseGpuResources() }
+    }
+}
+```
+
+## Frame pacing
+
+Issue GPU work **inside** the `withFrameNanos` callback (or during composition / layout /
+draw), not in the code that runs after the suspension:
+
+- On Linux the host hands the EGL context to a swap thread for blocking `eglSwapBuffers`
+  right after every frame. A post-frame continuation races that hand-off and gets
+  `withContextCurrent → null` almost every vsync.
+- The frame callback runs inside the render pass, while the context is bindable.
+
+When the scene has live `TextureView` imports or `TaoGpuRenderContext` consumers, Tao keeps
+VSync on through the Windows modal move/resize loop and Linux resize bursts so
+frame-clock-driven content stays display-paced instead of running at event-pump speed.
+
+## TextureView vs GPU render context
+
+| | `TextureView` | `TaoGpuRenderContext` |
+|--|---------------|------------------------|
+| Producer | Foreign / out-of-process | In-process, same device |
+| Import | Shared D3D11 / IOSurface / DMA-BUF | Allocate on `skiaContext` |
+| Typical use | Video decoder, game engine, camera | MapLibre-style engines, 3D viewports, charts |
+
+## Notes
+
+- Call every member from the composition thread (Tao event-loop thread; process main thread on
+  macOS). Hop GPU work through `runOnGpuThread` / `withContextCurrent`.
+- Nested `withContextCurrent` is safe; the previous current context is restored afterwards and
+  Skia's GL state cache is invalidated so consumers do not need to.
+- Windows surfaces often share one context per owner; macOS and Linux popup / tray surfaces
+  may own private contexts.
+
+## What's next
+
+- [TextureView](/docs/tao/texture-view) — import external GPU frames into the scene.
+- [Native views](/docs/tao/native-views) — embed interactive native widgets.
+- [DecoratedWindow](/docs/tao/decorated-window) — host Tao windows from composition.
+- [The Tao backend](/docs/tao) — architecture and backend selection.
 
 ---
 
@@ -9362,16 +9508,33 @@ EnergyManager.withLightEfficiencyMode {
 Both helpers restore the previous mode when the block returns, including when it throws. Manual
 `enable`/`disable` calls are not balanced for you, so pair them yourself.
 
-## Keep the screen awake
+## Keep the system awake
 
-Prevent the display and system from sleeping while a task or presentation runs, then release
-the request when it finishes:
+Prevent sleep while a task or presentation runs, then release the request when it finishes.
+Choose whether the **display** must stay on:
 
 ```kotlin
-EnergyManager.keepScreenAwake()
-// ... long-running task or presentation
-EnergyManager.releaseScreenAwake()
+import dev.nucleusframework.energymanager.AwakeMode
+import dev.nucleusframework.energymanager.EnergyManager
+
+// Presentation / kiosk — screen stays on (default)
+EnergyManager.keepAwake(AwakeMode.SYSTEM_AND_DISPLAY)
+
+// Long export / sync — machine stays awake; screen saver and display sleep behave normally
+EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)
+
+// ... work completes
+EnergyManager.releaseAwake()
 ```
+
+| Mode | System sleep | Display / screen saver |
+|------|--------------|------------------------|
+| `SYSTEM_AND_DISPLAY` (default) | Blocked | Blocked — screen stays on |
+| `SYSTEM_ONLY` | Blocked | Allowed — screen can blank or lock |
+
+Calling `keepAwake` while a request is already active replaces it with the new mode.
+`keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` remain as deprecated
+forwarders to `keepAwake()` / `releaseAwake()` / `isAwakeActive()`.
 
 ## How it works
 
@@ -9388,11 +9551,11 @@ running its block on a single pinned thread.
 
 Each platform maps these levels to native OS facilities:
 
-| OS | Full mode | Light mode | Screen awake |
-|---|---|---|---|
-| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (green leaf in Task Manager 22H2+) | EcoQoS only | `SetThreadExecutionState(ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` |
-| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (E-core confinement, I/O and network throttling on Apple Silicon) | `task_policy_set` Tier 5 only — CPU deprioritized, I/O unaffected | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` |
-| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` only | GNOME SessionManager DBus, logind `Inhibit("idle")`, or X11 `XScreenSaverSuspend` |
+| OS | Full mode | Light mode | `SYSTEM_AND_DISPLAY` | `SYSTEM_ONLY` |
+|---|---|---|---|---|
+| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (green leaf in Task Manager 22H2+) | EcoQoS only | `SetThreadExecutionState(ES_SYSTEM_REQUIRED \| ES_DISPLAY_REQUIRED)` | `ES_SYSTEM_REQUIRED` only |
+| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (E-core confinement, I/O and network throttling on Apple Silicon) | `task_policy_set` Tier 5 only — CPU deprioritized, I/O unaffected | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` | `kIOPMAssertPreventUserIdleSystemSleep` (like `caffeinate -i`; lid close still sleeps) |
+| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` only | GNOME SessionManager / PowerManagement / logind / X11 | Suspend-only session inhibitor (no X11 screen-saver fallback) |
 
 Thread-level mode uses the per-thread form of these primitives on Linux,
 `pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` on macOS, and
@@ -9410,10 +9573,18 @@ Thread-level mode uses the per-thread form of these primitives on Linux,
 | `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Per-thread; affects the calling thread only. |
 | `withEfficiencyMode { }` (suspend) | Runs the block on a dedicated thread with thread-level efficiency; the thread is disposed when the block returns. |
 | `withLightEfficiencyMode { }` (suspend) | Applies process-level light QoS for the block's lifetime; no thread pinning. |
-| `keepScreenAwake()` / `releaseScreenAwake()` | Prevent and restore display and system sleep. |
-| `isScreenAwakeActive(): Boolean` | Whether screen-awake is currently held. |
+| `keepAwake(mode)` / `releaseAwake()` | Prevent and restore system (and optionally display) sleep. |
+| `isAwakeActive(): Boolean` | Whether an awake request is currently held. |
+| `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Deprecated forwarders to the `keepAwake` / `releaseAwake` / `isAwakeActive` APIs. |
 
-Every `enable`/`disable` call and `keepScreenAwake`/`releaseScreenAwake` returns an
+### AwakeMode
+
+| Value | Description |
+|---|---|
+| `SYSTEM_AND_DISPLAY` | Block system and display sleep (default). |
+| `SYSTEM_ONLY` | Block system sleep only; display and screen saver behave normally. |
+
+Every `enable`/`disable` call and `keepAwake`/`releaseAwake` returns an
 `EnergyManager.Result` with `success: Boolean`, `errorCode: Int`, and `message: String`. On an
 unsupported platform the result is `success = false` with `errorCode = -1`.
 
@@ -9421,9 +9592,10 @@ unsupported platform the result is `success = false` with `errorCode = -1`.
 
 - On Linux, `libdbus-1`, `libX11`, and `libXss` are loaded through `dlopen()` at runtime.
   Missing libraries degrade gracefully, and a private DBus connection is used so the module
-  does not interfere with the JVM's accessibility bus.
+  does not interfere with the JVM's accessibility bus. `SYSTEM_ONLY` needs a session bus
+  (GNOME, PowerManagement) or systemd-logind; the X11 screen-saver fallback cannot serve that mode.
 - On Windows 10 1709+, EcoQoS applies only on battery; Windows 11+ honors it on AC power too.
-- For a long task that must also wake the device, hold `keepScreenAwake()` alongside a job from
+- For a long task that must also wake the device, hold `keepAwake(…)` alongside a job from
   the [scheduler](/docs/lifecycle/scheduler).
 
 ## What's next
@@ -12069,6 +12241,20 @@ The MSI target is enabled by `TargetFormat.Msi`. Set `upgradeUuid` to a fixed va
 matches successor versions during an upgrade. Without a stable UUID, every new build is treated
 as a separate product.
 
+Install scope uses the same shape as NSIS — `windows.msi { perMachine }` maps 1:1 to
+electron-builder's `msi.perMachine`. MSI installs **per-machine** by default
+(`perMachine = true`). Prefer this over the deprecated inverted `windows.perUserInstall`
+flag; when `msi.perMachine` is unset, `perUserInstall` still applies for compatibility:
+
+```kotlin title="build.gradle.kts"
+windows {
+    upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+    msi {
+        perMachine = false // per-user MSI (Program Files → user-local)
+    }
+}
+```
+
 ## Build an AppX or MSIX package
 
 AppX targets produce an `.appx` (or a `.msixbundle` via CI). The Desktop Bridge runs with
@@ -12148,9 +12334,10 @@ For a Windows-specific file icon, call `windows.fileAssociation(...)` instead.
 ## Reference
 
 The `windows { }` block exposes `iconFile`, `packageName`, `console`, `dirChooser`,
-`perUserInstall`, `shortcut`, `menu`, `menuGroup`, `upgradeUuid`, `msiPackageVersion`, and
-`exePackageVersion`, plus the sub-blocks `nsis { }`, `appx { }`, `portable { }`, and
-`signing { }`. See the [Gradle DSL reference](/docs/reference/gradle-dsl) for every property.
+`perUserInstall` (deprecated), `shortcut`, `menu`, `menuGroup`, `upgradeUuid`,
+`msiPackageVersion`, and `exePackageVersion`, plus the sub-blocks `nsis { }`, `msi { }`,
+`appx { }`, `portable { }`, and `signing { }`. See the
+[Gradle DSL reference](/docs/reference/gradle-dsl) for every property.
 
 ## Notes
 
@@ -13477,7 +13664,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.0.0` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.4.0` for production runs.
 
 ## Reference an action
 
@@ -13990,9 +14177,13 @@ also selectable directly as a `targetFormats` entry).
 | jDeploy | Built-in | No | No |
 | jpackage / Compose MP | None | — | — |
 
-Conveyor is the only compared tool with delta updates (about 31 KB on macOS via Sparkle 2).
-Nucleus downloads the full file and exposes a runtime API for progress flow, channel
-switching, post-update detection, and restart-on-update.
+Both Nucleus and Conveyor support delta updates. Nucleus (from 2.3) does differential
+downloads: it matches electron-builder block maps of the new artifact against a cached copy
+of the previous one, copies unchanged blocks from disk, and fetches the rest with HTTP range
+requests — jumps such as 1.0 → 1.7 are differential too, with no pairwise delta files ever
+produced. Conveyor ships delta updates via Sparkle 2 (about 31 KB on macOS). Nucleus also
+exposes a runtime API for progress flow, channel switching, post-update detection, and
+restart-on-update.
 
 ## Code signing and notarization
 
@@ -14032,14 +14223,14 @@ Snap (Snap Store), and Flatpak (Flathub).
 
 | Where Nucleus is strong | Where competitors win |
 |-------------------------|----------------------|
-| Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: delta updates, broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
+| Most formats. Auto-update, signing, and CI in one plugin. Built-in GraalVM Native Image packaging. Apache 2 / MIT. | Conveyor: broader HSM signing, single-machine builds. install4j: stable, paid, long-running support. jpackage: no new dependency. |
 
 Nucleus builds each OS on its own CI runner — there is no cross-compilation. It is Gradle-only
 and younger than Conveyor and install4j.
 
 ## When to pick what
 
-- A small CLI or single-window app that needs delta updates and cloud HSM signing — **Conveyor**.
+- A small CLI or single-window app that needs the widest HSM signing backends and single-machine builds — **Conveyor**.
 - An enterprise installer with custom dialogs and paid support — **install4j**.
 - A DMG, MSI, or DEB straight from jpackage — **Compose Multiplatform** or **jpackage** directly.
 - One Kotlin codebase covering every format and store, with auto-update, AOT, and GraalVM —
@@ -14303,6 +14494,445 @@ manager; if it is missing, the checker cannot run.
 
 ---
 
+# Migrating from Nucleus 1.x to 2.0
+
+URL: https://nucleusframework.dev/docs/migrate/from-1.x
+
+Port a Nucleus 1.x desktop app to 2.0 by renaming the project namespace and moving bootstrap into nucleusApplication.
+
+In this tutorial, you'll migrate a Nucleus 1.x desktop app to 2.0. Nucleus 2.0 uses a single
+entry point, `nucleusApplication`, and moves the project namespace to `dev.nucleusframework`.
+The migration is mostly mechanical: rename the namespace, then move your `application { }` block
+into `nucleusApplication(args) { }`, which removes about 30 lines of bootstrap from a typical `main()`.
+
+## Before you start
+
+Nucleus 2.0 needs two build changes before you touch any application code.
+
+### Set the JDK toolchain to 25 (only if you use Jewel)
+
+The core 2.0 artifacts — `core-runtime`, `nucleus-application`, `decorated-window-core`,
+`decorated-window-material3`, `decorated-window-tao` — target a JDK 17 baseline. The **Jewel** stack
+is the exception: `decorated-window-jewel` and the IntelliJ platform libraries it pulls are
+published for **JDK 25**. So the toolchain bump is a Jewel requirement, not a blanket Nucleus one.
+
+If your app uses `JewelDecoratedWindow` / `JewelDecoratedDialog`, set the toolchain on **every**
+module that pulls the Jewel stack:
+
+```kotlin title="build.gradle.kts"
+kotlin { jvmToolchain(25) }
+```
+
+The failing module is where Jewel is on the classpath — often a shared UI module, not just the
+desktop app. In a Kotlin Multiplatform project the `jvm()` target defaults to your Gradle JDK
+(commonly 21), so set the toolchain in the `shared` module too:
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    jvmToolchain(25)     // the jvm() target needs it; the Android target keeps its own bytecode level
+    // ...
+}
+```
+
+Skip this and dependency resolution fails with (the version is whatever toolchain you're on today —
+often 21): `Dependency resolution is looking for a library compatible with JVM runtime version 21,
+but 'dev.nucleusframework:nucleus.decorated-window-jewel' is only compatible with JVM runtime
+version 25 or newer.`
+
+If you don't use Jewel, you can stay on your current toolchain (JDK 17 or newer).
+
+### Add the IntelliJ snapshots repository
+
+Nucleus 2.x pulls Jewel `0.39.0-262.9437.21`, which lives only in the IntelliJ snapshots
+repository. Add it to `settings.gradle.kts`:
+
+```kotlin title="settings.gradle.kts"
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://www.jetbrains.com/intellij-repository/releases")
+        maven("https://www.jetbrains.com/intellij-repository/snapshots") // new
+    }
+}
+```
+
+If you declare Jewel directly, pin it to the same coordinate Nucleus brings in transitively:
+
+```toml
+intellijIcons = "262.9437.16"
+jewel        = "0.39.0-262.9437.21"
+```
+
+## What changed in 2.0
+
+| Area | 1.x | 2.0 |
+|---|---|---|
+| Plugin ID | `io.github.kdroidfilter.nucleus` | `dev.nucleusframework` |
+| Maven group | `io.github.kdroidfilter` | `dev.nucleusframework` |
+| Kotlin package root | `io.github.kdroidfilter.nucleus.*` | `dev.nucleusframework.*` |
+| Entry point | `application { }` | `nucleusApplication(args) { }` |
+| Window | `Window(...)` | `DecoratedWindow(...)` |
+| GraalVM bootstrap | Manual `GraalVmInitializer.initialize()` | Automatic |
+| Single instance | Manual `SingleInstanceManager.isSingleInstance(...)` | Automatic |
+| Restore on second launch | Manual `LaunchedEffect` + `toFront()` | Automatic |
+| AOT training timer | Manual `Thread` + `exitProcess` | `aotTraining(duration = ...)` |
+| AutoLaunch cache prime | Manual | Automatic |
+| Windows AUMID | Manual | Automatic |
+
+## Update the plugin ID and Maven coordinates
+
+Change the plugin ID and version:
+
+```diff
+ plugins {
+-    id("io.github.kdroidfilter.nucleus") version "1.3.0"
++    id("dev.nucleusframework") version "<version>"
+ }
+```
+
+Update the dependency coordinates:
+
+```diff
+ dependencies {
+-    implementation("io.github.kdroidfilter:nucleus.core-runtime:1.3.0")
+-    implementation("io.github.kdroidfilter:nucleus.nucleus-application:1.3.0")
++    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
++    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+ }
+```
+
+Update any Gradle DSL imports:
+
+```diff
+-import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
++import dev.nucleusframework.desktop.application.dsl.TargetFormat
+```
+
+## Rename the Kotlin imports
+
+Run a project-wide find and replace:
+
+```
+io.github.kdroidfilter.nucleus  →  dev.nucleusframework
+```
+
+No classes are renamed — only the package prefix changes.
+
+## Switch to nucleusApplication
+
+In 1.x you wrapped Compose Desktop's `application { }` in Nucleus init helpers. In 2.0,
+`nucleusApplication` runs the bootstrap in the correct order and exposes a unified
+`NucleusApplicationScope`.
+
+### Before: main() in 1.x
+
+```kotlin
+fun main(args: Array<String>) {
+    GraalVmInitializer.initialize()
+    AutoLaunch.wasStartedAtLogin(args)
+    if (Platform.Current == Platform.Windows) {
+        WindowsJumpListManager.setProcessAppId()
+    }
+
+    if (AotRuntime.isTraining()) {
+        Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
+            .apply { isDaemon = false }.start()
+    }
+
+    application {
+        val isFirstInstance = remember {
+            SingleInstanceManager.isSingleInstance(
+                onRestoreFileCreated = { DeepLinkHandler.writeUriTo(this) },
+                onRestoreRequest = { /* hand-rolled restore state */ },
+            )
+        }
+        if (!isFirstInstance) { exitApplication(); return@application }
+
+        DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
+
+        Window(onCloseRequest = ::exitApplication, title = "My App") { App() }
+    }
+}
+```
+
+### After: main() in 2.0
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.application.aotTraining
+import kotlin.time.Duration.Companion.seconds
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    aotTraining(duration = 45.seconds)
+
+    onDeepLink { uri -> handleDeepLink(uri) }
+
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        App()
+    }
+}
+```
+
+### Keep early exits above nucleusApplication
+
+`nucleusApplication` runs the full bootstrap: GraalVM init, the single-instance lock, and the
+Compose loop. For invocation modes that must bypass all of that — a desktop scheduler re-launch
+or a boot receiver — keep the check above the call:
+
+```kotlin
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args, registry = MyTaskRegistry.registry)
+        exitProcess(0)
+    }
+
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+Putting these checks inside the scope acquires the single-instance lock first — the opposite of
+what you want for a bypass path.
+
+### What nucleusApplication runs, in order
+
+1. `GraalVmInitializer.initialize()` — fonts, charsets, HiDPI, `java.home`.
+2. The AOT training timer, when `-Dnucleus.aot.mode=training` is set and you call `aotTraining(…)`.
+3. The single-instance lock. A second instance relays its CLI deep link to the primary and exits with code 0.
+4. Platform priming: the `AutoLaunch.wasStartedAtLogin(args)` cache is warmed, and on Windows
+   `WindowsJumpListManager.setProcessAppId()` runs before any window. Both are reflective — they
+   fire only if the modules are on the classpath.
+5. Backend resolution: `NucleusBackend.Auto` picks AWT or Tao.
+6. The Compose application loop.
+
+**Don't initialize COM on the main thread before `nucleusApplication` (Tao / Windows).** The Tao
+backend runs the Win32 message loop as a single-threaded COM apartment (STA) on the main thread.
+If something already put that thread into a multithreaded apartment (MTA) — a common culprit is
+calling `WindowsNotificationCenter.initialize()` yourself in `main()` — Tao's `OleInitialize` fails
+and the process aborts natively:
+
+```
+thread '<unnamed>' panicked at tao/.../windows/window.rs:
+OleInitialize failed! Result was: `RPC_E_CHANGED_MODE`.
+```
+
+The bootstrap already primes the AUMID and notification center on the right thread, so drop the
+manual call in the GUI path. If a headless bypass path (a scheduler invocation) still needs it,
+keep that call there — it has no Tao window to conflict with.
+
+## Replace Window with DecoratedWindow
+
+Pick the variant that matches your design system:
+
+| Composable | Module |
+|---|---|
+| `DecoratedWindow(…)` | `nucleus.decorated-window-core` |
+| `MaterialDecoratedWindow(…)` | `nucleus.decorated-window-material3` |
+| `JewelDecoratedWindow(…)` | `nucleus.decorated-window-jewel` |
+
+All three expose `nucleusWindow` inside their content — a backend-agnostic handle for `show()`,
+`toFront()`, `setMinimized()`, and similar calls.
+
+### Window composables are extension functions now
+
+This is the most common breakage. In 1.x, `JewelDecoratedWindow` was a plain `@Composable`. In
+2.0 it is an extension on `NucleusApplicationScope`:
+
+```kotlin
+fun NucleusApplicationScope.JewelDecoratedWindow(
+    onCloseRequest: () -> Unit, ...,
+    content: @Composable NucleusDecoratedWindowScope.() -> Unit,
+)
+```
+
+Any wrapper composable you wrote in 1.x must become an extension on the same scope:
+
+```diff
+ @Composable
+-fun MyOnboardingWindow(vmFactory: ViewModelFactory) {
++fun NucleusApplicationScope.MyOnboardingWindow(vmFactory: ViewModelFactory) {
+     JewelDecoratedWindow(onCloseRequest = {}, title = "...") { /* ... */ }
+ }
+```
+
+The call site inside `nucleusApplication { … }` does not change — the receiver is implicit.
+
+### Dialogs follow the same rule
+
+| Receiver | Backend support |
+|---|---|
+| `JewelDecoratedDialog(…)` (no receiver) | AWT only. Its implementation module isn't on the Tao classpath, so it fails at render with `ClassNotFoundException: dev.nucleusframework.window.DecoratedDialogKt`. |
+| `NucleusApplicationScope.JewelDecoratedDialog(…)` | Backend-agnostic. Dispatches to AWT or Tao. |
+
+Both overloads exist, so the plain call still **compiles** — it only fails at runtime on Tao. Use
+the scoped variant for anything composed inside `nucleusApplication { … }`.
+
+The catch: dialogs are usually opened deep in your UI tree (an event editor, a settings sheet),
+far from the `NucleusApplicationScope` receiver. Rather than thread the scope through every
+signature, expose it with a `CompositionLocal`:
+
+```kotlin
+// 1. Declare it once.
+val LocalNucleusApplicationScope = staticCompositionLocalOf<NucleusApplicationScope> {
+    error("LocalNucleusApplicationScope not provided")
+}
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    val nucleusScope = this
+    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        // 2. Provide it inside the window content.
+        CompositionLocalProvider(LocalNucleusApplicationScope provides nucleusScope) {
+            App()
+        }
+    }
+}
+
+// 3. Read it at the dialog call site. The explicit receiver also disambiguates the two overloads.
+@Composable
+fun SettingsDialog(/* ... */) {
+    LocalNucleusApplicationScope.current.JewelDecoratedDialog(onCloseRequest = { /* ... */ }) {
+        // JewelDialogTitleBar and other DecoratedDialogScope extensions work here:
+        // NucleusDecoratedDialogScope extends DecoratedDialogScope.
+    }
+}
+```
+
+### CompositionLocals propagate across the Tao scene
+
+The Tao backend opens a fresh `ComposeScene` per window and dialog. As of 2.0, the full parent
+`CompositionLocalContext` is bridged automatically, so you no longer need to wrap content twice:
+
+```kotlin
+// Before — needed on Tao
+IntUiTheme(theme, styling) {
+    JewelDecoratedWindow(...) {
+        IntUiTheme(theme, styling) { /* duplicate */ }
+    }
+}
+
+// After — a single wrap is enough on every backend
+IntUiTheme(theme, styling) {
+    JewelDecoratedWindow(...) { /* content */ }
+}
+```
+
+## Remove the manual single-instance block
+
+Single instance is automatic in 2.0. Delete the 1.x manual block:
+
+```diff
+-val isFirstInstance = remember {
+-    SingleInstanceManager.isSingleInstance(...)
+-}
+-if (!isFirstInstance) { exitApplication(); return@application }
+```
+
+The primary instance restores its `DecoratedWindow` (`show()` + `setMinimized(false)` +
+`toFront()` + `requestFocus()`) on every second launch. The secondary instance's CLI deep link is
+delivered to the primary through `onDeepLink { }`, then it exits with code 0.
+
+Opt out for editor-style apps that allow multiple windows:
+
+```kotlin
+nucleusApplication(args, enableSingleInstance = false) { /* ... */ }
+```
+
+## Move AOT training into aotTraining
+
+```diff
+-if (AotRuntime.isTraining()) {
+-    Thread({ Thread.sleep(45_000); exitProcess(0) }, "aot-timer")
+-        .apply { isDaemon = false }.start()
+-}
+
+ nucleusApplication(args) {
++    aotTraining(duration = 45.seconds)
++
++    if (isAotTraining) {
++        preloadNavigationScreens()
++        preloadFontsAndImages()
++    }
+ }
+```
+
+`aotTraining` is a no-op outside training mode. The scope also exposes `aotMode`, `isAotTraining`,
+and `isAotRuntime`. See [AOT cache](/docs/performance/aot-cache).
+
+## Register deep links with onDeepLink
+
+```diff
+-DeepLinkHandler.register(args) { uri -> handleDeepLink(uri) }
++onDeepLink { uri -> handleDeepLink(uri) }
+```
+
+URIs delivered before the handler is registered are buffered and replayed. `DeepLinkHandler`
+remains public for low-level work.
+
+## Drop the explicit GraalVmInitializer call
+
+```diff
+-GraalVmInitializer.initialize()
+-application { /* ... */ }
++nucleusApplication(args) { /* ... */ }
+```
+
+It runs as the first bootstrap step now.
+
+## Review the final result
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    remember {
+        AutoLaunch.wasStartedAtLogin(args)
+        if (Platform.Current == Platform.Windows) {
+            WindowsJumpListManager.setProcessAppId()
+        }
+        true
+    }
+
+    aotTraining(duration = 45.seconds)
+    onDeepLink { uri -> handleDeepLink(uri) }
+
+    MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "My App") {
+        App()
+    }
+}
+```
+
+No ordered init list, no `SingleInstanceManager` plumbing, and no restore counter with a
+`LaunchedEffect` to bring the window back.
+
+## Troubleshooting
+
+- **Imports won't resolve after the rename.** Search for `io.github.kdroidfilter.nucleus` — anything
+  left is stale. Replace it with `dev.nucleusframework`.
+- **`nucleusApplication` is unresolved.** Add `implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")`.
+- **The window doesn't restore on second launch with a plain `Window`.** That behavior lives in
+  `DecoratedWindow`. Switch to a `DecoratedWindow` variant.
+- **`Unresolved reference 'JewelDecoratedWindow'`.** The composable became a scope extension.
+  Propagate the receiver — see [Replace Window with DecoratedWindow](#replace-window-with-decoratedwindow).
+- **`ClassNotFoundException: …DecoratedDialogKt` at render on Tao.** You're calling the AWT-only
+  dialog (it compiles, but its impl module isn't on the Tao classpath). Use
+  `NucleusApplicationScope.JewelDecoratedDialog` — see [Dialogs follow the same rule](#dialogs-follow-the-same-rule).
+- **Native abort `OleInitialize failed! RPC_E_CHANGED_MODE` / exit code `0xC0000409` on Windows.**
+  Something initialized COM in MTA on the main thread before Tao. Don't call
+  `WindowsNotificationCenter.initialize()` (or other COM setup) in the GUI `main()` path — the
+  bootstrap handles it. See the callout in [What nucleusApplication runs, in order](#what-nucleusapplication-runs-in-order).
+- **`Could not find org.jetbrains.jewel:jewel-foundation:0.37.…`** The IntelliJ snapshots repository
+  is missing. See [Before you start](#before-you-start).
+- **`Dependency resolution is looking for a library compatible with JVM runtime version 21`ish.** A
+  module that pulls the Jewel stack isn't on the JDK 25 toolchain (check shared/UI modules and the
+  KMP `jvm()` target). See [Set the JDK toolchain to 25](#set-the-jdk-toolchain-to-25-only-if-you-use-jewel).
+
+## What's next
+
+- [Quickstart](/docs/start/quickstart) — build and run a Nucleus app from scratch with the 2.0 DSL.
+- [Configuration](/docs/start/configuration) — the full `nucleus { }` DSL.
+- [AOT cache](/docs/performance/aot-cache) — how `aotTraining` primes startup.
+- [Backends](/docs/concepts/backends) — how `NucleusBackend.Auto` chooses AWT or Tao.
+
+---
+
 # Migrating from JetBrains Compose Desktop
 
 URL: https://nucleusframework.dev/docs/migrate/from-jb-compose
@@ -14326,9 +14956,9 @@ Nucleus extends it.
 
 ```diff
  plugins {
-     id("org.jetbrains.kotlin.jvm") version "2.3.10"
-     id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
-     id("org.jetbrains.compose") version "1.10.1"
+     id("org.jetbrains.kotlin.jvm") version "2.4.0"
+     id("org.jetbrains.kotlin.plugin.compose") version "2.4.0"
+     id("org.jetbrains.compose") version "1.11.1"
 +    id("dev.nucleusframework") version "<version>"
  }
 ```
@@ -14631,16 +15261,21 @@ Three mutually exclusive modes:
 ## `windows { }` — `WindowsPlatformSettings`
 
 - `iconFile`, `packageName`
-- `console: Boolean`, `dirChooser: Boolean`, `perUserInstall: Boolean`
+- `console: Boolean`, `dirChooser: Boolean`
+- `perUserInstall: Boolean` — **deprecated**; inverted vs electron-builder (`true` ≡ per-user). Prefer `msi { perMachine }` / `nsis { perMachine }`. Still applied when `msi.perMachine` is unset.
 - `shortcut`, `menu`, `menuGroup`
 - `upgradeUuid: String?`, `msiPackageVersion`, `exePackageVersion`
 - `nsis { … }` — see [NSIS](#windows--nsis--nsissettings)
+- `msi { … }` — see [MSI](#windows--msi--msisettings)
 - `appx { … }` — see [AppX](#windows--appx--appxsettings)
 - `portable { … }` — see [Portable](#windows--portable--portablesettings)
 - `signing { … }` — see [Signing](#windows--signing--windowssigningsettings)
 
 ### `windows.portable { }` — `PortableSettings`
 - `compressionLevel: CompressionLevel?` — overrides root `nativeDistributions.compressionLevel` for the portable EXE only
+
+### `windows.msi { }` — `MsiSettings`
+- `perMachine: Boolean` — install per-machine (Program Files, all users). Default `true`. Maps 1:1 to electron-builder `msi.perMachine`.
 
 ### `windows.nsis { }` — `NsisSettings`
 - `oneClick: Boolean`
@@ -14709,7 +15344,7 @@ Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signi
 
 ### `linux.flatpak { }` — `FlatpakSettings`
 - `runtime: String = "org.freedesktop.Platform"`
-- `runtimeVersion: String = "23.08"`
+- `runtimeVersion: String = "23.08"` — note: the `setup-nucleus` CI action installs the Freedesktop Platform/SDK **24.08**; set `runtimeVersion = "24.08"` when building Flatpaks in CI
 - `sdk: String = "org.freedesktop.Sdk"`
 - `branch: String = "master"`
 - `finishArgs: List<String>` — defaults: `--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`, `--device=dri`
@@ -15106,7 +15741,7 @@ See [migrate from 1.x](/docs/migrate/from-1.x).
 
 URL: https://nucleusframework.dev/docs/roadmap
 
-What shipped in Nucleus 2.0–2.3, the modules planned next, and features under consideration.
+What shipped in Nucleus 2.0–2.4, the modules planned next, and features under consideration.
 
 Nucleus 2.0 provides the runtime and packaging foundation. Later releases add
 OS-integration modules for capabilities that JVM desktop apps otherwise reach through
@@ -15158,9 +15793,19 @@ GPU textures, update bandwidth, and application-scope polish:
 - **System theme bridge** — `isSystemInDarkTheme()` tracks OS changes under `nucleusApplication`. See [Dark mode](/docs/os/dark-mode#bridge-to-compose-issystemindarktheme).
 - **GraalVM** — innovation default **25.2**, exact reachability on `runGraalvmNative`, orphan project-class detection, safer SLF4J lifecycle, metadata input fingerprinting.
 
+## Shipped in 2.4
+
+In-process GPU, power control, packaging DSL, and a frozen public ABI:
+
+- **`TaoGpuRenderContext`** — scene Skia `DirectContext` + native device for in-process renderers. See [GPU render context](/docs/tao/gpu-render-context).
+- **`AwakeMode`** — `keepAwake(SYSTEM_ONLY)` without forcing the display on. See [Energy manager](/docs/lifecycle/energy-manager#keep-the-system-awake).
+- **`windows.msi { perMachine }`** — install-scope DSL aligned with NSIS. See [Windows packaging](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+- **Public ABI freeze** — `explicitApi()` + binary-compatibility-validator on published runtime modules.
+- Tao resize / frame-pacing and popup stability fixes across macOS, Windows, and Linux.
+
 ## Coming next
 
-Security and identity modules (still planned; not part of the 2.3.0 release):
+Security and identity modules (still planned; not part of the 2.4.0 release):
 
 | Module | Description | macOS | Windows | Linux |
 |--------|-------------|-------|---------|-------|
@@ -15205,6 +15850,63 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.4.0
+
+**Released: 2026-08-11**
+
+### Highlights
+
+- **`TaoGpuRenderContext` — in-process GPU on the scene's device.** Map engines, 3D viewports,
+  and charting can allocate render targets on the window's own Skia `DirectContext` and native
+  device (Metal / ANGLE GLES / native EGL) with no second GPU, no shareable handle, and no
+  per-frame cross-device copy. `TextureView` remains the contract for foreign producers. See
+  [GPU render context](/docs/tao/gpu-render-context).
+- **`AwakeMode` — keep the system awake without forcing the display.**
+  `EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)` lets the screen saver and display sleep behave
+  normally during long background work. `keepScreenAwake()` remains as a deprecated forwarder.
+  See [Keep the system awake](/docs/lifecycle/energy-manager#keep-the-system-awake).
+- **Public ABI freeze.** Published runtime modules run under Kotlin `explicitApi()` with
+  kotlinx binary-compatibility-validator baselines (`api/*.api`); `apiCheck` is part of
+  `check` / `preMerge`. Exception: `decorated-window-jewel` until BCV can read JVM 25 class files.
+
+### New features
+
+- **`windows.msi { perMachine }`** (#480) — install-scope DSL aligned with `nsis { perMachine }`.
+  `windows.perUserInstall` is deprecated (inverted meaning) but still works when `msi.perMachine`
+  is unset. MSI remains per-machine by default. See
+  [Build an MSI](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+
+### Improvements
+
+- **Unified JUL logging and renamed tray log API** (#491) — runtime modules log through
+  `java.util.logging`; `composeNativeTrayLoggingLevel` → `nucleusLoggingLevel` /
+  `NucleusLoggingLevel` (deprecated aliases retained).
+- **Safer updater construction** (#493) — provider validated at construction, config snapshotted,
+  downloads staged privately instead of a predictable shared temp path. See
+  [Auto-update](/docs/packaging/auto-update).
+- **Windows outbound drag** (#482) — `DoDragDrop` deferred off Compose pointer dispatch so
+  outbound drag frames paint without reentrancy. See
+  [Drag and drop](/docs/tao/drag-and-drop).
+
+### Bug fixes
+
+- **macOS live-resize trembling** (#476) — content no longer trails AppKit bounds during corner
+  resize.
+- **Windows interactive resize lag** (#479) — VSync dropped through the modal resize loop so
+  content tracks the border drag.
+- **Frame-paced GPU through modal loops** (#489, #505) — keep VSync on Windows move/resize and
+  Linux resize bursts when the scene hosts `TextureView` imports or `TaoGpuRenderContext`
+  consumers. See [GPU render context](/docs/tao/gpu-render-context#frame-pacing).
+- **macOS Metal render-thread leak** (#495) — autorelease pool around every render-thread task.
+- **`LocalComposeSceneContext` under `DecoratedWindow`** (#499) — Popup / Dialog / DropdownMenu
+  / Tooltip inside decorated window content no longer throw. See
+  [DecoratedWindow](/docs/tao/decorated-window).
+- **macOS overlay detach / focusable retain** (#496), **Wayland popup buffer_scale** (#508),
+  **macOS scene density from the window's display** (#509), **zoom-button tiling hover menu**
+  (#511), **RTL title-bar constraints while fullscreen** (#512).
+
+---
 
 ## v2.3.2
 

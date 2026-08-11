@@ -61,14 +61,17 @@ function resolveSection(dir, slugPrefix) {
     fs
       .readdirSync(dir)
       .filter((f) => f.endsWith('.mdx') && !f.endsWith('.fr.mdx'))
-      .map((f) => f.replace(/\.mdx$/, ''))
+      .map((f) => f.replace(/\.mdx$/, '').replace(/\.en$/, ''))
       .sort();
 
   const nodes = [];
   for (const name of pages) {
-    const filePath = path.join(dir, `${name}.mdx`);
+    // Default-locale pages are `name.mdx`; tolerate an explicit `name.en.mdx` too.
+    const filePath = [path.join(dir, `${name}.mdx`), path.join(dir, `${name}.en.mdx`)].find((p) =>
+      fs.existsSync(p),
+    );
     const subDir = path.join(dir, name);
-    if (fs.existsSync(filePath)) {
+    if (filePath) {
       const raw = fs.readFileSync(filePath, 'utf8');
       const { data, body } = parseFrontmatter(raw);
       const slug = name === 'index' ? slugPrefix : [...slugPrefix, name];
