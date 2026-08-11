@@ -1,0 +1,261 @@
+---
+title: Window scaffold and chrome
+description: Build full-window layouts and custom title bars on Tao with WindowScaffold, drag areas, WindowControls, and platform materials.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`DecoratedWindow` + `TitleBar` always laid the main content **below** a fixed chrome band.
+That blocked full-window layouts: no list under the toolbar, no glass sidebar that meets the
+traffic lights, no design-system headerbar that still drags the window. From 2.2, `WindowScaffold`
+and a small set of chrome primitives solve that without throwing away native caption zones,
+button order, or drag behaviour.
+
+## TL;DR
+
+- Compose chrome with `WindowScaffold` — slot any title bar, pick `Docked` or `Overlay` placement.
+- Opt into drag with `Modifier.windowDragArea`; opt children out with `noWindowDrag`.
+- Place system min/max/close with `WindowControls` (or pad with `LocalWindowChromeInsets` on macOS).
+- Theme the empty client with `WindowBackground`; force native light/dark with `WindowAppearance`.
+- Platform materials: `Modifier.windowGlassRegion` on macOS, `WindowsBackdrop` on Windows 11.
+
+## Add the dependency
+
+The scaffold APIs ship in `decorated-window-tao` (same artifact as the Tao backend):
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Existing `DecoratedWindow` + `TitleBar` call sites keep working. The scaffold is additive.
+
+## Quickstart
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.TitleBarPlacement
+import dev.nucleusframework.window.WindowBackground
+import dev.nucleusframework.window.WindowControls
+import dev.nucleusframework.window.WindowScaffold
+import dev.nucleusframework.window.windowDragArea
+
+fun main() = nucleusApplication {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Scaffold demo") {
+        MaterialTheme {
+            WindowBackground(MaterialTheme.colorScheme.background)
+            WindowScaffold(
+                titleBar = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .windowDragArea()
+                            .padding(horizontal = 12.dp),
+                    ) {
+                        Text("My App", Modifier.align(Alignment.CenterStart))
+                        WindowControls(Modifier.align(Alignment.CenterEnd))
+                    }
+                },
+                titleBarPlacement = TitleBarPlacement.Overlay(),
+            ) { contentPadding ->
+                Box(Modifier.fillMaxSize().padding(contentPadding)) {
+                    /* app content — scrolls under the overlay bar when padded */
+                }
+            }
+        }
+    }
+}
+```
+
+## How it works
+
+`WindowScaffold` is the sole intended child of a `DecoratedWindow` content lambda. It:
+
+1. **Measures** the `titleBar` slot and publishes the height to the native layer (macOS traffic-light
+   centring, Windows caption zone / touch drag) — replacing the hard-coded
+   `TitleBarStyle.metrics.height` contract.
+2. **Provides** `LocalWindowChromeInsets` so chrome and content avoid platform-reserved control
+   zones (traffic lights, KDE edge padding).
+3. In **`Overlay`** mode, lets content fill the full window height behind the bar and hands the
+   measured bar height back as top `PaddingValues`.
+
+Nothing is implicitly draggable at the scaffold level. Custom chrome must declare its move surface
+with `windowDragArea` — the same path the stock `TitleBar` already uses.
+
+### Title bar placement
+
+| Placement | Behaviour |
+|---|---|
+| `TitleBarPlacement.Docked` | Classic layout: the bar takes height, content fills the rest. Default. |
+| `TitleBarPlacement.Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Content is `fillMaxSize`; the bar floats on top. Content receives the bar height as top padding. |
+
+`autoHideInFullscreen` drops the bar while fullscreen so content is fully immersive.
+`passThroughToContent` hit-tests presses against content **under** the bar as well, so controls
+merged into the title-bar band (a collapsed nav pane's hamburger, a tab strip) stay interactive.
+Off by default: with full-bleed content scrolling behind opaque chrome, a click on the bar would
+otherwise activate whatever sits underneath.
+
+## Chrome primitives
+
+### Drag areas
+
+```kotlin
+Modifier = Modifier
+    .windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+```
+
+An unconsumed primary press followed by a move starts the native window move. Interactive children
+(buttons, text fields) opt out by consuming the press. Gesture detectors that only claim the pointer
+once it moves — scrollbars, sliders, resize handles — leave the press unconsumed, so wrap them:
+
+```kotlin
+Scrollbar(Modifier.noWindowDrag())
+```
+
+Prefer `Modifier.windowDragArea(window = taoWindow)` when chrome already holds a `TaoWindow`
+(title bars, secondary scenes). The no-arg form reads `LocalTaoWindow`; the explicit overload
+stays correct if parent-window CompositionLocals are bridged into a child scene (stock title
+bars do this from 2.3.2).
+
+`WindowDoubleClickAction.None` disables the double-click → maximize gesture on that area.
+
+### Window controls
+
+`WindowControls` draws the system min / maximize-restore / close strip **outside** `TitleBar`, so a
+design system can place it inside its own toolbar:
+
+```kotlin
+WindowControls(
+    modifier = Modifier.align(Alignment.CenterEnd),
+    renderer = WindowControlsRenderer.Platform, // default
+)
+```
+
+Nucleus owns the semantics (button order and side, including Linux `button-layout`; maximize ↔
+restore; fullscreen swap; close → `onCloseRequest`). The renderer only draws. On macOS,
+`WindowControlsRenderer.Platform` draws nothing and reserves the traffic-light footprint instead —
+pad with **either** `WindowControls` **or** `LocalWindowChromeInsets.controlsInsets`, never both.
+
+Supply a custom `WindowControlsRenderer` to draw buttons in the design system's own style.
+
+### Chrome insets
+
+```kotlin
+val insets = LocalWindowChromeInsets.current
+Row(Modifier.padding(insets.controlsInsets)) { /* title bar content */ }
+```
+
+`controlsInsets` is the horizontal safe area for system controls; `titleBarHeight` is the measured
+slot height (`0.dp` when the bar is hidden).
+
+## Platform materials and appearance
+
+### Window background
+
+Tao gives every window its own `ComposeScene`, so the theme often lives **inside** the window.
+`WindowBackground` sets the clear colour from inside that tree — the colour that shows during live
+resize, around floating panels, and wherever Compose paints nothing:
+
+```kotlin
+WindowBackground(MaterialTheme.colorScheme.background)
+```
+
+### Window appearance
+
+Force native surfaces (glass, traffic lights, menus, Windows chrome glyphs) to follow the **app**
+theme instead of the OS setting:
+
+```kotlin
+WindowAppearance(
+    if (dark) WindowAppearanceMode.Dark else WindowAppearanceMode.Light,
+)
+```
+
+A no-op on Linux. Reverts to system-derived appearance when the composable leaves composition.
+
+### macOS glass regions
+
+`Modifier.windowGlassRegion` hosts a real `NSSplitViewController` pane under the Compose surface so
+AppKit applies the wallpaper-tinted System Settings material — desktop shows through, intervening
+windows never do:
+
+```kotlin
+Box(
+    Modifier
+        .width(248.dp)
+        .fillMaxHeight()
+        .windowGlassRegion(WindowGlassRegionKind.Sidebar, cornerRadius = 12.dp),
+) { /* sidebar content; leave unpainted areas for the material */ }
+```
+
+Kinds: `Sidebar`, `ContentList`, `Inspector` (macOS 14+). The component must not paint a full opaque
+background. macOS only; a no-op elsewhere. There is no full-window macOS glass — that is not an
+AppKit pattern.
+
+### Windows 11 backdrops
+
+```kotlin
+WindowsBackdrop(
+    style = WindowsBackdropStyle.Mica,       // or Acrylic, MicaAlt
+    tint = Color.Unspecified,                // app tint over the material
+    tier = WindowsBackdropTier.Auto,         // Modern / LegacyMica / Windows10Acrylic
+)
+```
+
+DWM composites the material behind the window wherever the app paints nothing. Leave panels or
+margins unpainted to reveal it; a full-bleed opaque background covers it. `WindowBackground` is
+suspended while a backdrop is active and restored when it leaves composition.
+
+Degrades on older Windows: pre-22H2 Windows 11 maps Mica styles to the older single-material
+attribute; Windows 10 falls back to acrylic when available. Silent no-op on macOS and Linux.
+
+## Transparent and borderless overlays
+
+Full-window transparency is a creation-time flag on the **Tao** `DecoratedWindow` (AWT out of scope).
+At 2.2.0 the umbrella `NucleusApplicationScope.DecoratedWindow` does not forward it — use
+`taoApplication` or the Tao-scope overload:
+
+```kotlin
+import dev.nucleusframework.window.tao.taoApplication
+import dev.nucleusframework.window.tao.DecoratedWindow
+
+fun main() = taoApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        undecorated = true,   // no frame, no DWM shadow
+        transparent = true,   // empty client composites the desktop
+    ) {
+        Box(Modifier.size(48.dp).background(Color(0xFFFF00AA)))
+    }
+}
+```
+
+Hosts clear to alpha-0; opaque `WindowBackground` / title-bar clears are coerced to transparent so
+empty regions stay see-through. Semi-transparent tints still apply.
+
+## Notes
+
+- Intended as the sole child of the window content lambda; it fills the remaining window height.
+- Stock `TitleBar` still works for apps that do not need full-window layout — no migration required.
+- `passThroughToContent` is opt-in for a reason: enable it only when interactive content is meant to
+  live under the chrome band.
+
+## What's next
+
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — window parameters and scope members.
+- [Window & toolkits](/docs/window) — shared window API and toolkit themes.
+- [Accessibility](/docs/tao/accessibility) — Compose semantics projected to VoiceOver, Narrator, Orca.

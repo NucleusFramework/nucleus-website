@@ -1,0 +1,84 @@
+---
+title: Native Wayland
+description: The Tao backend renders Compose Desktop apps directly on Wayland and falls back to X11 automatically.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+On Linux, the Tao backend renders Compose Desktop apps directly on Wayland through native Wayland
+protocols, rather than through the XWayland compatibility layer. When no Wayland session is
+available, it falls back to X11 without any code change. This page covers what the Wayland path
+supports, how it works, and how to read the current session from Kotlin.
+
+## Add the dependency
+
+Wayland support ships with the Tao backend. There is no separate artifact.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Detect the session
+
+You rarely branch on the session type — the same Compose code runs on Wayland and X11. Detection is
+useful for diagnostics and feature gates, since taskbar progress, badges, and global hotkeys behave
+differently per session.
+
+```kotlin
+import dev.nucleusframework.core.runtime.LinuxDesktopEnvironment
+import dev.nucleusframework.core.runtime.Platform
+
+val onWayland = Platform.isWayland
+val desktopEnv = if (Platform.Current == Platform.Linux) LinuxDesktopEnvironment.Current else null
+```
+
+## How it works
+
+Tao binds the standard Wayland protocols at startup: `xdg-shell` for windows, `xdg-decoration` to
+negotiate server- or client-side decorations, `wp_fractional_scale_v1` for sub-integer scale
+factors, `pointer-gestures-unstable-v1` for pinch and swipe, and `wp_tablet_v2` for stylus input.
+Skiko renders to an EGL surface attached to the window's `wl_surface`.
+
+When the compositor signals a scale change — for example, when you drag a window from a 1.0 monitor
+to a 1.5 monitor — Tao reconfigures the EGL surface and emits a density change to Compose. Your `Dp`
+values stay logical and the rendered output stays crisp. See [Per-monitor HiDPI](/docs/tao/hidpi)
+for the details.
+
+On an X11 session, or on a Wayland compositor that refuses XDG decorations, Tao falls back to X11
+automatically. The Compose code does not change.
+
+## Wayland and X11 differences
+
+| Concern              | Wayland (Tao)                      | X11 (fallback)                   |
+|----------------------|------------------------------------|----------------------------------|
+| Fractional scaling   | Native, per-output                 | Whole-pixel only                 |
+| Window placement     | Compositor-controlled              | Client can set absolute position |
+| Global hotkeys       | Compositor-mediated (`xdg-portal`) | `XGrabKey`                       |
+| Screen capture       | Portal only                        | Direct                           |
+| Pen pressure         | `wp_tablet_v2`                      | Not exposed                      |
+| Multi-touch gestures | `pointer-gestures-unstable-v1`     | Limited                          |
+
+## Notes
+
+<Callout type="warn">
+On Wayland you cannot set absolute screen coordinates — the compositor owns window placement.
+`WindowState.position` is treated as a hint by some compositors and ignored by others (GNOME ignores
+client-requested positions). Design around `Center` or `PlatformDefault`, and persist the last size
+rather than the last position.
+</Callout>
+
+## API reference
+
+- `Platform.isWayland` — `true` on a Linux session when `XDG_SESSION_TYPE` is `wayland` or
+  `WAYLAND_DISPLAY` is set.
+- `Platform.Current` — one of `Linux`, `Windows`, `MacOS`, or `Unknown`.
+- `LinuxDesktopEnvironment.Current` — one of `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate`, or
+  `Unknown`.
+
+## What's next
+
+- [Per-monitor HiDPI](/docs/tao/hidpi) — how fractional scaling maps to Compose density.
+- [Multi-touch and gestures](/docs/tao/multi-touch) — pinch, swipe, and rotate on Wayland.
+- [Pen and stylus](/docs/tao/pen-stylus) — pressure and tilt through `wp_tablet_v2`.

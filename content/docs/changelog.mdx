@@ -6,6 +6,63 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.4.0
+
+**Released: 2026-08-11**
+
+### Highlights
+
+- **`TaoGpuRenderContext` — in-process GPU on the scene's device.** Map engines, 3D viewports,
+  and charting can allocate render targets on the window's own Skia `DirectContext` and native
+  device (Metal / ANGLE GLES / native EGL) with no second GPU, no shareable handle, and no
+  per-frame cross-device copy. `TextureView` remains the contract for foreign producers. See
+  [GPU render context](/docs/tao/gpu-render-context).
+- **`AwakeMode` — keep the system awake without forcing the display.**
+  `EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)` lets the screen saver and display sleep behave
+  normally during long background work. `keepScreenAwake()` remains as a deprecated forwarder.
+  See [Keep the system awake](/docs/lifecycle/energy-manager#keep-the-system-awake).
+- **Public ABI freeze.** Published runtime modules run under Kotlin `explicitApi()` with
+  kotlinx binary-compatibility-validator baselines (`api/*.api`); `apiCheck` is part of
+  `check` / `preMerge`. Exception: `decorated-window-jewel` until BCV can read JVM 25 class files.
+
+### New features
+
+- **`windows.msi { perMachine }`** (#480) — install-scope DSL aligned with `nsis { perMachine }`.
+  `windows.perUserInstall` is deprecated (inverted meaning) but still works when `msi.perMachine`
+  is unset. MSI remains per-machine by default. See
+  [Build an MSI](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+
+### Improvements
+
+- **Unified JUL logging and renamed tray log API** (#491) — runtime modules log through
+  `java.util.logging`; `composeNativeTrayLoggingLevel` → `nucleusLoggingLevel` /
+  `NucleusLoggingLevel` (deprecated aliases retained).
+- **Safer updater construction** (#493) — provider validated at construction, config snapshotted,
+  downloads staged privately instead of a predictable shared temp path. See
+  [Auto-update](/docs/packaging/auto-update).
+- **Windows outbound drag** (#482) — `DoDragDrop` deferred off Compose pointer dispatch so
+  outbound drag frames paint without reentrancy. See
+  [Drag and drop](/docs/tao/drag-and-drop).
+
+### Bug fixes
+
+- **macOS live-resize trembling** (#476) — content no longer trails AppKit bounds during corner
+  resize.
+- **Windows interactive resize lag** (#479) — VSync dropped through the modal resize loop so
+  content tracks the border drag.
+- **Frame-paced GPU through modal loops** (#489, #505) — keep VSync on Windows move/resize and
+  Linux resize bursts when the scene hosts `TextureView` imports or `TaoGpuRenderContext`
+  consumers. See [GPU render context](/docs/tao/gpu-render-context#frame-pacing).
+- **macOS Metal render-thread leak** (#495) — autorelease pool around every render-thread task.
+- **`LocalComposeSceneContext` under `DecoratedWindow`** (#499) — Popup / Dialog / DropdownMenu
+  / Tooltip inside decorated window content no longer throw. See
+  [DecoratedWindow](/docs/tao/decorated-window).
+- **macOS overlay detach / focusable retain** (#496), **Wayland popup buffer_scale** (#508),
+  **macOS scene density from the window's display** (#509), **zoom-button tiling hover menu**
+  (#511), **RTL title-bar constraints while fullscreen** (#512).
+
+---
+
 ## v2.3.2
 
 **Released: 2026-08-07**

@@ -14,8 +14,18 @@ interface FeatureItem {
   new?: boolean;
 }
 
-/** Lead with the 2.3 headlines, then the broader OS surface. */
+/** Lead with the 2.4 headlines, then the broader OS surface. */
 const ITEMS: FeatureItem[] = [
+  {
+    name: { en: 'GPU render context', fr: 'Contexte de rendu GPU' },
+    desc: {
+      en: 'In-process GPU on the scene device — Skia DirectContext, Metal / ANGLE / EGL. No second GPU, no copy.',
+      fr: 'GPU in-process sur le device de la scène — DirectContext Skia, Metal / ANGLE / EGL. Pas de second GPU, pas de copie.',
+    },
+    icon: 'texture',
+    href: '/docs/tao/gpu-render-context',
+    new: true,
+  },
   {
     name: { en: 'TextureView', fr: 'TextureView' },
     desc: {
@@ -27,6 +37,16 @@ const ITEMS: FeatureItem[] = [
     new: true,
   },
   {
+    name: { en: 'AwakeMode', fr: 'AwakeMode' },
+    desc: {
+      en: 'Keep the system awake for long jobs without forcing the screen on — SYSTEM_ONLY vs SYSTEM_AND_DISPLAY.',
+      fr: 'Gardez le système éveillé pour les jobs longs sans forcer l\'écran — SYSTEM_ONLY vs SYSTEM_AND_DISPLAY.',
+    },
+    icon: 'update',
+    href: '/docs/lifecycle/energy-manager',
+    new: true,
+  },
+  {
     name: { en: 'NativeView', fr: 'NativeView' },
     desc: {
       en: 'Embed NSView, HWND, or GtkWidget inside Compose — sized to the layout slot, disposed with composition.',
@@ -34,7 +54,6 @@ const ITEMS: FeatureItem[] = [
     },
     icon: 'native',
     href: '/docs/tao/native-views',
-    new: true,
   },
   {
     name: { en: 'Differential updates', fr: 'Mises à jour différentielles' },
@@ -44,7 +63,6 @@ const ITEMS: FeatureItem[] = [
     },
     icon: 'update',
     href: '/docs/packaging/auto-update',
-    new: true,
   },
   {
     name: { en: 'Task Scheduler', fr: 'Task Scheduler' },

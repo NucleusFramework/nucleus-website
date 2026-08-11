@@ -1,0 +1,97 @@
+---
+title: WebView
+description: Embed a native web engine in Compose with one API across Android, iOS, web, and desktop.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The WebView library embeds each platform's native web engine in Compose. You write against `WebView`, `WebViewState`, and `WebViewNavigator` once; the library binds to Android WebView, WKWebView, WebView2, WebKit2GTK, or an iframe underneath.
+
+The public API and the Android/iOS implementations follow [compose-webview-multiplatform](https://github.com/KevinnZou/compose-webview-multiplatform). ComposeNativeWebView adds a WasmJs target and a desktop path on the [Tao `NativeView`](/docs/tao/native-views) stack.
+
+<Callout type="info" title="Separate repository — versioned independently">
+WebView ships from [`NucleusFramework/ComposeNativeWebview`](https://github.com/NucleusFramework/ComposeNativeWebview) with its own release cycle, like the [system tray](/docs/os/system-tray) and the [PDF reader](/docs/pdf). Its version number is **independent of Nucleus** — pin it separately. The artifact is `dev.nucleusframework:composewebview`, published to Maven Central.
+<Version module="webview" />
+</Callout>
+
+## One API instead of one per platform
+
+| Platform | Native web engine |
+| -------- | ----------------- |
+| Android  | `android.webkit.WebView` |
+| iOS      | WKWebView |
+| WasmJs   | `HTMLIFrameElement` |
+| Desktop (Linux) | WebKit2GTK via Tao `NativeView` |
+| Desktop (macOS) | WKWebView via Tao `NativeView` |
+| Desktop (Windows) | WebView2 CompositionController via Tao `NativeView` |
+
+Without a shared layer, a multiplatform app integrates and maintains each engine separately. ComposeNativeWebView replaces that with a single Compose surface and the same navigation, cookie, and JavaScript model on every target.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("dev.nucleusframework:composewebview:<version>")
+        }
+    }
+}
+```
+
+The same artifact covers Android, iOS, Desktop (JVM), and WasmJs.
+
+## Show a page
+
+Hoist a `WebViewState` and drop `WebView` into your layout:
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.webview.web.WebView
+import dev.nucleusframework.webview.web.rememberWebViewState
+
+@Composable
+fun HelloWeb() {
+    val state = rememberWebViewState("https://example.com")
+    WebView(state = state, modifier = Modifier.fillMaxSize()) {
+        // Optional Compose overlay on top of the native surface
+    }
+}
+```
+
+The trailing `content` lambda draws Compose UI over the embedded engine — the same role as the content slot on Tao [`NativeView`](/docs/tao/native-views).
+
+## Supported targets
+
+| Target  | Backend |
+| ------- | ------- |
+| Android | `android.webkit.WebView` |
+| iOS     | WKWebView |
+| WasmJs  | IFrame |
+| JVM desktop | Tao + platform native library |
+
+Desktop requires a Nucleus Tao window (`nucleusApplication` and `decorated-window-tao`). Windows also needs the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (or Edge). Native libraries ship inside the artifact under `nucleus/native/…`.
+
+## What the library covers
+
+- Content loading: URL (with headers), inline HTML, and HTML from app resources.
+- Navigation: back, forward, reload, stop, with `canGoBack` / `canGoForward` as Compose state.
+- Observable state: `isLoading`, `loadingState`, `lastLoadedUrl`, `pageTitle`, and per-request errors.
+- A unified cookie manager across platforms.
+- `evaluateJavaScript` and a callback-based JS ↔ Kotlin bridge (`window.kmpJsBridge`).
+- A `RequestInterceptor` for navigator-initiated main-frame navigations.
+
+## Limitations
+
+- `RequestInterceptor` does not intercept sub-resources (images, XHR, scripts).
+- **Desktop** needs the Tao backend; the library does not embed a browser on the AWT path.
+- **WasmJs**: history back/forward is unavailable in the iframe; CORS must allow embedding; JavaScript runs only on the same origin; cookies apply only when the iframe destination matches the parent origin.
+
+## What's next
+
+- [Getting started](/docs/webview/getting-started) — load URLs and HTML, navigate, evaluate JS, intercept requests.
+- [API reference](/docs/webview/api-reference) — every public type, its parameters, and defaults.
+- [PDF reader](/docs/pdf) — another Nucleus component shipped from its own repository.
+- [Native views on Tao](/docs/tao/native-views) — the desktop embedding primitive used under the hood.

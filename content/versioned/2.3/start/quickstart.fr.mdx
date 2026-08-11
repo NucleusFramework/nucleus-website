@@ -1,0 +1,127 @@
+---
+title: Quickstart
+description: Construisez et lancez votre première app desktop Nucleus, puis empaquetez-la en installateur natif.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous allez créer une app desktop Nucleus à partir de zéro, la lancer dans une
+fenêtre native Tao, puis l'empaqueter en installateur pour votre système d'exploitation actuel.
+L'app entière tient en deux fichiers : un script de build Gradle et une fonction `main` Kotlin.
+
+## Avant de commencer
+
+Nucleus s'appuie sur Compose Multiplatform et nécessite :
+
+- **JDK 17 ou une version ultérieure** dans votre `PATH`.
+- **Kotlin 2.0 ou une version ultérieure** et **Gradle 8.x**.
+
+## Créer le script de build
+
+Dans un dossier de projet vide, créez `build.gradle.kts` et appliquez le plugin Nucleus :
+
+```kotlin title="build.gradle.kts"
+plugins {
+    kotlin("jvm") version "2.4.0"
+    id("org.jetbrains.compose") version "1.11.1"
+    id("dev.nucleusframework") version "<version>"
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+    // Le module d'entrée — fournit nucleusApplication et DecoratedWindow
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    // Active le backend Tao (fenêtrage natif en Rust)
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+
+nucleus.application {
+    mainClass = "com.example.MainKt"
+
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+    }
+}
+```
+
+Vous avez déjà une app Compose Desktop ? Nucleus étend `org.jetbrains.compose`, donc le passage est un
+simple renommage — retirez le bloc `compose.desktop.application { }` vanilla et pointez-le vers Nucleus :
+
+```diff
+-compose.desktop.application {
++nucleus.application {
+     mainClass = "com.example.MainKt"
+     // nativeDistributions { ... } reste identique
+ }
+```
+
+Le point d'entrée dans `main` suit le même échange : `application { Window(...) }` devient
+`nucleusApplication { DecoratedWindow(...) }`. Voir [Migration depuis Compose Desktop](/docs/migrate/from-jb-compose).
+
+## Écrire l'application
+
+Créez `src/main/kotlin/com/example/Main.kt` :
+
+```kotlin
+package com.example
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.Text
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Text("Hello from Nucleus")
+        }
+    }
+}
+```
+
+Le point d'entrée `nucleusApplication` démarre le runtime Nucleus et ouvre une `DecoratedWindow` —
+une fenêtre Compose avec une barre de titre native.
+
+<Callout type="info">
+`NucleusBackend.Auto` (la valeur par défaut) choisit Tao quand `decorated-window-tao` est sur
+le classpath, et se rabat sur le backend AWT déprécié sinon. Forcez un backend avec
+`NucleusBackend.Tao`. Voir [Backends](/docs/concepts/backends).
+</Callout>
+
+## Lancer l'application
+
+```shell
+./gradlew run
+```
+
+Une fenêtre native s'ouvre avec une barre de titre personnalisée — dessinée par Tao sous Linux
+et Windows, et par le système sur macOS.
+
+## Empaqueter l'application
+
+```shell
+./gradlew packageDistributionForCurrentOS
+```
+
+L'installateur est écrit dans `build/compose/binaries/main/<format>/` : un `.dmg` sur macOS, un
+`.msi` sur Windows et un `.deb` sur Linux. Ajoutez des formats en étendant `targetFormats(...)`.
+Voir [Configuration](/docs/start/configuration).
+
+## Et ensuite
+
+- [Project setup](/docs/start/project-setup) — organisation multi-module, propriétés Gradle et config JDK.
+- [Configuration](/docs/start/configuration) — le DSL `nucleus { }` complet.
+- [Architecture](/docs/concepts/architecture) — ce qui tourne sous votre fonction `main`.

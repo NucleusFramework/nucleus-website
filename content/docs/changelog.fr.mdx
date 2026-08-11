@@ -7,6 +7,67 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.4.0
+
+**Sortie : 2026-08-11**
+
+### Faits marquants
+
+- **`TaoGpuRenderContext` — GPU in-process sur le device de la scène.** Moteurs de carte,
+  viewports 3D et charting peuvent allouer leurs cibles de rendu sur le `DirectContext` Skia
+  et le device natif de la fenêtre (Metal / ANGLE GLES / EGL natif) sans second GPU, sans
+  handle partageable et sans copie inter-device par frame. `TextureView` reste le contrat pour
+  les producteurs externes. Voir [Contexte de rendu GPU](/docs/tao/gpu-render-context).
+- **`AwakeMode` — garder le système éveillé sans forcer l'écran.**
+  `EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)` laisse l'écran de veille et la mise en
+  veille de l'écran se comporter normalement pendant un job long. `keepScreenAwake()` reste un
+  forwarder déprécié. Voir
+  [Garder le système éveillé](/docs/lifecycle/energy-manager#garder-le-système-éveillé).
+- **Gel de l'ABI publique.** Les modules runtime publiés tournent sous `explicitApi()` Kotlin
+  avec des baselines kotlinx binary-compatibility-validator (`api/*.api`) ; `apiCheck` fait
+  partie de `check` / `preMerge`. Exception : `decorated-window-jewel` tant que BCV ne lit pas
+  les class files JVM 25.
+
+### Nouvelles fonctionnalités
+
+- **`windows.msi { perMachine }`** (#480) — DSL de scope d'install aligné sur
+  `nsis { perMachine }`. `windows.perUserInstall` est déprécié (sens inversé) mais reste actif
+  tant que `msi.perMachine` n'est pas défini. MSI reste per-machine par défaut. Voir
+  [Construire un MSI](/docs/packaging/windows#construire-un-msi-pour-le-déploiement-en-entreprise).
+
+### Améliorations
+
+- **Logging JUL unifié et API tray renommée** (#491) — les modules runtime loguent via
+  `java.util.logging` ; `composeNativeTrayLoggingLevel` → `nucleusLoggingLevel` /
+  `NucleusLoggingLevel` (alias dépréciés conservés).
+- **Construction plus sûre de l'updater** (#493) — provider validé à la construction, config
+  figée, téléchargements stagés en privé au lieu d'un chemin temp partagé prévisible. Voir
+  [Auto-update](/docs/packaging/auto-update).
+- **Drag sortant Windows** (#482) — `DoDragDrop` différé hors du dispatch pointeur Compose pour
+  peindre les frames de drag sans réentrance. Voir
+  [Drag and drop](/docs/tao/drag-and-drop).
+
+### Corrections de bugs
+
+- **Tremblement du live-resize macOS** (#476) — le contenu ne traîne plus derrière les bounds
+  AppKit pendant un resize de coin.
+- **Lag du resize interactif Windows** (#479) — VSync désactivé dans la boucle modale de resize
+  pour que le contenu suive le bord.
+- **GPU frame-paced pendant les boucles modales** (#489, #505) — VSync maintenu pendant
+  move/resize Windows et les bursts de resize Linux lorsque la scène héberge des imports
+  `TextureView` ou des consommateurs `TaoGpuRenderContext`. Voir
+  [Contexte de rendu GPU](/docs/tao/gpu-render-context#frame-pacing).
+- **Fuite du thread de rendu Metal macOS** (#495) — pool d'autorelease autour de chaque tâche
+  du thread de rendu.
+- **`LocalComposeSceneContext` sous `DecoratedWindow`** (#499) — Popup / Dialog / DropdownMenu
+  / Tooltip dans le contenu d'une fenêtre décorée ne lèvent plus. Voir
+  [DecoratedWindow](/docs/tao/decorated-window).
+- **Detach overlay / retain focusable macOS** (#496), **buffer_scale des popups Wayland**
+  (#508), **densité de scène depuis l'écran de la fenêtre macOS** (#509), **menu de tiling
+  au survol du bouton zoom** (#511), **contraintes de title bar RTL en plein écran** (#512).
+
+---
+
 ## v2.3.2
 
 **Sortie : 2026-08-07**

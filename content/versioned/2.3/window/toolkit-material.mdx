@@ -1,0 +1,158 @@
+---
+title: Material 2 & Material 3
+description: Theme a Nucleus DecoratedWindow from a Compose MaterialTheme, using either the Material 2 or Material 3 adapter.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+The Material toolkits theme a Nucleus `DecoratedWindow` from a Compose `MaterialTheme`, so the
+title bar and window controls follow your app's color scheme on every backend. Nucleus ships two
+adapters: `decorated-window-material2` for `androidx.compose.material` and
+`decorated-window-material3` for `androidx.compose.material3`.
+
+## Add the dependency
+
+Add the Nucleus runtime, a backend, and the Material adapter that matches the Compose Material
+version you use. Pair it with `decorated-window-tao` for the Tao backend.
+
+<Tabs items={['Material 3', 'Material 2']}>
+<Tab value="Material 3">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
+    implementation(compose.material3)
+}
+```
+
+</Tab>
+<Tab value="Material 2">
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
+    implementation(compose.material)
+}
+```
+
+</Tab>
+</Tabs>
+
+<Callout type="info">
+The Material 3 artifact is `nucleus.decorated-window-material3`, but its Kotlin package is
+`dev.nucleusframework.window.material` — with no `3`. Material 2 lives in
+`dev.nucleusframework.window.material2`.
+</Callout>
+
+## Create a Material window
+
+Wrap `MaterialDecoratedWindow` in a `MaterialTheme`. The window inherits the theme's colors, and
+`MaterialTitleBar` draws a title bar styled to match.
+
+<Tabs items={['Material 3', 'Material 2']}>
+<Tab value="Material 3">
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.material.MaterialDecoratedWindow
+import dev.nucleusframework.window.material.MaterialTitleBar
+
+fun main() = nucleusApplication {
+    MaterialTheme(colorScheme = lightColorScheme()) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 3") {
+            MaterialTitleBar { Text("Material 3") }
+            Surface(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+</Tab>
+<Tab value="Material 2">
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Surface
+import androidx.compose.material.Text
+import androidx.compose.material.lightColors
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.material2.MaterialDecoratedWindow
+import dev.nucleusframework.window.material2.MaterialTitleBar
+
+fun main() = nucleusApplication {
+    MaterialTheme(colors = lightColors()) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 2") {
+            MaterialTitleBar { Text("Material 2") }
+            Surface(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Swap `lightColorScheme()` / `lightColors()` for the dark variant to switch the whole window,
+chrome included. To follow the operating system, drive the color scheme from `isSystemInDarkMode()`
+in the `nucleus.darkmode-detector` artifact.
+
+## How it works
+
+Inside `nucleusApplication { }`, `MaterialDecoratedWindow` reads the current `MaterialTheme`,
+derives a `DecoratedWindowStyle` and a `TitleBarStyle` from it, and wraps the window in
+`NucleusDecoratedWindowTheme`. The title bar background, content color, and window-control button
+colors are taken from your `ColorScheme` (Material 3) or `Colors` (Material 2), so the chrome
+updates whenever the theme switches to a dark palette.
+
+Material 3 exposes the color mapping as public helpers you can call yourself:
+
+```kotlin
+val windowStyle = rememberMaterialWindowStyle(colorScheme)
+val titleBarStyle = rememberMaterialTitleBarStyle(colorScheme)
+```
+
+Pass a `TitleBarStyle` to the `titleBarStyle` parameter of `MaterialDecoratedWindow` to override the
+derived title bar; the window style is always resolved from the active `ColorScheme`. Material 2
+derives the same styles internally, but those helpers are `internal` and not part of its public API.
+
+## API reference
+
+### Material 3
+
+- `ApplicationScope.MaterialDecoratedWindow(...)` and `NucleusApplicationScope.MaterialDecoratedWindow(...)`
+- `ApplicationScope.MaterialDecoratedDialog(...)` and `NucleusApplicationScope.MaterialDecoratedDialog(...)`
+- `DecoratedWindowScope.MaterialTitleBar(...)`
+- `DecoratedDialogScope.MaterialDialogTitleBar(...)`
+- `rememberMaterialWindowStyle(colorScheme: ColorScheme): DecoratedWindowStyle`
+- `rememberMaterialTitleBarStyle(colorScheme: ColorScheme): TitleBarStyle`
+
+### Material 2
+
+- `MaterialDecoratedWindow(...)` and `NucleusApplicationScope.MaterialDecoratedWindow(...)`
+- `MaterialDecoratedDialog(...)`
+- `DecoratedWindowScope.MaterialTitleBar(...)`
+- `DecoratedDialogScope.MaterialDialogTitleBar(...)`
+
+<Callout type="info">
+The Material adapters run on every backend. Pair them with `decorated-window-tao` for the Tao
+backend, or with the deprecated `-jbr` / `-jni` AWT modules.
+</Callout>
+
+## What's next
+
+- [Window and toolkits](/docs/window) — the `DecoratedWindow` API the Material adapters wrap.
+- [Choosing a toolkit](/docs/window/toolkits) — compare Material with the native looks.
+- [Jewel toolkit](/docs/window/toolkit-jewel) — IDE-style chrome built on Jewel.

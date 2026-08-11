@@ -1,0 +1,65 @@
+---
+title: Correcteur orthographique natif
+description: Vérifiez l'orthographe dans une application Kotlin avec PlatformSpellCheckerKt, un wrapper sur le moteur de correction natif de chaque système d'exploitation.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+[PlatformSpellCheckerKt](https://github.com/Wavesonics/PlatformSpellCheckerKt) vous permet de
+vérifier l'orthographe depuis Kotlin en utilisant le moteur de correction natif de chaque système
+d'exploitation. Nucleus ne fournit pas de module de correction orthographique ; cette bibliothèque
+couvre déjà les plateformes visées par Nucleus, alors ajoutez-la directement à votre application.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("com.darkrockstudios:platform-spellcheckerkt:<version>")
+}
+```
+
+## Vérifier l'orthographe
+
+Créez un checker via `PlatformSpellCheckerFactory`, puis vérifiez soit un mot seul, soit une chaîne
+entière :
+
+```kotlin
+val checker = PlatformSpellCheckerFactory().createSpellChecker()
+
+// Vérifie un seul mot ; le résultat porte les corrections suggérées.
+val result = checker.checkWord("sentance")
+val suggestions = result.suggestions // ex. ["sentence", ...]
+
+// Vérifie une chaîne complète ; chaque entrée indique le mot mal orthographié et sa position.
+val misspellings = checker.checkMultiword("This is a sentance with errors")
+// chaque entrée : misspelledWord, startIndex, length
+```
+
+`checkWord` valide un seul token et renvoie ses suggestions. `checkMultiword` parcourt une chaîne
+et renvoie une entrée par faute, chacune avec le mot et sa position dans le texte.
+
+## Fonctionnement
+
+La bibliothèque s'appuie sur le moteur de correction déjà intégré au système hôte :
+
+- **macOS** — `NSSpellChecker`, le même moteur que TextEdit et les champs de texte système.
+- **Windows** — la Windows Spell Checking API (disponible depuis Windows 8), via l'interface COM
+  `ISpellCheckerFactory`.
+- **Linux** — `hunspell`.
+
+Comme elle utilise le moteur de la plateforme, le comportement de correction, les dictionnaires
+installés et la détection de langue correspondent à ce que l'utilisateur voit déjà ailleurs sur son
+système.
+
+## Notes
+
+<Callout type="warn">
+Sur Linux, la correction orthographique dépend de `hunspell`. Installez-le via le gestionnaire de
+paquets de votre distribution ; s'il est absent, le checker ne peut pas fonctionner.
+</Callout>
+
+## Et ensuite
+
+- [L'écosystème JVM](/docs/ecosystem) — des bibliothèques qui couvrent les besoins courants du desktop.
+- [Fenêtres de fichiers natives](/docs/ecosystem/file-dialog) — FileKit pour les sélecteurs d'ouverture, d'enregistrement et de dossier.
+- [Quickstart](/docs/start/quickstart) — construisez et lancez une application Nucleus.

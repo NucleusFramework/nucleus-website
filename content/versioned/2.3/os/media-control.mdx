@@ -1,0 +1,185 @@
+---
+title: Media controls
+description: Publish now-playing metadata to the system media center and handle playback commands on macOS, Windows, and Linux from Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Media controls lets you publish track metadata to the operating system's media center and
+receive playback commands from Kotlin. A single `MediaControlService` object wraps the
+MPRIS D-Bus interface on Linux, `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` on macOS,
+and the System Media Transport Controls (SMTC) on Windows.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.media-control:<version>")
+}
+```
+
+## Publish now-playing metadata
+
+Check that the native backend loaded, configure the player identity, then push metadata and
+playback state:
+
+```kotlin
+import dev.nucleusframework.media.control.MediaControlService
+import dev.nucleusframework.media.control.MediaMetadata
+import dev.nucleusframework.media.control.MediaPlaybackState
+import dev.nucleusframework.media.control.MediaPlaybackStatus
+
+if (MediaControlService.isAvailable()) {
+    MediaControlService.configure()
+
+    MediaControlService.setMetadata(
+        MediaMetadata(
+            title = "Strobe",
+            artist = "deadmau5",
+            album = "For Lack of a Better Name",
+            coverUrl = "file:///tmp/cover.png",
+            duration = 10 * 60 * 1_000L,
+        ),
+    )
+
+    MediaControlService.setPlaybackState(
+        MediaPlaybackState(status = MediaPlaybackStatus.PLAYING, positionMs = 0),
+    )
+}
+```
+
+`duration` and `positionMs` are in milliseconds. On Linux, a `coverUrl` pointing at a local
+file must use the `file://` scheme.
+
+## Handle playback commands
+
+Register a listener with `attach` to receive commands from the OS media center. The callback
+is dispatched on the Swing EDT, so you can mutate Compose or Swing state directly:
+
+```kotlin
+import dev.nucleusframework.media.control.MediaControlEvent
+
+MediaControlService.attach { event ->
+    when (event) {
+        MediaControlEvent.Play -> player.play()
+        MediaControlEvent.Pause -> player.pause()
+        MediaControlEvent.Toggle -> player.toggle()
+        MediaControlEvent.Next -> player.skipToNext()
+        MediaControlEvent.Previous -> player.skipToPrevious()
+        MediaControlEvent.Stop -> player.stop()
+        is MediaControlEvent.SeekBy -> player.seekBy(event.offsetMs)
+        is MediaControlEvent.SetPosition -> player.seekTo(event.positionMs)
+        else -> {}
+    }
+}
+```
+
+Only one listener is active at a time — calling `attach` again replaces the previous one.
+Call `detach()` to stop receiving events and unregister from the media center.
+
+## How it works
+
+`MediaControlService` is a singleton that delegates to a per-OS native bridge. `isAvailable()`
+returns `true` only when that bridge loaded successfully on the current platform; when it
+returns `false`, every call is a no-op, so you can guard setup with a single check.
+
+`configure()` sets the player identity. On Linux it registers the MPRIS bus name (default
+`org.mpris.MediaPlayer2.<appId>`, taken from `NucleusApp.appId`); on macOS the identity comes
+from the host app bundle; on Windows it uses the application's AUMID. Both parameters are
+defaulted, so `configure()` with no arguments is the common case.
+
+After configuring, push metadata and playback state as your player changes. Incoming commands
+are parsed from the native bridge and delivered to your listener on the Swing EDT.
+
+<Callout type="info" title="Events per platform">
+The commands the OS can send back differ by platform:
+
+- **Linux (MPRIS)** emits every `MediaControlEvent` variant.
+- **macOS** emits `Play`, `Pause`, `Toggle`, `Next`, `Previous`, `Stop`, and `SetPosition`.
+- **Windows (SMTC)** emits `Play`, `Pause`, `Next`, `Previous`, `Stop`, `SeekBy`, and `SetPosition`.
+</Callout>
+
+## API reference
+
+### Set metadata
+
+```kotlin
+MediaControlService.setMetadata(
+    MediaMetadata(
+        title = "Track",
+        artist = "Artist",
+        album = "Album",
+        coverUrl = "file:///tmp/cover.png",
+        duration = 3 * 60 * 1_000L,
+    ),
+)
+```
+
+Every `MediaMetadata` field is nullable and defaults to `null`. `duration` is in milliseconds.
+
+### Set playback state
+
+```kotlin
+MediaControlService.setPlaybackState(
+    MediaPlaybackState(
+        status = MediaPlaybackStatus.PLAYING,
+        positionMs = currentPositionMs,
+    ),
+)
+```
+
+`status` is one of `MediaPlaybackStatus.STOPPED`, `PAUSED`, or `PLAYING`. `positionMs` is
+optional and defaults to `null`. Push a state update on every play, pause, stop, and seek so
+the system seek bar stays accurate.
+
+### Set volume
+
+```kotlin
+MediaControlService.setVolume(0.5)
+```
+
+`volume` is clamped to the range `0.0`–`1.0`.
+
+### Attach and detach
+
+```kotlin
+MediaControlService.attach { event -> /* handle */ }
+MediaControlService.detach()
+```
+
+### Per-platform notes
+
+<Tabs items={["macOS", "Windows", "Linux"]}>
+<Tab value="macOS">
+
+Set `LSApplicationCategoryType` to `public.app-category.music` in `Info.plist` so the Now
+Playing widget treats the app as a media player. Hardware media keys deliver Play, Pause,
+Next, and Previous when the app is the active now-playing client.
+
+</Tab>
+<Tab value="Windows">
+
+SMTC integration is automatic once you call `configure()`. The system treats the most recent
+publisher as the current now-playing source, and the identity resolves through the app's AUMID.
+
+</Tab>
+<Tab value="Linux">
+
+`configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<appId>`, derived from
+`NucleusApp.appId`. `playerctl` and desktop indicators discover the player by enumerating that
+prefix. Pass a custom `dbusName` to override it.
+
+</Tab>
+</Tabs>
+
+## Notes
+
+- `setVolume(...)` is a no-op on macOS — Now Playing has no per-app volume channel.
+- On Linux without a session D-Bus, `isAvailable()` returns `false` and every call is a no-op.
+
+## What's next
+
+- [Global hotkeys](/docs/os/global-hotkey) — bind media keys and other shortcuts system-wide.
+- [System info](/docs/os/system-info) — query the OS, CPU, battery, and displays from Kotlin.
+- [Quickstart](/docs/start/quickstart) — build and run your first Nucleus app.

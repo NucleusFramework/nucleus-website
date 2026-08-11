@@ -70,16 +70,34 @@ exception. Les appels `enable`/`disable` manuels ne sont pas équilibrés pour v
 appairer.
 </Callout>
 
-## Garder l'écran allumé
+## Garder le système éveillé
 
-Empêchez l'écran et le système de se mettre en veille pendant une tâche ou une présentation,
-puis relâchez la demande à la fin :
+Empêchez la mise en veille pendant une tâche ou une présentation, puis relâchez la demande à
+la fin. Choisissez si l'**écran** doit rester allumé :
 
 ```kotlin
-EnergyManager.keepScreenAwake()
-// ... tâche longue ou présentation
-EnergyManager.releaseScreenAwake()
+import dev.nucleusframework.energymanager.AwakeMode
+import dev.nucleusframework.energymanager.EnergyManager
+
+// Présentation / kiosque — l'écran reste allumé (défaut)
+EnergyManager.keepAwake(AwakeMode.SYSTEM_AND_DISPLAY)
+
+// Export / sync long — la machine reste éveillée ; l'économiseur d'écran et la veille
+// d'affichage se comportent normalement
+EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)
+
+// ... travail terminé
+EnergyManager.releaseAwake()
 ```
+
+| Mode | Veille système | Écran / économiseur |
+|------|----------------|---------------------|
+| `SYSTEM_AND_DISPLAY` (défaut) | Bloquée | Bloquée — l'écran reste allumé |
+| `SYSTEM_ONLY` | Bloquée | Autorisée — l'écran peut s'éteindre ou se verrouiller |
+
+Un appel à `keepAwake` alors qu'une demande est déjà active la remplace par le nouveau mode.
+`keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` restent des forwarders
+dépréciés vers `keepAwake()` / `releaseAwake()` / `isAwakeActive()`.
 
 ## Fonctionnement
 
@@ -97,11 +115,11 @@ son bloc sur un thread unique épinglé.
 
 Chaque plateforme mappe ces niveaux sur des fonctions natives de l'OS :
 
-| OS | Mode full | Mode light | Écran allumé |
-|---|---|---|---|
-| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (feuille verte dans Task Manager 22H2+) | EcoQoS uniquement | `SetThreadExecutionState(ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` |
-| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (confinement E-cores, throttling I/O et réseau sur Apple Silicon) | `task_policy_set` Tier 5 uniquement — CPU déprioritisé, I/O intact | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` |
-| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` uniquement | GNOME SessionManager DBus, logind `Inhibit("idle")`, ou X11 `XScreenSaverSuspend` |
+| OS | Mode full | Mode light | `SYSTEM_AND_DISPLAY` | `SYSTEM_ONLY` |
+|---|---|---|---|---|
+| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (feuille verte dans Task Manager 22H2+) | EcoQoS uniquement | `SetThreadExecutionState(ES_SYSTEM_REQUIRED \| ES_DISPLAY_REQUIRED)` | `ES_SYSTEM_REQUIRED` uniquement |
+| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (confinement E-cores, throttling I/O et réseau sur Apple Silicon) | `task_policy_set` Tier 5 uniquement — CPU déprioritisé, I/O intact | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` | `kIOPMAssertPreventUserIdleSystemSleep` (comme `caffeinate -i` ; fermer le capot endort toujours) |
+| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` uniquement | GNOME SessionManager / PowerManagement / logind / X11 | Inhibiteur de session suspend-only (pas de fallback X11 screen-saver) |
 
 Le mode thread utilise la forme par-thread de ces primitives sur Linux,
 `pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` sur macOS, et
@@ -119,10 +137,18 @@ Le mode thread utilise la forme par-thread de ces primitives sur Linux,
 | `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Par thread ; n'affecte que le thread appelant. |
 | `withEfficiencyMode { }` (suspend) | Exécute le bloc sur un thread dédié à efficacité thread ; le thread est libéré au retour du bloc. |
 | `withLightEfficiencyMode { }` (suspend) | Applique une QoS light au niveau process pour la durée du bloc ; pas d'épinglage de thread. |
-| `keepScreenAwake()` / `releaseScreenAwake()` | Empêche puis restaure la veille écran et système. |
-| `isScreenAwakeActive(): Boolean` | Si le maintien de l'écran allumé est actif. |
+| `keepAwake(mode)` / `releaseAwake()` | Empêche puis restaure la veille système (et éventuellement l'écran). |
+| `isAwakeActive(): Boolean` | Si une demande d'éveil est active. |
+| `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Forwarders dépréciés vers `keepAwake` / `releaseAwake` / `isAwakeActive`. |
 
-Chaque appel `enable`/`disable` et `keepScreenAwake`/`releaseScreenAwake` renvoie un
+### AwakeMode
+
+| Valeur | Description |
+|---|---|
+| `SYSTEM_AND_DISPLAY` | Bloque la veille système et l'écran (défaut). |
+| `SYSTEM_ONLY` | Bloque uniquement la veille système ; l'écran et l'économiseur se comportent normalement. |
+
+Chaque appel `enable`/`disable` et `keepAwake`/`releaseAwake` renvoie un
 `EnergyManager.Result` avec `success: Boolean`, `errorCode: Int` et `message: String`. Sur une
 plateforme non supportée, le résultat est `success = false` avec `errorCode = -1`.
 
@@ -130,10 +156,12 @@ plateforme non supportée, le résultat est `success = false` avec `errorCode = 
 
 - Sur Linux, `libdbus-1`, `libX11` et `libXss` sont chargées via `dlopen()` au runtime. Les
   bibliothèques manquantes dégradent proprement, et une connexion DBus privée évite que le
-  module interfère avec le bus d'accessibilité de la JVM.
+  module interfère avec le bus d'accessibilité de la JVM. `SYSTEM_ONLY` exige un bus de
+  session (GNOME, PowerManagement) ou systemd-logind ; le fallback X11 screen-saver ne peut
+  pas servir ce mode.
 - Sur Windows 10 1709+, EcoQoS ne s'applique que sur batterie ; Windows 11+ le respecte aussi
   sur secteur.
-- Pour une tâche longue qui doit aussi réveiller la machine, maintenez `keepScreenAwake()` en
+- Pour une tâche longue qui doit aussi réveiller la machine, maintenez `keepAwake(…)` en
   parallèle d'un job du [scheduler](/docs/lifecycle/scheduler).
 
 ## Et ensuite

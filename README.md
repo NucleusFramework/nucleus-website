@@ -57,7 +57,7 @@ Short form when `content/docs/` is still the line to freeze:
 ```bash
 npm run snapshot-docs 2.2          # copies content/docs → content/versioned/2.2 + scaffolds routes
 # then wire source.config.ts + lib/source.ts (script prints the exact lines)
-# bump latest label to "2.3 (latest)", write new docs under content/docs/
+# bump latest label to "2.4 (latest)", write new docs under content/docs/
 ```
 
 Do **not** snapshot for patch releases (2.1.9 → 2.1.10): keep editing latest.

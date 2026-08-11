@@ -1,0 +1,117 @@
+---
+title: Tray menu DSL
+description: Build the tray context menu from Kotlin with items, checkable items, submenus, dividers, and conditional content.
+---
+
+The tray menu DSL lets you build the tray context menu from Kotlin, inside the `Tray()`
+trailing lambda. The menu participates in Compose recomposition: when a `mutableStateOf`
+changes, the labels, checkmarks, icons, and entire branches update in the native menu.
+
+The DSL provides four item types — `Item`, `CheckableItem`, `SubMenu`, and `Divider`. Every
+item type accepts an icon as an `ImageVector`, `Painter`, `DrawableResource`, or `@Composable`.
+Because the menu is ordinary Kotlin code, you can use `if` branches and computed values directly.
+
+## Add menu items
+
+Add an `Item` for each action. Pass `isEnabled = false` to disable an item, and `icon` to show
+a leading icon:
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Open settings") { openSettings() }
+    Item(label = "Disabled", isEnabled = false) {}
+    Item(label = "Export", icon = Icons.Default.Upload) { export() }
+}
+```
+
+## Add checkable items
+
+Use `CheckableItem` for toggles. Each platform renders its native checkmark style. The
+`checked` parameter reflects the current state, and the trailing lambda receives the new value:
+
+```kotlin
+var notifications by remember { mutableStateOf(true) }
+var darkMode by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    CheckableItem(label = "Notifications", checked = notifications) {
+        notifications = it
+    }
+    CheckableItem(label = "Dark mode", icon = Icons.Default.DarkMode, checked = darkMode) {
+        darkMode = it
+    }
+}
+```
+
+## Add submenus
+
+Nest a `SubMenu` to group related items. Submenus can nest to any depth:
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    SubMenu(label = "Tools", icon = Icons.Default.Build) {
+        Item(label = "Terminal") { openTerminal() }
+        Item(label = "File manager") { openFiles() }
+        SubMenu(label = "More") {
+            Item(label = "Calculator") { openCalc() }
+        }
+    }
+}
+```
+
+## Add dividers
+
+Insert a `Divider` to separate groups of items:
+
+```kotlin
+Tray(icon = Icons.Default.Favorite, tooltip = "App") {
+    Item(label = "Show window") { show() }
+    Divider()
+    Item(label = "Settings") { settings() }
+    Item(label = "About") { about() }
+    Divider()
+    Item(label = "Quit") { exitProcess(0) }
+}
+```
+
+## Build a reactive menu
+
+Because the DSL is Compose code, you can show items conditionally and compute labels from
+state. Write the menu like any other Compose tree:
+
+```kotlin
+var isConnected by remember { mutableStateOf(false) }
+var showAdvanced by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Wifi, tooltip = "Network") {
+    Item(label = if (isConnected) "Disconnect" else "Connect") {
+        isConnected = !isConnected
+    }
+
+    CheckableItem(label = "Advanced options", checked = showAdvanced) {
+        showAdvanced = it
+    }
+
+    if (showAdvanced) {
+        Divider()
+        SubMenu(label = "Advanced") {
+            Item(label = "DNS settings") {}
+            Item(label = "Proxy") {}
+        }
+    }
+
+    Divider()
+    Item(label = "Quit") { exitProcess(0) }
+}
+```
+
+## How it works
+
+The native menu rebuilds itself when the state it reads mutates. You do not call `refresh()`
+and you do not diff the menu yourself — Compose tracks the state reads and Nucleus applies the
+changes to the platform menu.
+
+## What's next
+
+- [System tray](/docs/os/system-tray) — icon types, primary action, and platform-specific icons.
+- [Tray apps](/docs/os/tray-app) — show a popup window instead of, or alongside, the menu.
