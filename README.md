@@ -69,3 +69,8 @@ Do **not** snapshot for patch releases (2.1.9 → 2.1.10): keep editing latest.
 - OpenGraph image: dynamic via `/opengraph-image`
 - JSON-LD: `SoftwareApplication` schema in root layout
 - llms.txt: `/llms.txt` and `/llms-full.txt`
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+

@@ -16,6 +16,7 @@ export function baseOptionsFor(lang: string): BaseLayoutProps {
     githubUrl: SITE.github,
     links: [
       { text: 'Docs', url: p('/docs') },
+      { text: lang === 'fr' ? 'Migrer avec l’IA' : 'Migrate with AI', url: p('/docs/migrate/ai-agent') },
       { text: 'Roadmap', url: p('/docs/roadmap') },
       { text: 'Changelog', url: p('/docs/changelog') },
       { text: 'GitHub', url: SITE.github, external: true },
