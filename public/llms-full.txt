@@ -153,7 +153,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.4.2           | 2.4.0+         | 1.11.1          |
+| 2.4.3           | 2.4.0+         | 1.11.1          |
 
 ## Apply the plugin
 
@@ -1666,6 +1666,8 @@ entry point you start from. The same holds for `WindowScaffold` and the chrome p
   `nucleusApplication` block. Each window gets its own `NucleusWindow`.
 - Linux CSD windows draw a native GTK drop shadow (hidden-titlebar pattern) that tracks the
   window during interactive moves.
+- Windowed Windows CSD (no Mica/Acrylic) clears the DWM border fill so the Compose frame
+  stroke is visible. Backdrop windows keep the system frame.
 - `NucleusApplicationScope` implements Compose's `ApplicationScope`, so libraries scoped to the
   plain Compose receiver (for example system-tray composables) resolve inside
   `nucleusApplication { }`.
@@ -11089,8 +11091,8 @@ switching between them re-compiles rather than serving a stale binary from the o
 
 | Task | Description |
 |------|-------------|
-| `packageGraalvmNative` | Internal assembler: compile the image and layout the app folder (binary + Skiko/AWT libs + icons). Prefer the public tasks above. |
-| `runWithNativeAgent` | Run the app with the GraalVM `native-image-agent` to collect reflection metadata. |
+| `packageGraalvmNative` | Internal assembler: compile the image and layout the app folder (binary + Skiko/AWT libs + icons + `appResources`). Prefer the public tasks above. |
+| `runWithNativeAgent` | Run the app with the GraalVM `native-image-agent` to collect reflection metadata. Sets `compose.application.resources.dir` to the prepared `appResources`. |
 | `resolveGraalvmReachabilityMetadata` | Resolve reachability metadata from the Oracle repository for runtime dependencies. Runs automatically. |
 | `analyzeGraalvmStaticMetadata` | Statically analyze bytecode to detect reflection, JNI, and resource usage. Runs automatically. |
 | `filterGraalvmLibraryMetadata` | Filter and merge per-library metadata against the runtime classpath. Runs automatically. |
@@ -14036,7 +14038,7 @@ your project.
 
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.4.2` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.4.3` for production runs.
 
 
 ## Reference an action
@@ -16314,6 +16316,24 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.4.3
+
+**Released: 2026-08-13**
+
+### Bug fixes
+
+- **Windows CSD frame hidden by DWM** (#523 / #522 / #520) — windowed CSD (no Mica/Acrylic)
+  clears only the DWM border fill so the Compose frame stroke is visible, while the Win11
+  8px rounded clip and drop shadow stay. See
+  [DecoratedWindow notes](/docs/tao/decorated-window#notes).
+- **`appResources` missing from GraalVM native packages** (#524) — `prepareAppResources` is
+  copied next to the native binary and `compose.application.resources.dir` is set for
+  `packageGraalvmNative` and `runWithNativeAgent`. Sidecars such as Dawn's `dxil.dll` load
+  the same way as `run` / jpackage. See
+  [GraalVM tasks — metadata, installers, and helpers](/docs/performance/graalvm/tasks-ci#metadata-installers-and-helpers).
+
+---
 
 ## v2.4.2
 
