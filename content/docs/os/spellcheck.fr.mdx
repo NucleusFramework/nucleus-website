@@ -1,0 +1,226 @@
+---
+title: Correcteur orthographique
+description: Soulignement ondulé et suggestions dans le menu contextuel des champs Compose, adossés à Hunspell sous Linux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`spellcheck` marque les mots mal orthographiés dans un champ Compose et injecte des
+suggestions dans le menu Couper/Copier/Coller existant. Encadrez le champ avec
+`SpellcheckContextMenu`. Le moteur est Hunspell sous Linux ; sur macOS et Windows — et
+sous Linux quand Hunspell ou un dictionnaire correspondant manque — chaque appel est un
+no-op.
+
+`nucleus-application` dépend de `spellcheck` en `api` : le wrap et le moteur sont donc
+sur le classpath dès que vous utilisez `nucleusApplication`. N'ajoutez la coordonnée
+explicitement que si vous utilisez le moteur hors de ce parapluie.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    // Optionnel — seulement si vous utilisez SpellChecker / SpellcheckSession sans le parapluie :
+    // implementation("dev.nucleusframework:nucleus.spellcheck:<version>")
+}
+```
+
+## Encadrer un champ de texte
+
+Passez le texte courant et un write-back, ou un `TextFieldState`. Le wrap dessine le
+soulignement à partir du layout IME (jamais depuis la boîte de décoration Material /
+Jewel, donc un label flottant n'est jamais marqué comme une faute) et ajoute les
+suggestions au menu contextuel du champ.
+
+```kotlin
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+@Composable
+fun NotesField() {
+    var text by remember { mutableStateOf("") }
+    SpellcheckContextMenu(text = text, onTextChange = { text = it }) {
+        BasicTextField(value = text, onValueChange = { text = it })
+    }
+}
+```
+
+```kotlin
+import androidx.compose.material.Text
+import androidx.compose.material.TextField
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+@Composable
+fun MaterialNotesField() {
+    var text by remember { mutableStateOf("") }
+    SpellcheckContextMenu(text = text, onTextChange = { text = it }) {
+        TextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Notes") }, // jamais souligné
+        )
+    }
+}
+```
+
+Clic droit sur un mot mal orthographié : suggestions, un séparateur, puis **Add to
+dictionary**. La session est créée sur un dispatcher d'arrière-plan ; le premier clic
+droit avant le chargement du dictionnaire n'affiche que le menu standard.
+
+## Placement du menu
+
+Compose parcourt les données de menu de l'intérieur vers l'extérieur : un
+`ContextMenuDataProvider` parent atterrit donc toujours **en bas**. `menuPlacement`
+choisit l'ordre visible :
+
+```kotlin
+import dev.nucleusframework.application.spellcheck.SpellcheckMenuPlacement
+
+SpellcheckContextMenu(
+    state = state,
+    menuPlacement = SpellcheckMenuPlacement.Top,
+) {
+    TextField(state = state)
+}
+```
+
+| Placement | Ordre |
+|-----------|--------|
+| `Bottom` (défaut) | Couper/Copier/Coller et items de l'app, puis un séparateur, puis les suggestions |
+| `Top` | Suggestions, puis un séparateur, puis Couper/Copier/Coller et items de l'app |
+
+`Top` préfixe au moment du draw et conserve le `LocalContextMenuRepresentation` ambiant
+(Jewel ou tout chrome custom). Fournissez un `LocalTextContextMenu` / une representation
+custom **autour** du wrap. Si vous remplacez ces locals à l'intérieur, `Top` ne peut pas
+injecter les items.
+
+## Jewel
+
+`JewelDecoratedWindow` et `JewelDecoratedDialog` installent `ProvideJewelSpellcheckMenu`,
+qui pose `LocalSpellcheckMenuSeparator` sur le `ContextMenuDivider` de Jewel. Les
+séparateurs se dessinent comme des filets Jewel ; le wrap ne remplace pas le chrome du
+menu Jewel.
+
+Si vous construisez le chrome Jewel autour d'un `DecoratedWindow` simple, encadrez le
+contenu vous-même :
+
+```kotlin
+import dev.nucleusframework.window.jewel.ProvideJewelSpellcheckMenu
+
+ProvideJewelSpellcheckMenu {
+    SpellcheckContextMenu(state = state) {
+        TextField(state = state)
+    }
+}
+```
+
+## Menus contextuels custom
+
+Les applications qui construisent déjà la liste d'items (icônes, raccourcis, actions
+supplémentaires) doivent insérer le bloc retourné à l'index voulu, plutôt que de laisser
+le wrap injecter les items :
+
+```kotlin
+import androidx.compose.foundation.ContextMenuDataProvider
+import dev.nucleusframework.application.spellcheck.NucleusSpellcheckInstaller
+import dev.nucleusframework.application.spellcheck.SpellcheckMenuPlacement
+import dev.nucleusframework.spellcheck.SpellChecker
+import org.jetbrains.jewel.ui.component.ContextMenuDivider
+
+ContextMenuDataProvider(
+    items = {
+        buildList {
+            val session = SpellChecker.sessionIfReady
+            if (session != null) {
+                addAll(
+                    NucleusSpellcheckInstaller.menuItems(
+                        word = selectedWord,
+                        session = session,
+                        onSuggestion = { replacement -> /* réécrire le champ */ },
+                        onAddToDictionary = { session.addToDictionary(selectedWord) },
+                        separator = ContextMenuDivider,
+                        menuPlacement = SpellcheckMenuPlacement.Top,
+                    ),
+                )
+            }
+            // items de l'app…
+        }
+    },
+) {
+    // champ
+}
+```
+
+Ne combinez pas cette insertion avec un wrap qui injecte aussi les items — le bloc
+apparaîtrait deux fois. Vous pouvez toujours encadrer le champ pour le soulignement
+seul si vous insérez les items vous-même ; dans ce cas, gardez le wrap à l'extérieur
+de tout override de `LocalTextContextMenu` pour que l'intercepteur IME voie le champ.
+
+## Fonctionnement
+
+- **Linux** — JNI `dlopen` de `libhunspell-1.7.so.0`. Les dictionnaires sont la paire
+  système `.aff` / `.dic` (`/usr/share/hunspell`, `/usr/share/myspell`, `DICPATH`,
+  `$XDG_DATA_HOME/hunspell`). La locale est `Locale.getDefault()`, avec repli sur la
+  langue seule (`fr` → `fr_FR`).
+- **Dictionnaire utilisateur** — les mots ajoutés depuis le menu persistent sous
+  `~/.config/nucleus/spellcheck/<tag>.dic` (`$XDG_CONFIG_HOME` s'il est défini).
+- **macOS / Windows** — no-op. `check` renvoie `false`, `suggest` est vide, le wrap
+  rend le champ inchangé.
+- **Hunspell ou dictionnaire manquant** — même no-op. Le champ garde son menu
+  standard.
+- **Soulignements** — dessinés depuis `PlatformTextInputMethodRequest.textLayoutResult`
+  et découpés au rectangle IME. La boîte de décoration Material / Jewel n'est jamais
+  mesurée.
+- **GraalVM** — le module livre les métadonnées de reachability JNI. Pas de réflexion.
+
+## API moteur
+
+Utilisez `SpellChecker` quand vous avez besoin de check / suggest sans wrap Compose.
+Préférez `sessionIfReady` / `ensureSession()` sur un dispatcher d'arrière-plan ;
+`session` charge Hunspell au premier accès et ne doit pas tourner sur le thread UI.
+
+```kotlin
+import dev.nucleusframework.spellcheck.SpellChecker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+suspend fun loadSpellcheck() {
+    val session = withContext(Dispatchers.IO) { SpellChecker.ensureSession() }
+    if (!session.isAvailable) return
+    session.check("hello")          // true
+    session.suggest("helo")         // ["hello", …]
+    session.misspellings("helo world")
+    session.addToDictionary("helo")
+}
+```
+
+`SpellcheckSession` est le handle isolé derrière `SpellChecker`. Ne construisez le
+vôtre que si vous avez besoin d'une locale ou d'un chemin de dictionnaire utilisateur
+différents de l'instance process-wide.
+
+## Notes
+
+<Callout type="warn">
+Sous Linux, installez Hunspell et un dictionnaire pour la locale de la JVM (`hunspell`
+et `hunspell-en-us`, `hunspell-fr`, …). Sans les deux, le wrap reste silencieux.
+</Callout>
+
+<Callout type="info">
+Le wrap utilise le menu contextuel classique de Compose Desktop
+(`ContextMenuDataProvider` / `LocalTextContextMenu`). Il ne participe pas à
+`ComposeFoundationFlags.isNewContextMenuEnabled`.
+</Callout>
+
+## Et ensuite
+
+- [Toolkit Jewel](/docs/window/toolkit-jewel) — `JewelDecoratedWindow` installe le séparateur automatiquement.
+- [Intégration OS](/docs/os) — les autres modules desktop natifs.
+- [Dialogues de fichier natifs](/docs/ecosystem/file-dialog) — FileKit pour les sélecteurs d'ouverture et d'enregistrement.
