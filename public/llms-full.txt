@@ -5363,7 +5363,8 @@ separate Gradle artifact, so you depend only on the modules you use.
 | --- | --- | --- | --- | --- |
 | Cross-platform notifications | `notification-common` | yes | yes | yes |
 | Native notifications (per OS) | `notification-macos` / `notification-windows` / `notification-linux` | yes | yes | yes |
-| System tray and tray-anchored apps | `composenativetray` | yes | yes | yes |
+| System tray | `composenativetray` | yes | yes | yes |
+| Tray-anchored popup apps | `composenativetray-app` | yes | yes | yes |
 | Global hotkeys | `global-hotkey` | yes | yes | yes |
 | Media controls | `media-control` | yes | yes | yes |
 | Dark mode | `darkmode-detector` | yes | yes | yes |
@@ -5374,7 +5375,8 @@ separate Gradle artifact, so you depend only on the modules you use.
 
 Modules published by Nucleus use the group `dev.nucleusframework` and the artifact name
 `nucleus.<module-name>`. The `composenativetray` module ships from a separate repository under
-the same group, without the `nucleus.` prefix.
+the same group, without the `nucleus.` prefix. From 2.1.0, `composenativetray` is the icon and
+menu; `composenativetray-app` is `TrayApp` and depends on the Tao window backend.
 
 ## Cross-platform modules and platform modules
 
@@ -6080,33 +6082,42 @@ Windows, and Linux. The icon is anything Compose can draw, the menu is a Kotlin 
 react to Compose state. `Tray()` is a single composable that hands the rendered icon and menu
 to the native tray API of the current OS.
 
-System tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) with its own release cycle. Its version number is **independent of Nucleus** — pin it separately. The artifact is `dev.nucleusframework:composenativetray`.
+System tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray) with its own release cycle. Pin it separately from Nucleus. From 2.1.0 the library is two artifacts:
+
+- `dev.nucleusframework:composenativetray` — `Tray` and the menu DSL. Works in Compose Desktop's `application { }` and in `nucleusApplication { }`.
+- `dev.nucleusframework:composenativetray-app` — `TrayApp`. Requires `nucleusApplication { }`. See [Tray apps](/docs/os/tray-app).
 
 ## Add the dependency
 
-```kotlin
+```kotlin title="build.gradle.kts"
 dependencies {
     implementation("dev.nucleusframework:composenativetray:<version>")
 }
 ```
 
+Add `composenativetray-app` only when you use [`TrayApp`](/docs/os/tray-app).
+
 ## Add a tray icon
 
-Declare a `Tray()` composable with an icon, a tooltip, and a menu lambda:
+`Tray` is an extension on Compose's `ApplicationScope`. Call it from `nucleusApplication` (or from Compose Desktop's `application`):
 
 ```kotlin
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
-import dev.nucleusframework.tray.*
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.tray.api.Tray
+import kotlin.system.exitProcess
 
-Tray(
-    icon = Icons.Default.Favorite,
-    tooltip = "My App",
-    primaryAction = { showWindow() },
-) {
-    Item(label = "Show window") { showWindow() }
-    Divider()
-    Item(label = "Quit") { exitProcess(0) }
+fun main() = nucleusApplication {
+    Tray(
+        icon = Icons.Default.Favorite,
+        tooltip = "My App",
+        primaryAction = { showWindow() },
+    ) {
+        Item(label = "Show window") { showWindow() }
+        Divider()
+        Item(label = "Quit") { exitProcess(0) }
+    }
 }
 ```
 
@@ -6208,8 +6219,9 @@ URL: https://nucleusframework.dev/docs/os/tray-menu-dsl
 Build the tray context menu from Kotlin with items, checkable items, submenus, dividers, and conditional content.
 
 The tray menu DSL lets you build the tray context menu from Kotlin, inside the `Tray()`
-trailing lambda. The menu participates in Compose recomposition: when a `mutableStateOf`
-changes, the labels, checkmarks, icons, and entire branches update in the native menu.
+trailing lambda. It ships in `composenativetray` — no extra artifact. The menu participates in
+Compose recomposition: when a `mutableStateOf` changes, the labels, checkmarks, icons, and
+entire branches update in the native menu.
 
 The DSL provides four item types — `Item`, `CheckableItem`, `SubMenu`, and `Divider`. Every
 item type accepts an icon as an `ImageVector`, `Painter`, `DrawableResource`, or `@Composable`.
@@ -6332,20 +6344,41 @@ TrayApp anchors a Compose popup window to a system tray icon so you can build me
 window beside it, and click away to close it. It implements the menu bar app pattern used by
 tools such as Bartender, iStat Menus, and Hidden Bar.
 
-`TrayApp` is in alpha and the API may change. Opt in with `@OptIn(ExperimentalTrayAppApi::class)`.
+From 2.1.0, `TrayApp` lives in `composenativetray-app`, not in the core tray artifact.
 
 ## Add the dependency
 
-`TrayApp` ships with [`composenativetray`](/docs/os/system-tray). If that dependency is on your
-classpath, no extra artifact is required.
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:composenativetray-app:<version>")
+}
+```
+
+`composenativetray-app` pulls in [`composenativetray`](/docs/os/system-tray) and the Nucleus Tao
+window backend. `TrayApp` is an extension on `NucleusApplicationScope` — launch with
+`nucleusApplication { }`.
 
 ## Create a tray app
 
 Pass an icon, a tooltip, a window size, and the Compose content to render in the popup:
 
 ```kotlin
-@OptIn(ExperimentalTrayAppApi::class)
-fun main() = application {
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+
+fun main() = nucleusApplication {
     TrayApp(
         icon = Icons.Default.Dashboard,
         tooltip = "Quick dashboard",
@@ -6375,8 +6408,19 @@ menu bar windows do on each desktop.
 Hold a `TrayAppState` to show, hide, resize, or change the dismiss mode from your own code:
 
 ```kotlin
-@OptIn(ExperimentalTrayAppApi::class)
-fun main() = application {
+import androidx.compose.material.Button
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import dev.nucleusframework.composenativetray.trayapp.TrayWindowDismissMode
+import dev.nucleusframework.composenativetray.trayapp.rememberTrayAppState
+
+fun main() = nucleusApplication {
     val state = rememberTrayAppState(
         initialWindowSize = DpSize(350.dp, 500.dp),
         initiallyVisible = false,
@@ -6402,8 +6446,14 @@ fun main() = application {
 Left-click opens the popup; right-click opens a classic menu:
 
 ```kotlin
-@OptIn(ExperimentalTrayAppApi::class)
-fun main() = application {
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import kotlin.system.exitProcess
+
+fun main() = nucleusApplication {
     TrayApp(
         icon = Icons.Default.Dashboard,
         tooltip = "Dashboard",
@@ -6451,9 +6501,9 @@ The app then runs with no Dock entry and no menu bar — only the tray icon.
 | `windowSize` | `DpSize(300.dp, 200.dp)` | initial size |
 | `visibleOnStart` | `false` | show immediately |
 | `enterTransition` / `exitTransition` | platform default | animations |
-| `transparent` | `true` | transparent background |
 | `undecorated` | `true` | no chrome |
 | `resizable` | `false` | user resize |
+| `windowsTitle` | `""` | window title (used on Linux and when decorated) |
 | `horizontalOffset` / `verticalOffset` | 0 / platform default | nudge against the tray anchor |
 
 ### TrayAppState
@@ -6465,6 +6515,12 @@ The app then runs with no Dock entry and no menu bar — only the tray icon.
 | `setWindowSize(size)` | resize on the fly |
 | `setDismissMode(mode)` | `AUTO` (click outside closes) or `MANUAL` |
 | `onVisibilityChanged(cb)` | observe transitions |
+
+## Notes
+
+- From 2.1.0, `getTrayPosition()` and `TrayPosition` live in `composenativetray-app`
+  (`dev.nucleusframework.composenativetray.trayapp`). They need the Tao backend for screen
+  geometry. Prefer `TrayApp` if you only need a popup next to the icon.
 
 ## What's next
 
