@@ -1,6 +1,7 @@
 import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import { SITE } from './lib/site';
 
 export const docs = defineDocs({
   dir: 'content/docs',
@@ -87,9 +88,60 @@ function remarkNucleusVersions() {
   };
 }
 
+// Turn bare `#123` in prose into a link to the Nucleus GitHub issue / PR.
+// GitHub redirects `/issues/N` to the pull request when N is a PR.
+// Skips code, existing links, and fragments like `/docs/foo#123`.
+const SKIP_ISSUE_LINK = new Set([
+  'code',
+  'inlineCode',
+  'link',
+  'linkReference',
+  'definition',
+  'html',
+]);
+const ISSUE_RE = /(?<![\w/])#(\d+)\b/g;
+
+function linkifyGithubIssues(value: string) {
+  ISSUE_RE.lastIndex = 0;
+  const nodes: any[] = [];
+  let last = 0;
+  for (const match of value.matchAll(ISSUE_RE)) {
+    const start = match.index ?? 0;
+    if (start > last) nodes.push({ type: 'text', value: value.slice(last, start) });
+    const num = match[1];
+    nodes.push({
+      type: 'link',
+      url: `${SITE.github}/issues/${num}`,
+      children: [{ type: 'text', value: `#${num}` }],
+    });
+    last = start + match[0].length;
+  }
+  if (nodes.length === 0) return null;
+  if (last < value.length) nodes.push({ type: 'text', value: value.slice(last) });
+  return nodes;
+}
+
+function remarkGithubIssueLinks() {
+  return (tree: any) => visitIssueText(tree);
+}
+
+function visitIssueText(node: any) {
+  if (SKIP_ISSUE_LINK.has(node.type) || !Array.isArray(node.children)) return;
+  const next: any[] = [];
+  for (const child of node.children) {
+    if (child.type === 'text' && typeof child.value === 'string') {
+      next.push(...(linkifyGithubIssues(child.value) ?? [child]));
+    } else {
+      visitIssueText(child);
+      next.push(child);
+    }
+  }
+  node.children = next;
+}
+
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkNucleusVersions],
+    remarkPlugins: [remarkNucleusVersions, remarkGithubIssueLinks],
     rehypeCodeOptions: {
       themes: {
         light: 'github-light',
