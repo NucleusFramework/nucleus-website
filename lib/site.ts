@@ -11,6 +11,10 @@ export const SITE = {
   github: 'https://github.com/NucleusFramework/Nucleus',
   /** This website's repository (footer open-source link). */
   websiteGithub: 'https://github.com/NucleusFramework/nucleus-website',
+  /** Official #nucleus channel on the Kotlin Slack. */
+  slack: 'https://kotlinlang.slack.com/archives/C0BQYKHBGR0',
+  /** JetBrains form to join the Kotlin Slack workspace. */
+  slackInvite: 'https://surveys.jetbrains.com/s3/kotlin-slack-sign-up',
   /**
    * Docs website repository — “Edit on GitHub” for latest content under content/docs/.
    * Archived versions do not get an edit link.

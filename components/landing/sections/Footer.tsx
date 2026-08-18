@@ -39,7 +39,7 @@ export function Footer({ lang }: FooterProps) {
           <a href={SITE.websiteGithub} target="_blank" rel="noreferrer">{pick(footerT.websiteSource, lang)}</a>
           <a href="#">{pick(footerT.releases, lang)}</a>
           <a href="#">{pick(footerT.roadmap, lang)}</a>
-          <a href="#">{pick(footerT.discord, lang)}</a>
+          <a href={SITE.slack} target="_blank" rel="noreferrer">{pick(footerT.slack, lang)}</a>
         </div>
         <div className="footer-col">
           <h4>{pick(footerT.legal, lang)}</h4>

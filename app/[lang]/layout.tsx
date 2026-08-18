@@ -68,7 +68,7 @@ const orgJsonLd = {
   author: { '@type': 'Person', name: SITE.author },
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   programmingLanguage: 'Kotlin',
-  sameAs: [SITE.github],
+  sameAs: [SITE.github, SITE.slack],
 };
 
 export function generateStaticParams() {

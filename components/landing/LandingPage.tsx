@@ -11,6 +11,7 @@ import { Accessibility } from './sections/Accessibility';
 import { Perf } from './sections/Perf';
 import { NativeParadox } from './sections/NativeParadox';
 import { ShipPipeline } from './sections/ShipPipeline';
+import { Community } from './sections/Community';
 import { Footer } from './sections/Footer';
 import type { Lang } from '@/lib/landing-i18n';
 
@@ -63,6 +64,7 @@ export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
       <Perf lang={lang} />
       <NativeParadox lang={lang} />
       <ShipPipeline lang={lang} />
+      <Community lang={lang} />
       <Footer lang={lang} />
     </div>
   );
