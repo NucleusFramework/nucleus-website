@@ -593,6 +593,22 @@ export const installT = {
 };
 
 // =====================================================================
+// Community
+// =====================================================================
+export const communityT = {
+  title: { en: 'Talk with us', fr: 'Discutez avec nous' } as Bi<string>,
+  body: {
+    en: 'Questions, a stuck migration, or just lurking. #nucleus is on the official Kotlin Slack.',
+    fr: 'Une question, une migration coincée, ou juste pour lire. #nucleus est sur le Slack officiel Kotlin.',
+  } as Bi<string>,
+  cta: { en: 'Open #nucleus', fr: 'Ouvrir #nucleus' } as Bi<string>,
+  invite: {
+    en: 'New to Kotlin Slack? Get an invite.',
+    fr: 'Pas encore sur le Slack Kotlin ? Demandez une invitation.',
+  } as Bi<string>,
+};
+
+// =====================================================================
 // Footer
 // =====================================================================
 export const footerT = {
@@ -610,7 +626,7 @@ export const footerT = {
   github: { en: 'GitHub', fr: 'GitHub' } as Bi<string>,
   releases: { en: 'Releases', fr: 'Versions' } as Bi<string>,
   roadmap: { en: 'Roadmap', fr: 'Roadmap' } as Bi<string>,
-  discord: { en: 'Discord', fr: 'Discord' } as Bi<string>,
+  slack: { en: 'Kotlin Slack', fr: 'Slack Kotlin' } as Bi<string>,
   legal: { en: 'Legal', fr: 'Mentions légales' } as Bi<string>,
   license: { en: 'License (MIT)', fr: 'Licence (MIT)' } as Bi<string>,
   trademark: { en: 'Trademark', fr: 'Marque' } as Bi<string>,
