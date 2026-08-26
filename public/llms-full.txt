@@ -636,8 +636,8 @@ Requires JDK 25 or later. The build generates an AOT cache and ships it with the
 |---|---|
 | macOS | `Dmg`, `Pkg` |
 | Windows | `Msi`, `Exe`, `Nsis`, `NsisWeb`, `Portable`, `AppX` |
-| Linux | `Deb`, `Rpm`, `AppImage`, `RawAppImage`, `Pacman`, `Snap`, `Flatpak` |
-| Any | `Zip`, `Tar`, `SevenZ` |
+| Linux | `Deb`, `Rpm`, `AppImage`, `Pacman`, `Snap`, `Flatpak` |
+| Any | `Zip`, `Tar`, `SevenZ`, `RawAppImage` |
 
 ```kotlin title="build.gradle.kts"
 nativeDistributions {
@@ -924,7 +924,6 @@ Enable it in the plugin DSL:
 nucleus.application {
     graalvm {
         isEnabled.set(true)
-        javaLanguageVersion.set(25)
     }
 }
 ```
@@ -1236,7 +1235,7 @@ Tao is a Rust-native window backend that runs Compose Desktop without AWT and ad
 Tao is the Rust windowing crate that also underpins Tauri 2. Nucleus wraps it as a window
 backend: Compose Desktop renders into a native OS window, so there is no Swing event-dispatch
 thread and no XWayland fallback. Tao is the backend for new Nucleus apps. The legacy AWT
-backend is deprecated and will be removed in a future release — see
+backend is legacy and maintenance-only — see
 [migration from JBR](/docs/tao/migration-from-jbr).
 
 ## Add the dependency
@@ -1327,8 +1326,9 @@ The Tao-specific API lives in `dev.nucleusframework.window.tao`:
   input constants.
 - `TaoDeepLinkBridge.setSink { uri -> … }` — deep link delivery.
 
-`decorated-window-jbr` and `decorated-window-jni` are deprecated and will be removed in a
-future Nucleus release. Keep one on the classpath and select the backend with
+`decorated-window-jbr` and `decorated-window-jni` are legacy and maintenance-only: they still
+ship and still work, but new features land on Tao only. Keep one on the classpath and select the
+backend with
 `NucleusBackend.Awt` only if you still need Swing / AWT interop during migration. See
 [migration from JBR](/docs/tao/migration-from-jbr).
 
@@ -3868,7 +3868,7 @@ Stay on the AWT backend when your app:
 - embeds an AWT `Canvas` you have not ported to `NativeView` yet, or
 - depends on a library that needs `ComposeWindow` directly.
 
-Nucleus 2.0 publishes `decorated-window-jbr`, `decorated-window-jni`, and
+Nucleus publishes `decorated-window-jbr`, `decorated-window-jni`, and
 `decorated-window-tao` from the same version, so you can defer the switch and pin the
 backend per build with `NucleusBackend.Awt` or `NucleusBackend.Tao`.
 
@@ -3936,7 +3936,17 @@ fun main() = nucleusApplication {
 ```
 
 Each call to `DecoratedWindow` manages its own state, handle, and close request, so you open a
-second window by calling it again from the same `nucleusApplication` block.
+second window by calling it again. There are two overloads: one on `NucleusApplicationScope`, and
+a receiverless top-level one that resolves the scope from `LocalNucleusApplicationScope` — use
+that to open a window from a navigation destination or a row action, without threading the
+receiver through.
+
+Beyond the Compose Desktop parameters, `DecoratedWindow` takes the Nucleus window flags:
+`undecorated`, `popupFor`, `nativePopupLayers`, `hiddenFromDock`,
+[`nativeContextMenu`](/docs/window/context-menu#turn-on-the-native-menu), and the overlay flags
+`transparent`, `clickThrough`, `visibleOnAllWorkspaces`, `forceX11` and `alwaysOnBottom`. See
+[DecoratedWindow parameters](/docs/tao/decorated-window#decoratedwindow-parameters) and
+[Overlay windows](/docs/tao/overlay-windows).
 
 ## The title bar slot
 
@@ -4618,7 +4628,6 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
     implementation("dev.nucleusframework:nucleus.decorated-window-jewel:<version>")
-    implementation("dev.nucleusframework:nucleus.darkmode-detector:<version>")
     // A Jewel theme module — pick the one that matches your target IDE build.
     implementation("org.jetbrains.jewel:jewel-int-ui-standalone-243:<version>")
 }
@@ -4684,7 +4693,10 @@ switches between Jewel and another toolkit at runtime.
 ### Open a window or dialog
 
 - `JewelDecoratedWindow(...)` — a Jewel-styled window. Available on `NucleusApplicationScope`
-  (backend-agnostic) and on `ApplicationScope` (AWT-backed).
+  (backend-agnostic) and on `ApplicationScope` (AWT-backed). The `NucleusApplicationScope`
+  overload also takes `undecorated`, `popupFor`, `nativeContextMenu`, `hiddenFromDock`,
+  `titleBarStyle`, and the Tao-only flags `transparent`, `clickThrough`,
+  `visibleOnAllWorkspaces` and `forceX11`; the AWT overload does not.
 - `JewelDecoratedDialog(...)` — the modal dialog variant. A top-level function is AWT-backed;
   the `NucleusApplicationScope` overload is backend-agnostic.
 
@@ -4828,7 +4840,7 @@ derives the same styles internally, but those helpers are `internal` and not par
 
 ### Material 3
 
-- `ApplicationScope.MaterialDecoratedWindow(...)` and `NucleusApplicationScope.MaterialDecoratedWindow(...)`
+- `ApplicationScope.MaterialDecoratedWindow(...)` and `NucleusApplicationScope.MaterialDecoratedWindow(...)` — the `NucleusApplicationScope` overload also takes `nativePopupLayers`, `nativeContextMenu`, `hiddenFromDock`, `titleBarStyle`, `undecorated`, and the Tao-only flags `transparent`, `clickThrough`, `visibleOnAllWorkspaces` and `forceX11` (Material 2 has the same set minus `nativePopupLayers`)
 - `ApplicationScope.MaterialDecoratedDialog(...)` and `NucleusApplicationScope.MaterialDecoratedDialog(...)`
 - `DecoratedWindowScope.MaterialTitleBar(...)`
 - `DecoratedDialogScope.MaterialDialogTitleBar(...)`
@@ -6331,7 +6343,7 @@ A toast on Windows is an XML payload dispatched through `ToastNotificationManage
 - **Unpackaged (EXE/MSI/dev)**: Nucleus derives the AUMID from `NucleusApp.aumid` and registers it on the current process.
 - Override it with `WindowsNotificationCenter.initialize(aumid = "Vendor.App")`.
 
-Unpackaged apps need a Start Menu `.lnk` shortcut whose AUMID property matches the one used at runtime. Without it, toasts may fail to appear or to persist in Action Center. `initialize` creates or updates this shortcut by default (`ShortcutPolicy.REQUIRE_CREATE`), and the Nucleus Gradle plugin sets it up when you build the Windows installer formats.
+Unpackaged apps need a Start Menu `.lnk` shortcut whose AUMID property matches the one used at runtime. Without it, toasts may fail to appear or to persist in Action Center. `initialize` picks the policy automatically: `ShortcutPolicy.REQUIRE_CREATE` for installed apps and `REQUIRE_NO_CREATE` in dev mode, where no shortcut is created and a warning is logged. Pass `shortcutPolicy = ShortcutPolicy.REQUIRE_CREATE` to force it. The Nucleus Gradle plugin sets the shortcut up when you build the Windows installer formats.
 
 ## API reference
 
@@ -7299,7 +7311,8 @@ returns `true` only when that bridge loaded successfully on the current platform
 returns `false`, every call is a no-op, so you can guard setup with a single check.
 
 `configure()` sets the player identity. On Linux it registers the MPRIS bus name (default
-`org.mpris.MediaPlayer2.<appId>`, taken from `NucleusApp.appId`); on macOS the identity comes
+`org.mpris.MediaPlayer2.<suffix>`, where `<suffix>` is `NucleusApp.appId` sanitized into a legal
+D-Bus name); on macOS the identity comes
 from the host app bundle; on Windows it uses the application's AUMID. Both parameters are
 defaulted, so `configure()` with no arguments is the common case.
 
@@ -7377,14 +7390,16 @@ fetched by the system.
 
 **Linux**
 
-`configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<appId>`, derived from
-`NucleusApp.appId`. `playerctl` and desktop indicators discover the player by enumerating that
-prefix. Pass a custom `dbusName` to override it.
+`configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<suffix>`, where `<suffix>` is
+`NucleusApp.appId` sanitized into a legal D-Bus name: illegal characters become `_`, elements that
+start with a digit get an `_` prefix, empty elements are dropped, and the suffix is truncated to
+keep the name under the 255-character D-Bus limit. `playerctl` and desktop indicators discover the
+player by enumerating that prefix. Pass a custom `dbusName` to override it.
 
 ## Notes
 
 - `setVolume(...)` is a no-op on macOS — Now Playing has no per-app volume channel.
-- On Linux without a session D-Bus, `isAvailable()` returns `false` and every call is a no-op.
+- On Linux, `isAvailable()` only reports whether the native library loaded. If the session bus is unreachable or the MPRIS name is invalid, registration is skipped: `attach` returns without blocking and logs a warning, while `isAvailable()` still returns `true`.
 
 ## What's next
 
@@ -8659,8 +8674,8 @@ derived from them and are read-only.
 - The lock file lives under the per-user temp directory, so two users on the same machine can each
   run the app.
 - If the lock file is stale or unreadable, `SingleInstanceManager` deletes it and retries once. If
-  it still cannot acquire the lock, it treats the process as the primary rather than blocking the
-  user.
+  the retry finds the lock still held, the process is a secondary and sends a restore request.
+  Only an unrecoverable error makes it fail open and continue as the primary.
 
 ## What's next
 
@@ -8846,7 +8861,7 @@ fun AboutDialog() {
 
 Each property resolves once and is cached, so reading it repeatedly is cheap.
 
-Use `isConfigured` to tell a packaged app apart from a `./gradlew run` session:
+Use `isConfigured` to tell whether the Nucleus plugin injected metadata at all:
 
 ```kotlin
 if (NucleusApp.isConfigured) {
@@ -8855,16 +8870,18 @@ if (NucleusApp.isConfigured) {
 }
 ```
 
-Gate auto-update, telemetry, or anything you don't want firing in development on
-`NucleusApp.isConfigured`. It is `true` only when the plugin injected metadata.
+`isConfigured` is `true` under `./gradlew run` too, because the plugin injects `nucleus.app.id`
+into the `run` task. To gate auto-update, telemetry, or anything else you don't want firing in
+development, test `ExecutableRuntime.isDev()` instead.
 
 ## How it works
 
 The Gradle plugin delivers metadata to `NucleusApp` through two channels. Each property resolves
 from them in order, and the first non-blank value wins:
 
-1. **System properties** during `./gradlew run` — `-Dnucleus.app.id=...`, `-Dnucleus.app.version=...`,
-   and so on.
+1. **System properties** during `./gradlew run` — the plugin injects `-Dnucleus.app.id` and
+   `-Dnucleus.executable.type`. `NucleusApp` reads the other `nucleus.app.*` properties only if
+   you set them yourself.
 2. **A classpath resource** in packaged builds — `nucleus/nucleus-app.properties`, baked into the
    application jar.
 
@@ -9465,9 +9482,10 @@ Each `LinuxQuicklist` registers its own `com.canonical.dbusmenu` object. The she
 object for the layout, and item clicks are dispatched back on the Swing event dispatch thread
 with `SwingUtilities.invokeLater`.
 
-The `.desktop` filename determines which launcher icon receives the signals. The name derived
-from `NucleusApp.appId` is usually correct; pass a different id to
-`LinuxLauncherEntry.appUri("custom.desktop")` when your packaging uses another name.
+The `.desktop` filename determines which launcher icon receives the signals. `launcher-linux`
+never derives it for you — always pass it explicitly, as in
+`LinuxLauncherEntry.appUri("myapp.desktop")`. (Auto-detection from the running process is a
+[taskbar-progress](/docs/lifecycle/taskbar-progress) feature.)
 
 ## API reference
 
@@ -10660,9 +10678,9 @@ Every method takes a `java.awt.Window` and returns `Boolean`.
 | State | Windows | macOS | Linux |
 |---|---|---|---|
 | `NO_PROGRESS` | No overlay | Removed | `progress-visible: false` |
-| `INDETERMINATE` | Pulsing bar | Pulsing bar | Depends on the desktop environment |
+| `INDETERMINATE` | Pulsing bar | Static bar at the current value | Same as `NORMAL` — the Unity Launcher protocol has no indeterminate mode |
 | `NORMAL` | Green bar | Blue bar | Accent bar |
-| `ERROR` | Red bar | Red bar | `urgent: true` |
+| `ERROR` | Red bar | Red bar | Progress stays visible; no `urgent` flag — use `requestAttention` |
 | `PAUSED` | Yellow bar | Yellow bar | Mapped to progress |
 
 ### `TaskbarProgress.AttentionType`
@@ -11581,8 +11599,10 @@ hide real Room `*_Impl` classes that contain nested types.
 The `nucleus.graalvm-runtime` module bundles GraalVM metadata inside its JAR:
 
 - A `reachability-metadata.json` with serialization entries.
-- A `native-image.properties` that registers resource patterns (`.svg`, `.ttf`, `.otf`,
-  `nucleus/.*`, `META-INF/services/.*`, and `composeResources/.*`).
+- A `reachability-metadata.json` whose `resources` section registers the globs `**/*.svg`,
+  `**/*.ttf`, `**/*.otf`, `composeResources/**`, `nucleus/**`, and `META-INF/services/**`.
+- A `native-image.properties` carrying only `-H:+SharedArenaSupport`, which has no metadata
+  equivalent.
 - SVM substitutions for the AWT font managers, the splash screen, and the X11 window class.
 
 `native-image` discovers all of it from the classpath, so no configuration is needed.
@@ -12062,14 +12082,16 @@ classpath detection. `native-image` merges all of them.
 
 ## Included resources
 
-The `graalvm-runtime` JAR registers four resource-include patterns:
+The `graalvm-runtime` JAR registers seven resource globs in the `resources` section of its
+`reachability-metadata.json`:
 
-| Pattern | Covers |
+| Glob | Covers |
 |---------|--------|
-| `.*\.(svg\|ttf\|otf)` | SVG icons and fonts on the classpath — Jewel, IntelliJ Platform icons, Compose resources, and your own |
-| `composeResources/.*` | Compose Multiplatform resources loaded through `Res.*` |
-| `nucleus/.*` | Nucleus JNI shared libraries and bundled runtime resources |
-| `META-INF/services/.*` | `ServiceLoader` descriptors (ktor engines, Coil fetchers, SLF4J providers, …) |
+| `**/*.svg`, `**/*.ttf`, `**/*.otf` | SVG icons and fonts on the classpath — Jewel, IntelliJ Platform icons, Compose resources, and your own |
+| `composeResources/**` | Compose Multiplatform resources loaded through `Res.*` |
+| `nucleus/**` | Nucleus JNI shared libraries and bundled runtime resources |
+| `META-INF/services/**` | `ServiceLoader` descriptors (ktor engines, Coil fetchers, SLF4J providers, …) |
+| `META-INF/services/javax.sound.sampled.spi.MixerProvider` | The audio mixer provider descriptor |
 
 These patterns are broad on purpose. If you pull in the IntelliJ Platform icons library and
 binary size matters, override the icon glob with a tighter `resource-config.json` of your own.
@@ -12378,7 +12400,7 @@ run:
 Layout under that root:
 
 ```text
-<cache>/nucleus/native/<os>-<arch>/<fingerprint>/<library file>
+<os-cache-root>/nucleus/native/<os>-<arch>/<fingerprint>/<library file>
 ```
 
 ### Content-addressed fingerprints
@@ -16103,6 +16125,9 @@ The Nucleus Gradle plugin (`id("dev.nucleusframework")`) exposes a single top-le
 | `val macOS: JvmMacOSPlatformSettings` | — | See [macOS](#macos--jvmmacosplatformsettings) |
 | `val windows: WindowsPlatformSettings` | — | See [Windows](#windows--windowsplatformsettings) |
 | `val publish: PublishSettings` | — | See [publish](#publish--publishsettings) |
+| `val aotCache: AotCacheSettings` | — | JVM AOT cache settings; also `aotCache { }` |
+| `val sandboxing: SandboxingSettings` | — | Sandbox settings such as `keepNativeLibsInJars`; also `sandboxing { }` |
+| `fun signing(Action<UnifiedSigningSettings>)` | — | One block that configures signing for all three OSes |
 
 Methods:
 
@@ -16122,7 +16147,8 @@ Methods:
 
 Extends `AbstractMacOSPlatformSettings`. Identification:
 
-- `packageName: String?`, `packageVersion`, `packageBuildVersion`
+- `packageName: String?`, `bundleName: String?`, `packageVersion`, `packageBuildVersion`
+  — `bundleName` names the `.app` directory across DMG/ZIP/PKG/app-image/GraalVM, defaulting to `appName` then `packageName`
 - `dmgPackageVersion`, `dmgPackageBuildVersion`, `pkgPackageVersion`, `pkgPackageBuildVersion`
 - `dockName: String?`, `setDockNameSameAsPackageName: Boolean = true`
 - `bundleID: String?`, `appCategory: String?`, `minimumSystemVersion: String?`

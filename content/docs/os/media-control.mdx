@@ -86,7 +86,8 @@ returns `true` only when that bridge loaded successfully on the current platform
 returns `false`, every call is a no-op, so you can guard setup with a single check.
 
 `configure()` sets the player identity. On Linux it registers the MPRIS bus name (default
-`org.mpris.MediaPlayer2.<appId>`, taken from `NucleusApp.appId`); on macOS the identity comes
+`org.mpris.MediaPlayer2.<suffix>`, where `<suffix>` is `NucleusApp.appId` sanitized into a legal
+D-Bus name); on macOS the identity comes
 from the host app bundle; on Windows it uses the application's AUMID. Both parameters are
 defaulted, so `configure()` with no arguments is the common case.
 
@@ -169,9 +170,11 @@ fetched by the system.
 </Tab>
 <Tab value="Linux">
 
-`configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<appId>`, derived from
-`NucleusApp.appId`. `playerctl` and desktop indicators discover the player by enumerating that
-prefix. Pass a custom `dbusName` to override it.
+`configure()` registers the MPRIS bus name `org.mpris.MediaPlayer2.<suffix>`, where `<suffix>` is
+`NucleusApp.appId` sanitized into a legal D-Bus name: illegal characters become `_`, elements that
+start with a digit get an `_` prefix, empty elements are dropped, and the suffix is truncated to
+keep the name under the 255-character D-Bus limit. `playerctl` and desktop indicators discover the
+player by enumerating that prefix. Pass a custom `dbusName` to override it.
 
 </Tab>
 </Tabs>
@@ -179,7 +182,7 @@ prefix. Pass a custom `dbusName` to override it.
 ## Notes
 
 - `setVolume(...)` is a no-op on macOS — Now Playing has no per-app volume channel.
-- On Linux without a session D-Bus, `isAvailable()` returns `false` and every call is a no-op.
+- On Linux, `isAvailable()` only reports whether the native library loaded. If the session bus is unreachable or the MPRIS name is invalid, registration is skipped: `attach` returns without blocking and logs a warning, while `isAvailable()` still returns `true`.
 
 ## What's next
 

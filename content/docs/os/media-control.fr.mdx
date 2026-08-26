@@ -89,7 +89,7 @@ plateforme courante ; quand il renvoie `false`, chaque appel est un no-op, ce qu
 protéger l'initialisation avec une seule vérification.
 
 `configure()` définit l'identité du lecteur. Sous Linux, il enregistre le nom de bus MPRIS
-(par défaut `org.mpris.MediaPlayer2.<appId>`, tiré de `NucleusApp.appId`) ; sur macOS,
+(par défaut `org.mpris.MediaPlayer2.<suffixe>`, où `<suffixe>` est `NucleusApp.appId` assaini en nom D-Bus légal) ; sur macOS,
 l'identité provient du bundle de l'application hôte ; sur Windows, il utilise l'AUMID de
 l'application. Les deux paramètres ont une valeur par défaut, donc `configure()` sans argument
 est le cas courant.
@@ -176,9 +176,12 @@ URL `http`/`https` sont récupérées par le système.
 </Tab>
 <Tab value="Linux">
 
-`configure()` enregistre le nom de bus MPRIS `org.mpris.MediaPlayer2.<appId>`, dérivé de
-`NucleusApp.appId`. `playerctl` et les indicateurs de bureau découvrent le lecteur en
-énumérant ce préfixe. Passez un `dbusName` personnalisé pour le remplacer.
+`configure()` enregistre le nom de bus MPRIS `org.mpris.MediaPlayer2.<suffixe>`, où `<suffixe>`
+est `NucleusApp.appId` assaini en nom D-Bus légal : les caractères illégaux deviennent `_`, les
+éléments commençant par un chiffre reçoivent un préfixe `_`, les éléments vides sont supprimés, et
+le suffixe est tronqué pour rester sous la limite D-Bus de 255 caractères. `playerctl` et les
+indicateurs de bureau découvrent le lecteur en énumérant ce préfixe. Passez un `dbusName`
+personnalisé pour le remplacer.
 
 </Tab>
 </Tabs>
@@ -187,7 +190,7 @@ URL `http`/`https` sont récupérées par le système.
 
 - `setVolume(...)` est un no-op sur macOS — Now Playing n'a pas de canal de volume par
   application.
-- Sous Linux sans D-Bus de session, `isAvailable()` renvoie `false` et chaque appel est un no-op.
+- Sous Linux, `isAvailable()` n'indique que le chargement de la bibliothèque native. Si le bus de session est injoignable ou le nom MPRIS invalide, l'enregistrement est ignoré : `attach` retourne sans bloquer et journalise un avertissement, tandis qu'`isAvailable()` renvoie toujours `true`.
 
 ## Et ensuite
 

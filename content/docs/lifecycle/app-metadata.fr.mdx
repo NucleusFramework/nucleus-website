@@ -43,7 +43,7 @@ fun AboutDialog() {
 
 Chaque propriété est résolue une seule fois puis mise en cache : la relire plusieurs fois coûte peu.
 
-Utilisez `isConfigured` pour distinguer une app packagée d'une session `./gradlew run` :
+Utilisez `isConfigured` pour savoir si le plugin Nucleus a injecté des métadonnées :
 
 ```kotlin
 if (NucleusApp.isConfigured) {
@@ -53,8 +53,9 @@ if (NucleusApp.isConfigured) {
 ```
 
 <Callout type="info">
-Branchez l'auto-update, la télémétrie ou tout ce que vous ne voulez pas voir partir en développement sur
-`NucleusApp.isConfigured`. Il ne vaut `true` que si le plugin a injecté les métadonnées.
+`isConfigured` vaut aussi `true` sous `./gradlew run`, car le plugin injecte `nucleus.app.id`
+dans la tâche `run`. Pour conditionner l'auto-update, la télémétrie ou tout ce que vous ne voulez
+pas voir partir en développement, testez plutôt `ExecutableRuntime.isDev()`.
 </Callout>
 
 ## Fonctionnement
@@ -62,8 +63,9 @@ Branchez l'auto-update, la télémétrie ou tout ce que vous ne voulez pas voir 
 Le plugin Gradle fournit les métadonnées à `NucleusApp` par deux canaux. Chaque propriété les résout
 dans l'ordre, et la première valeur non vide l'emporte :
 
-1. **System properties** pendant `./gradlew run` — `-Dnucleus.app.id=...`, `-Dnucleus.app.version=...`,
-   etc.
+1. **System properties** pendant `./gradlew run` — le plugin injecte `-Dnucleus.app.id` et
+   `-Dnucleus.executable.type`. `NucleusApp` ne lit les autres propriétés `nucleus.app.*` que si
+   vous les définissez vous-même.
 2. **Une resource du classpath** dans les builds packagés — `nucleus/nucleus-app.properties`,
    embarquée dans le jar de l'application.
 

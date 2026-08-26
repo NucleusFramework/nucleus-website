@@ -43,7 +43,7 @@ fun AboutDialog() {
 
 Each property resolves once and is cached, so reading it repeatedly is cheap.
 
-Use `isConfigured` to tell a packaged app apart from a `./gradlew run` session:
+Use `isConfigured` to tell whether the Nucleus plugin injected metadata at all:
 
 ```kotlin
 if (NucleusApp.isConfigured) {
@@ -53,8 +53,9 @@ if (NucleusApp.isConfigured) {
 ```
 
 <Callout type="info">
-Gate auto-update, telemetry, or anything you don't want firing in development on
-`NucleusApp.isConfigured`. It is `true` only when the plugin injected metadata.
+`isConfigured` is `true` under `./gradlew run` too, because the plugin injects `nucleus.app.id`
+into the `run` task. To gate auto-update, telemetry, or anything else you don't want firing in
+development, test `ExecutableRuntime.isDev()` instead.
 </Callout>
 
 ## How it works
@@ -62,8 +63,9 @@ Gate auto-update, telemetry, or anything you don't want firing in development on
 The Gradle plugin delivers metadata to `NucleusApp` through two channels. Each property resolves
 from them in order, and the first non-blank value wins:
 
-1. **System properties** during `./gradlew run` — `-Dnucleus.app.id=...`, `-Dnucleus.app.version=...`,
-   and so on.
+1. **System properties** during `./gradlew run` — the plugin injects `-Dnucleus.app.id` and
+   `-Dnucleus.executable.type`. `NucleusApp` reads the other `nucleus.app.*` properties only if
+   you set them yourself.
 2. **A classpath resource** in packaged builds — `nucleus/nucleus-app.properties`, baked into the
    application jar.
 
