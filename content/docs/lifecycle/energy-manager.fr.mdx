@@ -129,6 +129,40 @@ Les handles coexistent entre eux et avec `keepAwake`. La demande envoyée à l'O
 le plus fort réclamé par un handle vivant, et n'est relâchée qu'une fois tous les handles fermés
 et sans `keepAwake` pendant. `close()` est idempotent et thread-safe.
 
+## Garder l'écran allumé depuis un composable
+
+`Modifier.keepScreenOn()` est le modifier de Compose Multiplatform lui-même et, sur le
+[backend Tao](/docs/tao), il prend désormais effet : tant que le modifier est attaché, l'écran
+reste allumé.
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.keepScreenOn
+
+@Composable
+fun VideoSurface() {
+    Box(Modifier.keepScreenOn()) {
+        Player()
+    }
+}
+```
+
+Préférez-le aux appels impératifs pour tout ce qui est lié à un morceau d'UI : la demande vit
+exactement le temps où le composable reste dans la composition, il n'y a donc aucun relâchement à
+oublier.
+
+En interne, il est décompté à l'échelle du processus et adossé à un seul handle
+`acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)` : plusieurs fenêtres ou popups peuvent donc le
+demander en même temps sans se relâcher mutuellement, et aucune ne perturbe un slot `keepAwake`
+que votre application détient. Si la demande ne peut pas être honorée, le modifier se dégrade
+silencieusement et journalise en `FINE`.
+
+<Callout type="info">
+Les backends AWT n'implémentent pas le hook plateforme : le modifier s'y compose mais reste sans
+effet.
+</Callout>
+
 ## Fonctionnement
 
 Le mode efficacité a deux niveaux. Le mode light laisse l'app pleinement fonctionnelle en

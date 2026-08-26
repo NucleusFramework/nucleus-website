@@ -227,7 +227,7 @@ app is two files: a Gradle build script and a Kotlin `main` function.
 Nucleus builds on Compose Multiplatform and requires:
 
 - **JDK 17 or later** on your `PATH`.
-- **Kotlin 2.0 or later** and **Gradle 8.x**.
+- **Kotlin 2.4.10 or later** and **Gradle 8.x**.
 
 ## Create the build script
 
@@ -355,7 +355,7 @@ This tutorial builds on the [Quickstart](/docs/start/quickstart), which fits in 
 module. You need:
 
 - **JDK 17 or later** for a standard build, or **JDK 25** to enable the AOT cache.
-- **Kotlin 2.0 or later** and **Gradle 8.x**.
+- **Kotlin 2.4.10 or later** and **Gradle 8.x**.
 
 ## Configure the repositories
 
@@ -616,7 +616,7 @@ Requires JDK 25 or later. The build generates an AOT cache and ships it with the
 |---|---|
 | `targetFormats(...)` | Select packaging formats. See [the format list](#select-packaging-formats) below. |
 | `packageName`, `packageVersion`, `description`, `vendor`, `copyright`, `homepage`, `licenseFile` | App metadata. `homepage` is required for Linux DEB. |
-| `modules(...)`, `includeAllModules` | JDK modules to include. Default: `java.base`, `java.desktop`, `java.logging`, `java.net.http`, `jdk.accessibility`, `jdk.crypto.ec`. |
+| `modules(...)`, `includeAllModules` | JDK modules to include. Default: `java.base`, `java.desktop`, `java.logging`, `java.net.http`, `jdk.accessibility`, `jdk.crypto.ec`, `jdk.unsupported`. |
 | `cleanupNativeLibs` | Strip non-target native libraries from dependency JARs. |
 | `enableAotCache` | Generate a JDK 25+ AOT cache. |
 | `splashImage` | Path (relative to app resources) to a splash PNG. |
@@ -1287,7 +1287,7 @@ GPU device, use [`TaoGpuRenderContext`](/docs/tao/gpu-render-context).
 
 Tao opens a native OS window directly: an `NSWindow` on macOS, an `HWND` on Windows, and a
 `wl_surface` (or an X11 window) on Linux. Compose renders into that surface through Skiko —
-Metal on macOS, WGL on Windows, EGL on Linux. Nothing routes through Swing's event-dispatch
+Metal on macOS, ANGLE GLES over Direct3D 11 on Windows, EGL/GLES on Linux. Nothing routes through Swing's event-dispatch
 thread.
 
 Compose Desktop's `SwingPanel` does not work on the Tao backend and crashes the app at
@@ -1551,6 +1551,7 @@ provides them through composition locals. The same theme works whether the depen
 | `alwaysOnBottom` | `Boolean` | Default `false`. Keep the window below normal windows. Clears `alwaysOnTop`. Reactive. |
 | `visibleOnAllWorkspaces` | `Boolean` | Default `false`. Show on every workspace or Space. Reactive. |
 | `forceX11` | `Boolean` | Default `false`. Linux only: take an X11 (XWayland) surface for this window alone. Creation-time only. |
+| `nativeContextMenu` | `Boolean` | Default `false`. Replace Compose context menus with the platform's. On the backend-agnostic `DecoratedWindow` and `HostedWindow`, not the Tao-scope overload. See [Context menus](/docs/window/context-menu#turn-on-the-native-menu). |
 | `macOSStyle` | `MacOSStyle` | Default `MacOSStyle.Classic`. Title-bar treatment on macOS. |
 | `compositionLocalContext` | `CompositionLocalContext?` | Composition locals to carry into the new window's composition. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. On native Wayland, positions are in the parent **content** area (hidden-titlebar CSD origin is applied inside `setOuterPosition`). |
@@ -1772,6 +1773,10 @@ with `windowDragArea` — the same path the stock `TitleBar` already uses.
 | `TitleBarPlacement.Docked` | Classic layout: the bar takes height, content fills the rest. Default. |
 | `TitleBarPlacement.Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Content is `fillMaxSize`; the bar floats on top. Content receives the bar height as top padding. |
 
+`controlButtonsDirection` sets the order and side of the system buttons for the whole scaffold —
+`ControlButtonsDirection.Auto` follows the platform, `Rtl` moves them to the leading edge and
+flips the macOS traffic lights.
+
 `autoHideInFullscreen` drops the bar while fullscreen so content is fully immersive.
 `passThroughToContent` hit-tests presses against content **under** the bar as well, so controls
 merged into the title-bar band (a collapsed nav pane's hamburger, a tab strip) stay interactive.
@@ -1784,7 +1789,10 @@ otherwise activate whatever sits underneath.
 
 ```kotlin
 Modifier = Modifier
-    .windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+    .windowDragArea(
+        enabled = true, // default; false makes the whole modifier a no-op
+        doubleClickAction = WindowDoubleClickAction.ToggleMaximize,
+    )
 ```
 
 An unconsumed primary press followed by a move starts the native window move. Interactive children
@@ -1810,12 +1818,15 @@ design system can place it inside its own toolbar:
 ```kotlin
 WindowControls(
     modifier = Modifier.align(Alignment.CenterEnd),
+    direction = ControlButtonsDirection.Auto,   // default
     renderer = WindowControlsRenderer.Platform, // default
 )
 ```
 
-Nucleus owns the semantics (button order and side, including Linux `button-layout`; maximize ↔
-restore; fullscreen swap; close → `onCloseRequest`). The renderer only draws. On macOS,
+Nucleus owns the semantics (maximize ↔ restore; fullscreen swap; close → `onCloseRequest`). The
+renderer only draws. `direction` decides the button order and side: `Auto` follows the platform —
+including the desktop's own `button-layout` on Linux — and `Rtl` moves them to the leading edge,
+which on macOS also flips the AppKit traffic lights. On macOS,
 `WindowControlsRenderer.Platform` draws nothing and reserves the traffic-light footprint instead —
 pad with **either** `WindowControls` **or** `LocalWindowChromeInsets.controlsInsets`, never both.
 In native fullscreen the replacement traffic lights cannot miniaturize the window, so the
@@ -2249,11 +2260,10 @@ If the returned variant doesn't match the current OS — or the platform's scene
 isn't available — `NativeView` renders an empty `Box(modifier)` instead of failing. This
 lets you write one call site per platform and rely on the fallback on the others.
 
-The optional `content` slot renders Compose UI on top of the embedded view. On macOS it is
-a sibling overlay `NSView` with its own `CAMetalLayer` and `ComposeScene`; on Windows it is
-a top-level layered HWND composited via DirectComposition; on Linux it renders inline in the
-same window scene. Pointer events fall through to the native view except inside regions you
-mark with `Modifier.consumeOverlayPointerEvents()`.
+The optional `content` slot renders Compose UI on top of the embedded view, in the host window's
+own Compose scene on all three platforms — the same hole-punch blending path as later Compose
+siblings and in-scene popups. Overlay content claims its own input; anything it does not cover
+falls through to the native view, with no marker modifier needed.
 
 ## API reference
 
@@ -2486,7 +2496,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.2/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.0/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2518,7 +2528,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.2/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.0/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2569,7 +2579,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.3.2/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.0/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -2862,8 +2872,8 @@ Modifier.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             val change = awaitPointerEvent().changes.first()
-            val source = change.type          // PointerType.Mouse | Touch | Stylus | Eraser
-            val pressure = change.pressure    // 0f when the device reports no pressure
+            val source = change.type          // PointerType.Mouse | Touch — Tao emits no Stylus/Eraser
+            val pressure = change.pressure    // 1f when the digitizer reports none
             // React to source / pressure.
         }
     }
@@ -3562,7 +3572,7 @@ The value updates automatically when the window moves to a display with a differ
 
 ## How it works
 
-When you open a `DecoratedWindow` on Tao, the backend queries the active display for its scale factor and configures the Skiko surface accordingly: `CAMetalLayer.contentsScale` on macOS, the swapchain color space on Windows, and the EGL buffer scale on Wayland.
+When you open a `DecoratedWindow` on Tao, the backend queries the active display for its scale factor and configures the Skiko surface accordingly: `CAMetalLayer.contentsScale` on macOS, an ANGLE GL surface resize at the new scale on Windows, and the EGL buffer scale on Wayland.
 
 The native window receives a `ScaleFactorChanged` event whenever you drag it between displays, plug in an external monitor, or change the system scale. Tao forwards that event to the `ComposeScene`, which propagates a new `LocalDensity` to your composables.
 
@@ -6758,12 +6768,12 @@ var notifications by remember { mutableStateOf(true) }
 var darkMode by remember { mutableStateOf(false) }
 
 Tray(icon = Icons.Default.Favorite, tooltip = "App") {
-    CheckableItem(label = "Notifications", checked = notifications) {
+    CheckableItem(label = "Notifications", checked = notifications, onCheckedChange = {
         notifications = it
-    }
-    CheckableItem(label = "Dark mode", icon = Icons.Default.DarkMode, checked = darkMode) {
+    })
+    CheckableItem(label = "Dark mode", icon = Icons.Default.DarkMode, checked = darkMode, onCheckedChange = {
         darkMode = it
-    }
+    })
 }
 ```
 
@@ -6812,9 +6822,9 @@ Tray(icon = Icons.Default.Wifi, tooltip = "Network") {
         isConnected = !isConnected
     }
 
-    CheckableItem(label = "Advanced options", checked = showAdvanced) {
+    CheckableItem(label = "Advanced options", checked = showAdvanced, onCheckedChange = {
         showAdvanced = it
-    }
+    })
 
     if (showAdvanced) {
         Divider()
@@ -7086,7 +7096,7 @@ DisposableEffect(Unit) {
     GlobalHotKeyManager.initialize()
     val handle = GlobalHotKeyManager.register(
         keyCode = KeyEvent.VK_K,
-        modifiers = HotKeyModifier.META,
+        modifiers = 0 + HotKeyModifier.META,
     ) { _, _ ->
         showQuickSwitcher()
     }
@@ -7116,8 +7126,8 @@ start re-prompted the user.
 loop of registrations, either wait for the flush or call `commitRegistrations()` to force it:
 
 ```kotlin
-val a = GlobalHotKeyManager.register(KeyEvent.VK_K, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
-val b = GlobalHotKeyManager.register(KeyEvent.VK_L, HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+val a = GlobalHotKeyManager.register(KeyEvent.VK_K, 0 + HotKeyModifier.CONTROL) { _, _ -> /* … */ }
+val b = GlobalHotKeyManager.register(KeyEvent.VK_L, 0 + HotKeyModifier.CONTROL) { _, _ -> /* … */ }
 GlobalHotKeyManager.commitRegistrations() // one portal dialog for both
 
 // Debug: portal id for a handle (Linux only; null elsewhere)
@@ -7928,8 +7938,8 @@ NativeMenuBar {
             onCheckedChange = { darkMode = it },
         )
         Separator()
-        RadioButtonItem("Light", selected = !darkMode) { darkMode = false }
-        RadioButtonItem("Dark", selected = darkMode) { darkMode = true }
+        RadioButtonItem("Light", selected = !darkMode, onClick = { darkMode = false })
+        RadioButtonItem("Dark", selected = darkMode, onClick = { darkMode = true })
     }
 }
 ```
@@ -9780,7 +9790,7 @@ registers your application binary with the platform's timer/job system and passe
 1. Loads the persisted `TaskContext` (input data and attempt count) from the per-task metadata file.
 2. Checks any registered constraints against current system state via [`system-info`](/docs/os/system-info).
 3. If they are satisfied, calls your `doWork(context)`.
-4. Records the outcome — `Success`, `Failure`, `Retry`, or `ConstraintsNotMet` — and, on `Retry`, schedules a backoff.
+4. Records the outcome — `Success`, `Failure`, `Retry`, or `ConstraintsNotMet` — and, on `Retry`, schedules a single re-run about 5 minutes later.
 
 | Platform | Mechanism | Plist / unit location |
 |---|---|---|
@@ -9841,7 +9851,7 @@ The minimum periodic interval is 15 minutes; a shorter value throws.
 | Builder method | Description |
 |---|---|
 | `inputData(value)` | Attach a `@Serializable` payload, persisted as JSON. |
-| `retryPolicy(policy)` | `RetryPolicy.Linear` or `RetryPolicy.ExponentialBackoff`. |
+| `retryPolicy(policy)` | `RetryPolicy.Linear` or `RetryPolicy.ExponentialBackoff`. Recorded on the request; the platform backends currently retry at a fixed delay regardless of the policy. |
 | `runImmediately()` | Run once on registration, in addition to the interval (periodic only). |
 | `constraints { ... }` | Network, charging, idle, and storage conditions. |
 | `existingTaskPolicy(policy)` | `KEEP` (default), `UPDATE_DATA`, or `REPLACE`. |
@@ -9858,7 +9868,7 @@ Return one of these from `doWork`:
 
 - `TaskResult.Success`
 - `TaskResult.Failure(message)` — permanent, no retry.
-- `TaskResult.Retry(message)` — retried according to the task's `RetryPolicy`.
+- `TaskResult.Retry(message)` — schedules one re-run about 5 minutes later. The configured `RetryPolicy` is not applied by the platform backends yet.
 
 ### Constraints
 
@@ -9873,7 +9883,7 @@ Set on the `constraints { }` block; all are checked at execution time.
 | `minimumStorageBytes` | `Long?` | Minimum free disk space on the app partition. |
 
 An unsatisfied periodic fire is silently skipped and re-checked on the next trigger. An
-unsatisfied calendar or on-boot fire schedules a retry with backoff.
+unsatisfied calendar or on-boot fire bumps the attempt counter and schedules a single re-run about 5 minutes later.
 
 ### SchedulerConfig
 
@@ -10379,6 +10389,36 @@ EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY).use {
 Handles coexist with each other and with `keepAwake`. The OS request uses the strongest mode
 any live handle asked for, and is released only once every handle is closed and no unmatched
 `keepAwake` is left. `close()` is idempotent and thread-safe.
+
+## Keep the screen on from a composable
+
+`Modifier.keepScreenOn()` is Compose Multiplatform's own modifier, and on the
+[Tao backend](/docs/tao) it now takes effect: while the modifier is attached, the display stays
+awake.
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.keepScreenOn
+
+@Composable
+fun VideoSurface() {
+    Box(Modifier.keepScreenOn()) {
+        Player()
+    }
+}
+```
+
+Prefer it over the imperative calls for anything tied to a piece of UI: the request lives exactly
+as long as the composable is in the composition, so there is no release to forget.
+
+Under the hood it is refcounted process-wide and backed by one
+`acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)` handle, so several windows or popups can ask at the
+same time without releasing each other, and none of them disturbs a `keepAwake` slot your app
+owns. If the request cannot be honored the modifier degrades silently and logs at `FINE`.
+
+The AWT backends do not implement the platform hook, so the modifier composes but has no effect
+there.
 
 ## How it works
 
@@ -11475,7 +11515,7 @@ set are covered without extra configuration.
 The `resolveGraalvmReachabilityMetadata` task resolves entries from the
 [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata)
 for each dependency on your runtime classpath. Resolution is enabled by default and uses
-repository version `0.10.6`.
+repository version `1.1.4`.
 
 Configure this source with the `metadataRepository { }` block: `enabled`, `version`,
 `excludedModules`, and `moduleToConfigVersion`. See
@@ -11860,7 +11900,7 @@ During training the JVM watches a real run of your app and writes the cache when
 ```kotlin
 import dev.nucleusframework.application.aotTraining
 import dev.nucleusframework.application.nucleusApplication
-import dev.nucleusframework.window.DecoratedWindow
+import dev.nucleusframework.application.DecoratedWindow
 import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) = nucleusApplication(args) {
@@ -13007,7 +13047,7 @@ URL: https://nucleusframework.dev/docs/packaging/windows
 
 Package a Nucleus app for Windows as an NSIS, MSI, MSIX/AppX, or Portable build and sign it for distribution.
 
-In this tutorial, you'll package a Nucleus app for Windows in one or more of five formats —
+In this tutorial, you'll package a Nucleus app for Windows in one or more of six formats —
 NSIS, NSIS Web, MSI, MSIX/AppX, and Portable — and sign the result for distribution.
 
 ## Before you start
@@ -13054,13 +13094,14 @@ nucleus {
 }
 ```
 
-The five Windows formats are:
+The six Windows formats are:
 
 - `TargetFormat.Nsis` — the standard Windows installer.
 - `TargetFormat.NsisWeb` — an NSIS downloader stub that fetches the payload at install time.
 - `TargetFormat.Msi` — a Windows Installer package for enterprise deployment.
 - `TargetFormat.AppX` — an MSIX/AppX package for the Microsoft Store and sideloading.
 - `TargetFormat.Portable` — a single executable that runs without installation.
+- `TargetFormat.Exe` — a bare electron-builder `.exe` target.
 
 ## Customize the NSIS installer
 
@@ -13438,7 +13479,7 @@ generated `.desktop` file as `MimeType=` values:
 
 ```kotlin title="build.gradle.kts"
 nativeDistributions {
-    protocol(name = "MyApp URL", schemes = listOf("myapp"))
+    protocol("MyApp URL", "myapp")
     fileAssociation(
         mimeType = "application/x-myapp",
         extension = "myapp",
@@ -14526,7 +14567,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.4.7` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.0` for production runs.
 
 ## Reference an action
 
@@ -15613,7 +15654,7 @@ If you don't use Jewel, you can stay on your current toolchain (JDK 17 or newer)
 
 ### Add the IntelliJ snapshots repository
 
-Nucleus 2.x pulls Jewel `0.39.0-262.9437.21`, which lives only in the IntelliJ snapshots
+Nucleus 2.x pulls Jewel `0.39.1-262.9437.29`, which lives only in the IntelliJ snapshots
 repository. Add it to `settings.gradle.kts`:
 
 ```kotlin title="settings.gradle.kts"
@@ -15631,7 +15672,7 @@ If you declare Jewel directly, pin it to the same coordinate Nucleus brings in t
 
 ```toml
 intellijIcons = "262.9437.16"
-jewel        = "0.39.0-262.9437.21"
+jewel        = "0.39.1-262.9437.29"
 ```
 
 ## What changed in 2.0
@@ -17312,7 +17353,7 @@ Published around the 2.2 line; versioned independently of Nucleus:
 - **Desktop-appropriate default max heap for native images** (#390) — native-image's Serial GC defaults the max heap to 80% of physical RAM, far above a desktop app's norm. Nucleus now bakes `-R:MaximumHeapSizePercent=25` for parity with HotSpot's `MaxRAMPercentage`, configurable via `graalvm { maxHeapSizePercent = N }` or an absolute `graalvm { maxHeapSize = "2g" }` (which takes precedence). Both are defaults only, still overridable at runtime with `-Xmx`.
 - **`--enable-native-access=ALL-UNNAMED` baked into native images** (#390) — native modules call `System.loadLibrary` from the unnamed module, which since JDK 24 (JEP 472) emits a restricted-method warning and will be blocked in a future release. The JVM run path already passed the flag; the native binary now starts clean too.
 - **Pause the render loop while the window is minimized** (#384) — each platform scene host gates its frame body on `window.isMinimized` before the frame-clock tick, so Compose animations park instead of recording and presenting into a hidden surface. This matters most on Windows, where ANGLE's flip-model swapchain never reports occlusion and there is no vsync back-pressure while minimized; restore re-kicks a redraw explicitly.
-- **Jewel 0.39 and IntelliJ icons 262** (#395) — bumps Jewel to `0.39.0-262.9437.21`, adds the `intellij-icons-api`/`impl` dependencies that Jewel 0.39's `IntUiTheme` needs, and registers the build-time initialization and reflection entries required to avoid a `Method.invoke` segfault under SVM.
+- **Jewel 0.39 and IntelliJ icons 262** (#395) — bumps Jewel to `0.39.1-262.9437.29`, adds the `intellij-icons-api`/`impl` dependencies that Jewel 0.39's `IntUiTheme` needs, and registers the build-time initialization and reflection entries required to avoid a `Method.invoke` segfault under SVM.
 
 ### Bug fixes
 

@@ -108,6 +108,10 @@ surface de déplacement avec `windowDragArea` — le même chemin que le `TitleB
 | `TitleBarPlacement.Docked` | Layout classique : la barre prend de la hauteur, le contenu remplit le reste. Par défaut. |
 | `TitleBarPlacement.Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Le contenu est en `fillMaxSize` ; la barre flotte au-dessus. Le contenu reçoit la hauteur de la barre en padding supérieur. |
 
+`controlButtonsDirection` fixe l'ordre et le côté des boutons système pour tout le scaffold —
+`ControlButtonsDirection.Auto` suit la plateforme, `Rtl` les place sur le bord d'attaque et
+inverse les feux de circulation macOS.
+
 `autoHideInFullscreen` retire la barre en plein écran pour un contenu immersif.
 `passThroughToContent` hit-teste aussi les appuis contre le contenu **sous** la barre, pour que les
 contrôles fusionnés dans la bande de barre de titre (hamburger d'un panneau de nav réduit, bande de
@@ -120,7 +124,10 @@ chrome opaque, un clic sur la barre activerait sinon ce qui se trouve en dessous
 
 ```kotlin
 modifier = Modifier
-    .windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+    .windowDragArea(
+        enabled = true, // défaut ; false rend tout le modifier inopérant
+        doubleClickAction = WindowDoubleClickAction.ToggleMaximize,
+    )
 ```
 
 Un appui primaire non consommé suivi d'un déplacement démarre le move natif de la fenêtre. Les
@@ -148,13 +155,15 @@ depuis 2.3.2).
 ```kotlin
 WindowControls(
     modifier = Modifier.align(Alignment.CenterEnd),
+    direction = ControlButtonsDirection.Auto,   // par défaut
     renderer = WindowControlsRenderer.Platform, // par défaut
 )
 ```
 
-Nucleus possède la sémantique (ordre et côté des boutons, y compris le `button-layout` Linux ;
-maximiser ↔ restaurer ; échange plein écran ; fermer → `onCloseRequest`). Le renderer ne dessine
-que. Sous macOS, `WindowControlsRenderer.Platform` ne dessine rien et réserve l'empreinte des feux
+Nucleus possède la sémantique (maximiser ↔ restaurer ; échange plein écran ; fermer →
+`onCloseRequest`). Le renderer ne fait que dessiner. `direction` décide de l'ordre et du côté des
+boutons : `Auto` suit la plateforme — y compris le `button-layout` du bureau sous Linux — et `Rtl`
+les déplace sur le bord d'attaque, ce qui inverse aussi les feux de circulation sous macOS. Sous macOS, `WindowControlsRenderer.Platform` ne dessine rien et réserve l'empreinte des feux
 de circulation — padez avec **soit** `WindowControls` **soit**
 `LocalWindowChromeInsets.controlsInsets`, jamais les deux. En plein écran natif, les feux de
 circulation de remplacement ne peuvent pas miniaturiser la fenêtre : le bouton minimiser est

@@ -103,6 +103,10 @@ with `windowDragArea` — the same path the stock `TitleBar` already uses.
 | `TitleBarPlacement.Docked` | Classic layout: the bar takes height, content fills the rest. Default. |
 | `TitleBarPlacement.Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Content is `fillMaxSize`; the bar floats on top. Content receives the bar height as top padding. |
 
+`controlButtonsDirection` sets the order and side of the system buttons for the whole scaffold —
+`ControlButtonsDirection.Auto` follows the platform, `Rtl` moves them to the leading edge and
+flips the macOS traffic lights.
+
 `autoHideInFullscreen` drops the bar while fullscreen so content is fully immersive.
 `passThroughToContent` hit-tests presses against content **under** the bar as well, so controls
 merged into the title-bar band (a collapsed nav pane's hamburger, a tab strip) stay interactive.
@@ -115,7 +119,10 @@ otherwise activate whatever sits underneath.
 
 ```kotlin
 Modifier = Modifier
-    .windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+    .windowDragArea(
+        enabled = true, // default; false makes the whole modifier a no-op
+        doubleClickAction = WindowDoubleClickAction.ToggleMaximize,
+    )
 ```
 
 An unconsumed primary press followed by a move starts the native window move. Interactive children
@@ -141,12 +148,15 @@ design system can place it inside its own toolbar:
 ```kotlin
 WindowControls(
     modifier = Modifier.align(Alignment.CenterEnd),
+    direction = ControlButtonsDirection.Auto,   // default
     renderer = WindowControlsRenderer.Platform, // default
 )
 ```
 
-Nucleus owns the semantics (button order and side, including Linux `button-layout`; maximize ↔
-restore; fullscreen swap; close → `onCloseRequest`). The renderer only draws. On macOS,
+Nucleus owns the semantics (maximize ↔ restore; fullscreen swap; close → `onCloseRequest`). The
+renderer only draws. `direction` decides the button order and side: `Auto` follows the platform —
+including the desktop's own `button-layout` on Linux — and `Rtl` moves them to the leading edge,
+which on macOS also flips the AppKit traffic lights. On macOS,
 `WindowControlsRenderer.Platform` draws nothing and reserves the traffic-light footprint instead —
 pad with **either** `WindowControls` **or** `LocalWindowChromeInsets.controlsInsets`, never both.
 In native fullscreen the replacement traffic lights cannot miniaturize the window, so the

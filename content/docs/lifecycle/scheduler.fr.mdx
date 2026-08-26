@@ -119,7 +119,7 @@ Au déclenchement, votre `main()` tourne, `DesktopBootReceiver.isSchedulerInvoca
 1. Charge le `TaskContext` persisté (input data et compteur de tentatives) depuis le fichier de métadonnées de la tâche.
 2. Vérifie les contraintes enregistrées face à l'état système courant via [`system-info`](/docs/os/system-info).
 3. Si elles sont satisfaites, appelle votre `doWork(context)`.
-4. Enregistre le résultat — `Success`, `Failure`, `Retry` ou `ConstraintsNotMet` — et programme un backoff en cas de `Retry`.
+4. Enregistre le résultat — `Success`, `Failure`, `Retry` ou `ConstraintsNotMet` — et, en cas de `Retry`, programme une seule réexécution environ 5 minutes plus tard.
 
 | Plateforme | Mécanisme | Emplacement du plist / de l'unité |
 |---|---|---|
@@ -181,7 +181,7 @@ L'intervalle périodique minimum est de 15 minutes ; une valeur plus courte lèv
 | Méthode builder | Description |
 |---|---|
 | `inputData(value)` | Attache un payload `@Serializable`, persisté en JSON. |
-| `retryPolicy(policy)` | `RetryPolicy.Linear` ou `RetryPolicy.ExponentialBackoff`. |
+| `retryPolicy(policy)` | `RetryPolicy.Linear` ou `RetryPolicy.ExponentialBackoff`. Enregistré sur la requête ; les backends de plateforme réessaient actuellement à délai fixe, quelle que soit la politique. |
 | `runImmediately()` | Exécute une fois à l'enregistrement, en plus de l'intervalle (périodique uniquement). |
 | `constraints { ... }` | Conditions de réseau, charge, inactivité et stockage. |
 | `existingTaskPolicy(policy)` | `KEEP` (défaut), `UPDATE_DATA` ou `REPLACE`. |
@@ -199,7 +199,7 @@ Renvoie l'une de ces valeurs depuis `doWork` :
 
 - `TaskResult.Success`
 - `TaskResult.Failure(message)` — définitif, pas de réessai.
-- `TaskResult.Retry(message)` — réessayé selon la `RetryPolicy` de la tâche.
+- `TaskResult.Retry(message)` — programme une réexécution environ 5 minutes plus tard. La `RetryPolicy` configurée n'est pas encore appliquée par les backends de plateforme.
 
 ### Constraints
 
@@ -214,7 +214,7 @@ Se définissent dans le bloc `constraints { }` ; toutes sont vérifiées à l'ex
 | `minimumStorageBytes` | `Long?` | Espace disque libre minimum sur la partition de l'app. |
 
 Un déclenchement périodique non satisfait est ignoré silencieusement et revérifié au prochain
-tir. Un déclenchement calendaire ou on-boot non satisfait programme un réessai avec backoff.
+tir. Un déclenchement calendaire ou on-boot non satisfait incrémente le compteur de tentatives et programme une seule réexécution environ 5 minutes plus tard.
 
 ### SchedulerConfig
 

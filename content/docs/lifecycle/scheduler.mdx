@@ -116,7 +116,7 @@ registers your application binary with the platform's timer/job system and passe
 1. Loads the persisted `TaskContext` (input data and attempt count) from the per-task metadata file.
 2. Checks any registered constraints against current system state via [`system-info`](/docs/os/system-info).
 3. If they are satisfied, calls your `doWork(context)`.
-4. Records the outcome — `Success`, `Failure`, `Retry`, or `ConstraintsNotMet` — and, on `Retry`, schedules a backoff.
+4. Records the outcome — `Success`, `Failure`, `Retry`, or `ConstraintsNotMet` — and, on `Retry`, schedules a single re-run about 5 minutes later.
 
 | Platform | Mechanism | Plist / unit location |
 |---|---|---|
@@ -177,7 +177,7 @@ The minimum periodic interval is 15 minutes; a shorter value throws.
 | Builder method | Description |
 |---|---|
 | `inputData(value)` | Attach a `@Serializable` payload, persisted as JSON. |
-| `retryPolicy(policy)` | `RetryPolicy.Linear` or `RetryPolicy.ExponentialBackoff`. |
+| `retryPolicy(policy)` | `RetryPolicy.Linear` or `RetryPolicy.ExponentialBackoff`. Recorded on the request; the platform backends currently retry at a fixed delay regardless of the policy. |
 | `runImmediately()` | Run once on registration, in addition to the interval (periodic only). |
 | `constraints { ... }` | Network, charging, idle, and storage conditions. |
 | `existingTaskPolicy(policy)` | `KEEP` (default), `UPDATE_DATA`, or `REPLACE`. |
@@ -194,7 +194,7 @@ Return one of these from `doWork`:
 
 - `TaskResult.Success`
 - `TaskResult.Failure(message)` — permanent, no retry.
-- `TaskResult.Retry(message)` — retried according to the task's `RetryPolicy`.
+- `TaskResult.Retry(message)` — schedules one re-run about 5 minutes later. The configured `RetryPolicy` is not applied by the platform backends yet.
 
 ### Constraints
 
@@ -209,7 +209,7 @@ Set on the `constraints { }` block; all are checked at execution time.
 | `minimumStorageBytes` | `Long?` | Minimum free disk space on the app partition. |
 
 An unsatisfied periodic fire is silently skipped and re-checked on the next trigger. An
-unsatisfied calendar or on-boot fire schedules a retry with backoff.
+unsatisfied calendar or on-boot fire bumps the attempt counter and schedules a single re-run about 5 minutes later.
 
 ### SchedulerConfig
 
