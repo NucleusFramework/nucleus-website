@@ -13675,7 +13675,7 @@ throwaway `GNUPGHOME` and discards it afterwards.
 
 Once your packages are signed, the app can apply updates without a root password prompt, because
 the install is gated on the signature. Add `silentUpdate.set(true)` to the Linux signing block; see
-[passwordless updates](/docs/packaging/auto-update#passwordless-updates-on-linux) for the full flow
+[passwordless updates](/docs/packaging/auto-update#set-up-passwordless-updates-on-linux) for the full flow
 and security model.
 
 ## Configure all platforms in one block
@@ -14096,7 +14096,7 @@ Users on `beta` see `latest` and `beta`; users on `alpha` see all three.
 Hosting is configured in `nativeDistributions.publish { }` (see
 [publishing](/docs/packaging/publishing)):
 
-- **GitHub Releases** — the [release workflow](/docs/packaging/ci-cd#release) handles it end to end.
+- **GitHub Releases** — the [release workflow](/docs/packaging/ci-cd#publish-the-release) handles it end to end.
 - **S3** — set credentials via environment variables; the plugin uploads alongside the YAML.
 - **Generic HTTPS** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
   The base URL must be `https` (see [Providers](#providers)).
@@ -14181,7 +14181,7 @@ See [`native-ssl`](/docs/performance/native-ssl) for the trust-manager details.
 By default, applying a DEB or RPM update runs through `pkexec`, which shows a PolicyKit password
 dialog. You can let the app install verified updates without a password, gated on a signature check.
 
-This builds on [Linux code signing](/docs/packaging/code-signing#linux--gpg-signing-for-debrpm).
+This builds on [Linux code signing](/docs/packaging/code-signing#sign-on-linux).
 Enable it on the signing block:
 
 ```kotlin title="build.gradle.kts"
@@ -14304,7 +14304,7 @@ nothing if the attacker also writes the manifest.
 ## What's next
 
 - [Publishing](/docs/packaging/publishing) — configure providers in `nativeDistributions.publish { }`.
-- [CI/CD](/docs/packaging/ci-cd#release) — the release workflow that generates and uploads metadata.
+- [CI/CD](/docs/packaging/ci-cd#publish-the-release) — the release workflow that generates and uploads metadata.
 - [Code signing](/docs/packaging/code-signing) — GPG signing for DEB/RPM and passwordless updates.
 
 ---
@@ -14445,7 +14445,7 @@ publish {
 
 The `publish { }` block writes electron-builder publisher settings; it does not upload anything by
 itself. The actual upload runs in your CI workflow (`gh release create` for GitHub, `aws s3 cp` for
-S3, your own copy step for generic). See [release CI](/docs/packaging/ci-cd#release) for the standard
+S3, your own copy step for generic). See [release CI](/docs/packaging/ci-cd#publish-the-release) for the standard
 path.
 
 ## Submit to a desktop store
@@ -14458,7 +14458,7 @@ store format, then upload the artifact:
   time. Apple reviews the build; App Store builds are not notarized.
 - **Microsoft Store** — upload the `.msixbundle` to [Partner Center](https://partner.microsoft.com/).
   The identity must match the reservation (`identityName`, `publisher = CN=<GUID>`,
-  `publisherDisplayName`). See [Windows targets](/docs/packaging/windows#appx-msix).
+  `publisherDisplayName`). See [Windows targets](/docs/packaging/windows#build-an-appx-or-msix-package).
 - **Snapcraft** — run `snapcraft upload` from CI. The Snap Store accepts `strict` and `classic`
   confinement; `classic` requires approval. Set the grade with `linux.snap { grade = SnapGrade.Stable }`.
 - **Flathub** — submit a manifest pull request to the [Flathub repo](https://github.com/flathub/flathub).
@@ -15524,7 +15524,7 @@ This also applies to GraalVM Native Image DEB packaging (`packageGraalvmDeb`).
 | Store pipeline | Not available | Sandboxed pipeline for PKG, AppX, Flatpak |
 | Auto-update | Not available | Built-in with YAML metadata |
 | Code signing | macOS only | + Windows PFX / Azure Artifact Signing |
-| DMG appearance | Not customizable | Full `dmg { }` DSL ([details](/docs/packaging/macos#dmg-appearance)) |
+| DMG appearance | Not customizable | Full `dmg { }` DSL ([details](/docs/packaging/macos#package-a-dmg)) |
 | Artifact naming | Fixed | Template with `artifactName` |
 
 ## What stays the same
@@ -16159,13 +16159,13 @@ Three mutually exclusive modes:
 - `signing { … }` — see [Signing](#linux--signing--linuxsigningsettings)
 
 ### `linux.signing { }` — `LinuxSigningSettings`
-GPG-signs DEB/RPM for distribution outside a store. See [Code signing](/docs/packaging/code-signing#linux--gpg-signing-for-debrpm).
+GPG-signs DEB/RPM for distribution outside a store. See [Code signing](/docs/packaging/code-signing#sign-on-linux).
 - `enabled: Property<Boolean>` (default `false`)
 - `keyId: Property<String>` — GPG key id, fingerprint or email
 - `keyFile: RegularFileProperty` — ASCII-armored private key, imported into a throwaway keyring (optional if the key is already in the signing keyring)
 - `passphrase: Property<String>`
 - `debMethod: DebSignMethod` (default `Detached`; also `DpkgSig`, `Debsig`)
-- `silentUpdate: Property<Boolean>` (default `false`) — passwordless signature-verified self-update; requires `enabled`. See [passwordless updates](/docs/packaging/auto-update#passwordless-updates-on-linux).
+- `silentUpdate: Property<Boolean>` (default `false`) — passwordless signature-verified self-update; requires `enabled`. See [passwordless updates](/docs/packaging/auto-update#set-up-passwordless-updates-on-linux).
 
 Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signing.{keyId,keyFile,passphrase,silentUpdate}`.
 
@@ -16772,7 +16772,8 @@ the new modules, features, bug fixes, and breaking changes in that version.
   `RectManager` delayed dispatch kept off the AWT event thread.
 - **`jdk.unsupported` in the default runtime modules** — `sun.misc.Unsafe` is required by JNA,
   Jewel, and many common libraries, so the module is included by default rather than discovered
-  through a runtime failure. See [Configuration](/docs/start/configuration).
+  through a runtime failure. See the
+  [`nativeDistributions { }` reference](/docs/start/configuration#nativedistributions---reference).
 
 ### Breaking changes
 
@@ -17838,7 +17839,7 @@ nativeDistributions {
     - **L2 (Oracle Reachability Metadata Repository)** — Automatic resolution of metadata for all runtime classpath dependencies from the [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata). Covers popular libraries like ktor, kotlinx.serialization, SLF4J, Logback, and many others. Enabled by default.
     - **L3 (plugin platform metadata)** — Platform-specific AWT/Java2D/font/security metadata for macOS, Windows, and Linux, shipped inside the Gradle plugin. Written to the build directory at compile time — no per-platform `when` block needed in your build script.
 
-    Users no longer need to copy thousands of reflection entries from the example app. Most applications will work without any manual reflection configuration. See [Centralized Reflection Metadata](/docs/performance/graalvm#centralized-reflection-metadata).
+    Users no longer need to copy thousands of reflection entries from the example app. Most applications will work without any manual reflection configuration. See [Centralized Reflection Metadata](/docs/performance/graalvm/automatic-metadata#how-the-sources-merge).
 
 - **`metadataRepository {}` DSL** — New configuration block in `graalvm {}` to control the Oracle Reachability Metadata Repository integration. Supports `enabled`, `version`, `excludedModules`, and `moduleToConfigVersion`. Enabled by default with version `0.10.6`.
 
@@ -17850,7 +17851,7 @@ nativeDistributions {
 
 - **All JDK locale bundles auto-included** — Locale-specific resource bundles are now part of the centralized metadata, reducing runtime `MissingResourceException` crashes.
 
-- **`UpdateLevel` enum** — `UpdateResult.Available` now carries an `UpdateLevel` (`MAJOR`, `MINOR`, `PATCH`, `PRE_RELEASE`) computed by comparing semantic version numbers. Allows the UI to adapt messaging based on update significance. See [Auto Update](/docs/packaging/auto-update#update-level).
+- **`UpdateLevel` enum** — `UpdateResult.Available` now carries an `UpdateLevel` (`MAJOR`, `MINOR`, `PATCH`, `PRE_RELEASE`) computed by comparing semantic version numbers. Allows the UI to adapt messaging based on update significance. See [Auto Update](/docs/packaging/auto-update#result-and-level-types).
 
 - **Post-update detection** — New `NucleusUpdater.consumeUpdateEvent()` and `wasJustUpdated()` methods detect that the app was just updated and return an `UpdateEvent` with `previousVersion`, `newVersion`, and `updateLevel`. Useful for "What's new" dialogs, migrations, or analytics. See [Auto Update](/docs/packaging/auto-update#post-update-detection).
 
@@ -17872,7 +17873,7 @@ nativeDistributions {
 
 ### Breaking changes
 
-- **Sample app `reachability-metadata.json` files drastically reduced** — If you copied metadata from the example or jewel-sample apps, the source files are now nearly empty (framework entries moved to L1/L3). This is not a code-breaking change, but you should clean up your own metadata files — see the [migration guide](/docs/performance/graalvm#migration-from-v15x).
+- **Sample app `reachability-metadata.json` files drastically reduced** — If you copied metadata from the example or jewel-sample apps, the source files are now nearly empty (framework entries moved to L1/L3). This is not a code-breaking change, but you should clean up your own metadata files — see the [migration guide](/docs/performance/graalvm/automatic-metadata#clean-up-manual-entries).
 
 - **Removed old-format config files from samples** — `predefined-classes-config.json`, `proxy-config.json`, `resource-config.json`, and `serialization-config.json` have been removed. All configuration is consolidated in `reachability-metadata.json`.
 
@@ -17890,7 +17891,7 @@ nativeDistributions {
 
 ### Breaking changes
 
-- **Remove release build type for GraalVM** — GraalVM native-image tasks no longer have `release` variants (`packageReleaseGraalvmNative`, etc.). ProGuard is redundant with native-image's closed-world dead code elimination and harmful because it can rename classes referenced in `reachability-metadata.json`. See [No Release Build Type](/docs/performance/graalvm#no-release-build-type).
+- **Remove release build type for GraalVM** — GraalVM native-image tasks no longer have `release` variants (`packageReleaseGraalvmNative`, etc.). ProGuard is redundant with native-image's closed-world dead code elimination and harmful because it can rename classes referenced in `reachability-metadata.json`. See [No Release Build Type](/docs/performance/graalvm/configuration#no-release-variant).
 
 ---
 
@@ -17900,7 +17901,7 @@ nativeDistributions {
 
 ### New features
 
-- **Automatic resource inclusion for GraalVM native-image** — `graalvm-runtime` now ships a `native-image.properties` that auto-includes all `.svg`, `.ttf`, `.otf` resources, `nucleus/native/*` JNI libraries, and `META-INF/services/*` descriptors via glob patterns. Projects no longer need to run the tracing agent just to discover icon and font resources — they are embedded in the native binary automatically. The tracing agent is still required for reflection, JNI, resource bundles, and non-standard resources. See [Automatic Resource Inclusion](/docs/performance/graalvm#automatic-resource-inclusion).
+- **Automatic resource inclusion for GraalVM native-image** — `graalvm-runtime` now ships a `native-image.properties` that auto-includes all `.svg`, `.ttf`, `.otf` resources, `nucleus/native/*` JNI libraries, and `META-INF/services/*` descriptors via glob patterns. Projects no longer need to run the tracing agent just to discover icon and font resources — they are embedded in the native binary automatically. The tracing agent is still required for reflection, JNI, resource bundles, and non-standard resources. See [Automatic Resource Inclusion](/docs/performance/graalvm/configuration#graalvm---reference).
 
 ---
 
@@ -17980,7 +17981,7 @@ nativeDistributions {
 
 ### New features
 
-- **Automatic Liquid Glass support via `macOsSdkVersion`** — Nucleus now automatically patches the app launcher's `LC_BUILD_VERSION` Mach-O header to macOS SDK 26.0 using `vtool`, enabling Liquid Glass window decorations (larger traffic lights, rounded corners). This works with **any JDK** — a JDK compiled with Xcode 26 is no longer required. The `run` task uses a cached patched copy of the JVM, while distributable builds patch the launcher before signing. Controlled via `macOS { macOsSdkVersion = "26.0" }` (enabled by default, set to `null` to disable). Requires Xcode Command Line Tools. See [macOS 26 Window Appearance](/docs/packaging/macos#macos-26-window-appearance-liquid-glass).
+- **Automatic Liquid Glass support via `macOsSdkVersion`** — Nucleus now automatically patches the app launcher's `LC_BUILD_VERSION` Mach-O header to macOS SDK 26.0 using `vtool`, enabling Liquid Glass window decorations (larger traffic lights, rounded corners). This works with **any JDK** — a JDK compiled with Xcode 26 is no longer required. The `run` task uses a cached patched copy of the JVM, while distributable builds patch the launcher before signing. Controlled via `macOS { macOsSdkVersion = "26.0" }` (enabled by default, set to `null` to disable). Requires Xcode Command Line Tools. See [macOS 26 Window Appearance](/docs/packaging/macos#enable-liquid-glass-on-sdk-26).
 - **`Modifier.clientRegion()` for JBR title bar hit testing** — New modifier function that registers composable elements as interactive client regions within a `DecoratedWindow`'s title bar. Client regions receive mouse events (clicks, presses) instead of triggering window dragging. Uses AWT-level mouse listeners with precise coordinate-based hit testing, replacing the old pointer-event-based `customTitleBarMouseEventHandler`. See [Decorated Window](/docs/window).
 - **`decorated-window-jewel` module** — New module providing Jewel theme integration for `DecoratedWindow`. Used by the jewel-sample app.
 - **`decorated-window-material2` module** — New module providing Material 2 theme color mapping for `DecoratedWindow`, complementing the existing Material 3 module.

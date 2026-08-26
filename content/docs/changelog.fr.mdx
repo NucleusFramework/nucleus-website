@@ -95,7 +95,8 @@ les changements incompatibles de la version.
   différé de `RectManager` maintenu hors du thread d'événements AWT.
 - **`jdk.unsupported` dans les modules runtime par défaut** — `sun.misc.Unsafe` est requis par JNA,
   Jewel et beaucoup de bibliothèques courantes : le module est donc inclus par défaut plutôt que
-  découvert via une erreur à l'exécution. Voir [Configuration](/docs/start/configuration).
+  découvert via une erreur à l'exécution. Voir la
+  [référence `nativeDistributions { }`](/docs/start/configuration#référence-nativedistributions--).
 
 ### Changements incompatibles
 
@@ -1186,7 +1187,7 @@ nativeDistributions {
     - **L2 (Oracle Reachability Metadata Repository)** — Résolution automatique des métadonnées pour toutes les dépendances du classpath runtime depuis le [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata). Couvre les bibliothèques populaires comme ktor, kotlinx.serialization, SLF4J, Logback et bien d'autres. Activé par défaut.
     - **L3 (métadonnées de plateforme du plugin)** — Métadonnées AWT/Java2D/police/sécurité spécifiques à la plateforme pour macOS, Windows et Linux, livrées à l'intérieur du plugin Gradle. Écrites dans le répertoire de build à la compilation — aucun bloc `when` par plateforme nécessaire dans votre script de build.
 
-    Vous n'avez plus besoin de copier des milliers d'entrées de réflexion depuis l'application d'exemple. La plupart des applications fonctionneront sans aucune configuration de réflexion manuelle. Voir [Métadonnées de réflexion centralisées](/docs/performance/graalvm#centralized-reflection-metadata).
+    Vous n'avez plus besoin de copier des milliers d'entrées de réflexion depuis l'application d'exemple. La plupart des applications fonctionneront sans aucune configuration de réflexion manuelle. Voir [Métadonnées de réflexion centralisées](/docs/performance/graalvm/automatic-metadata#fusion-des-sources).
 
 - **DSL `metadataRepository {}`** — Nouveau bloc de configuration dans `graalvm {}` pour contrôler l'intégration du Oracle Reachability Metadata Repository. Prend en charge `enabled`, `version`, `excludedModules` et `moduleToConfigVersion`. Activé par défaut avec la version `0.10.6`.
 
@@ -1198,9 +1199,9 @@ nativeDistributions {
 
 - **Tous les bundles de locale du JDK inclus automatiquement** — Les bundles de ressources spécifiques à une locale font désormais partie des métadonnées centralisées, réduisant les crashs `MissingResourceException` au runtime.
 
-- **Enum `UpdateLevel`** — `UpdateResult.Available` porte désormais un `UpdateLevel` (`MAJOR`, `MINOR`, `PATCH`, `PRE_RELEASE`) calculé en comparant les numéros de version sémantique. Permet à l'UI d'adapter son message selon l'importance de la mise à jour. Voir [Auto Update](/docs/packaging/auto-update#update-level).
+- **Enum `UpdateLevel`** — `UpdateResult.Available` porte désormais un `UpdateLevel` (`MAJOR`, `MINOR`, `PATCH`, `PRE_RELEASE`) calculé en comparant les numéros de version sémantique. Permet à l'UI d'adapter son message selon l'importance de la mise à jour. Voir [Auto Update](/docs/packaging/auto-update#types-de-résultat-et-de-niveau).
 
-- **Détection post-mise à jour** — Les nouvelles méthodes `NucleusUpdater.consumeUpdateEvent()` et `wasJustUpdated()` détectent que l'application vient d'être mise à jour et renvoient un `UpdateEvent` avec `previousVersion`, `newVersion` et `updateLevel`. Utile pour les dialogues « Quoi de neuf », les migrations ou l'analytics. Voir [Auto Update](/docs/packaging/auto-update#post-update-detection).
+- **Détection post-mise à jour** — Les nouvelles méthodes `NucleusUpdater.consumeUpdateEvent()` et `wasJustUpdated()` détectent que l'application vient d'être mise à jour et renvoient un `UpdateEvent` avec `previousVersion`, `newVersion` et `updateLevel`. Utile pour les dialogues « Quoi de neuf », les migrations ou l'analytics. Voir [Auto Update](/docs/packaging/auto-update#détection-après-mise-à-jour).
 
 - **Modules jlink par défaut étendus** — `java.net.http` et `jdk.accessibility` sont désormais inclus dans la liste des modules jlink par défaut aux côtés de `java.base`, `java.desktop`, `java.logging` et `jdk.crypto.ec`. Plus besoin de les ajouter manuellement.
 
@@ -1220,7 +1221,7 @@ nativeDistributions {
 
 ### Changements incompatibles
 
-- **Fichiers `reachability-metadata.json` des applications d'exemple drastiquement réduits** — Si vous avez copié des métadonnées des applications example ou jewel-sample, les fichiers source sont désormais quasiment vides (les entrées du framework ont été déplacées vers L1/L3). Ce n'est pas un changement qui casse le code, mais vous devriez nettoyer vos propres fichiers de métadonnées — voir le [guide de migration](/docs/performance/graalvm#migration-from-v15x).
+- **Fichiers `reachability-metadata.json` des applications d'exemple drastiquement réduits** — Si vous avez copié des métadonnées des applications example ou jewel-sample, les fichiers source sont désormais quasiment vides (les entrées du framework ont été déplacées vers L1/L3). Ce n'est pas un changement qui casse le code, mais vous devriez nettoyer vos propres fichiers de métadonnées — voir le [guide de migration](/docs/performance/graalvm/automatic-metadata#nettoyer-les-entrées-manuelles).
 
 - **Suppression des fichiers de config à l'ancien format des exemples** — `predefined-classes-config.json`, `proxy-config.json`, `resource-config.json` et `serialization-config.json` ont été supprimés. Toute la configuration est consolidée dans `reachability-metadata.json`.
 
@@ -1238,7 +1239,7 @@ nativeDistributions {
 
 ### Changements incompatibles
 
-- **Suppression du type de build release pour GraalVM** — Les tâches d'image native GraalVM n'ont plus de variantes `release` (`packageReleaseGraalvmNative`, etc.). ProGuard fait doublon avec l'élimination de code mort à monde clos de native-image, et il est nuisible car il peut renommer des classes référencées dans `reachability-metadata.json`. Voir [Pas de type de build release](/docs/performance/graalvm#no-release-build-type).
+- **Suppression du type de build release pour GraalVM** — Les tâches d'image native GraalVM n'ont plus de variantes `release` (`packageReleaseGraalvmNative`, etc.). ProGuard fait doublon avec l'élimination de code mort à monde clos de native-image, et il est nuisible car il peut renommer des classes référencées dans `reachability-metadata.json`. Voir [Pas de type de build release](/docs/performance/graalvm/configuration#pas-de-variant-release).
 
 ---
 
@@ -1248,7 +1249,7 @@ nativeDistributions {
 
 ### Nouvelles fonctionnalités
 
-- **Inclusion automatique des ressources pour l'image native GraalVM** — `graalvm-runtime` livre désormais un `native-image.properties` qui inclut automatiquement toutes les ressources `.svg`, `.ttf`, `.otf`, les bibliothèques JNI `nucleus/native/*` et les descripteurs `META-INF/services/*` via des patterns glob. Les projets n'ont plus besoin de lancer l'agent de tracing juste pour découvrir les ressources d'icônes et de polices — elles sont embarquées automatiquement dans le binaire natif. L'agent de tracing reste nécessaire pour la réflexion, JNI, les bundles de ressources et les ressources non standard. Voir [Inclusion automatique des ressources](/docs/performance/graalvm#automatic-resource-inclusion).
+- **Inclusion automatique des ressources pour l'image native GraalVM** — `graalvm-runtime` livre désormais un `native-image.properties` qui inclut automatiquement toutes les ressources `.svg`, `.ttf`, `.otf`, les bibliothèques JNI `nucleus/native/*` et les descripteurs `META-INF/services/*` via des patterns glob. Les projets n'ont plus besoin de lancer l'agent de tracing juste pour découvrir les ressources d'icônes et de polices — elles sont embarquées automatiquement dans le binaire natif. L'agent de tracing reste nécessaire pour la réflexion, JNI, les bundles de ressources et les ressources non standard. Voir [Inclusion automatique des ressources](/docs/performance/graalvm/configuration#référence-de-graalvm--).
 
 ---
 
@@ -1328,7 +1329,7 @@ nativeDistributions {
 
 ### Nouvelles fonctionnalités
 
-- **Prise en charge automatique de Liquid Glass via `macOsSdkVersion`** — Nucleus patche désormais automatiquement l'en-tête Mach-O `LC_BUILD_VERSION` du launcher de l'application vers le SDK macOS 26.0 avec `vtool`, activant les décorations de fenêtre Liquid Glass (feux de circulation plus grands, coins arrondis). Cela fonctionne avec **n'importe quel JDK** — un JDK compilé avec Xcode 26 n'est plus requis. La tâche `run` utilise une copie patchée mise en cache de la JVM, tandis que les builds distribuables patchent le launcher avant la signature. Contrôlé via `macOS { macOsSdkVersion = "26.0" }` (activé par défaut, mettez `null` pour désactiver). Nécessite les Xcode Command Line Tools. Voir [Apparence de fenêtre macOS 26](/docs/packaging/macos#macos-26-window-appearance-liquid-glass).
+- **Prise en charge automatique de Liquid Glass via `macOsSdkVersion`** — Nucleus patche désormais automatiquement l'en-tête Mach-O `LC_BUILD_VERSION` du launcher de l'application vers le SDK macOS 26.0 avec `vtool`, activant les décorations de fenêtre Liquid Glass (feux de circulation plus grands, coins arrondis). Cela fonctionne avec **n'importe quel JDK** — un JDK compilé avec Xcode 26 n'est plus requis. La tâche `run` utilise une copie patchée mise en cache de la JVM, tandis que les builds distribuables patchent le launcher avant la signature. Contrôlé via `macOS { macOsSdkVersion = "26.0" }` (activé par défaut, mettez `null` pour désactiver). Nécessite les Xcode Command Line Tools. Voir [Apparence de fenêtre macOS 26](/docs/packaging/macos#activer-liquid-glass-sur-le-sdk-26).
 - **`Modifier.clientRegion()` pour le hit testing de la barre de titre JBR** — Nouvelle fonction de modifier qui enregistre des éléments composables comme régions client interactives dans la barre de titre d'une `DecoratedWindow`. Les régions client reçoivent les événements souris (clics, appuis) au lieu de déclencher le drag de la fenêtre. Utilise des listeners souris au niveau AWT avec un hit testing précis basé sur les coordonnées, remplaçant l'ancien `customTitleBarMouseEventHandler` basé sur les pointer events. Voir [Decorated Window](/docs/window).
 - **Module `decorated-window-jewel`** — Nouveau module fournissant l'intégration du thème Jewel pour `DecoratedWindow`. Utilisé par l'application jewel-sample.
 - **Module `decorated-window-material2`** — Nouveau module fournissant le mapping de couleurs du thème Material 2 pour `DecoratedWindow`, complétant le module Material 3 existant.
