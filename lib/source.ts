@@ -54,6 +54,7 @@ function version(opts: {
 // Archive procedure: .docs-versioning.md — `npm run snapshot-docs <X.Y>` then wire here.
 export const DOC_VERSIONS: DocVersion[] = [
   version({ id: 'latest', label: NUCLEUS_LATEST_DOCS_LABEL, baseUrl: '/docs', collection: Source.docs, latest: true }),
+  version({ id: '2.4', label: '2.4', baseUrl: '/docs/2.4', collection: Source.docs_2_4 }),
   version({ id: '2.3', label: '2.3', baseUrl: '/docs/2.3', collection: Source.docs_2_3 }),
   version({ id: '2.2', label: '2.2', baseUrl: '/docs/2.2', collection: Source.docs_2_2 }),
   version({ id: '2.1', label: '2.1', baseUrl: '/docs/2.1', collection: Source.docs_2_1 }),

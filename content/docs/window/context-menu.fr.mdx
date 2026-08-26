@@ -1,0 +1,207 @@
+---
+title: Menus contextuels
+description: Remplacez les menus contextuels dessinés par Compose par le menu de l'OS — NSMenu sous macOS, flyout Fluent sous Windows, Adwaita ou Breeze sous Linux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Par défaut, Compose Desktop dessine ses propres menus contextuels, qui ne ressemblent pas au
+bureau sur lequel ils tournent. Nucleus peut les remplacer par le menu de la plateforme : un vrai
+`NSMenu` sous macOS, et un flyout Compose stylé Fluent sous Windows, Adwaita sur les bureaux GTK
+ou Breeze sur les bureaux Qt. Cette page couvre l'activation, les types d'entrées et le chemin
+par lequel les entrées arrivent au menu.
+
+## Activer le menu natif
+
+Renseignez `nativeContextMenu` sur la fenêtre :
+
+```kotlin
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+        nativeContextMenu = true,
+    ) {
+        // Les champs de texte affichent désormais le menu Couper/Copier/Coller de l'OS
+    }
+}
+```
+
+Cela couvre `ContextMenuArea`, le menu Couper/Copier/Coller des champs de texte et les
+[suggestions orthographiques](/docs/os/spell-check). Le paramètre existe aussi sur `HostedWindow`.
+
+<Callout type="info">
+Le menu natif est une fonctionnalité du [backend Tao](/docs/tao). Sur les backends AWT, le
+paramètre est accepté et ignoré : le même code y conserve les menus Compose.
+</Callout>
+
+Vous ne choisissez pas de style. Le menu suit la plateforme et, sous Linux, le toolkit de la
+session — Breeze sur les bureaux Qt, Adwaita partout ailleurs.
+
+## Ajouter vos propres entrées
+
+Construisez les entrées avec `NucleusContextMenuItem`, qui étend le `ContextMenuItem` de Compose
+avec une icône et un libellé de raccourci :
+
+```kotlin
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
+import dev.nucleusframework.application.contextmenu.ContextMenuIcon
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuDivider
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuItem
+
+ContextMenuArea(
+    items = {
+        listOf(
+            NucleusContextMenuItem(
+                label = "Afficher dans le gestionnaire de fichiers",
+                icon = ContextMenuIcon.Folder,
+                onClick = { revealInFileManager(path) },
+            ),
+            NucleusContextMenuDivider,
+            NucleusContextMenuItem(
+                label = "Supprimer",
+                icon = ContextMenuIcon.Delete,
+                shortcut = "Suppr",
+                onClick = { delete(path) },
+            ),
+        )
+    },
+) {
+    FileRow(path)
+}
+```
+
+`NucleusContextMenuDivider` est le séparateur, et `NucleusContextMenuSubmenu` imbrique un groupe.
+Sa lambda `items` est évaluée à l'ouverture du menu : un sous-menu peut donc lister un contenu
+changeant.
+
+```kotlin
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuSubmenu
+
+NucleusContextMenuSubmenu(label = "Ouvrir un fichier récent") { recentFiles.map { fileItem(it) } }
+```
+
+## Afficher les raccourcis clavier
+
+Une entrée dotée d'une icône standard reçoit gratuitement le libellé de raccourci de la
+plateforme — `⌘C` sous macOS, `Ctrl+C` ailleurs :
+
+```kotlin
+NucleusContextMenuItem(label = "Copier", icon = ContextMenuIcon.Copy, onClick = ::copy)
+```
+
+Passez `shortcut` pour remplacer le libellé, ou `shortcut = ""` pour supprimer celui par défaut.
+`ContextMenuIcon.stockShortcut()` renvoie le libellé associé à une icône.
+
+<Callout type="info">
+Les libellés de raccourci sont dessinés par les flyouts Windows et Linux. Le `NSMenu` de macOS
+n'exploite pas encore ce champ.
+</Callout>
+
+## Détecter le toolkit Linux
+
+Le style de menu Linux est déduit de la session, que vous pouvez aussi lire vous-même — par
+exemple pour accorder un widget indépendant au bureau :
+
+```kotlin
+import dev.nucleusframework.core.runtime.LinuxUiToolkit
+
+when (LinuxUiToolkit.Current) {
+    LinuxUiToolkit.Qt -> // KDE Plasma, LXQt, Deepin, …
+    LinuxUiToolkit.Gtk -> // GNOME, Xfce, Cinnamon, MATE, …
+}
+```
+
+`LinuxUiToolkit.Current` lit `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION` et `XDG_SESSION_DESKTOP`,
+puis se replie sur `KDE_FULL_SESSION` et `QT_QPA_PLATFORMTHEME`. Les bureaux inconnus et les
+gestionnaires de fenêtres en mosaïque donnent `Gtk`.
+
+## Fonctionnement
+
+Activer `nativeContextMenu` installe deux représentations Compose pour le sous-arbre de la
+fenêtre : `NativeContextMenuRepresentation` pour `ContextMenuArea` et `NativeTextContextMenu`
+pour les champs de texte. Toutes deux parcourent la liste de `ContextMenuItem` fournie par
+Compose et la convertissent en arbre de `ContextMenuEntry` via le `ContextMenuItemInterpreter`
+présent dans la portée.
+
+Cet arbre est ensuite rendu par plateforme. macOS construit un vrai `NSMenu` via
+[`menu-macos`](/docs/os/menu-macos) et l'affiche ; Windows et Linux dessinent un flyout Compose à
+la densité de l'OS, ce qui préserve l'échelle système même dans un sous-arbre qui redéfinit
+`LocalDensity`.
+
+Les entrées proviennent de contributeurs indépendants — le Couper/Copier/Coller du champ, vos
+ajouts, les suggestions orthographiques — donc la liste est normalisée avant affichage : les
+séparateurs en tête, en fin et consécutifs sont supprimés, récursivement dans les sous-menus. Une
+liste vide referme le menu au lieu de faire clignoter un cadre vide.
+
+## Référence de l'API
+
+Package `dev.nucleusframework.application.contextmenu`, livré dans `nucleus-application`.
+
+### Construire des entrées
+
+| Symbole | Description |
+|---|---|
+| `NucleusContextMenuItem(label, enabled, icon, shortcut, onClick)` | Un `ContextMenuItem` avec icône et libellé de raccourci optionnels. |
+| `NucleusContextMenuDivider` | Entrée séparateur. |
+| `NucleusContextMenuSubmenu(label) { items }` | Groupe imbriqué ; `items` est évalué à l'ouverture du menu. |
+| `ContextMenuIcon` | `Cut`, `Copy`, `Paste`, `SelectAll`, `Delete`, `Folder`, `SfSymbol(name)`. |
+| `ContextMenuIcon.stockShortcut()` | Libellé de raccourci de la plateforme pour les icônes d'édition, sinon `null`. |
+
+### Piloter le menu
+
+| Symbole | Description |
+|---|---|
+| `NativeContextMenuProvider(enabled) { }` | Installe le menu natif sur un sous-arbre, sans passer par le paramètre de fenêtre. |
+| `isNativeContextMenuSupported` | Si la plateforme peut l'afficher. |
+| `LocalNativeContextMenu` | Si le sous-arbre utilise actuellement le menu natif. |
+| `LocalContextMenuDivider` | Le séparateur dessiné par le rendu actif, ou `null`. Lisez-le quand vous assemblez des listes d'entrées. |
+| `NativeContextMenuRepresentation` / `NativeTextContextMenu` | Les représentations installées par le provider. |
+
+### Interpréter les entrées
+
+| Symbole | Description |
+|---|---|
+| `ContextMenuEntry` | `Item(label, enabled, icon, onClick, shortcut)`, `Separator`, `Submenu(label, items)`. |
+| `ContextMenuItemInterpreter` | Convertit un `ContextMenuItem` Compose en `ContextMenuEntry`. |
+| `DefaultContextMenuItemInterpreter` | La conversion par défaut. |
+| `LocalContextMenuItemInterpreter` | Redéfinit la conversion pour un sous-arbre. |
+
+### Primitives de popup macOS
+
+Package `dev.nucleusframework.menu.macos`, livré dans `menu-macos`.
+
+| Symbole | Description |
+|---|---|
+| `NativePopupMenuItem` | `Entry(title, enabled, icon, onClick)`, `Separator`, `Submenu(title, items)`. |
+| `isNativePopupMenuAvailable` | Si le pont natif s'est chargé. |
+| `popUpNativeMenu(items)` | Affiche un `NSMenu` à la position du curseur. |
+
+<Callout type="warn">
+Appelez `popUpNativeMenu` hors du thread UI de Tao. AppKit exécute une boucle de tracking
+imbriquée pendant que le menu est ouvert et, à l'intérieur d'un callback d'événement Tao, cette
+boucle affame la boucle d'événements — animations, `Dispatchers.Main` et `delay` s'arrêtent
+jusqu'à la fermeture du menu.
+</Callout>
+
+## Notes
+
+- Les icônes ne se rendent pas de la même façon partout : Breeze dessine des vecteurs de 16 dp,
+  Fluent utilise les glyphes Segoe Fluent Icons, et Adwaita suit la convention GTK sans icônes
+  dans les menus contextuels. `ContextMenuIcon.SfSymbol` ne concerne que macOS.
+- Le flyout se referme quand la fenêtre propriétaire perd le focus. La surveillance des clics
+  extérieurs ne voit que ce processus : le focus est le seul signal remonté par tous les
+  backends, et il couvre aussi Alt+Tab et les clics sur la barre des tâches.
+- Sous macOS, le menu requiert la bibliothèque native `menu-macos` ; si elle ne se charge pas,
+  `isNativeContextMenuSupported` vaut `false` et les menus Compose sont utilisés.
+
+## Et ensuite
+
+- [Correction orthographique](/docs/os/spell-check) — les suggestions affichées dans ces menus.
+- [Barre de menus macOS](/docs/os/menu-macos) — le menu applicatif, même couche native.
+- [DecoratedWindow sur Tao](/docs/tao/decorated-window) — la fenêtre qui héberge le menu.

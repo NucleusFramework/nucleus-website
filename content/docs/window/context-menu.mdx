@@ -1,0 +1,202 @@
+---
+title: Context menus
+description: Replace Compose-drawn context menus with the OS-looking menu — NSMenu on macOS, a Fluent flyout on Windows, and Adwaita or Breeze on Linux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+By default, Compose Desktop draws its own context menus, which do not match the desktop they run
+on. Nucleus can replace them with the platform menu: a real `NSMenu` on macOS, and a Compose
+flyout styled as Fluent on Windows, Adwaita on GTK desktops, or Breeze on Qt desktops. This page
+covers the opt-in, the item types, and how items reach the menu.
+
+## Turn on the native menu
+
+Set `nativeContextMenu` on the window:
+
+```kotlin
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+        nativeContextMenu = true,
+    ) {
+        // Text fields now show the OS-looking Cut/Copy/Paste menu
+    }
+}
+```
+
+This covers `ContextMenuArea`, the text-field Cut/Copy/Paste menu, and
+[spellcheck suggestions](/docs/os/spell-check). The parameter is also available on `HostedWindow`.
+
+<Callout type="info">
+The native menu is a [Tao backend](/docs/tao) feature. On the AWT backends the parameter is
+accepted and ignored, so the same code keeps Compose menus there.
+</Callout>
+
+You do not choose a style. The menu follows the platform, and on Linux it follows the session's
+toolkit — Breeze on Qt desktops, Adwaita everywhere else.
+
+## Add your own items
+
+Build items with `NucleusContextMenuItem`, which extends Compose's `ContextMenuItem` with an icon
+and a shortcut label:
+
+```kotlin
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
+import dev.nucleusframework.application.contextmenu.ContextMenuIcon
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuDivider
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuItem
+
+ContextMenuArea(
+    items = {
+        listOf(
+            NucleusContextMenuItem(
+                label = "Reveal in Finder",
+                icon = ContextMenuIcon.Folder,
+                onClick = { revealInFileManager(path) },
+            ),
+            NucleusContextMenuDivider,
+            NucleusContextMenuItem(
+                label = "Delete",
+                icon = ContextMenuIcon.Delete,
+                shortcut = "Del",
+                onClick = { delete(path) },
+            ),
+        )
+    },
+) {
+    FileRow(path)
+}
+```
+
+`NucleusContextMenuDivider` is the separator, and `NucleusContextMenuSubmenu` nests a group. Its
+`items` lambda is evaluated when the menu opens, so a submenu can list something that changes:
+
+```kotlin
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuSubmenu
+
+NucleusContextMenuSubmenu(label = "Open recent") { recentFiles.map { fileItem(it) } }
+```
+
+## Show keyboard shortcuts
+
+An item with a stock icon gets the platform shortcut label for free — `⌘C` on macOS, `Ctrl+C`
+elsewhere:
+
+```kotlin
+NucleusContextMenuItem(label = "Copy", icon = ContextMenuIcon.Copy, onClick = ::copy)
+```
+
+Pass `shortcut` to override the label, or `shortcut = ""` to suppress the stock one.
+`ContextMenuIcon.stockShortcut()` returns the label used for a given icon.
+
+<Callout type="info">
+Shortcut labels are drawn by the Windows and Linux flyouts. macOS `NSMenu` does not render this
+field yet.
+</Callout>
+
+## Detect the Linux toolkit
+
+The Linux menu style is picked from the session, which you can also read yourself — for example
+to match an unrelated widget to the desktop:
+
+```kotlin
+import dev.nucleusframework.core.runtime.LinuxUiToolkit
+
+when (LinuxUiToolkit.Current) {
+    LinuxUiToolkit.Qt -> // KDE Plasma, LXQt, Deepin, …
+    LinuxUiToolkit.Gtk -> // GNOME, Xfce, Cinnamon, MATE, …
+}
+```
+
+`LinuxUiToolkit.Current` reads `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION`, and
+`XDG_SESSION_DESKTOP`, then falls back to `KDE_FULL_SESSION` and `QT_QPA_PLATFORMTHEME`. Unknown
+desktops and bare tiling window managers resolve to `Gtk`.
+
+## How it works
+
+Turning on `nativeContextMenu` installs two Compose representations for the window subtree:
+`NativeContextMenuRepresentation` for `ContextMenuArea`, and `NativeTextContextMenu` for text
+fields. Both walk the `ContextMenuItem` list Compose hands them and convert it to a
+`ContextMenuEntry` tree through the `ContextMenuItemInterpreter` in scope.
+
+That tree is then rendered per platform. macOS builds a real `NSMenu` through
+[`menu-macos`](/docs/os/menu-macos) and pops it up; Windows and Linux draw a Compose flyout at OS
+density, so the menu keeps system scale even inside a subtree that overrides `LocalDensity`.
+
+Items arrive from independent contributors — the field's own Cut/Copy/Paste, your extras, the
+spellcheck suggestions — so the entry list is normalized before it is shown: leading, trailing,
+and consecutive separators are dropped, recursively into submenus. An empty list closes the menu
+instead of flashing an empty frame.
+
+## API reference
+
+Package `dev.nucleusframework.application.contextmenu`, shipped in `nucleus-application`.
+
+### Build items
+
+| Symbol | Description |
+|---|---|
+| `NucleusContextMenuItem(label, enabled, icon, shortcut, onClick)` | A `ContextMenuItem` with an optional icon and shortcut label. |
+| `NucleusContextMenuDivider` | Separator item. |
+| `NucleusContextMenuSubmenu(label) { items }` | Nested group; `items` is evaluated when the menu opens. |
+| `ContextMenuIcon` | `Cut`, `Copy`, `Paste`, `SelectAll`, `Delete`, `Folder`, `SfSymbol(name)`. |
+| `ContextMenuIcon.stockShortcut()` | Platform shortcut label for the editing icons, else `null`. |
+
+### Control the menu
+
+| Symbol | Description |
+|---|---|
+| `NativeContextMenuProvider(enabled) { }` | Installs the native menu for a subtree, without going through the window parameter. |
+| `isNativeContextMenuSupported` | Whether this platform can show it. |
+| `LocalNativeContextMenu` | Whether the subtree currently uses the native menu. |
+| `LocalContextMenuDivider` | The separator the active renderer draws, or `null`. Read it when you assemble item lists. |
+| `NativeContextMenuRepresentation` / `NativeTextContextMenu` | The representations installed by the provider. |
+
+### Interpret items
+
+| Symbol | Description |
+|---|---|
+| `ContextMenuEntry` | `Item(label, enabled, icon, onClick, shortcut)`, `Separator`, `Submenu(label, items)`. |
+| `ContextMenuItemInterpreter` | Maps a Compose `ContextMenuItem` to a `ContextMenuEntry`. |
+| `DefaultContextMenuItemInterpreter` | The default mapping. |
+| `LocalContextMenuItemInterpreter` | Override the mapping for a subtree. |
+
+### macOS popup primitives
+
+Package `dev.nucleusframework.menu.macos`, shipped in `menu-macos`.
+
+| Symbol | Description |
+|---|---|
+| `NativePopupMenuItem` | `Entry(title, enabled, icon, onClick)`, `Separator`, `Submenu(title, items)`. |
+| `isNativePopupMenuAvailable` | Whether the native bridge loaded. |
+| `popUpNativeMenu(items)` | Shows an `NSMenu` at the cursor. |
+
+<Callout type="warn">
+Call `popUpNativeMenu` off the Tao UI thread. AppKit runs a nested tracking loop while the menu
+is open, and inside a Tao event callback that loop starves the event loop — animations,
+`Dispatchers.Main`, and `delay` all stop until the menu closes.
+</Callout>
+
+## Notes
+
+- Icons render differently per platform: Breeze draws 16 dp vectors, Fluent uses Segoe Fluent
+  Icons glyphs, and Adwaita follows the GTK convention of no icons in context menus.
+  `ContextMenuIcon.SfSymbol` applies to macOS only.
+- The flyout closes when the owning window loses focus. Outside-click monitoring only sees this
+  process, so focus is the one signal every backend reports — and it also covers Alt+Tab and
+  clicks on the taskbar.
+- On macOS the menu needs the `menu-macos` native library; if it fails to load,
+  `isNativeContextMenuSupported` is `false` and Compose menus are used.
+
+## What's next
+
+- [Spell check](/docs/os/spell-check) — suggestions inside these menus.
+- [macOS menu bar](/docs/os/menu-macos) — the application menu, same native layer.
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — the window that hosts the menu.

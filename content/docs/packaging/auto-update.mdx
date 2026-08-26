@@ -100,7 +100,8 @@ Hosting is configured in `nativeDistributions.publish { }` (see
 
 - **GitHub Releases** — the [release workflow](/docs/packaging/ci-cd#release) handles it end to end.
 - **S3** — set credentials via environment variables; the plugin uploads alongside the YAML.
-- **Generic HTTP** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
+- **Generic HTTPS** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
+  The base URL must be `https` (see [Providers](#providers)).
 
 The `publish { }` block only generates electron-builder config — it does not upload. CI does the upload.
 
@@ -267,9 +268,15 @@ UI on it — force a dialog for major bumps, install patches silently.
 ### Providers
 
 - `GitHubProvider(owner, repo, token? = null)`
-- `GenericProvider(baseUrl)`
+- `GenericProvider(baseUrl)` — the `baseUrl` must use `https`. A non-`https` origin throws
+  `IllegalArgumentException` at construction. `http` is accepted only for loopback hosts
+  (`localhost`, `127.0.0.0/8`, `::1`) so integration tests can serve fixtures without TLS.
 
 Custom auth headers come from the provider's `authHeaders()`, not from the config.
+
+The manifest, the checksums, and the artifact all come from that one origin, so plain `http`
+would let an on-path attacker rewrite the three together — the SHA-512 in the manifest protects
+nothing if the attacker also writes the manifest.
 
 ### Installer commands
 
@@ -293,6 +300,8 @@ Custom auth headers come from the provider's `authHeaders()`, not from the confi
 - Passwordless Linux updates (`signing.silentUpdate`) add a second, stronger check: a GPG signature
   verified against the key bundled in the app.
 - GitHub tokens are sent in the `Authorization` header, never in URL parameters.
+- The detached installer script runs from a fresh owner-only directory (POSIX `0700`) created per
+  update, not from a fixed path in the shared temp directory.
 - For Mac App Store, Microsoft Store, Snapcraft, and Flathub, the store handles updates; skip
   `updater-runtime` entirely.
 

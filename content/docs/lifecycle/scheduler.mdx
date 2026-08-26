@@ -211,6 +211,34 @@ Set on the `constraints { }` block; all are checked at execution time.
 An unsatisfied periodic fire is silently skipped and re-checked on the next trigger. An
 unsatisfied calendar or on-boot fire schedules a retry with backoff.
 
+### SchedulerConfig
+
+Every backend invokes the current executable, resolved from
+`ProcessHandle.current().info().command()`. If your app boots through a custom launcher, point
+the scheduler at that launcher instead:
+
+```kotlin
+import dev.nucleusframework.scheduler.SchedulerConfig
+
+SchedulerConfig.executablePath = "/opt/myapp/myapp-launcher"
+SchedulerConfig.executableArguments = listOf("--background")
+```
+
+The resulting command is `<executablePath> <executableArguments…> --nucleus-scheduler-run <taskId>`.
+
+| Property | Type | Default | Behavior |
+|---|---|---|---|
+| `executablePath` | `String?` | `null` | Absolute path to the program the OS scheduler invokes. `null` or blank resolves the current executable. |
+| `executableArguments` | `List<String>` | `emptyList()` | Arguments inserted before the `--nucleus-scheduler-run` flag. |
+
+`executablePath` must be absolute: the generated wrapper scripts check that the file still
+exists and unregister the task when it is gone, for example after an uninstall.
+
+<Callout type="warn">
+Set both properties before the first `enqueue` call. The values are baked into the generated
+plist, unit, or task at enqueue time, so a later change only affects tasks scheduled afterwards.
+</Callout>
+
 ## Notes
 
 - Don't put secrets in `inputData` — it's persisted as plain JSON in the per-task metadata file.

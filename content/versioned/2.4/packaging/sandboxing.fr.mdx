@@ -1,0 +1,155 @@
+---
+title: Sandboxing
+description: Comment Nucleus construit des distributions sandboxées pour les formats store App Store, Flatpak et MSIX.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Trois formats store exigent un build sandboxé : `Pkg` (macOS App Sandbox), `Flatpak` (Linux) et `AppX` (Windows MSIX). Une app sandboxée ne peut pas extraire de bibliothèques natives dans un répertoire temporaire au runtime, ni charger du code arbitraire. Nucleus exécute donc un second pipeline de build pour ces formats. Cette page décrit ce que fait ce pipeline et comment configurer les parties qui demandent des valeurs propres à votre projet.
+
+## Demander un format store
+
+Ajoutez un format store à `targetFormats`. Le pipeline sandboxé s'active automatiquement dès qu'au moins un format store est présent.
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            targetFormats(
+                // Pipeline non-sandboxé
+                TargetFormat.Dmg,
+                TargetFormat.Nsis,
+                TargetFormat.Deb,
+                // Pipeline sandboxé
+                TargetFormat.Pkg,
+                TargetFormat.AppX,
+                TargetFormat.Flatpak,
+            )
+        }
+    }
+}
+```
+
+Lancez la tâche de packaging habituelle. Les deux pipelines s'exécutent dans la même invocation :
+
+```shell
+./gradlew packageDistributionForCurrentOS
+```
+
+## Fonctionnement
+
+| Format    | OS      | Modèle de sandbox |
+|-----------|---------|-------------------|
+| `Pkg`     | macOS   | [App Sandbox](https://developer.apple.com/documentation/security/app-sandbox) |
+| `AppX`    | Windows | MSIX — full trust, mais avec des contraintes de packaging |
+| `Flatpak` | Linux   | [Sandbox Flatpak](https://docs.flatpak.org/en/latest/sandbox-permissions.html) |
+
+Quand au moins un format store est configuré, Nucleus enregistre des tâches Gradle supplémentaires qui :
+
+1. Parcourent les JARs de dépendances pour y trouver les fichiers `.dylib`, `.jnilib`, `.so` et `.dll`, puis les extraient — dans `Contents/Frameworks/` sur macOS, et dans `resources/` sur Windows et Linux.
+2. Réécrivent les JARs sans ces entrées natives pour éviter de les dupliquer.
+3. Fusionnent vos `appResources` avec les bibliothèques extraites.
+4. Injectent des arguments JVM pour que `java.library.path`, `jna.library.path` et `jna.boot.library.path` pointent vers le répertoire d'extraction signé. JNA reçoit aussi `nounpack=true` et `nosys=true`.
+5. Signent chaque binaire natif de `Contents/Frameworks/` individuellement avec `codesign` (macOS).
+6. Reconnectent Skiko et `icudtl.dat` vers ce même répertoire.
+
+Le pipeline non-sandboxé continue de tourner en parallèle : `Dmg`, `Nsis` et `Deb` sont construits sans changement.
+
+### Cache AOT et sandboxing
+
+Quand il génère un cache AOT pour un build sandboxé, Nucleus retire la signature de `jspawnhelper` pendant la phase de training — sinon macOS tue les processus forkés sandboxés — puis la réapplique avec les runtime entitlements avant le packaging.
+
+### Windows AppX
+
+`AppX` tourne en full trust et dispose du même accès système qu'une app Win32 classique. Il rejoint le pipeline sandboxé uniquement parce que le packaging MSIX interdit l'extraction de DLL dans un répertoire temporaire au runtime.
+
+## Configurer les entitlements macOS
+
+Nucleus livre des entitlements par défaut pour les builds sandboxés comme non-sandboxés.
+
+Builds non-sandboxés (`Dmg`, `Zip`) :
+
+```xml
+<key>com.apple.security.cs.allow-jit</key>                        <true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>
+<key>com.apple.security.cs.disable-library-validation</key>       <true/>
+```
+
+Builds sandboxés (`Pkg`) :
+
+```xml
+<key>com.apple.security.app-sandbox</key>                         <true/>
+<key>com.apple.security.cs.allow-jit</key>                        <true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>
+<key>com.apple.security.cs.disable-library-validation</key>       <true/>
+<key>com.apple.security.network.client</key>                      <true/>
+<key>com.apple.security.files.user-selected.read-write</key>      <true/>
+```
+
+Les runtime entitlements appliquées aux binaires JVM livrés sont plus strictes : pas de réseau, pas d'accès fichier. Seul le code de votre app déclare des capacités. Vous pouvez surcharger l'un ou l'autre jeu par build :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    entitlementsFile.set(project.file("packaging/entitlements.plist"))
+    runtimeEntitlementsFile.set(project.file("packaging/runtime-entitlements.plist"))
+}
+```
+
+## Intégrer les provisioning profiles
+
+La soumission au Mac App Store exige des provisioning profiles intégrés à `Contents/embedded.provisionprofile` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    provisioningProfile.set(project.file("packaging/MyApp.provisionprofile"))
+    runtimeProvisioningProfile.set(project.file("packaging/MyApp_Runtime.provisionprofile"))
+}
+```
+
+## Configurer le sandbox Flatpak
+
+Les permissions Flatpak se déclarent via `finishArgs` :
+
+```kotlin title="build.gradle.kts"
+linux {
+    flatpak {
+        finishArgs = listOf(
+            "--share=ipc",
+            "--socket=wayland",
+            "--socket=pulseaudio",
+            "--device=dri",
+            "--filesystem=home",
+            "--share=network",
+        )
+    }
+}
+```
+
+Voir [Cibles Linux](/docs/packaging/linux) pour les autres options Flatpak.
+
+## Tâches
+
+Ces tâches ne sont enregistrées que si un format store est demandé.
+
+| Tâche | Rôle |
+|-------|------|
+| `extractNativeLibsForSandboxing` | Extraire les fichiers `.dylib`, `.so` et `.dll` des JARs de dépendances. |
+| `stripNativeLibsFromJars` | Réécrire les JARs sans leurs entrées natives. |
+| `prepareSandboxedAppResources` | Fusionner `appResources` avec les bibliothèques extraites. |
+| `createSandboxedDistributable` | Construire l'app image avec les arguments JVM du sandbox. |
+| `generateSandboxedAotCache` | Entraîner le cache AOT à l'intérieur du sandbox. |
+
+## Notes
+
+<Callout type="warn">
+`appStore` est déprécié et ignoré. `Pkg` est toujours traité comme un build App Store : Nucleus applique automatiquement les certificats 3rd Party Mac Developer et les entitlements sandbox.
+</Callout>
+
+- Un seul `./gradlew packageReleaseDistributionForCurrentOS` construit les deux pipelines en CI. Les artefacts sandboxés sont écrits dans des sous-répertoires `<format>-sandboxed/`.
+- Le pipeline sandboxé s'appuie sur l'ordre de signature inside-out utilisé pour les binaires universels macOS. Voir [Signature de code](/docs/packaging/code-signing).
+
+## Et ensuite
+
+- [Signature de code](/docs/packaging/code-signing) — signer et notariser les builds macOS, Windows et Linux.
+- [Cibles macOS](/docs/packaging/macos) — entitlements, provisioning profiles et disposition du DMG.
+- [Cibles Linux](/docs/packaging/linux) — configuration de Flatpak, Snap et AppImage.

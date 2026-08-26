@@ -99,6 +99,36 @@ Un appel à `keepAwake` alors qu'une demande est déjà active la remplace par l
 `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` restent des forwarders
 dépréciés vers `keepAwake()` / `releaseAwake()` / `isAwakeActive()`.
 
+## Tenir plusieurs demandes d'éveil à la fois
+
+`keepAwake` occupe un slot unique : le dernier appelant gagne, et un seul `releaseAwake()`
+annule la demande pour tout le monde. Quand plusieurs fonctionnalités indépendantes ont besoin
+de la machine éveillée — un lecteur vidéo, un téléchargement, une vue présentation — prenez un
+handle par fonctionnalité :
+
+```kotlin
+import dev.nucleusframework.energymanager.AwakeMode
+import dev.nucleusframework.energymanager.EnergyManager
+
+val playback = EnergyManager.acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)
+val download = EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY)
+
+playback.close() // la machine reste éveillée : `download` est toujours tenu
+download.close() // dernier handle libéré — la demande OS est relâchée
+```
+
+`AwakeHandle` implémente `AutoCloseable`, donc `use { }` borne une demande à un bloc :
+
+```kotlin
+EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY).use {
+    exportProject()
+}
+```
+
+Les handles coexistent entre eux et avec `keepAwake`. La demande envoyée à l'OS retient le mode
+le plus fort réclamé par un handle vivant, et n'est relâchée qu'une fois tous les handles fermés
+et sans `keepAwake` pendant. `close()` est idempotent et thread-safe.
+
 ## Fonctionnement
 
 Le mode efficacité a deux niveaux. Le mode light laisse l'app pleinement fonctionnelle en
@@ -137,7 +167,8 @@ Le mode thread utilise la forme par-thread de ces primitives sur Linux,
 | `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Par thread ; n'affecte que le thread appelant. |
 | `withEfficiencyMode { }` (suspend) | Exécute le bloc sur un thread dédié à efficacité thread ; le thread est libéré au retour du bloc. |
 | `withLightEfficiencyMode { }` (suspend) | Applique une QoS light au niveau process pour la durée du bloc ; pas d'épinglage de thread. |
-| `keepAwake(mode)` / `releaseAwake()` | Empêche puis restaure la veille système (et éventuellement l'écran). |
+| `keepAwake(mode)` / `releaseAwake()` | Empêche puis restaure la veille système (et éventuellement l'écran). Slot partagé unique : le dernier mode gagne. |
+| `acquireAwake(mode): AwakeHandle` | Demande d'éveil indépendante, relâchée par `AwakeHandle.close()`. |
 | `isAwakeActive(): Boolean` | Si une demande d'éveil est active. |
 | `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Forwarders dépréciés vers `keepAwake` / `releaseAwake` / `isAwakeActive`. |
 
@@ -147,6 +178,14 @@ Le mode thread utilise la forme par-thread de ces primitives sur Linux,
 |---|---|
 | `SYSTEM_AND_DISPLAY` | Bloque la veille système et l'écran (défaut). |
 | `SYSTEM_ONLY` | Bloque uniquement la veille système ; l'écran et l'économiseur se comportent normalement. |
+
+### AwakeHandle
+
+| Membre | Description |
+|---|---|
+| `mode: AwakeMode` | Le mode demandé par ce handle. |
+| `isActive: Boolean` | `false` après `close()`. |
+| `close()` | Relâche cette demande. Idempotent et thread-safe. |
 
 Chaque appel `enable`/`disable` et `keepAwake`/`releaseAwake` renvoie un
 `EnergyManager.Result` avec `success: Boolean`, `errorCode: Int` et `message: String`. Sur une

@@ -6,6 +6,117 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.0
+
+**Released: 2026-08-26**
+
+### New modules
+
+- **Spell check** (`nucleus.spellcheck`) — checks spelling through the engine each OS already
+  ships: Hunspell on Linux (loaded with `dlopen`, no compile-time dependency), `NSSpellChecker`
+  on macOS, and the Windows Spell Checking API. Ships a `SpellcheckContextMenu` wrapper that adds
+  suggestions and "Add to dictionary" to a Compose text field's context menu, plus an engine API
+  (`SpellChecker`, `SpellcheckSession`) usable without Compose. `nucleus-application` exposes it
+  as an `api` dependency, so no extra Gradle line is needed. Where no engine is available every
+  operation is a no-op rather than an error. See
+  [Spell check](/docs/os/spell-check#check-a-text-field).
+    - Per-field and process-wide language override via `locale` / `SpellChecker.locale`. See
+      [Choose the check language](/docs/os/spell-check#choose-the-check-language).
+    - `SpellcheckMenuPlacement` puts suggestions above or below Cut/Copy/Paste. See
+      [Place the menu items](/docs/os/spell-check#place-the-menu-items).
+    - The "Add to dictionary" label is localized for 45+ locales; user words persist to
+      `~/.config/nucleus/spellcheck/<tag>.dic`.
+
+### New features
+
+- **Native context menus** (#542, #544, #545, #547) — `nativeContextMenu = true` on
+  `DecoratedWindow` / `HostedWindow` replaces the Compose-drawn context menu with the platform's:
+  a real `NSMenu` on macOS, and a Compose flyout styled as Fluent on Windows, Adwaita on GTK
+  desktops, and Breeze on Qt desktops. Covers `ContextMenuArea`, text-field Cut/Copy/Paste, and
+  spellcheck items. Tao backend only; accepted and ignored on AWT. See
+  [Context menus](/docs/window/context-menu#turn-on-the-native-menu).
+    - `NucleusContextMenuItem`, `NucleusContextMenuDivider`, and `NucleusContextMenuSubmenu` build
+      items with icons and lazy submenus. See
+      [Add your own items](/docs/window/context-menu#add-your-own-items).
+    - Stock icons carry their platform shortcut label (`⌘C` / `Ctrl+C`), overridable per item.
+      Drawn on the Windows and Linux flyouts. See
+      [Show keyboard shortcuts](/docs/window/context-menu#show-keyboard-shortcuts).
+    - New `LinuxUiToolkit` in `core-runtime` reports whether the session is Gtk or Qt, which is
+      also how the Linux menu style is chosen. See
+      [Detect the Linux toolkit](/docs/window/context-menu#detect-the-linux-toolkit).
+    - `menu-macos` gained the popup primitives behind it: `NativePopupMenuItem`,
+      `popUpNativeMenu`, `isNativePopupMenuAvailable`.
+- **Overlay windows** (#564, #568) — new window flags for watermarks, desktop widgets, and
+  heads-up overlays: `clickThrough` (pointer events pass through), `alwaysOnBottom` (below normal
+  windows, mutually exclusive with `alwaysOnTop`), and `visibleOnAllWorkspaces`. All three are
+  reactive, with imperative `TaoWindow` setters alongside. See
+  [Overlay windows](/docs/tao/overlay-windows#build-a-click-through-watermark).
+    - `transparent` is now exposed on the backend-agnostic `DecoratedWindow` and the Material and
+      Jewel window wrappers, not just the Tao composable. A fully transparent window drops the
+      contour that traced the rectangular window instead of the content, and Compose scenes are
+      told the window is transparent so dialog scrims blend against alpha (#559, #561).
+    - `forceX11` gives one window an XWayland surface without moving the whole process off
+      Wayland, and `TaoWindow.isNativeWaylandSurface` reports what it actually got. Flags that
+      cannot work on a native Wayland surface log once per window with the reason. See
+      [Take an X11 surface on Wayland](/docs/tao/overlay-windows#take-an-x11-surface-on-wayland).
+- **Compose over native views** (#587) — the `NativeView` `content` slot now draws in the
+  window's own Compose scene on all three platforms, so Compose siblings declared after the view
+  and in-scene `Popup`s paint over it, and overlay content claims its own pointer events. Linux
+  supports the `content` slot at all for the first time (Wayland only).
+  `Modifier.consumeOverlayPointerEvents()` is deprecated and no longer needed. See
+  [Overlay Compose content](/docs/tao/native-views#overlay-compose-content).
+- **Linux clipboard through GTK** (#582, #583) — the Tao clipboard on Linux goes through GDK
+  instead of AWT, so copy and paste work in a Wayland-native window and in a session with no
+  XWayland. Images (as PNG) and file lists (`text/uri-list` plus the GNOME copied-files target)
+  are carried in both directions alongside plain text. No API change: use Compose's
+  `LocalClipboard`. See [Copy and paste](/docs/tao/wayland#copy-and-paste).
+- **`EnergyManager.acquireAwake`** — returns an `AwakeHandle` that holds one awake request until
+  it is closed, so independent features can each keep the machine awake without releasing each
+  other. `keepAwake` keeps its single last-writer-wins slot. This also backs Compose's
+  `Modifier.keepScreenOn`, which the Tao backend now implements. See
+  [Hold several awake requests at once](/docs/lifecycle/energy-manager#hold-several-awake-requests-at-once).
+- **Custom scheduler command** (#540) — `SchedulerConfig.executablePath` and
+  `executableArguments` point the OS scheduler at a custom launcher instead of the current
+  executable. Set them before the first `enqueue`; values are baked into the generated
+  plist, unit, or task. See [SchedulerConfig](/docs/lifecycle/scheduler#schedulerconfig).
+- **Compose 1.12** (#354, #550, #551, #555) — `decorated-window-tao` moves to Compose
+  Multiplatform 1.12, with frames driven through `SingleComposeSceneRenderingScope` and the new
+  `RectManager` delayed dispatch kept off the AWT event thread.
+- **`jdk.unsupported` in the default runtime modules** — `sun.misc.Unsafe` is required by JNA,
+  Jewel, and many common libraries, so the module is included by default rather than discovered
+  through a runtime failure. See [Configuration](/docs/start/configuration).
+
+### Breaking changes
+
+- **`GenericProvider` requires `https`** — a non-`https` update origin now throws
+  `IllegalArgumentException` at construction. The manifest, checksums, and artifact all come from
+  that one origin, so plain `http` lets an on-path attacker rewrite the three together and the
+  SHA-512 protects nothing. `http` is still accepted for loopback hosts so integration tests can
+  serve fixtures without TLS. See [Providers](/docs/packaging/auto-update#providers).
+
+### Bug fixes
+
+- **Self-update scripts written to a private directory** — the detached update script and its log
+  went to a fixed path in the shared temp directory (`/tmp/nucleus-update.sh` on Linux), which
+  another local user can pre-create as a symlink or a file they own, turning the update into local
+  code execution as the app's user. Each run now gets a fresh owner-only (`0700`) directory.
+- **Windows update script escaping** — manifest-derived paths are escaped before they reach
+  PowerShell.
+- **Linux root update helper** — closed a time-of-check/time-of-use window and a downgrade path
+  in the privileged helper.
+- **Linux update helper leaked a gpg-agent** — the signature check no longer leaves a gpg-agent
+  running inside the app's systemd scope.
+- **MPRIS invalid D-Bus name** (#548) — an app id that is not a valid D-Bus name no longer hangs
+  media-control startup on Linux.
+- **Context menu dismissal and first right-click** — the flyout closes when the owning window
+  loses focus, and the macOS menu opens on the first right-click in an app that is not yet
+  active.
+- **Tao fixes** — the dialog close button animates its hover like `DecoratedWindow`; a native
+  session that swallows a mouse-up no longer leaves a stuck button; Adwaita separators follow
+  libadwaita's `currentColor` rule.
+
+---
+
 ## v2.4.7
 
 **Released: 2026-08-17**

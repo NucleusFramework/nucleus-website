@@ -1,0 +1,115 @@
+---
+title: Couleur d'accent système
+description: Lisez la couleur d'accent de l'OS et le réglage haut contraste choisis par l'utilisateur sous forme d'état Compose réactif.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module `system-color` lit la couleur d'accent de l'OS et le réglage haut contraste choisis
+par l'utilisateur depuis Kotlin. Les deux sont exposés sous forme d'état Compose réactif qui se
+recompose quand l'utilisateur les modifie dans les réglages système, ce qui vous permet de brancher
+l'accent directement sur une color scheme Compose. Pris en charge sur macOS, Windows et Linux.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-color:<version>")
+}
+```
+
+## Lire la couleur d'accent système
+
+Appelez `systemAccentColor()` dans un composable. La fonction renvoie un `Color?` et se recompose
+dès que l'utilisateur choisit un autre accent. Retombez sur votre propre palette quand elle renvoie
+`null` :
+
+```kotlin
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import dev.nucleusframework.systemcolor.systemAccentColor
+
+@Composable
+fun App() {
+    val accent = systemAccentColor()
+
+    val scheme = when {
+        accent != null -> darkColorScheme(primary = accent)
+        else -> darkColorScheme()
+    }
+
+    MaterialTheme(colorScheme = scheme) {
+        // L'UI se recompose quand la couleur d'accent change.
+    }
+}
+```
+
+Lisez le réglage haut contraste de la même façon avec `isSystemInHighContrast()` :
+
+```kotlin
+import androidx.compose.runtime.Composable
+import dev.nucleusframework.systemcolor.isSystemInHighContrast
+
+@Composable
+fun AppContent() {
+    val highContrast = isSystemInHighContrast()
+    // Ajustez les bordures, l'élévation ou les tokens de contraste quand highContrast vaut true.
+}
+```
+
+## Fonctionnement
+
+Sur chaque plateforme prise en charge, un pont natif JNI observe les notifications de changement
+de couleur d'accent et de contraste de l'OS et les transmet aux listeners enregistrés.
+
+`systemAccentColor()` et `isSystemInHighContrast()` s'abonnent à ce pont et conservent la valeur
+courante en état Compose. Tout composable qui les lit se recompose quand la valeur change : pas
+de polling, pas de refresh manuel.
+
+`systemAccentColor()` renvoie `null` quand la plateforme ne peut pas fournir de couleur d'accent.
+C'est le cas de toute plateforme autre que macOS, Windows ou Linux. Traitez `null` comme un signal
+« utilisez votre propre couleur de marque ».
+
+<Callout type="info">
+Tous les OS ou configurations n'exposent pas une couleur d'accent. Gérez toujours le cas `null` et
+retombez sur votre propre palette.
+</Callout>
+
+## Référence de l'API
+
+### Vérifier la prise en charge de la plateforme
+
+```kotlin
+fun isSystemAccentColorSupported(): Boolean
+```
+
+Renvoie `true` quand la plateforme courante sait rapporter une couleur d'accent. C'est une fonction
+simple, pas un composable : vous pouvez donc l'appeler hors composition, par exemple pour activer ou
+griser un toggle dans un écran de réglages.
+
+### Lire la couleur d'accent
+
+```kotlin
+@Composable
+fun systemAccentColor(): Color?
+```
+
+Renvoie la couleur d'accent courante, ou `null` quand la plateforme ne la prend pas en charge. Se
+recompose quand l'accent change.
+
+### Lire le flag haut contraste
+
+```kotlin
+@Composable
+fun isSystemInHighContrast(): Boolean
+```
+
+Renvoie `true` quand l'OS est en mode haut contraste. Se recompose quand l'utilisateur active ou
+désactive le réglage d'accessibilité du contraste.
+
+## Et ensuite
+
+- [Détection du mode sombre](/docs/os/dark-mode) — combinez avec la couleur d'accent pour un thème entièrement piloté par l'OS.
+- [Infos système](/docs/os/system-info) — lisez l'OS, le matériel et la batterie depuis Kotlin.
+- [Intégration OS](/docs/os) — le reste des modules de plateforme natifs.

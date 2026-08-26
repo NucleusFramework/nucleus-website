@@ -1,0 +1,196 @@
+---
+title: Apps ancrées au tray
+description: TrayApp ancre une fenêtre popup Compose à une icône du tray système pour construire des apps menu bar en Kotlin.
+---
+
+`TrayApp` ancre une fenêtre Compose complète à une icône du tray système : vous cliquez gauche sur
+l'icône et la fenêtre s'ouvre à côté, vous cliquez ailleurs et elle se ferme. C'est le pattern menu
+bar app utilisé par des outils comme Bartender, iStat Menus et Hidden Bar.
+
+Depuis 2.1.0, `TrayApp` vit dans `composenativetray-app`, pas dans l'artefact tray de base.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:composenativetray-app:<version>")
+}
+```
+
+`composenativetray-app` tire [`composenativetray`](/docs/os/system-tray) et le backend de fenêtre
+Tao de Nucleus. `TrayApp` est une extension de `NucleusApplicationScope` — lancez avec
+`nucleusApplication { }`.
+
+<Version module="tray" />
+
+## Créer une tray app
+
+Passez une icône, un tooltip, une taille de fenêtre et le contenu Compose à afficher dans la popup :
+
+```kotlin
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+
+fun main() = nucleusApplication {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Quick dashboard",
+        windowSize = DpSize(300.dp, 400.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Dashboard", style = MaterialTheme.typography.h6)
+            Spacer(Modifier.height(8.dp))
+            Text("CPU: 42%")
+            Text("RAM: 8.2 GB")
+        }
+    }
+}
+```
+
+## Fonctionnement
+
+`TrayApp` combine une icône tray et une fenêtre Compose transparente, sans décoration et toujours
+au-dessus. La bibliothèque suit la position de l'icône à l'écran et place la fenêtre à côté avec
+l'offset adapté à chaque système d'exploitation.
+
+Le clic-en-dehors-pour-fermer est branché sur l'événement de perte de focus de l'OS : la popup se
+ferme comme les fenêtres menu bar natives de chaque bureau.
+
+## Piloter la visibilité et la taille avec l'état
+
+Conservez un `TrayAppState` pour afficher, masquer, redimensionner ou changer le mode de dismiss
+depuis votre propre code :
+
+```kotlin
+import androidx.compose.material.Button
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import dev.nucleusframework.composenativetray.trayapp.TrayWindowDismissMode
+import dev.nucleusframework.composenativetray.trayapp.rememberTrayAppState
+
+fun main() = nucleusApplication {
+    val state = rememberTrayAppState(
+        initialWindowSize = DpSize(350.dp, 500.dp),
+        initiallyVisible = false,
+        initialDismissMode = TrayWindowDismissMode.AUTO,
+    )
+
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+        state = state,
+    ) {
+        Column {
+            Text("Dashboard")
+            Button(onClick = { state.hide() }) { Text("Fermer") }
+            Button(onClick = { state.setWindowSize(500.dp, 600.dp) }) { Text("Redimensionner") }
+        }
+    }
+}
+```
+
+## Ajouter un menu contextuel
+
+Le clic gauche ouvre la popup ; le clic droit ouvre un menu classique :
+
+```kotlin
+import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import kotlin.system.exitProcess
+
+fun main() = nucleusApplication {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+        menu = {
+            Item(label = "Réglages") { openSettings() }
+            Divider()
+            Item(label = "Quitter") { exitProcess(0) }
+        },
+    ) {
+        Text("Contenu de la popup")
+    }
+}
+```
+
+## Masquer l'icône du Dock sur macOS
+
+Une tray app n'a généralement pas besoin d'icône dans le Dock. Sur macOS, mettez `LSUIElement = true`
+dans l'`Info.plist` de l'app. Le plugin Gradle Nucleus expose `macOS.infoPlist.extraKeysRawXml`
+pour cela :
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        nativeDistributions {
+            macOS {
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>LSUIElement</key>
+                        <true/>
+                    """.trimIndent()
+                }
+            }
+        }
+    }
+}
+```
+
+L'app tourne alors sans entrée dans le Dock ni barre de menus — seule l'icône du tray reste.
+
+## Référence de l'API
+
+### Options de fenêtre de TrayApp
+
+| Paramètre | Défaut | Notes |
+| --- | --- | --- |
+| `windowSize` | `DpSize(300.dp, 200.dp)` | taille initiale |
+| `visibleOnStart` | `false` | affiche tout de suite |
+| `enterTransition` / `exitTransition` | défaut plateforme | animations |
+| `undecorated` | `true` | sans cadre |
+| `resizable` | `false` | redimensionnement utilisateur |
+| `windowsTitle` | `""` | titre de fenêtre (utilisé sous Linux et en mode décoré) |
+| `horizontalOffset` / `verticalOffset` | 0 / défaut plateforme | décalage depuis l'icône |
+
+### TrayAppState
+
+| API | Description |
+| --- | --- |
+| `isVisible: StateFlow<Boolean>` | visibilité courante |
+| `show() / hide() / toggle()` | contrôle impératif |
+| `setWindowSize(size)` | redimensionne à la volée |
+| `setDismissMode(mode)` | `AUTO` (clic dehors ferme) ou `MANUAL` |
+| `onVisibilityChanged(cb)` | observer les transitions |
+
+## Notes
+
+- Depuis 2.1.0, `getTrayPosition()` et `TrayPosition` vivent dans `composenativetray-app`
+  (`dev.nucleusframework.composenativetray.trayapp`). Ils ont besoin du backend Tao pour la
+  géométrie d'écran. Préférez `TrayApp` si vous voulez seulement une popup à côté de l'icône.
+
+## Et ensuite
+
+- [System tray](/docs/os/system-tray) — l'API d'icône tray sur laquelle repose `TrayApp`.
+- [DSL menu du tray](/docs/os/tray-menu-dsl) — construire le menu du clic droit.
+- [Single instance](/docs/lifecycle/single-instance) — un re-launch depuis le `.app` ré-affiche la popup au lieu de démarrer un second process.

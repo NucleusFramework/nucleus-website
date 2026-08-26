@@ -4,6 +4,7 @@ description: Intégrez n'importe quelle vue native de la plateforme — NSView, 
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 Le composable `NativeView` intègre une vue native de la plateforme dans une mise en page
 Compose sur le backend Tao. C'est l'équivalent Tao d'`AndroidView` sur Android et d'`UIKitView`
@@ -140,43 +141,62 @@ fun NativeView(
 
 ### Superposer du contenu Compose
 
-L'emplacement `content` dessine de l'UI Compose par-dessus la vue intégrée. Par défaut, les
-événements natifs du pointeur la traversent vers la vue sous-jacente. Enveloppez une région
-interactive avec `Modifier.consumeOverlayPointerEvents()` pour router à la place les
-événements de cette région vers Compose :
+L'emplacement `content` dessine de l'UI Compose par-dessus la vue intégrée, dans la scène Compose
+de la fenêtre elle-même. Ce que vous y placez est un composable ordinaire : il reçoit les
+événements pointeur là où il est dessiné, et les événements qu'il ne consomme pas sont rejoués
+vers la vue native en dessous.
 
 ```kotlin
-import dev.nucleusframework.window.tao.consumeOverlayPointerEvents
-
 NativeView(
     factory = { WebPlatformView(createNativeWebView(url)) },
     modifier = Modifier.fillMaxSize(),
 ) {
-    // Une barre d'outils Compose au-dessus de la vue web ; le bouton reste
-    // interactif, les clics ailleurs atteignent la vue web en dessous.
-    Button(
-        onClick = { /* recharger */ },
-        modifier = Modifier.consumeOverlayPointerEvents(),
-    ) {
+    // Une barre d'outils Compose au-dessus de la vue web. Le bouton gère ses
+    // propres clics ; les clics ailleurs atteignent la vue web en dessous.
+    Button(onClick = { /* recharger */ }) {
         Text("Recharger")
     }
 }
 ```
 
-Pour les champs de saisie, passez un curseur pour que toute la région affiche le I-beam :
-`consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
+Comme l'overlay vit dans la scène principale, les composables déclarés après le `NativeView`
+peignent aussi par-dessus, et les `Popup` issus de la scène s'affichent au-dessus de la vue
+native.
 
-L'emplacement `content` fonctionne sur **macOS, Windows et Linux** :
+<Callout type="info">
+`Modifier.consumeOverlayPointerEvents()` est déprécié et n'est plus nécessaire — le contenu
+d'overlay revendique lui-même ses entrées. L'argument `cursor` reste mappé sur
+`Modifier.pointerHoverIcon` ; utilisez directement ce modifier.
+</Callout>
 
-- **macOS / Windows** — une surface d'overlay sœur (NSView Metal / HWND DirectComposition)
-  héberge une scène Compose séparée au-dessus de la vue native embarquée.
-- **Linux** — Compose dessine l'overlay dans la scène principale avec alpha par-dessus le
-  buffer du widget GTK. Le hit-test traversant est par région : hors des rects
-  `consumeOverlayPointerEvents`, les clics tombent sur GTK et le widget embarqué.
-  Depuis 2.3.1, les clics d'overlay utilisent les coordonnées de la zone de contenu (les
-  marges d'ombre CSD ne décalent plus le hit-test), et la région opaque pleine surface est
-  effacée tant qu'un `NativeView` est attaché pour que le contenu GTK (ex. WebKit)
-  réapparaisse à travers le sous-surface EGL.
+La vue native est composée dans la scène par découpe : Compose efface le rectangle de la vue en
+transparent, et la plateforme y laisse apparaître le contenu natif.
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+Le `NSView` est inséré sous la vue de contenu Tao, et le calque Metal devient non opaque pour que
+Skia efface à alpha 0. Les déplacements sont appliqués dans la même frame que la géométrie
+Compose.
+</Tab>
+<Tab value="Windows">
+Le `HWND` enfant est rattaché à la fenêtre. Sous Win32, un enfant peint toujours au-dessus de son
+parent : Compose est donc re-rendu par-dessus via un overlay DirectComposition découpé à l'union
+des rectangles `NativeView` vivants — Compose voit toujours les événements en premier à
+l'intérieur de ces rectangles.
+
+Un `hwndHandle` à `0L` est licite : une vue sans fenêtre enfant Win32 (WebView2 en mode
+composition, par exemple) pilote son propre visuel via `setBounds` et `setCornerRadius`.
+</Tab>
+<Tab value="Linux">
+Le `GtkWidget` est rattaché à la fenêtre et la surface GL peint au-dessus : la découpe révèle donc
+le widget. Tant qu'un `NativeView` est attaché, la surface annonce une région opaque vide pour que
+le compositeur continue de mélanger le contenu GTK en dessous.
+
+Cela exige Wayland. Sur le backend X11, l'alpha d'une fenêtre enfant n'est jamais mélangé à celui
+de son parent : le rectangle découpé montre alors le bureau au lieu du widget — lequel continue de
+tourner, mais derrière la surface GL.
+</Tab>
+</Tabs>
 
 ### Rogner en coins arrondis
 
@@ -193,6 +213,11 @@ NativeView(
 
 Passez `Dp.Infinity` pour un rognage entièrement circulaire quelle que soit la taille. La
 valeur par défaut, `Dp.Unspecified`, n'applique aucun rognage.
+
+<Callout type="warn">
+`cornerRadius` n'a aucun effet sous Linux, où GTK 3 ne sait pas rogner un widget en coins
+arrondis. Dessinez plutôt une bordure Compose `RoundedCornerShape` dans l'emplacement `content`.
+</Callout>
 
 ## Et ensuite
 

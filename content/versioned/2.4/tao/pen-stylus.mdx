@@ -1,0 +1,121 @@
+---
+title: Pen & stylus input
+description: Read pen and touchscreen pressure from Compose pointer events on the Tao backend.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Tao backend delivers pen, stylus, and touchscreen contacts as Compose pointer events of
+type `PointerType.Touch`, each carrying a `pressure` value. You read them with the same
+`pointerInput` modifier you use for mouse input. The only pen-specific field is `pressure`.
+
+## Add the dependency
+
+Pen and touch support ships with the Tao backend. There is no separate artifact to add.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+## Read pressure from pointer events
+
+Read pointer events inside a `pointerInput` modifier. Keep the `PointerType.Touch` contacts —
+this is what pen and touchscreen input arrives as on Tao — and use `change.pressure` to size
+each stroke:
+
+```kotlin
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.*
+
+@Composable
+fun InkSurface() {
+    val strokes = remember { mutableStateListOf<Triple<Offset, Offset, Float>>() }
+    var last: Offset? by remember { mutableStateOf(null) }
+
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.first()
+                        if (change.type != PointerType.Touch) {
+                            last = null
+                            continue
+                        }
+                        val start = last ?: change.position
+                        strokes += Triple(start, change.position, change.pressure)
+                        last = if (change.pressed) change.position else null
+                        change.consume()
+                    }
+                }
+            }
+    ) {
+        strokes.forEach { (a, b, p) ->
+            drawLine(Color.Black, a, b, strokeWidth = 1f + p * 6f)
+        }
+    }
+}
+```
+
+## How it works
+
+Tao reads each operating system's native pointer input and forwards every contact into the
+Compose scene. On Windows, pen and touchscreen input arrives through `WM_POINTER` / `WM_TOUCH`;
+on Linux, through the Wayland and X11/XWayland touch protocols. Each contact is dispatched as a
+`PointerType.Touch` pointer, so at the Compose layer a pen is indistinguishable from a finger
+except by its pressure.
+
+The native layer reports pressure as an integer scaled by 10,000, which Tao normalizes to
+`change.pressure` in the `[0f, 1f]` range. When the digitizer does not report pressure — the
+case for most consumer touchscreens — the contact still reports `1f`. A `1f` reading therefore
+means either full pressure or no pressure data, not strictly maximal pressure.
+
+Because a contact surfaces as an ordinary `PointerInputChange`, everything that works for mouse
+and touch — hit testing, gesture detectors, `consume()` — works for pen input unchanged.
+
+## API reference
+
+### Pointer fields
+
+```kotlin
+val change = event.changes.first()
+val type: PointerType = change.type     // Mouse | Touch
+val pressure: Float = change.pressure   // in [0f, 1f]
+val pressed: Boolean = change.pressed
+val position: Offset = change.position
+```
+
+`PointerType` and `PointerInputChange` are standard Compose types from
+`androidx.compose.ui.input.pointer`. The Tao backend reports pen and touch contacts as
+`PointerType.Touch`; it does not produce `PointerType.Stylus` or `PointerType.Eraser`.
+`PointerInputChange` carries no tilt or rotation, so those are not available through the event.
+
+### Platform support
+
+| Platform                    | Native source                | Pressure                                  |
+|-----------------------------|------------------------------|-------------------------------------------|
+| Windows                     | `WM_POINTER` / `WM_TOUCH`    | Reported when the digitizer supports it.  |
+| Linux (Wayland, X11/XWayland) | touch protocol             | Reported when the digitizer supports it.  |
+| macOS                       | —                            | No touch path; contacts arrive as mouse.  |
+
+## Notes
+
+<Callout type="info">
+A contact reports `pressure = 1f` both at full pressure and when the digitizer exposes no
+pressure at all. Treat `1f` as "maximal or unavailable", not strictly maximal.
+</Callout>
+
+## What's next
+
+- [Multi-touch and trackpad gestures](/docs/tao/multi-touch) — read touch and trackpad input on Tao.
+- [Wayland](/docs/tao/wayland) — Linux compositor requirements for touch input.
+- [The Tao backend](/docs/tao) — how the no-AWT windowing backend fits together.

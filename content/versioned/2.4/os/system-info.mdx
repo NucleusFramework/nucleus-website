@@ -1,0 +1,138 @@
+---
+title: System info
+description: Read host details — OS, CPU, memory, disks, GPUs, batteries, network, processes, and users — through the SystemInfo object.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`SystemInfo` lets you read host details from Kotlin: the operating system, CPU, memory, disks,
+GPUs, batteries, network interfaces, processes, and users. Each reading is a snapshot taken at
+call time, backed by a per-platform native library on macOS, Windows, and Linux.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-info:<version>")
+}
+```
+
+## Read the host
+
+`SystemInfo` is an `object`. Call its methods directly and check for `null`: a value that
+cannot be retrieved on a given host returns `null` rather than a guess.
+
+```kotlin
+import dev.nucleusframework.systeminfo.SystemInfo
+
+fun main() {
+    val os = SystemInfo.osInfo() ?: return
+    println("OS: ${os.longOsVersion} (${os.cpuArch})")
+
+    val mem = SystemInfo.memoryInfo()
+    println("Memory: ${mem?.usedMemory?.div(1024 * 1024)} MB / ${mem?.totalMemory?.div(1024 * 1024)} MB")
+
+    SystemInfo.gpus().forEach { gpu ->
+        println("GPU: ${gpu.name} — ${gpu.dedicatedVideoMemory / 1024 / 1024} MB")
+    }
+
+    val battery = SystemInfo.batteryInfo()
+    println("Battery: ${battery?.let { "${(it.stateOfCharge * 100).toInt()}% (${it.state})" } ?: "none"}")
+}
+```
+
+Call `SystemInfo.isAvailable()` first when you need to know whether the native library loaded on
+the current platform.
+
+## How it works
+
+Each method delegates to a native library, one per operating system, loaded through JNI. The
+library reads the underlying platform APIs and returns plain Kotlin data classes.
+
+The API is snapshot-oriented: each call reads the current values and returns immediately. There
+is no polling or subscription. To display readings on a refresh interval, call the method again
+and cache the result yourself.
+
+Nullable returns and empty lists mean the value was unavailable, not that an error was thrown.
+List methods such as `disks()` and `gpus()` return an empty list when nothing could be read;
+single-value methods such as `cpuInfo()` return `null`.
+
+## API reference
+
+### Operating system
+
+```kotlin
+val os = SystemInfo.osInfo()
+// name, osVersion, longOsVersion, kernelVersion, distributionId,
+// hostName, cpuArch, uptime, bootTime
+```
+
+`osInfo()` returns `OsInfo?`.
+
+### CPU
+
+```kotlin
+val cpu = SystemInfo.cpuInfo()   // CpuGlobalInfo?
+cpu?.cpus?.forEach { core ->
+    println("${core.brand}: ${core.frequency} MHz, usage ${core.cpuUsage}%")
+}
+println("Global usage: ${cpu?.globalCpuUsage}%")
+```
+
+`cpuInfo()` returns a `CpuGlobalInfo?` holding `globalCpuUsage`, `physicalCoreCount`, and a
+`cpus: List<CpuInfo>` with one entry per logical core.
+
+### Memory and disks
+
+```kotlin
+SystemInfo.memoryInfo()   // MemoryInfo? — total, free, available, used, and swap counters
+SystemInfo.disks()        // List<DiskInfo> — name, fileSystem, mountPoint, totalSpace, availableSpace
+```
+
+### GPUs, batteries, and network
+
+```kotlin
+SystemInfo.gpus()             // List<GpuInfo>
+SystemInfo.batteryInfo()      // BatteryInfo? — stateOfCharge, state, cycleCount, health, …
+SystemInfo.networks()         // List<NetworkInterfaceInfo>
+SystemInfo.connectivityInfo() // ConnectivityInfo? — isConnected, meteredStatus
+```
+
+`BatteryInfo.state` is a `BatteryState` enum: `Charging`, `Discharging`, `Full`, or `Unknown`.
+`ConnectivityInfo.meteredStatus` is a `MeteredStatus` enum: `NOT_AVAILABLE`, `UNKNOWN`,
+`UNMETERED`, or `METERED`.
+
+### Processes and users
+
+```kotlin
+SystemInfo.processes()    // List<ProcessInfo> — every running process
+SystemInfo.process(pid)   // ProcessInfo? — a single process by pid: Long
+SystemInfo.users()        // List<UserInfo>
+```
+
+### Other readings
+
+```kotlin
+SystemInfo.components()    // List<ComponentInfo> — temperature sensors
+SystemInfo.motherboard()   // MotherboardInfo?
+SystemInfo.product()       // ProductInfo?
+SystemInfo.idleTime()      // Long — seconds since last user input, or -1 if unavailable
+```
+
+## Notes
+
+- Some readings are platform-specific. Temperature sensors through `components()` are sparse on
+  Windows, and `motherboard()` is most complete on Linux.
+- `processes()` walks every process and can be expensive on a busy host. Use `process(pid)` when
+  you only need one.
+
+<Callout type="info">
+`idleTime()` returns `-1` when the platform library did not load, the same value
+`isAvailable()` reports as `false`.
+</Callout>
+
+## What's next
+
+- [System color](/docs/os/system-color) — read the system accent and high-contrast state.
+- [Dark mode](/docs/os/dark-mode) — detect and observe the system light/dark setting.
+- [Modules](/docs/concepts/modules) — the full list of Nucleus modules and their artifacts.

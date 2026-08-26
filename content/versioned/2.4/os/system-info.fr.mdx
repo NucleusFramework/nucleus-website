@@ -1,0 +1,143 @@
+---
+title: Infos système
+description: Lisez les détails de la machine — OS, CPU, mémoire, disques, GPUs, batteries, réseau, processus et utilisateurs — via l'objet SystemInfo.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`SystemInfo` vous permet de lire les détails de la machine depuis Kotlin : système d'exploitation,
+CPU, mémoire, disques, GPUs, batteries, interfaces réseau, processus et utilisateurs. Chaque
+lecture est un instantané pris au moment de l'appel, servi par une bibliothèque native propre à
+chaque plateforme sur macOS, Windows et Linux.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-info:<version>")
+}
+```
+
+## Lire la machine
+
+`SystemInfo` est un `object`. Appelez ses méthodes directement et vérifiez les `null` : une
+valeur qui ne peut pas être récupérée sur une machine donnée renvoie `null` plutôt qu'une
+valeur devinée.
+
+```kotlin
+import dev.nucleusframework.systeminfo.SystemInfo
+
+fun main() {
+    val os = SystemInfo.osInfo() ?: return
+    println("OS : ${os.longOsVersion} (${os.cpuArch})")
+
+    val mem = SystemInfo.memoryInfo()
+    println("Mémoire : ${mem?.usedMemory?.div(1024 * 1024)} Mo / ${mem?.totalMemory?.div(1024 * 1024)} Mo")
+
+    SystemInfo.gpus().forEach { gpu ->
+        println("GPU : ${gpu.name} — ${gpu.dedicatedVideoMemory / 1024 / 1024} Mo")
+    }
+
+    val battery = SystemInfo.batteryInfo()
+    println("Batterie : ${battery?.let { "${(it.stateOfCharge * 100).toInt()}% (${it.state})" } ?: "aucune"}")
+}
+```
+
+Appelez d'abord `SystemInfo.isAvailable()` quand vous avez besoin de savoir si la bibliothèque
+native a bien été chargée sur la plateforme courante.
+
+## Fonctionnement
+
+Chaque méthode délègue à une bibliothèque native, une par système d'exploitation, chargée via
+JNI. La bibliothèque lit les APIs de la plateforme sous-jacente et renvoie de simples data
+classes Kotlin.
+
+L'API fonctionne par instantané : chaque appel lit les valeurs courantes et retourne
+immédiatement. Il n'y a ni polling ni abonnement. Pour afficher les lectures avec un
+rafraîchissement régulier, rappelez la méthode et mettez le résultat en cache vous-même.
+
+Un `null` ou une liste vide signifie que la valeur était indisponible, pas qu'une erreur a été
+levée. Les méthodes qui renvoient une liste, comme `disks()` et `gpus()`, renvoient une liste
+vide quand rien n'a pu être lu ; les méthodes à valeur unique, comme `cpuInfo()`, renvoient
+`null`.
+
+## Référence de l'API
+
+### Système d'exploitation
+
+```kotlin
+val os = SystemInfo.osInfo()
+// name, osVersion, longOsVersion, kernelVersion, distributionId,
+// hostName, cpuArch, uptime, bootTime
+```
+
+`osInfo()` renvoie un `OsInfo?`.
+
+### CPU
+
+```kotlin
+val cpu = SystemInfo.cpuInfo()   // CpuGlobalInfo?
+cpu?.cpus?.forEach { core ->
+    println("${core.brand}: ${core.frequency} MHz, usage ${core.cpuUsage}%")
+}
+println("Usage global : ${cpu?.globalCpuUsage}%")
+```
+
+`cpuInfo()` renvoie un `CpuGlobalInfo?` contenant `globalCpuUsage`, `physicalCoreCount` et une
+liste `cpus: List<CpuInfo>` avec une entrée par cœur logique.
+
+### Mémoire et disques
+
+```kotlin
+SystemInfo.memoryInfo()   // MemoryInfo? — compteurs total, free, available, used et swap
+SystemInfo.disks()        // List<DiskInfo> — name, fileSystem, mountPoint, totalSpace, availableSpace
+```
+
+### GPUs, batteries et réseau
+
+```kotlin
+SystemInfo.gpus()             // List<GpuInfo>
+SystemInfo.batteryInfo()      // BatteryInfo? — stateOfCharge, state, cycleCount, health, …
+SystemInfo.networks()         // List<NetworkInterfaceInfo>
+SystemInfo.connectivityInfo() // ConnectivityInfo? — isConnected, meteredStatus
+```
+
+`BatteryInfo.state` est un enum `BatteryState` : `Charging`, `Discharging`, `Full` ou
+`Unknown`. `ConnectivityInfo.meteredStatus` est un enum `MeteredStatus` : `NOT_AVAILABLE`,
+`UNKNOWN`, `UNMETERED` ou `METERED`.
+
+### Processus et utilisateurs
+
+```kotlin
+SystemInfo.processes()    // List<ProcessInfo> — tous les processus en cours
+SystemInfo.process(pid)   // ProcessInfo? — un seul processus par pid: Long
+SystemInfo.users()        // List<UserInfo>
+```
+
+### Autres lectures
+
+```kotlin
+SystemInfo.components()    // List<ComponentInfo> — sondes de température
+SystemInfo.motherboard()   // MotherboardInfo?
+SystemInfo.product()       // ProductInfo?
+SystemInfo.idleTime()      // Long — secondes depuis la dernière activité, ou -1 si indisponible
+```
+
+## Notes
+
+- Certaines lectures dépendent de la plateforme. Les sondes de température via `components()`
+  sont rares sous Windows, et `motherboard()` est plus complète sous Linux.
+- `processes()` parcourt tous les processus et peut coûter cher sur une machine chargée.
+  Utilisez `process(pid)` quand vous n'en voulez qu'un seul.
+
+<Callout type="info">
+`idleTime()` renvoie `-1` quand la bibliothèque de la plateforme n'a pas été chargée, la même
+situation que `isAvailable()` signale par `false`.
+</Callout>
+
+## Et ensuite
+
+- [Couleurs système](/docs/os/system-color) — lisez la couleur d'accentuation et l'état de
+  contraste élevé du système.
+- [Mode sombre](/docs/os/dark-mode) — détectez et observez le réglage clair/sombre du système.
+- [Modules](/docs/concepts/modules) — la liste complète des modules Nucleus et de leurs artefacts.

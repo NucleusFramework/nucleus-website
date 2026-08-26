@@ -60,6 +60,32 @@ X11 automatiquement. Le code Compose ne change pas.
 | Capture d'écran       | Via portal uniquement              | Direct                            |
 | Pression du stylet    | `wp_tablet_v2`                     | Non exposée                       |
 | Gestes multi-touch    | `pointer-gestures-unstable-v1`     | Limités                           |
+| Presse-papiers        | `wl_data_device` sur le seat de la fenêtre | Sélection `CLIPBOARD`      |
+| Empilement de fenêtres | Aucun protocole côté client       | `_NET_WM_STATE_ABOVE` / `BELOW`   |
+
+## Copier-coller
+
+Sous Linux, Tao lit et écrit le presse-papiers via GDK et non via AWT. Le presse-papiers d'AWT est
+limité à X11 : dans une fenêtre Wayland native, il ne collait rien — la sélection Wayland
+n'atteint XWayland que tant qu'une fenêtre X11 est active — et il levait carrément une exception
+dans une session sans XWayland.
+
+Utilisez l'API Compose standard ; il n'y a rien de spécifique à Nucleus à appeler :
+
+```kotlin
+import androidx.compose.ui.platform.LocalClipboard
+
+val clipboard = LocalClipboard.current
+val scope = rememberCoroutineScope()
+
+scope.launch { clipboard.setClipEntry(entry) }
+```
+
+Le texte brut, les images et les listes de fichiers circulent dans les deux sens. Les images
+passent en PNG, et les listes de fichiers en `text/uri-list` plus la cible « copied-files » de
+GNOME, pour que le collage dans un gestionnaire de fichiers fonctionne. Le HTML n'est transporté
+dans aucun sens, et seule la sélection `CLIPBOARD` est utilisée — jamais la sélection PRIMARY
+(clic du milieu) de X11.
 
 ## Notes
 

@@ -1,0 +1,101 @@
+---
+title: Roadmap
+description: What shipped in Nucleus 2.0–2.4, the modules planned next, and features under consideration.
+---
+
+Nucleus 2.0 provides the runtime and packaging foundation. Later releases add
+OS-integration modules for capabilities that JVM desktop apps otherwise reach through
+JavaScript or hand-written native code. This page lists what has shipped, what is planned,
+and what is still speculative.
+
+## Shipped in 2.0
+
+- `nucleusApplication { }` unified entry point — single-instance, deep links, AOT, GraalVM init, AutoLaunch priming, Windows AUMID — all automatic.
+- Tao backend — Wayland-native, multi-touch, pen pressure + tilt, native popups, embedded `NativeView`, drag-and-drop with diagnostics.
+- 18 packaging formats from one Gradle DSL.
+- `updater-runtime` — electron-builder-compatible auto-update, channels, post-update detection.
+- GraalVM Native Image — end-to-end packaging pipeline (DMG, NSIS, DEB), static bytecode reflection analyzer, per-library reachability metadata.
+- macOS Liquid Glass on SDK 26 — `vtool` patching means any JDK works.
+- 40+ runtime modules: notifications, system tray, global hotkeys, media controls, taskbar progress, energy manager, system info, scheduler, autolaunch, dark mode, system color, native SSL, native HTTP, filesystem watcher, decorated windows with four toolkits.
+
+## Shipped in 2.1
+
+Tooling and native-image work, no new runtime modules:
+
+- **GraalVM Community Edition is the default toolchain** (from 2.1.7) — auto-downloaded and cached; no redistribution-for-a-fee clause. Opt into Oracle GraalVM for PGO, `-O3`, ML-inferred profiles, and advanced obfuscation. Only the deprecated AWT backend still needs a local BellSoft Liberica NIK install for AWT/Swing native-image support.
+- Compose Hot Reload — works out of the box. Apply the `org.jetbrains.compose.hot-reload` plugin and run `hotRun`; Nucleus resolves the entry point from `nucleus.application.mainClass`. Supported on the AWT and Tao backends.
+- Profile-Guided Optimization — record a profile with `runWithPgoInstrument`, commit it, and later full native builds apply it automatically. Oracle GraalVM only.
+- Smaller native images — `optimization = NativeImageOptimization.SIZE` (`-Os`), type-safe `march`, automatic executable stripping, desktop-appropriate max heap, and advanced obfuscation (Oracle).
+- CPU-portable AOT cache by default (metadata-only) with an explicit `aotCache { }` block.
+- `CompressionLevel.Ultra` — extra post-processing recompression (LZMA DMG, `xz -9e` DEB) for smaller installers.
+- `--enable-native-access=ALL-UNNAMED` in default JVM args and native images for JDK 24+ (JEP 472).
+
+## Shipped in 2.2
+
+Window chrome, accessibility, and tooling parity:
+
+- **Window scaffold and chrome primitives** — `WindowScaffold` with `TitleBarPlacement.Docked` / `Overlay`, `windowDragArea` / `noWindowDrag`, `WindowControls`, macOS `windowGlassRegion`, Windows 11 `WindowsBackdrop` (Mica / Acrylic / MicaAlt), `WindowBackground`, `WindowAppearance`. See [Window scaffold](/docs/tao/window-scaffold).
+- **Full-window transparency on Tao** — `DecoratedWindow(transparent = true)` for ghost overlays (pair with `undecorated`).
+- **AccessKit on Windows** — Windows and Linux share the AccessKit accessibility path (UIA + AT-SPI).
+- **GraalVM task surface aligned with the JVM pipeline** — `runGraalvmNative` (quick-build), `createGraalvmNativeDistributable`, `runGraalvmNativeDistributable`, `packageGraalvmNativeDistributionForCurrentOS`.
+- **Type-safe garbage collector selection** — `GarbageCollector` on the JVM path and `NativeImageGarbageCollector` for native images.
+- **`NucleusApplicationScope` implements Compose `ApplicationScope`** — libraries scoped to plain `ApplicationScope` resolve inside `nucleusApplication { }`.
+- Scheme-only deep links (`myapp:?query=…`), consistent macOS `.app` bundle names, native GTK CSD shadow.
+
+## Shipped in 2.3
+
+GPU textures, update bandwidth, and application-scope polish:
+
+- **`TextureView`** — external GPU textures in the Compose scene (Windows D3D11, macOS Metal/`IOSurface`, Linux DMA-BUF/`EGLImage` + planar YUV). See [TextureView](/docs/tao/texture-view).
+- **Differential auto-update** — block-map range downloads; AppImage relaunch; hardened silent DEB/RPM helper packaging. See [Auto-update](/docs/packaging/auto-update).
+- **Notification platform DSL** — `linux { }` / `macos { }` / `windows { }` on the common API. See [Notifications](/docs/os/notifications#platform-specific-options).
+- **`LocalNucleusApplicationScope`** — open windows from deep composition without threading the receiver. See [DecoratedWindow](/docs/tao/decorated-window#open-a-window-from-composition).
+- **System theme bridge** — `isSystemInDarkTheme()` tracks OS changes under `nucleusApplication`. See [Dark mode](/docs/os/dark-mode#bridge-to-compose-issystemindarktheme).
+- **GraalVM** — innovation default **25.2**, exact reachability on `runGraalvmNative`, orphan project-class detection, safer SLF4J lifecycle, metadata input fingerprinting.
+
+## Shipped in 2.4
+
+In-process GPU, power control, packaging DSL, and a frozen public ABI:
+
+- **`TaoGpuRenderContext`** — scene Skia `DirectContext` + native device for in-process renderers. See [GPU render context](/docs/tao/gpu-render-context).
+- **`AwakeMode`** — `keepAwake(SYSTEM_ONLY)` without forcing the display on. See [Energy manager](/docs/lifecycle/energy-manager#keep-the-system-awake).
+- **`windows.msi { perMachine }`** — install-scope DSL aligned with NSIS. See [Windows packaging](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+- **Public ABI freeze** — `explicitApi()` + binary-compatibility-validator on published runtime modules.
+- Tao resize / frame-pacing and popup stability fixes across macOS, Windows, and Linux.
+
+## Coming next
+
+Security and identity modules (still planned; not part of the 2.4 line):
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `secure-storage` | Hardware-backed secret storage for tokens, passwords, keys | Keychain | Credential Manager / DPAPI | Secret Service (`libsecret`) |
+| `biometric-auth` | Prompt for fingerprint / face authentication | `LocalAuthentication` (Touch ID / Face ID) | Windows Hello | `fprintd` via D-Bus / polkit |
+
+OS-level events and IO:
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `share-sheet` | OS share sheet (URL, file, text) | `NSSharingService` | Windows `DataTransferManager` | xdg-desktop-portal `Share` |
+| `power-events` | Sleep / wake / lock / unlock / screen-off / battery state | `NSWorkspace` notifications | `WM_POWERBROADCAST` / `WTSRegisterSessionNotification` | `org.freedesktop.login1` D-Bus signals |
+
+## Under consideration
+
+Speculative — no commitment, no ETA. Open an issue if you want one of these earlier:
+
+| Module | Description | macOS | Windows | Linux |
+|--------|-------------|-------|---------|-------|
+| `clipboard` | Rich clipboard — image, files, HTML, RTF — plus change watcher | `NSPasteboard` | `OleGetClipboard` / Clipboard History API | `wl-clipboard` / X11 selections |
+| `screen-capture` | Native screenshot / screen recording | `CGDisplayCreateImage` / ScreenCaptureKit | Windows Graphics Capture / DXGI | xdg-desktop-portal `Screenshot` |
+
+## Influence the order
+
+Open an issue describing your use case, link a sample app that needs the module, or sponsor
+a specific platform's implementation. Native modules are bounded mostly by JNI bridge
+complexity per OS — the more people that need one, the sooner it ships.
+
+## What's next
+
+- [Changelog](/docs/changelog) — released versions and what each one contains.
+- [Modules](/docs/concepts/modules) — how runtime modules are structured and added to a build.
+- [Ecosystem](/docs/ecosystem) — the modules available today.

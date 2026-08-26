@@ -4,6 +4,7 @@ description: Embed any platform-native view — NSView, HWND, or GtkWidget — i
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The `NativeView` composable embeds a platform-native view inside a Compose layout on the
 Tao backend. It is the Tao equivalent of `AndroidView` on Android and `UIKitView` on
@@ -136,41 +137,58 @@ fun NativeView(
 
 ### Overlay Compose content
 
-The `content` slot draws Compose UI over the embedded view. By default native pointer
-events pass through it to the underlying view. Wrap an interactive region with
-`Modifier.consumeOverlayPointerEvents()` to route events in that region to Compose instead:
+The `content` slot draws Compose UI over the embedded view, in the window's own Compose scene.
+Anything you put there is an ordinary composable: it takes pointer events where it is drawn, and
+events it does not consume are replayed to the native view underneath.
 
 ```kotlin
-import dev.nucleusframework.window.tao.consumeOverlayPointerEvents
-
 NativeView(
     factory = { WebPlatformView(createNativeWebView(url)) },
     modifier = Modifier.fillMaxSize(),
 ) {
-    // A Compose toolbar over the web view; the button stays interactive,
+    // A Compose toolbar over the web view. The button handles its own clicks;
     // clicks elsewhere reach the web view underneath.
-    Button(
-        onClick = { /* reload */ },
-        modifier = Modifier.consumeOverlayPointerEvents(),
-    ) {
+    Button(onClick = { /* reload */ }) {
         Text("Reload")
     }
 }
 ```
 
-For text-input fields, pass a cursor so the whole region shows the I-beam:
-`consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
+Because the overlay lives in the main scene, Compose siblings declared after the `NativeView`
+also paint over it, and `Popup`s from inside the scene land above the native view.
 
-The `content` slot works on **macOS, Windows, and Linux**:
+<Callout type="info">
+`Modifier.consumeOverlayPointerEvents()` is deprecated and no longer needed — overlay content
+claims its own input. The `cursor` argument still maps to `Modifier.pointerHoverIcon`; use that
+modifier directly instead.
+</Callout>
 
-- **macOS / Windows** — a sibling overlay surface (Metal NSView / DirectComposition HWND)
-  hosts a separate Compose scene over the embedded native view.
-- **Linux** — Compose draws the overlay in the main scene with alpha over the GTK widget
-  buffer. Hit-test passthrough is region-based: outside
-  `consumeOverlayPointerEvents` rects, clicks fall through to GTK and the embedded widget.
-  From 2.3.1, overlay clicks use content-area coordinates (so CSD shadow margins do not
-  offset hit-testing), and the full-surface opaque region is cleared while any `NativeView`
-  is attached so GTK content (e.g. WebKit) shows through the EGL subsurface.
+The native view is composited into the scene with a punched hole: Compose clears the view's
+rectangle to transparent, and the platform shows the native content through it.
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+The `NSView` is inserted below the Tao content view, and the Metal layer becomes non-opaque so
+Skia clears at alpha 0. Moves are applied in the same frame as the Compose geometry.
+</Tab>
+<Tab value="Windows">
+The child `HWND` is parented under the window. Win32 children always paint above their parent, so
+Compose is re-rendered on top through a DirectComposition overlay clipped to the union of the
+live `NativeView` rectangles — Compose still sees events first inside those rectangles.
+
+A `hwndHandle` of `0L` is legal: a view that has no Win32 child window (WebView2 in composition
+mode, for example) drives its own visual through `setBounds` and `setCornerRadius`.
+</Tab>
+<Tab value="Linux">
+The `GtkWidget` is reparented under the window and the GL surface paints above it, so the punched
+hole reveals the widget. While a `NativeView` is attached, the surface advertises an empty opaque
+region so the compositor keeps blending the GTK content underneath.
+
+This requires Wayland. On the X11 backend a child window's alpha is never blended against its
+parent, so the punched rectangle shows the desktop instead of the widget — the widget still runs,
+but behind the GL surface.
+</Tab>
+</Tabs>
 
 ### Clip to rounded corners
 
@@ -187,6 +205,11 @@ NativeView(
 
 Pass `Dp.Infinity` to clip fully circular regardless of size. The default,
 `Dp.Unspecified`, applies no clip.
+
+<Callout type="warn">
+`cornerRadius` has no effect on Linux, where GTK 3 has no per-widget rounded clipping. Draw a
+Compose `RoundedCornerShape` border in the `content` slot instead.
+</Callout>
 
 ## What's next
 

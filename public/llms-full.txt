@@ -156,7 +156,12 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
+| 2.5.0           | 2.4.0+         | 1.12.0          |
 | 2.4.7           | 2.4.0+         | 1.11.1          |
+
+The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
+Multiplatform internals that change between minors, so 2.5.0 needs 1.12.0 and will not run on
+1.11.x. Pin the Compose plugin to the row that matches your Nucleus version.
 
 ## Apply the plugin
 
@@ -165,7 +170,7 @@ In your module's `build.gradle.kts`, apply the Nucleus plugin alongside the Kotl
 ```kotlin title="build.gradle.kts"
 plugins {
     kotlin("jvm") version "2.4.0"
-    id("org.jetbrains.compose") version "1.11.1"
+    id("org.jetbrains.compose") version "1.12.0"
     id("dev.nucleusframework") version "<version>"
 }
 ```
@@ -227,7 +232,7 @@ In an empty project directory, create `build.gradle.kts` and apply the Nucleus p
 ```kotlin title="build.gradle.kts"
 plugins {
     kotlin("jvm") version "2.4.0"
-    id("org.jetbrains.compose") version "1.11.1"
+    id("org.jetbrains.compose") version "1.12.0"
     id("dev.nucleusframework") version "<version>"
 }
 
@@ -377,7 +382,7 @@ Apply the Nucleus plugin in the module that holds your `main` function:
 ```kotlin title="app/build.gradle.kts"
 plugins {
     kotlin("jvm") version "2.4.0"
-    id("org.jetbrains.compose") version "1.11.1"
+    id("org.jetbrains.compose") version "1.12.0"
     id("dev.nucleusframework") version "<version>"
 }
 ```
@@ -1911,6 +1916,236 @@ empty regions stay see-through. Semi-transparent tints still apply.
 
 ---
 
+# Overlay windows
+
+URL: https://nucleusframework.dev/docs/tao/overlay-windows
+
+Build watermarks, desktop widgets, and heads-up overlays with transparent, click-through, always-on-bottom, and all-workspaces windows on the Tao backend.
+
+An overlay is a window that sits outside the normal window stack: a watermark that ignores
+clicks, a widget pinned below every other window, a badge that follows the user across
+workspaces. This page covers the window flags that make those shapes possible and what each one
+does per platform.
+
+## Add the dependency
+
+The flags are parameters on `DecoratedWindow` in `nucleus-application`, implemented by the Tao
+backend:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Overlay flags are a Tao feature. On the AWT backends they are accepted and ignored, so the same
+source runs there with an ordinary window.
+
+## Build a click-through watermark
+
+A passive overlay is transparent, undecorated, unfocusable, and lets the pointer pass through to
+whatever is behind it:
+
+```kotlin
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    val state = rememberWindowState(
+        position = WindowPosition.Aligned(Alignment.BottomEnd),
+        size = DpSize(360.dp, 160.dp),
+    )
+
+    DecoratedWindow(
+        onCloseRequest = { },
+        state = state,
+        title = "Watermark",
+        resizable = false,
+        undecorated = true,
+        transparent = true,
+        alwaysOnTop = true,
+        focusable = false,
+        clickThrough = true,
+        hiddenFromDock = true,
+        visibleOnAllWorkspaces = true,
+        forceX11 = true,
+    ) {
+        Watermark()
+    }
+}
+```
+
+Pair `clickThrough = true` with `focusable = false`: a window that cannot be clicked should not
+take keyboard focus either.
+
+## Pin a widget below other windows
+
+A desktop widget is the same shape with the stacking inverted — `alwaysOnBottom` instead of
+`alwaysOnTop`, and clicks kept so the widget stays interactive:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    state = rememberWindowState(
+        position = WindowPosition.Aligned(Alignment.BottomEnd),
+        size = DpSize(300.dp, 340.dp),
+    ),
+    title = "Nucleus widget",
+    resizable = false,
+    undecorated = true,
+    transparent = true,
+    hiddenFromDock = true,
+    nativeContextMenu = true,
+    visibleOnAllWorkspaces = true,
+    forceX11 = true,
+    alwaysOnBottom = true,
+) {
+    WidgetSurface()
+}
+```
+
+`alwaysOnTop` and `alwaysOnBottom` are mutually exclusive: setting one clears the other, and the
+last one set wins.
+
+Below-stacking is not desktop membership. The window still appears in the taskbar and Alt+Tab
+unless you also set `hiddenFromDock`, and it is not a true desktop-type window. On native Wayland
+a surface glued to the wallpaper needs `wlr-layer-shell`, which Tao does not implement.
+
+## Toggle flags at run time
+
+`clickThrough`, `alwaysOnBottom`, and `visibleOnAllWorkspaces` are reactive parameters: change the
+state they read and the window follows. For imperative control, call the setters on the
+`TaoWindow` handle:
+
+```kotlin
+import dev.nucleusframework.window.tao.TaoWindow
+
+fun applyOverlayMode(window: TaoWindow, passive: Boolean) {
+    window.setIgnoreCursorEvents(passive)
+    window.setAlwaysOnBottom(passive)
+    window.setVisibleOnAllWorkspaces(passive)
+}
+```
+
+`transparent` and `forceX11` are creation-time only — they describe the native surface, which
+cannot change after the window exists.
+
+## Take an X11 surface on Wayland
+
+Client-side stacking, positioning, and workspace stickiness do not exist in the Wayland
+protocols, so overlay flags are no-ops on a native Wayland surface. `forceX11 = true` gives one
+window an XWayland surface instead, without pushing the rest of the app off Wayland:
+
+```kotlin
+DecoratedWindow(onCloseRequest = { }, forceX11 = true, /* … */) { Watermark() }
+```
+
+Read back what the window actually got:
+
+```kotlin
+import dev.nucleusframework.core.runtime.Platform
+import dev.nucleusframework.window.tao.TaoWindow
+
+fun surfaceLabel(window: TaoWindow?): String? {
+    if (window == null || Platform.Current != Platform.Linux) return null
+    return if (window.isNativeWaylandSurface) "Wayland" else "X11"
+}
+```
+
+`isNativeWaylandSurface` reads the live native surface rather than the environment, so a
+`forceX11` window reports `false` while its siblings on Wayland report `true`. It is meaningful
+only once the window is ready.
+
+To move the whole process onto XWayland instead, set `NUCLEUS_TAO_LINUX_RENDERER=x11` (or
+`GDK_BACKEND=x11`) before launch.
+
+When a flag lands on a native Wayland surface, Nucleus logs a warning once per window and per
+feature through `java.util.logging`, naming the flag and the reason it cannot work. If `forceX11`
+finds no X server on `DISPLAY` — a session with no XWayland — the window stays on Wayland and
+says so.
+
+## Platform behavior
+
+**macOS**
+
+`clickThrough` sets `NSWindow.ignoresMouseEvents`. `alwaysOnBottom` uses a window level below
+normal, and `visibleOnAllWorkspaces` joins every Space through
+`NSWindowCollectionBehaviorCanJoinAllSpaces`.
+
+A transparent window keeps its shadow, because AppKit shapes the shadow to the drawn content.
+Floating above another app's full-screen Space needs a window level Tao does not expose.
+
+**Windows**
+
+`clickThrough` applies `WS_EX_TRANSPARENT | WS_EX_LAYERED` and initializes the layer's alpha, so
+per-pixel transparency keeps working. `alwaysOnBottom` uses `HWND_BOTTOM`.
+
+`visibleOnAllWorkspaces` is a no-op and is not needed: a window hidden from the taskbar
+(`hiddenFromDock = true`) is not tracked by the Virtual Desktop Manager and already shows on
+every desktop.
+
+A fully transparent window drops the system shadow and the 1px DWM border, which trace the
+rectangular window rather than your content. Hit-testing is unaffected.
+
+**Linux**
+
+`clickThrough` installs an empty GDK input region. `alwaysOnBottom` maps to
+`_NET_WM_STATE_BELOW` and `visibleOnAllWorkspaces` to `gtk_window_stick()` — both X11 and
+XWayland only.
+
+Transparency itself works on both backends. Stacking, positioning, and workspace flags need X11:
+use `forceX11` per window, or `NUCLEUS_TAO_LINUX_RENDERER=x11` for the process.
+
+## API reference
+
+### DecoratedWindow parameters
+
+| Parameter | Default | Reactive | Description |
+|---|---|---|---|
+| `transparent` | `false` | No | Builds the native surface with an alpha channel; opaque background and title-bar colors are cleared. |
+| `clickThrough` | `false` | Yes | The window ignores pointer events; they reach whatever is behind it. |
+| `alwaysOnBottom` | `false` | Yes | Keeps the window below normal windows. Clears `alwaysOnTop`. |
+| `visibleOnAllWorkspaces` | `false` | Yes | Shows the window on every workspace or Space. |
+| `forceX11` | `false` | No | Linux only: request an X11 (XWayland) surface for this window. |
+
+`alwaysOnBottom` is also available on `HostedWindow`. `transparent`, `clickThrough`,
+`visibleOnAllWorkspaces`, and `forceX11` are additionally exposed on the Material and Jewel
+window wrappers.
+
+### TaoWindow members
+
+| Member | Description |
+|---|---|
+| `setIgnoreCursorEvents(ignore: Boolean)` | Imperative `clickThrough`. |
+| `setAlwaysOnBottom(alwaysOnBottom: Boolean)` | Imperative `alwaysOnBottom`. |
+| `setVisibleOnAllWorkspaces(visible: Boolean)` | Imperative `visibleOnAllWorkspaces`. |
+| `isNativeWaylandSurface: Boolean` | Whether this window ended up on a native Wayland surface. |
+
+Reach the handle from the window scope with `nucleusWindow.unsafe.taoWindow`.
+
+## Notes
+
+- A mostly transparent window looks better with custom chrome than with the stock `TitleBar`;
+  combine `transparent = true` with `undecorated = true` for a borderless overlay.
+- Compose scenes are told the window is transparent, so dialog scrims and popups blend against
+  the alpha background instead of painting over a grey sheet.
+- `WindowPosition.Aligned` cannot be honored on native Wayland — the compositor decides
+  placement. Nucleus logs this once per process.
+
+## What's next
+
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — the rest of the window parameters.
+- [Native Wayland](/docs/tao/wayland) — session detection and the X11 fallback.
+- [Context menus](/docs/window/context-menu) — the menu an interactive widget needs.
+
+---
+
 # Native views on Tao
 
 URL: https://nucleusframework.dev/docs/tao/native-views
@@ -2046,41 +2281,56 @@ fun NativeView(
 
 ### Overlay Compose content
 
-The `content` slot draws Compose UI over the embedded view. By default native pointer
-events pass through it to the underlying view. Wrap an interactive region with
-`Modifier.consumeOverlayPointerEvents()` to route events in that region to Compose instead:
+The `content` slot draws Compose UI over the embedded view, in the window's own Compose scene.
+Anything you put there is an ordinary composable: it takes pointer events where it is drawn, and
+events it does not consume are replayed to the native view underneath.
 
 ```kotlin
-import dev.nucleusframework.window.tao.consumeOverlayPointerEvents
-
 NativeView(
     factory = { WebPlatformView(createNativeWebView(url)) },
     modifier = Modifier.fillMaxSize(),
 ) {
-    // A Compose toolbar over the web view; the button stays interactive,
+    // A Compose toolbar over the web view. The button handles its own clicks;
     // clicks elsewhere reach the web view underneath.
-    Button(
-        onClick = { /* reload */ },
-        modifier = Modifier.consumeOverlayPointerEvents(),
-    ) {
+    Button(onClick = { /* reload */ }) {
         Text("Reload")
     }
 }
 ```
 
-For text-input fields, pass a cursor so the whole region shows the I-beam:
-`consumeOverlayPointerEvents(cursor = PointerIcon.Text)`.
+Because the overlay lives in the main scene, Compose siblings declared after the `NativeView`
+also paint over it, and `Popup`s from inside the scene land above the native view.
 
-The `content` slot works on **macOS, Windows, and Linux**:
+`Modifier.consumeOverlayPointerEvents()` is deprecated and no longer needed — overlay content
+claims its own input. The `cursor` argument still maps to `Modifier.pointerHoverIcon`; use that
+modifier directly instead.
 
-- **macOS / Windows** — a sibling overlay surface (Metal NSView / DirectComposition HWND)
-  hosts a separate Compose scene over the embedded native view.
-- **Linux** — Compose draws the overlay in the main scene with alpha over the GTK widget
-  buffer. Hit-test passthrough is region-based: outside
-  `consumeOverlayPointerEvents` rects, clicks fall through to GTK and the embedded widget.
-  From 2.3.1, overlay clicks use content-area coordinates (so CSD shadow margins do not
-  offset hit-testing), and the full-surface opaque region is cleared while any `NativeView`
-  is attached so GTK content (e.g. WebKit) shows through the EGL subsurface.
+The native view is composited into the scene with a punched hole: Compose clears the view's
+rectangle to transparent, and the platform shows the native content through it.
+
+**macOS**
+
+The `NSView` is inserted below the Tao content view, and the Metal layer becomes non-opaque so
+Skia clears at alpha 0. Moves are applied in the same frame as the Compose geometry.
+
+**Windows**
+
+The child `HWND` is parented under the window. Win32 children always paint above their parent, so
+Compose is re-rendered on top through a DirectComposition overlay clipped to the union of the
+live `NativeView` rectangles — Compose still sees events first inside those rectangles.
+
+A `hwndHandle` of `0L` is legal: a view that has no Win32 child window (WebView2 in composition
+mode, for example) drives its own visual through `setBounds` and `setCornerRadius`.
+
+**Linux**
+
+The `GtkWidget` is reparented under the window and the GL surface paints above it, so the punched
+hole reveals the widget. While a `NativeView` is attached, the surface advertises an empty opaque
+region so the compositor keeps blending the GTK content underneath.
+
+This requires Wayland. On the X11 backend a child window's alpha is never blended against its
+parent, so the punched rectangle shows the desktop instead of the widget — the widget still runs,
+but behind the GL surface.
 
 ### Clip to rounded corners
 
@@ -2097,6 +2347,9 @@ NativeView(
 
 Pass `Dp.Infinity` to clip fully circular regardless of size. The default,
 `Dp.Unspecified`, applies no clip.
+
+`cornerRadius` has no effect on Linux, where GTK 3 has no per-widget rounded clipping. Draw a
+Compose `RoundedCornerShape` border in the `content` slot instead.
 
 ## What's next
 
@@ -3211,6 +3464,31 @@ automatically. The Compose code does not change.
 | Screen capture       | Portal only                        | Direct                           |
 | Pen pressure         | `wp_tablet_v2`                      | Not exposed                      |
 | Multi-touch gestures | `pointer-gestures-unstable-v1`     | Limited                          |
+| Clipboard            | `wl_data_device` on the window's seat | `CLIPBOARD` selection          |
+| Window stacking      | No client-side protocol            | `_NET_WM_STATE_ABOVE` / `BELOW`  |
+
+## Copy and paste
+
+On Linux, Tao reads and writes the clipboard through GDK rather than AWT. AWT's clipboard is
+X11-only, so in a Wayland-native window it pasted nothing — the Wayland selection reaches
+XWayland only while an X11 window is active — and it threw outright in a session with no
+XWayland at all.
+
+Use the standard Compose API; there is nothing Nucleus-specific to call:
+
+```kotlin
+import androidx.compose.ui.platform.LocalClipboard
+
+val clipboard = LocalClipboard.current
+val scope = rememberCoroutineScope()
+
+scope.launch { clipboard.setClipEntry(entry) }
+```
+
+Plain text, images, and file lists are carried in both directions. Images cross as PNG, and file
+lists as `text/uri-list` plus the GNOME copied-files target, so pasting into a file manager works.
+HTML is not carried in either direction, and only the `CLIPBOARD` selection is used — never
+X11's PRIMARY (middle-click) selection.
 
 ## Notes
 
@@ -3894,6 +4172,203 @@ For full-window layouts and custom chrome without a design-system pack, use
 - [Jewel for tooling](/docs/window/toolkit-jewel)
 - [Material 2 / 3](/docs/window/toolkit-material)
 - [Window scaffold](/docs/tao/window-scaffold)
+
+---
+
+# Context menus
+
+URL: https://nucleusframework.dev/docs/window/context-menu
+
+Replace Compose-drawn context menus with the OS-looking menu — NSMenu on macOS, a Fluent flyout on Windows, and Adwaita or Breeze on Linux.
+
+By default, Compose Desktop draws its own context menus, which do not match the desktop they run
+on. Nucleus can replace them with the platform menu: a real `NSMenu` on macOS, and a Compose
+flyout styled as Fluent on Windows, Adwaita on GTK desktops, or Breeze on Qt desktops. This page
+covers the opt-in, the item types, and how items reach the menu.
+
+## Turn on the native menu
+
+Set `nativeContextMenu` on the window:
+
+```kotlin
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main() = nucleusApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+        nativeContextMenu = true,
+    ) {
+        // Text fields now show the OS-looking Cut/Copy/Paste menu
+    }
+}
+```
+
+This covers `ContextMenuArea`, the text-field Cut/Copy/Paste menu, and
+[spellcheck suggestions](/docs/os/spell-check). The parameter is also available on `HostedWindow`.
+
+The native menu is a [Tao backend](/docs/tao) feature. On the AWT backends the parameter is
+accepted and ignored, so the same code keeps Compose menus there.
+
+You do not choose a style. The menu follows the platform, and on Linux it follows the session's
+toolkit — Breeze on Qt desktops, Adwaita everywhere else.
+
+## Add your own items
+
+Build items with `NucleusContextMenuItem`, which extends Compose's `ContextMenuItem` with an icon
+and a shortcut label:
+
+```kotlin
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
+import dev.nucleusframework.application.contextmenu.ContextMenuIcon
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuDivider
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuItem
+
+ContextMenuArea(
+    items = {
+        listOf(
+            NucleusContextMenuItem(
+                label = "Reveal in Finder",
+                icon = ContextMenuIcon.Folder,
+                onClick = { revealInFileManager(path) },
+            ),
+            NucleusContextMenuDivider,
+            NucleusContextMenuItem(
+                label = "Delete",
+                icon = ContextMenuIcon.Delete,
+                shortcut = "Del",
+                onClick = { delete(path) },
+            ),
+        )
+    },
+) {
+    FileRow(path)
+}
+```
+
+`NucleusContextMenuDivider` is the separator, and `NucleusContextMenuSubmenu` nests a group. Its
+`items` lambda is evaluated when the menu opens, so a submenu can list something that changes:
+
+```kotlin
+import dev.nucleusframework.application.contextmenu.NucleusContextMenuSubmenu
+
+NucleusContextMenuSubmenu(label = "Open recent") { recentFiles.map { fileItem(it) } }
+```
+
+## Show keyboard shortcuts
+
+An item with a stock icon gets the platform shortcut label for free — `⌘C` on macOS, `Ctrl+C`
+elsewhere:
+
+```kotlin
+NucleusContextMenuItem(label = "Copy", icon = ContextMenuIcon.Copy, onClick = ::copy)
+```
+
+Pass `shortcut` to override the label, or `shortcut = ""` to suppress the stock one.
+`ContextMenuIcon.stockShortcut()` returns the label used for a given icon.
+
+Shortcut labels are drawn by the Windows and Linux flyouts. macOS `NSMenu` does not render this
+field yet.
+
+## Detect the Linux toolkit
+
+The Linux menu style is picked from the session, which you can also read yourself — for example
+to match an unrelated widget to the desktop:
+
+```kotlin
+import dev.nucleusframework.core.runtime.LinuxUiToolkit
+
+when (LinuxUiToolkit.Current) {
+    LinuxUiToolkit.Qt -> // KDE Plasma, LXQt, Deepin, …
+    LinuxUiToolkit.Gtk -> // GNOME, Xfce, Cinnamon, MATE, …
+}
+```
+
+`LinuxUiToolkit.Current` reads `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION`, and
+`XDG_SESSION_DESKTOP`, then falls back to `KDE_FULL_SESSION` and `QT_QPA_PLATFORMTHEME`. Unknown
+desktops and bare tiling window managers resolve to `Gtk`.
+
+## How it works
+
+Turning on `nativeContextMenu` installs two Compose representations for the window subtree:
+`NativeContextMenuRepresentation` for `ContextMenuArea`, and `NativeTextContextMenu` for text
+fields. Both walk the `ContextMenuItem` list Compose hands them and convert it to a
+`ContextMenuEntry` tree through the `ContextMenuItemInterpreter` in scope.
+
+That tree is then rendered per platform. macOS builds a real `NSMenu` through
+[`menu-macos`](/docs/os/menu-macos) and pops it up; Windows and Linux draw a Compose flyout at OS
+density, so the menu keeps system scale even inside a subtree that overrides `LocalDensity`.
+
+Items arrive from independent contributors — the field's own Cut/Copy/Paste, your extras, the
+spellcheck suggestions — so the entry list is normalized before it is shown: leading, trailing,
+and consecutive separators are dropped, recursively into submenus. An empty list closes the menu
+instead of flashing an empty frame.
+
+## API reference
+
+Package `dev.nucleusframework.application.contextmenu`, shipped in `nucleus-application`.
+
+### Build items
+
+| Symbol | Description |
+|---|---|
+| `NucleusContextMenuItem(label, enabled, icon, shortcut, onClick)` | A `ContextMenuItem` with an optional icon and shortcut label. |
+| `NucleusContextMenuDivider` | Separator item. |
+| `NucleusContextMenuSubmenu(label) { items }` | Nested group; `items` is evaluated when the menu opens. |
+| `ContextMenuIcon` | `Cut`, `Copy`, `Paste`, `SelectAll`, `Delete`, `Folder`, `SfSymbol(name)`. |
+| `ContextMenuIcon.stockShortcut()` | Platform shortcut label for the editing icons, else `null`. |
+
+### Control the menu
+
+| Symbol | Description |
+|---|---|
+| `NativeContextMenuProvider(enabled) { }` | Installs the native menu for a subtree, without going through the window parameter. |
+| `isNativeContextMenuSupported` | Whether this platform can show it. |
+| `LocalNativeContextMenu` | Whether the subtree currently uses the native menu. |
+| `LocalContextMenuDivider` | The separator the active renderer draws, or `null`. Read it when you assemble item lists. |
+| `NativeContextMenuRepresentation` / `NativeTextContextMenu` | The representations installed by the provider. |
+
+### Interpret items
+
+| Symbol | Description |
+|---|---|
+| `ContextMenuEntry` | `Item(label, enabled, icon, onClick, shortcut)`, `Separator`, `Submenu(label, items)`. |
+| `ContextMenuItemInterpreter` | Maps a Compose `ContextMenuItem` to a `ContextMenuEntry`. |
+| `DefaultContextMenuItemInterpreter` | The default mapping. |
+| `LocalContextMenuItemInterpreter` | Override the mapping for a subtree. |
+
+### macOS popup primitives
+
+Package `dev.nucleusframework.menu.macos`, shipped in `menu-macos`.
+
+| Symbol | Description |
+|---|---|
+| `NativePopupMenuItem` | `Entry(title, enabled, icon, onClick)`, `Separator`, `Submenu(title, items)`. |
+| `isNativePopupMenuAvailable` | Whether the native bridge loaded. |
+| `popUpNativeMenu(items)` | Shows an `NSMenu` at the cursor. |
+
+Call `popUpNativeMenu` off the Tao UI thread. AppKit runs a nested tracking loop while the menu
+is open, and inside a Tao event callback that loop starves the event loop — animations,
+`Dispatchers.Main`, and `delay` all stop until the menu closes.
+
+## Notes
+
+- Icons render differently per platform: Breeze draws 16 dp vectors, Fluent uses Segoe Fluent
+  Icons glyphs, and Adwaita follows the GTK convention of no icons in context menus.
+  `ContextMenuIcon.SfSymbol` applies to macOS only.
+- The flyout closes when the owning window loses focus. Outside-click monitoring only sees this
+  process, so focus is the one signal every backend reports — and it also covers Alt+Tab and
+  clicks on the taskbar.
+- On macOS the menu needs the `menu-macos` native library; if it fails to load,
+  `isNativeContextMenuSupported` is `false` and Compose menus are used.
+
+## What's next
+
+- [Spell check](/docs/os/spell-check) — suggestions inside these menus.
+- [macOS menu bar](/docs/os/menu-macos) — the application menu, same native layer.
+- [DecoratedWindow on Tao](/docs/tao/decorated-window) — the window that hosts the menu.
 
 ---
 
@@ -5382,6 +5857,7 @@ separate Gradle artifact, so you depend only on the modules you use.
 | Accent color and high contrast | `system-color` | yes | yes | yes |
 | Hardware and OS info | `system-info` | yes | yes | yes |
 | macOS menu bar | `menu-macos` | yes | — | — |
+| Spell check | `spellcheck` | yes | yes | yes |
 | FreeDesktop icon names | `freedesktop-icons` | — | — | yes |
 
 Modules published by Nucleus use the group `dev.nucleusframework` and the artifact name
@@ -7499,6 +7975,218 @@ Item("Software Update", badge = NsMenuItemBadge.Updates(pendingUpdates)) { openU
 
 ---
 
+# Spell check
+
+URL: https://nucleusframework.dev/docs/os/spell-check
+
+Check spelling in Compose text fields through each operating system's native engine — Hunspell on Linux, NSSpellChecker on macOS, and the Windows Spell Checking API.
+
+The `spellcheck` module checks spelling from Kotlin through the spell-check engine each operating
+system already ships. It exposes a Compose wrapper that adds suggestions to a text field's
+context menu, and an engine API you can call without Compose.
+
+## Add the dependency
+
+`nucleus-application` exposes `spellcheck` as an `api` dependency, so the Compose integration is
+already on the classpath of any Nucleus app:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+}
+```
+
+Add the module explicitly only when you want the engine without the Compose layer:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.spellcheck:<version>")
+}
+```
+
+## Check a text field
+
+Wrap the field in `SpellcheckContextMenu`. Right-clicking a misspelled word lists suggestions
+and an "Add to dictionary" entry above or below the standard Cut/Copy/Paste items:
+
+```kotlin
+import androidx.compose.foundation.text.BasicTextField
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+@Composable
+fun NoteField(value: String, onValueChange: (String) -> Unit) {
+    SpellcheckContextMenu(text = value, onTextChange = onValueChange) {
+        BasicTextField(value = value, onValueChange = onValueChange, singleLine = true)
+    }
+}
+```
+
+Picking a suggestion replaces the clicked word and calls `onTextChange` with the new text.
+
+There is a second overload for the state-based text fields, which manages the text itself:
+
+```kotlin
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+val state = rememberTextFieldState("helo world")
+
+SpellcheckContextMenu(state = state) {
+    TextField(state = state)
+}
+```
+
+## Choose the check language
+
+Without arguments, the session uses `Locale.getDefault()`. Pass `locale` to check one field in a
+different language:
+
+```kotlin
+SpellcheckContextMenu(
+    text = value,
+    onTextChange = onValueChange,
+    locale = Locale.FRENCH,
+) {
+    BasicTextField(value = value, onValueChange = onValueChange)
+}
+```
+
+To switch the whole process, assign `SpellChecker.locale`. Loading a dictionary touches the disk,
+so warm the session off the main thread:
+
+```kotlin
+import dev.nucleusframework.spellcheck.SpellChecker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+LaunchedEffect(locale) {
+    SpellChecker.locale = locale
+    withContext(Dispatchers.IO) { SpellChecker.ensureSession(locale) }
+}
+```
+
+Assigning `locale` drops the current session; the next access builds one for the new language.
+When you pass both `session` and `locale` to the composable, `session` wins.
+
+## Place the menu items
+
+`menuPlacement` decides whether suggestions land above or below the editing commands:
+
+```kotlin
+import dev.nucleusframework.application.spellcheck.SpellcheckMenuPlacement
+
+SpellcheckContextMenu(
+    text = value,
+    onTextChange = onValueChange,
+    menuPlacement = SpellcheckMenuPlacement.Top,
+) {
+    BasicTextField(value = value, onValueChange = onValueChange)
+}
+```
+
+| Value | Order |
+|---|---|
+| `Bottom` (default) | Cut/Copy/Paste, separator, suggestions |
+| `Top` | Suggestions, separator, Cut/Copy/Paste |
+
+## How it works
+
+Each platform has a spell-check engine, reached over JNI. macOS uses `NSSpellChecker`, Windows
+uses the Spell Checking API (`ISpellChecker`), and Linux loads Hunspell with `dlopen` — so there
+is no compile-time dependency on a distro package.
+
+A `SpellcheckSession` owns one loaded dictionary for one locale. `SpellChecker` keeps a
+process-wide session and rebuilds it when you change `locale`. Words you add through
+"Add to dictionary" are appended to `~/.config/nucleus/spellcheck/<tag>.dic` (honoring
+`XDG_CONFIG_HOME`); the OS-level learned-word lists on macOS and Windows are left untouched.
+
+When no engine is available — an unsupported platform, a missing Hunspell library, or no matching
+dictionary — every operation is a no-op instead of an error: `check` and `addToDictionary` return
+`false`, `suggest` returns an empty list, and `SpellcheckContextMenu` renders its content
+unchanged.
+
+**Linux**
+
+Hunspell is loaded at run time from the first soname that resolves: `libhunspell-1.7.so.0`,
+`libhunspell-1.7.so`, `libhunspell.so.0`, `libhunspell-1.6.so.0`, then `libhunspell.so`.
+
+Dictionaries are `<tag>.aff` + `<tag>.dic` pairs, searched in `$DICPATH` (colon-separated) first,
+then `/usr/share/hunspell`, `/usr/share/myspell/dicts`, `/usr/share/myspell`,
+`/usr/local/share/hunspell`, and `$XDG_DATA_HOME/hunspell` (default `~/.local/share/hunspell`).
+
+The tag is resolved as `lang_COUNTRY`, then language-only, then through aliases — `en` tries
+`en_US`, `en_GB`, `en`; `fr` tries `fr_FR`. End users need their distro's `hunspell` runtime
+library and a dictionary package.
+
+**macOS**
+
+`NSSpellChecker` provides the engine and the language list. No dictionary files are needed, and
+the requested locale is matched against the languages macOS reports as available.
+
+**Windows**
+
+The Windows Spell Checking API (`ISpellChecker`) provides the engine. No dictionary files are
+needed; languages come from the installed Windows language packs.
+
+## API reference
+
+### Compose integration
+
+Package `dev.nucleusframework.application.spellcheck`, shipped in `nucleus-application`.
+
+| Symbol | Description |
+|---|---|
+| `SpellcheckContextMenu(text, onTextChange, session?, locale?, menuPlacement, content)` | Adds suggestions to the context menu of the field in `content`. |
+| `SpellcheckContextMenu(state, session?, locale?, menuPlacement, content)` | Same, for a `TextFieldState`-based field. |
+| `SpellcheckMenuPlacement` | `Top`, `Bottom`. |
+| `NucleusSpellcheckInstaller.menuItems(word, session, onSuggestion, onAddToDictionary, separator?, menuPlacement)` | Builds the suggestion items to merge into a menu you assemble yourself. |
+| `drawMisspellingSquiggles(drawScope, layout, ranges, color)` | Draws underlines for the given ranges in a custom text renderer. |
+
+### Engine
+
+Package `dev.nucleusframework.spellcheck`, shipped in `spellcheck`.
+
+| Symbol | Description |
+|---|---|
+| `SpellChecker` | Process-wide singleton: `locale`, `session`, `sessionIfReady`, `isAvailable`, `ensureSession()`, `check()`, `suggest()`, `addToDictionary()`, `misspellings()`. |
+| `SpellcheckSession(locale, osName, dictionaryDirectories, userDictionaryFile)` | One loaded dictionary. `AutoCloseable`; exposes `locale`, `isAvailable`, `dictionaryTag`, `check`, `suggest`, `addToDictionary`, `misspellings`. |
+| `SpellcheckSession.defaultUserDictionaryFile(locale)` | Path of the user dictionary for a locale. |
+| `DictionaryLocator.defaultDirectories()` / `find(locale, directories)` | Where dictionaries are searched, and the pair that matches a locale. |
+| `DictionaryFiles(aff, dic, tag)` | A resolved dictionary pair. |
+| `SpellcheckWord(start, end, word)` | A token and its range in the text. |
+
+### Text helpers
+
+| Function | Description |
+|---|---|
+| `iterateWords(text)` | Every token in the text. |
+| `misspellingRanges(text) { isCorrect }` | Ranges rejected by the predicate. |
+| `wordAt(text, offset)` | The token containing an offset, or `null`. |
+| `replaceWord(text, word, replacement)` | Text with one token replaced. |
+| `buildSpellcheckMenuModel(word, session, range?, maxSuggestions)` | Suggestions plus the localized "Add to dictionary" label. |
+| `applySuggestion(text, model, suggestion)` | Text with the model's range replaced. |
+
+`SpellcheckMenuModel.localizedAddToDictionaryLabel(locale)` translates the label; the fallback is
+`DEFAULT_ADD_TO_DICTIONARY_LABEL`.
+
+## Notes
+
+- Tokens are Unicode letters with internal apostrophes. Hyphens split words, and all-digit
+  tokens or tokens longer than 64 characters are skipped.
+- `SpellChecker.session` blocks on first access while the dictionary loads. Use
+  `sessionIfReady` on a frame path, or warm it with `ensureSession()` from a background
+  dispatcher.
+- Under Jewel, `JewelDecoratedWindow` and `JewelDecoratedDialog` install
+  `ProvideJewelSpellcheckMenu` so the items match Jewel's menu chrome.
+
+## What's next
+
+- [Context menus](/docs/window/context-menu) — the menu chrome the suggestions appear in.
+- [Native access](/docs/performance/native-access) — how Nucleus binds to native libraries.
+- [Ecosystem](/docs/ecosystem) — JVM libraries that cover the rest of your app.
+
+---
+
 # SF Symbols
 
 URL: https://nucleusframework.dev/docs/os/sf-symbols
@@ -9166,6 +9854,32 @@ Set on the `constraints { }` block; all are checked at execution time.
 An unsatisfied periodic fire is silently skipped and re-checked on the next trigger. An
 unsatisfied calendar or on-boot fire schedules a retry with backoff.
 
+### SchedulerConfig
+
+Every backend invokes the current executable, resolved from
+`ProcessHandle.current().info().command()`. If your app boots through a custom launcher, point
+the scheduler at that launcher instead:
+
+```kotlin
+import dev.nucleusframework.scheduler.SchedulerConfig
+
+SchedulerConfig.executablePath = "/opt/myapp/myapp-launcher"
+SchedulerConfig.executableArguments = listOf("--background")
+```
+
+The resulting command is `<executablePath> <executableArguments…> --nucleus-scheduler-run <taskId>`.
+
+| Property | Type | Default | Behavior |
+|---|---|---|---|
+| `executablePath` | `String?` | `null` | Absolute path to the program the OS scheduler invokes. `null` or blank resolves the current executable. |
+| `executableArguments` | `List<String>` | `emptyList()` | Arguments inserted before the `--nucleus-scheduler-run` flag. |
+
+`executablePath` must be absolute: the generated wrapper scripts check that the file still
+exists and unregister the task when it is gone, for example after an uninstall.
+
+Set both properties before the first `enqueue` call. The values are baked into the generated
+plist, unit, or task at enqueue time, so a later change only affects tasks scheduled afterwards.
+
 ## Notes
 
 - Don't put secrets in `inputData` — it's persisted as plain JSON in the per-task metadata file.
@@ -9616,6 +10330,35 @@ Calling `keepAwake` while a request is already active replaces it with the new m
 `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` remain as deprecated
 forwarders to `keepAwake()` / `releaseAwake()` / `isAwakeActive()`.
 
+## Hold several awake requests at once
+
+`keepAwake` owns a single slot: the last caller wins, and one `releaseAwake()` drops the
+request for everybody. When independent features each need the machine awake — a video player,
+a download, a presentation view — acquire a handle per feature instead:
+
+```kotlin
+import dev.nucleusframework.energymanager.AwakeMode
+import dev.nucleusframework.energymanager.EnergyManager
+
+val playback = EnergyManager.acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)
+val download = EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY)
+
+playback.close() // the machine stays awake: `download` is still held
+download.close() // last handle gone — the OS request is released
+```
+
+`AwakeHandle` implements `AutoCloseable`, so `use { }` scopes a request to a block:
+
+```kotlin
+EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY).use {
+    exportProject()
+}
+```
+
+Handles coexist with each other and with `keepAwake`. The OS request uses the strongest mode
+any live handle asked for, and is released only once every handle is closed and no unmatched
+`keepAwake` is left. `close()` is idempotent and thread-safe.
+
 ## How it works
 
 Efficiency mode has two levels. Light mode leaves the app fully functional in the background:
@@ -9653,7 +10396,8 @@ Thread-level mode uses the per-thread form of these primitives on Linux,
 | `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Per-thread; affects the calling thread only. |
 | `withEfficiencyMode { }` (suspend) | Runs the block on a dedicated thread with thread-level efficiency; the thread is disposed when the block returns. |
 | `withLightEfficiencyMode { }` (suspend) | Applies process-level light QoS for the block's lifetime; no thread pinning. |
-| `keepAwake(mode)` / `releaseAwake()` | Prevent and restore system (and optionally display) sleep. |
+| `keepAwake(mode)` / `releaseAwake()` | Prevent and restore system (and optionally display) sleep. One shared slot; the last mode wins. |
+| `acquireAwake(mode): AwakeHandle` | Independent awake request released by `AwakeHandle.close()`. |
 | `isAwakeActive(): Boolean` | Whether an awake request is currently held. |
 | `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Deprecated forwarders to the `keepAwake` / `releaseAwake` / `isAwakeActive` APIs. |
 
@@ -9663,6 +10407,14 @@ Thread-level mode uses the per-thread form of these primitives on Linux,
 |---|---|
 | `SYSTEM_AND_DISPLAY` | Block system and display sleep (default). |
 | `SYSTEM_ONLY` | Block system sleep only; display and screen saver behave normally. |
+
+### AwakeHandle
+
+| Member | Description |
+|---|---|
+| `mode: AwakeMode` | The mode this handle requested. |
+| `isActive: Boolean` | `false` after `close()`. |
+| `close()` | Drops this request. Idempotent and thread-safe. |
 
 Every `enable`/`disable` call and `keepAwake`/`releaseAwake` returns an
 `EnergyManager.Result` with `success: Boolean`, `errorCode: Int`, and `message: String`. On an
@@ -13342,7 +14094,8 @@ Hosting is configured in `nativeDistributions.publish { }` (see
 
 - **GitHub Releases** — the [release workflow](/docs/packaging/ci-cd#release) handles it end to end.
 - **S3** — set credentials via environment variables; the plugin uploads alongside the YAML.
-- **Generic HTTP** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
+- **Generic HTTPS** — upload to any static host yourself; the updater fetches `<baseUrl>/latest-*.yml`.
+  The base URL must be `https` (see [Providers](#providers)).
 
 The `publish { }` block only generates electron-builder config — it does not upload. CI does the upload.
 
@@ -13507,9 +14260,15 @@ UI on it — force a dialog for major bumps, install patches silently.
 ### Providers
 
 - `GitHubProvider(owner, repo, token? = null)`
-- `GenericProvider(baseUrl)`
+- `GenericProvider(baseUrl)` — the `baseUrl` must use `https`. A non-`https` origin throws
+  `IllegalArgumentException` at construction. `http` is accepted only for loopback hosts
+  (`localhost`, `127.0.0.0/8`, `::1`) so integration tests can serve fixtures without TLS.
 
 Custom auth headers come from the provider's `authHeaders()`, not from the config.
+
+The manifest, the checksums, and the artifact all come from that one origin, so plain `http`
+would let an on-path attacker rewrite the three together — the SHA-512 in the manifest protects
+nothing if the attacker also writes the manifest.
 
 ### Installer commands
 
@@ -13533,6 +14292,8 @@ Custom auth headers come from the provider's `authHeaders()`, not from the confi
 - Passwordless Linux updates (`signing.silentUpdate`) add a second, stronger check: a GPG signature
   verified against the key bundled in the app.
 - GitHub tokens are sent in the `Authorization` header, never in URL parameters.
+- The detached installer script runs from a fresh owner-only directory (POSIX `0700`) created per
+  update, not from a fixed path in the shared temp directory.
 - For Mac App Store, Microsoft Store, Snapcraft, and Flathub, the store handles updates; skip
   `updater-runtime` entirely.
 
@@ -14400,17 +15161,16 @@ Every other artifact on Maven Central — roughly 500,000 libraries — is avail
 
 ## Where Nucleus stops
 
-Two common desktop needs have no Nucleus module, because existing libraries already cover them:
+One common desktop need has no Nucleus module, because an existing library already covers it:
 
 - [File dialogs](/docs/ecosystem/file-dialog) — use FileKit.
-- [Spell check](/docs/ecosystem/spell-check) — use PlatformSpellCheckerKt.
 
 The Nucleus Gradle plugin ships GraalVM reachability metadata for FileKit, so it works under Native Image with no manual configuration.
 
 ## What's next
 
 - [File dialogs](/docs/ecosystem/file-dialog) — native open and save dialogs through FileKit.
-- [Spell check](/docs/ecosystem/spell-check) — the system spell checker through PlatformSpellCheckerKt.
+- [Spell check](/docs/os/spell-check) — the system spell checker, with Compose context-menu integration.
 - [`native-ssl`](/docs/performance/native-ssl) — route HTTPS trust through the OS trust store.
 - [`native-http`](/docs/performance/native-http) — use the OS-managed HTTP stack.
 
@@ -14505,72 +15265,8 @@ FileKit already wraps each native dialog and integrates with Compose state, so N
 ## What's next
 
 - [Automatic GraalVM metadata](/docs/performance/graalvm/automatic-metadata) — how the plugin bundles reachability metadata for known libraries.
-- [Native spell check](/docs/ecosystem/spell-check) — another native-backed ecosystem library.
+- [Spell check](/docs/os/spell-check) — the platform spell-check engines, in Compose text fields.
 - [Ecosystem overview](/docs/ecosystem) — libraries that pair with Nucleus.
-
----
-
-# Native spell check
-
-URL: https://nucleusframework.dev/docs/ecosystem/spell-check
-
-Check spelling in a Kotlin desktop app with PlatformSpellCheckerKt, a wrapper over each operating system's native spell-check engine.
-
-[PlatformSpellCheckerKt](https://github.com/Wavesonics/PlatformSpellCheckerKt) lets you check
-spelling from Kotlin using each operating system's native spell-check engine. Nucleus does not
-ship a spell-check module; this library already covers the platforms Nucleus targets, so add it
-to your app directly.
-
-## Add the dependency
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("com.darkrockstudios:platform-spellcheckerkt:<version>")
-}
-```
-
-## Check spelling
-
-Create a checker through `PlatformSpellCheckerFactory`, then check either a single word or a
-whole string:
-
-```kotlin
-val checker = PlatformSpellCheckerFactory().createSpellChecker()
-
-// Check a single word; the result carries suggested corrections.
-val result = checker.checkWord("sentance")
-val suggestions = result.suggestions // e.g. ["sentence", ...]
-
-// Check a full string; each entry reports the misspelled word and its position.
-val misspellings = checker.checkMultiword("This is a sentance with errors")
-// each entry: misspelledWord, startIndex, length
-```
-
-`checkWord` validates one token and returns its suggestions. `checkMultiword` scans a string and
-returns one entry per misspelling, each with the word and its offset in the text.
-
-## How it works
-
-The library delegates to the spell-check engine already built into the host OS:
-
-- **macOS** — `NSSpellChecker`, the same engine TextEdit and the system text fields use.
-- **Windows** — the Windows Spell Checking API (available since Windows 8), through the
-  `ISpellCheckerFactory` COM interface.
-- **Linux** — `hunspell`.
-
-Because it uses the platform engine, spelling behavior, installed dictionaries, and language
-detection match what the user already sees elsewhere on their system.
-
-## Notes
-
-On Linux, spell checking depends on `hunspell`. Install it through your distribution's package
-manager; if it is missing, the checker cannot run.
-
-## What's next
-
-- [The JVM ecosystem](/docs/ecosystem) — libraries that cover common desktop needs.
-- [Native file dialogs](/docs/ecosystem/file-dialog) — FileKit for open, save, and folder pickers.
-- [Quickstart](/docs/start/quickstart) — build and run a Nucleus app.
 
 ---
 
@@ -14662,7 +15358,7 @@ Nucleus extends it.
  plugins {
      id("org.jetbrains.kotlin.jvm") version "2.4.0"
      id("org.jetbrains.kotlin.plugin.compose") version "2.4.0"
-     id("org.jetbrains.compose") version "1.11.1"
+     id("org.jetbrains.compose") version "1.12.0"
 +    id("dev.nucleusframework") version "<version>"
  }
 ```
@@ -15993,6 +16689,117 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.0
+
+**Released: 2026-08-26**
+
+### New modules
+
+- **Spell check** (`nucleus.spellcheck`) — checks spelling through the engine each OS already
+  ships: Hunspell on Linux (loaded with `dlopen`, no compile-time dependency), `NSSpellChecker`
+  on macOS, and the Windows Spell Checking API. Ships a `SpellcheckContextMenu` wrapper that adds
+  suggestions and "Add to dictionary" to a Compose text field's context menu, plus an engine API
+  (`SpellChecker`, `SpellcheckSession`) usable without Compose. `nucleus-application` exposes it
+  as an `api` dependency, so no extra Gradle line is needed. Where no engine is available every
+  operation is a no-op rather than an error. See
+  [Spell check](/docs/os/spell-check#check-a-text-field).
+    - Per-field and process-wide language override via `locale` / `SpellChecker.locale`. See
+      [Choose the check language](/docs/os/spell-check#choose-the-check-language).
+    - `SpellcheckMenuPlacement` puts suggestions above or below Cut/Copy/Paste. See
+      [Place the menu items](/docs/os/spell-check#place-the-menu-items).
+    - The "Add to dictionary" label is localized for 45+ locales; user words persist to
+      `~/.config/nucleus/spellcheck/<tag>.dic`.
+
+### New features
+
+- **Native context menus** (#542, #544, #545, #547) — `nativeContextMenu = true` on
+  `DecoratedWindow` / `HostedWindow` replaces the Compose-drawn context menu with the platform's:
+  a real `NSMenu` on macOS, and a Compose flyout styled as Fluent on Windows, Adwaita on GTK
+  desktops, and Breeze on Qt desktops. Covers `ContextMenuArea`, text-field Cut/Copy/Paste, and
+  spellcheck items. Tao backend only; accepted and ignored on AWT. See
+  [Context menus](/docs/window/context-menu#turn-on-the-native-menu).
+    - `NucleusContextMenuItem`, `NucleusContextMenuDivider`, and `NucleusContextMenuSubmenu` build
+      items with icons and lazy submenus. See
+      [Add your own items](/docs/window/context-menu#add-your-own-items).
+    - Stock icons carry their platform shortcut label (`⌘C` / `Ctrl+C`), overridable per item.
+      Drawn on the Windows and Linux flyouts. See
+      [Show keyboard shortcuts](/docs/window/context-menu#show-keyboard-shortcuts).
+    - New `LinuxUiToolkit` in `core-runtime` reports whether the session is Gtk or Qt, which is
+      also how the Linux menu style is chosen. See
+      [Detect the Linux toolkit](/docs/window/context-menu#detect-the-linux-toolkit).
+    - `menu-macos` gained the popup primitives behind it: `NativePopupMenuItem`,
+      `popUpNativeMenu`, `isNativePopupMenuAvailable`.
+- **Overlay windows** (#564, #568) — new window flags for watermarks, desktop widgets, and
+  heads-up overlays: `clickThrough` (pointer events pass through), `alwaysOnBottom` (below normal
+  windows, mutually exclusive with `alwaysOnTop`), and `visibleOnAllWorkspaces`. All three are
+  reactive, with imperative `TaoWindow` setters alongside. See
+  [Overlay windows](/docs/tao/overlay-windows#build-a-click-through-watermark).
+    - `transparent` is now exposed on the backend-agnostic `DecoratedWindow` and the Material and
+      Jewel window wrappers, not just the Tao composable. A fully transparent window drops the
+      contour that traced the rectangular window instead of the content, and Compose scenes are
+      told the window is transparent so dialog scrims blend against alpha (#559, #561).
+    - `forceX11` gives one window an XWayland surface without moving the whole process off
+      Wayland, and `TaoWindow.isNativeWaylandSurface` reports what it actually got. Flags that
+      cannot work on a native Wayland surface log once per window with the reason. See
+      [Take an X11 surface on Wayland](/docs/tao/overlay-windows#take-an-x11-surface-on-wayland).
+- **Compose over native views** (#587) — the `NativeView` `content` slot now draws in the
+  window's own Compose scene on all three platforms, so Compose siblings declared after the view
+  and in-scene `Popup`s paint over it, and overlay content claims its own pointer events. Linux
+  supports the `content` slot at all for the first time (Wayland only).
+  `Modifier.consumeOverlayPointerEvents()` is deprecated and no longer needed. See
+  [Overlay Compose content](/docs/tao/native-views#overlay-compose-content).
+- **Linux clipboard through GTK** (#582, #583) — the Tao clipboard on Linux goes through GDK
+  instead of AWT, so copy and paste work in a Wayland-native window and in a session with no
+  XWayland. Images (as PNG) and file lists (`text/uri-list` plus the GNOME copied-files target)
+  are carried in both directions alongside plain text. No API change: use Compose's
+  `LocalClipboard`. See [Copy and paste](/docs/tao/wayland#copy-and-paste).
+- **`EnergyManager.acquireAwake`** — returns an `AwakeHandle` that holds one awake request until
+  it is closed, so independent features can each keep the machine awake without releasing each
+  other. `keepAwake` keeps its single last-writer-wins slot. This also backs Compose's
+  `Modifier.keepScreenOn`, which the Tao backend now implements. See
+  [Hold several awake requests at once](/docs/lifecycle/energy-manager#hold-several-awake-requests-at-once).
+- **Custom scheduler command** (#540) — `SchedulerConfig.executablePath` and
+  `executableArguments` point the OS scheduler at a custom launcher instead of the current
+  executable. Set them before the first `enqueue`; values are baked into the generated
+  plist, unit, or task. See [SchedulerConfig](/docs/lifecycle/scheduler#schedulerconfig).
+- **Compose 1.12** (#354, #550, #551, #555) — `decorated-window-tao` moves to Compose
+  Multiplatform 1.12, with frames driven through `SingleComposeSceneRenderingScope` and the new
+  `RectManager` delayed dispatch kept off the AWT event thread.
+- **`jdk.unsupported` in the default runtime modules** — `sun.misc.Unsafe` is required by JNA,
+  Jewel, and many common libraries, so the module is included by default rather than discovered
+  through a runtime failure. See [Configuration](/docs/start/configuration).
+
+### Breaking changes
+
+- **`GenericProvider` requires `https`** — a non-`https` update origin now throws
+  `IllegalArgumentException` at construction. The manifest, checksums, and artifact all come from
+  that one origin, so plain `http` lets an on-path attacker rewrite the three together and the
+  SHA-512 protects nothing. `http` is still accepted for loopback hosts so integration tests can
+  serve fixtures without TLS. See [Providers](/docs/packaging/auto-update#providers).
+
+### Bug fixes
+
+- **Self-update scripts written to a private directory** — the detached update script and its log
+  went to a fixed path in the shared temp directory (`/tmp/nucleus-update.sh` on Linux), which
+  another local user can pre-create as a symlink or a file they own, turning the update into local
+  code execution as the app's user. Each run now gets a fresh owner-only (`0700`) directory.
+- **Windows update script escaping** — manifest-derived paths are escaped before they reach
+  PowerShell.
+- **Linux root update helper** — closed a time-of-check/time-of-use window and a downgrade path
+  in the privileged helper.
+- **Linux update helper leaked a gpg-agent** — the signature check no longer leaves a gpg-agent
+  running inside the app's systemd scope.
+- **MPRIS invalid D-Bus name** (#548) — an app id that is not a valid D-Bus name no longer hangs
+  media-control startup on Linux.
+- **Context menu dismissal and first right-click** — the flyout closes when the owning window
+  loses focus, and the macOS menu opens on the first right-click in an app that is not yet
+  active.
+- **Tao fixes** — the dialog close button animates its hover like `DecoratedWindow`; a native
+  session that swallows a mouse-up no longer leaves a stuck button; Adwaita separators follow
+  libadwaita's `currentColor` rule.
+
+---
 
 ## v2.4.7
 

@@ -1,0 +1,61 @@
+---
+title: Migrer avec un agent IA
+description: Pointez n'importe quel agent IA vers une seule URL — il analyse votre app, pose les bonnes questions et la migre vers Nucleus pas à pas.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+La façon la plus rapide de migrer une app JetBrains Compose Desktop existante est de laisser
+faire un agent IA, guidé par notre playbook de migration. Rien à installer : tout le playbook —
+script de détection, références d'API, checkpoints — tient dans un seul fichier que votre agent
+va chercher lui-même.
+
+## Un prompt, c'est tout
+
+Ouvrez votre agent (Claude Code, Cursor, Codex, …) dans l'app à migrer et collez :
+
+```text
+Fetch https://nucleusframework.dev/nucleus-migrate.md and follow its instructions to
+analyze this app and migrate it to Nucleus step by step.
+```
+
+## Ce que fait l'agent
+
+1. **Scanne votre projet** avec un détecteur embarqué : usage AWT/Swing (file dialogs, tray,
+   presse-papiers, `SwingPanel`…), title bars custom, Material 2/3/Jewel, notifications,
+   updaters et verrous single-instance faits main, JNA, formats de packaging (MSI…), signaux de
+   faisabilité GraalVM, et vos workflows CI.
+2. **Vous interroge** : backend Tao ou AWT, design system pour le chrome de fenêtre, quelles
+   fonctionnalités natives adopter (notifications, tray, auto-update, deep links, progression
+   taskbar…), MSI→NSIS, GraalVM maintenant ou plus tard, migration de la CI.
+3. **Migre une phase à la fois** — DSL Gradle, shell de fenêtre, retrait d'AWT, adoption des
+   fonctionnalités, packaging, GraalVM, CI — chaque phase se terminant par un checkpoint
+   vérifiable (`./gradlew run`, une validation visuelle, un installeur packagé) avant de
+   continuer.
+4. **Fait le bilan** : ce qui a changé, ce qui a été volontairement conservé, et la suite.
+
+<Callout title="Ancré dans une vraie migration">
+Le playbook encode les renommages du DSL, les règles de threading et les pièges les plus
+coûteux appris sur des migrations réelles (ambiguïté d'overload sur `NucleusApplicationScope`,
+thème qui enveloppe la fenêtre, `HostedWindow` pour le code de librairie, deadlocks de
+`Desktop.browse` sous Linux…), tous vérifiés contre les sources du plugin et du runtime.
+</Callout>
+
+## Utilisateurs Claude Code : installez-le en skill (optionnel)
+
+Le même playbook existe en skill réutilisable avec chargement progressif (l'agent ne lit que la
+référence utile à chaque phase). Téléchargez
+[nucleus-migrate.skill](https://nucleusframework.dev/nucleus-migrate.skill), puis décompressez-le
+dans votre répertoire de skills :
+
+```bash
+cd ~/.claude/skills && unzip ~/Downloads/nucleus-migrate.skill
+```
+
+Depuis n'importe quel projet, lancez `/nucleus-migrate` — ou dites simplement « migre cette app
+vers Nucleus » et le skill se déclenche tout seul.
+
+## Vous préférez le faire à la main ?
+
+Suivez les guides manuels : [migration du build depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose)
+et, si vous venez de Nucleus 1.x, le [guide 1.x vers 2.0](/docs/migrate/from-1.x).

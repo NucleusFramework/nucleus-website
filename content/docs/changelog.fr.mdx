@@ -7,6 +7,130 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.0
+
+**Sortie : 2026-08-26**
+
+### Nouveaux modules
+
+- **Correction orthographique** (`nucleus.spellcheck`) — vérifie l'orthographe via le moteur que
+  chaque OS embarque déjà : Hunspell sous Linux (chargé par `dlopen`, sans dépendance de
+  compilation), `NSSpellChecker` sous macOS et l'API Windows Spell Checking. Le module fournit un
+  wrapper `SpellcheckContextMenu` qui ajoute les suggestions et « Ajouter au dictionnaire » au menu
+  contextuel d'un champ de texte Compose, ainsi qu'une API moteur (`SpellChecker`,
+  `SpellcheckSession`) utilisable sans Compose. `nucleus-application` l'expose en dépendance `api` :
+  aucune ligne Gradle supplémentaire n'est nécessaire. Sans moteur disponible, chaque opération
+  devient inopérante au lieu d'échouer. Voir
+  [Correction orthographique](/docs/os/spell-check#vérifier-un-champ-de-texte).
+    - Langue redéfinissable par champ et pour tout le processus via `locale` /
+      `SpellChecker.locale`. Voir
+      [Choisir la langue de vérification](/docs/os/spell-check#choisir-la-langue-de-vérification).
+    - `SpellcheckMenuPlacement` place les suggestions au-dessus ou en dessous de
+      Couper/Copier/Coller. Voir
+      [Placer les entrées du menu](/docs/os/spell-check#placer-les-entrées-du-menu).
+    - Le libellé « Ajouter au dictionnaire » est localisé pour plus de 45 locales ; les mots
+      ajoutés sont conservés dans `~/.config/nucleus/spellcheck/<tag>.dic`.
+
+### Nouvelles fonctionnalités
+
+- **Menus contextuels natifs** (#542, #544, #545, #547) — `nativeContextMenu = true` sur
+  `DecoratedWindow` / `HostedWindow` remplace le menu contextuel dessiné par Compose par celui de
+  la plateforme : un vrai `NSMenu` sous macOS, et un flyout Compose stylé Fluent sous Windows,
+  Adwaita sur les bureaux GTK et Breeze sur les bureaux Qt. Couvre `ContextMenuArea`, le
+  Couper/Copier/Coller des champs de texte et les entrées d'orthographe. Backend Tao uniquement ;
+  accepté et ignoré sous AWT. Voir
+  [Menus contextuels](/docs/window/context-menu#activer-le-menu-natif).
+    - `NucleusContextMenuItem`, `NucleusContextMenuDivider` et `NucleusContextMenuSubmenu`
+      construisent des entrées avec icônes et sous-menus paresseux. Voir
+      [Ajouter vos propres entrées](/docs/window/context-menu#ajouter-vos-propres-entrées).
+    - Les icônes standard portent le libellé de raccourci de la plateforme (`⌘C` / `Ctrl+C`),
+      redéfinissable par entrée. Dessiné par les flyouts Windows et Linux. Voir
+      [Afficher les raccourcis clavier](/docs/window/context-menu#afficher-les-raccourcis-clavier).
+    - Le nouveau `LinuxUiToolkit` de `core-runtime` indique si la session est Gtk ou Qt, ce qui
+      détermine aussi le style du menu Linux. Voir
+      [Détecter le toolkit Linux](/docs/window/context-menu#détecter-le-toolkit-linux).
+    - `menu-macos` gagne les primitives sous-jacentes : `NativePopupMenuItem`, `popUpNativeMenu`,
+      `isNativePopupMenuAvailable`.
+- **Fenêtres overlay** (#564, #568) — nouveaux drapeaux de fenêtre pour watermarks, widgets de
+  bureau et overlays informatifs : `clickThrough` (les événements pointeur traversent),
+  `alwaysOnBottom` (sous les fenêtres normales, exclusif avec `alwaysOnTop`) et
+  `visibleOnAllWorkspaces`. Les trois sont réactifs, avec des setters impératifs sur `TaoWindow`.
+  Voir [Fenêtres overlay](/docs/tao/overlay-windows#construire-un-watermark-traversant).
+    - `transparent` est désormais exposé sur le `DecoratedWindow` agnostique du backend et sur les
+      wrappers de fenêtre Material et Jewel, et plus seulement sur le composable Tao. Une fenêtre
+      entièrement transparente perd le contour qui épousait la fenêtre rectangulaire au lieu du
+      contenu, et les scènes Compose sont informées de la transparence pour que les voiles de
+      dialogue se fondent sur l'alpha (#559, #561).
+    - `forceX11` donne à une seule fenêtre une surface XWayland sans sortir tout le processus de
+      Wayland, et `TaoWindow.isNativeWaylandSurface` indique ce qu'elle a réellement obtenu. Les
+      drapeaux inopérants sur une surface Wayland native sont signalés une fois par fenêtre, avec
+      la raison. Voir
+      [Prendre une surface X11 sous Wayland](/docs/tao/overlay-windows#prendre-une-surface-x11-sous-wayland).
+- **Compose au-dessus des vues natives** (#587) — l'emplacement `content` de `NativeView` dessine
+  maintenant dans la scène Compose de la fenêtre sur les trois plateformes : les composables
+  déclarés après la vue et les `Popup` de la scène peignent donc par-dessus, et le contenu
+  d'overlay revendique lui-même ses événements pointeur. Linux prend en charge l'emplacement
+  `content` pour la première fois (Wayland uniquement).
+  `Modifier.consumeOverlayPointerEvents()` est déprécié et devenu inutile. Voir
+  [Superposer du contenu Compose](/docs/tao/native-views#superposer-du-contenu-compose).
+- **Presse-papiers Linux via GTK** (#582, #583) — le presse-papiers Tao sous Linux passe par GDK
+  et non par AWT : copier-coller fonctionne donc dans une fenêtre Wayland native et dans une
+  session sans XWayland. Les images (en PNG) et les listes de fichiers (`text/uri-list` plus la
+  cible « copied-files » de GNOME) circulent dans les deux sens, en plus du texte brut. Aucun
+  changement d'API : utilisez `LocalClipboard` de Compose. Voir
+  [Copier-coller](/docs/tao/wayland#copier-coller).
+- **`EnergyManager.acquireAwake`** — renvoie un `AwakeHandle` qui tient une demande d'éveil
+  jusqu'à sa fermeture : des fonctionnalités indépendantes peuvent donc garder la machine
+  éveillée sans se relâcher mutuellement. `keepAwake` conserve son slot unique où le dernier
+  écrivain gagne. C'est aussi ce qui alimente `Modifier.keepScreenOn` de Compose, que le backend
+  Tao implémente désormais. Voir
+  [Tenir plusieurs demandes d'éveil à la fois](/docs/lifecycle/energy-manager#tenir-plusieurs-demandes-déveil-à-la-fois).
+- **Commande de scheduler personnalisée** (#540) — `SchedulerConfig.executablePath` et
+  `executableArguments` dirigent le scheduler de l'OS vers un launcher maison au lieu de
+  l'exécutable courant. Renseignez-les avant le premier `enqueue` ; les valeurs sont figées dans
+  le plist, l'unit ou la tâche générés. Voir
+  [SchedulerConfig](/docs/lifecycle/scheduler#schedulerconfig).
+- **Compose 1.12** (#354, #550, #551, #555) — `decorated-window-tao` passe à Compose Multiplatform
+  1.12, avec des frames pilotées par `SingleComposeSceneRenderingScope` et le nouveau dispatch
+  différé de `RectManager` maintenu hors du thread d'événements AWT.
+- **`jdk.unsupported` dans les modules runtime par défaut** — `sun.misc.Unsafe` est requis par JNA,
+  Jewel et beaucoup de bibliothèques courantes : le module est donc inclus par défaut plutôt que
+  découvert via une erreur à l'exécution. Voir [Configuration](/docs/start/configuration).
+
+### Changements incompatibles
+
+- **`GenericProvider` exige `https`** — une origine de mise à jour non-`https` lève désormais une
+  `IllegalArgumentException` à la construction. Le manifeste, les sommes de contrôle et l'artefact
+  viennent tous de cette même origine : en `http` simple, un attaquant en position d'interception
+  réécrit les trois ensemble et le SHA-512 ne protège rien. `http` reste accepté pour les hôtes
+  loopback, afin que les tests d'intégration servent des fixtures sans TLS. Voir
+  [Providers](/docs/packaging/auto-update#providers).
+
+### Corrections de bugs
+
+- **Scripts de mise à jour écrits dans un répertoire privé** — le script de mise à jour détaché et
+  son journal allaient à un chemin fixe du répertoire temporaire partagé
+  (`/tmp/nucleus-update.sh` sous Linux), qu'un autre utilisateur local peut pré-créer comme lien
+  symbolique ou comme fichier lui appartenant, transformant la mise à jour en exécution de code
+  local sous l'identité de l'application. Chaque exécution obtient maintenant un répertoire neuf
+  accessible au seul propriétaire (`0700`).
+- **Échappement du script de mise à jour Windows** — les chemins issus du manifeste sont échappés
+  avant d'atteindre PowerShell.
+- **Helper de mise à jour root sous Linux** — fermeture d'une fenêtre time-of-check/time-of-use et
+  d'un chemin de downgrade dans le helper privilégié.
+- **Le helper de mise à jour Linux laissait fuir un gpg-agent** — la vérification de signature ne
+  laisse plus de gpg-agent tourner dans le scope systemd de l'application.
+- **Nom D-Bus MPRIS invalide** (#548) — un identifiant d'application qui n'est pas un nom D-Bus
+  valide ne bloque plus le démarrage de media-control sous Linux.
+- **Fermeture du menu contextuel et premier clic droit** — le flyout se referme quand la fenêtre
+  propriétaire perd le focus, et le menu macOS s'ouvre dès le premier clic droit dans une
+  application encore inactive.
+- **Corrections Tao** — le bouton de fermeture des dialogues anime son survol comme
+  `DecoratedWindow` ; une session native qui avale un mouse-up ne laisse plus de bouton bloqué ;
+  les séparateurs Adwaita suivent la règle `currentColor` de libadwaita.
+
+---
+
 ## v2.4.7
 
 **Sortie : 2026-08-17**

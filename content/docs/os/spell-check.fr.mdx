@@ -1,0 +1,217 @@
+---
+title: Correction orthographique
+description: Vérifiez l'orthographe dans les champs de texte Compose via le moteur natif de chaque système — Hunspell sous Linux, NSSpellChecker sous macOS et l'API Windows Spell Checking.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Le module `spellcheck` vérifie l'orthographe depuis Kotlin en s'appuyant sur le moteur de
+correction que chaque système d'exploitation embarque déjà. Il expose un wrapper Compose qui
+ajoute les suggestions au menu contextuel d'un champ de texte, et une API moteur utilisable sans
+Compose.
+
+## Ajouter la dépendance
+
+`nucleus-application` expose `spellcheck` en dépendance `api` : l'intégration Compose est donc
+déjà dans le classpath de toute application Nucleus.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+}
+```
+
+Déclarez le module explicitement uniquement pour utiliser le moteur sans la couche Compose :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.spellcheck:<version>")
+}
+```
+
+## Vérifier un champ de texte
+
+Entourez le champ d'un `SpellcheckContextMenu`. Un clic droit sur un mot mal orthographié liste
+les suggestions et une entrée « Ajouter au dictionnaire », au-dessus ou en dessous des commandes
+Couper/Copier/Coller :
+
+```kotlin
+import androidx.compose.foundation.text.BasicTextField
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+@Composable
+fun NoteField(value: String, onValueChange: (String) -> Unit) {
+    SpellcheckContextMenu(text = value, onTextChange = onValueChange) {
+        BasicTextField(value = value, onValueChange = onValueChange, singleLine = true)
+    }
+}
+```
+
+Choisir une suggestion remplace le mot cliqué et appelle `onTextChange` avec le nouveau texte.
+
+Une seconde surcharge cible les champs à état, dont elle gère le texte elle-même :
+
+```kotlin
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import dev.nucleusframework.application.spellcheck.SpellcheckContextMenu
+
+val state = rememberTextFieldState("helo world")
+
+SpellcheckContextMenu(state = state) {
+    TextField(state = state)
+}
+```
+
+## Choisir la langue de vérification
+
+Sans argument, la session utilise `Locale.getDefault()`. Passez `locale` pour vérifier un champ
+dans une autre langue :
+
+```kotlin
+SpellcheckContextMenu(
+    text = value,
+    onTextChange = onValueChange,
+    locale = Locale.FRENCH,
+) {
+    BasicTextField(value = value, onValueChange = onValueChange)
+}
+```
+
+Pour basculer tout le processus, affectez `SpellChecker.locale`. Charger un dictionnaire touche
+le disque : préchauffez la session hors du thread principal.
+
+```kotlin
+import dev.nucleusframework.spellcheck.SpellChecker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+LaunchedEffect(locale) {
+    SpellChecker.locale = locale
+    withContext(Dispatchers.IO) { SpellChecker.ensureSession(locale) }
+}
+```
+
+Affecter `locale` libère la session courante ; l'accès suivant en construit une pour la nouvelle
+langue. Si vous passez à la fois `session` et `locale` au composable, `session` l'emporte.
+
+## Placer les entrées du menu
+
+`menuPlacement` décide si les suggestions apparaissent au-dessus ou en dessous des commandes
+d'édition :
+
+```kotlin
+import dev.nucleusframework.application.spellcheck.SpellcheckMenuPlacement
+
+SpellcheckContextMenu(
+    text = value,
+    onTextChange = onValueChange,
+    menuPlacement = SpellcheckMenuPlacement.Top,
+) {
+    BasicTextField(value = value, onValueChange = onValueChange)
+}
+```
+
+| Valeur | Ordre |
+|---|---|
+| `Bottom` (défaut) | Couper/Copier/Coller, séparateur, suggestions |
+| `Top` | Suggestions, séparateur, Couper/Copier/Coller |
+
+## Fonctionnement
+
+Chaque plateforme dispose d'un moteur de correction, atteint via JNI. macOS utilise
+`NSSpellChecker`, Windows l'API Spell Checking (`ISpellChecker`), et Linux charge Hunspell avec
+`dlopen` — il n'y a donc aucune dépendance de compilation vers un paquet de distribution.
+
+Une `SpellcheckSession` détient un dictionnaire chargé pour une locale. `SpellChecker` conserve
+une session à l'échelle du processus et la reconstruit quand vous changez `locale`. Les mots
+ajoutés via « Ajouter au dictionnaire » sont écrits dans
+`~/.config/nucleus/spellcheck/<tag>.dic` (en respectant `XDG_CONFIG_HOME`) ; les listes de mots
+apprises au niveau de l'OS sous macOS et Windows ne sont pas modifiées.
+
+Quand aucun moteur n'est disponible — plateforme non supportée, bibliothèque Hunspell absente ou
+dictionnaire introuvable — chaque opération devient inopérante au lieu d'échouer : `check` et
+`addToDictionary` renvoient `false`, `suggest` renvoie une liste vide et `SpellcheckContextMenu`
+affiche son contenu tel quel.
+
+<Tabs items={['Linux', 'macOS', 'Windows']}>
+<Tab value="Linux">
+Hunspell est chargé à l'exécution depuis le premier soname qui se résout :
+`libhunspell-1.7.so.0`, `libhunspell-1.7.so`, `libhunspell.so.0`, `libhunspell-1.6.so.0`, puis
+`libhunspell.so`.
+
+Les dictionnaires sont des paires `<tag>.aff` + `<tag>.dic`, cherchées d'abord dans `$DICPATH`
+(séparé par des deux-points), puis dans `/usr/share/hunspell`, `/usr/share/myspell/dicts`,
+`/usr/share/myspell`, `/usr/local/share/hunspell` et `$XDG_DATA_HOME/hunspell` (par défaut
+`~/.local/share/hunspell`).
+
+Le tag est résolu en `lang_COUNTRY`, puis par langue seule, puis via des alias — `en` essaie
+`en_US`, `en_GB`, `en` ; `fr` essaie `fr_FR`. L'utilisateur final a besoin de la bibliothèque
+`hunspell` de sa distribution et d'un paquet de dictionnaire.
+</Tab>
+<Tab value="macOS">
+`NSSpellChecker` fournit le moteur et la liste des langues. Aucun fichier de dictionnaire n'est
+nécessaire, et la locale demandée est confrontée aux langues que macOS déclare disponibles.
+</Tab>
+<Tab value="Windows">
+L'API Windows Spell Checking (`ISpellChecker`) fournit le moteur. Aucun fichier de dictionnaire
+n'est nécessaire ; les langues viennent des modules linguistiques installés.
+</Tab>
+</Tabs>
+
+## Référence de l'API
+
+### Intégration Compose
+
+Package `dev.nucleusframework.application.spellcheck`, livré dans `nucleus-application`.
+
+| Symbole | Description |
+|---|---|
+| `SpellcheckContextMenu(text, onTextChange, session?, locale?, menuPlacement, content)` | Ajoute les suggestions au menu contextuel du champ dans `content`. |
+| `SpellcheckContextMenu(state, session?, locale?, menuPlacement, content)` | Idem, pour un champ basé sur `TextFieldState`. |
+| `SpellcheckMenuPlacement` | `Top`, `Bottom`. |
+| `NucleusSpellcheckInstaller.menuItems(word, session, onSuggestion, onAddToDictionary, separator?, menuPlacement)` | Construit les entrées de suggestion à fusionner dans un menu que vous assemblez. |
+| `drawMisspellingSquiggles(drawScope, layout, ranges, color)` | Dessine les soulignements des plages fournies dans un rendu de texte personnalisé. |
+
+### Moteur
+
+Package `dev.nucleusframework.spellcheck`, livré dans `spellcheck`.
+
+| Symbole | Description |
+|---|---|
+| `SpellChecker` | Singleton du processus : `locale`, `session`, `sessionIfReady`, `isAvailable`, `ensureSession()`, `check()`, `suggest()`, `addToDictionary()`, `misspellings()`. |
+| `SpellcheckSession(locale, osName, dictionaryDirectories, userDictionaryFile)` | Un dictionnaire chargé. `AutoCloseable` ; expose `locale`, `isAvailable`, `dictionaryTag`, `check`, `suggest`, `addToDictionary`, `misspellings`. |
+| `SpellcheckSession.defaultUserDictionaryFile(locale)` | Chemin du dictionnaire utilisateur pour une locale. |
+| `DictionaryLocator.defaultDirectories()` / `find(locale, directories)` | Où les dictionnaires sont cherchés, et la paire correspondant à une locale. |
+| `DictionaryFiles(aff, dic, tag)` | Une paire de dictionnaire résolue. |
+| `SpellcheckWord(start, end, word)` | Un token et sa plage dans le texte. |
+
+### Utilitaires de texte
+
+| Fonction | Description |
+|---|---|
+| `iterateWords(text)` | Tous les tokens du texte. |
+| `misspellingRanges(text) { isCorrect }` | Les plages rejetées par le prédicat. |
+| `wordAt(text, offset)` | Le token contenant un offset, ou `null`. |
+| `replaceWord(text, word, replacement)` | Le texte avec un token remplacé. |
+| `buildSpellcheckMenuModel(word, session, range?, maxSuggestions)` | Les suggestions et le libellé « Ajouter au dictionnaire » localisé. |
+| `applySuggestion(text, model, suggestion)` | Le texte avec la plage du modèle remplacée. |
+
+`SpellcheckMenuModel.localizedAddToDictionaryLabel(locale)` traduit le libellé ; la valeur de
+repli est `DEFAULT_ADD_TO_DICTIONARY_LABEL`.
+
+## Notes
+
+- Les tokens sont des lettres Unicode avec apostrophes internes. Les traits d'union coupent les
+  mots ; les tokens purement numériques ou de plus de 64 caractères sont ignorés.
+- `SpellChecker.session` bloque au premier accès pendant le chargement du dictionnaire. Sur un
+  chemin de frame, utilisez `sessionIfReady`, ou préchauffez avec `ensureSession()` depuis un
+  dispatcher d'arrière-plan.
+- Sous Jewel, `JewelDecoratedWindow` et `JewelDecoratedDialog` installent
+  `ProvideJewelSpellcheckMenu` pour que les entrées adoptent le chrome des menus Jewel.
+
+## Et ensuite
+
+- [Menus contextuels](/docs/window/context-menu) — le chrome dans lequel les suggestions s'affichent.
+- [Native access](/docs/performance/native-access) — comment Nucleus se lie aux bibliothèques natives.
+- [Écosystème](/docs/ecosystem) — les bibliothèques JVM qui couvrent le reste de votre application.

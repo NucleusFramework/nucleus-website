@@ -1,0 +1,267 @@
+---
+title: API reference
+description: WebView, WebViewState, WebViewNavigator, settings, cookies, JS bridge, and request interception.
+---
+
+The public API lives under `dev.nucleusframework.webview`. Platform packages re-export the same types from `commonMain`.
+
+## WebView
+
+The multiplatform composable. Draws the native engine and an optional Compose overlay.
+
+```kotlin
+@Composable
+fun WebView(
+    state: WebViewState,
+    modifier: Modifier = Modifier,
+    navigator: WebViewNavigator = rememberWebViewNavigator(),
+    webViewJsBridge: WebViewJsBridge? = null,
+    onCreated: (NativeWebView) -> Unit = {},
+    onDispose: (NativeWebView) -> Unit = {},
+    content: @Composable () -> Unit = {},
+)
+```
+
+- `content` is Compose UI drawn **over** the native surface (Tao `NativeView` content slot on desktop; a layered sibling elsewhere).
+- `onCreated` / `onDispose` receive the platform `NativeWebView` handle when the engine is attached or released.
+
+## WebViewState
+
+State holder for one embedded engine. Create it with the `rememberWebViewState*` helpers.
+
+```kotlin
+@Stable
+class WebViewState(webContent: WebContent) {
+    var lastLoadedUrl: String?           // last committed URL
+    var content: WebContent              // drives loads when reassigned
+    var loadingState: LoadingState       // Initializing | Loading | Finished
+    val isLoading: Boolean               // true until Finished
+    var pageTitle: String?
+    val errorsForCurrentRequest: SnapshotStateList<WebViewError>
+    val webSettings: WebSettings
+    val cookieManager: CookieManager
+    var webView: IWebView?               // set after the platform view attaches
+}
+```
+
+```kotlin
+@Composable
+fun rememberWebViewState(
+    url: String,
+    additionalHttpHeaders: Map<String, String> = emptyMap(),
+    extraSettings: WebSettings.() -> Unit = {},
+): WebViewState
+
+@Composable
+fun rememberWebViewStateWithHTMLData(
+    data: String,
+    baseUrl: String? = null,
+    encoding: String = "utf-8",
+    mimeType: String? = null,
+    historyUrl: String? = null,
+): WebViewState
+
+@Composable
+fun rememberWebViewStateWithHTMLFile(
+    fileName: String,
+    readType: WebViewFileReadType,
+): WebViewState
+```
+
+## WebContent
+
+```kotlin
+sealed class WebContent {
+    data class Url(
+        val url: String,
+        val additionalHttpHeaders: Map<String, String> = emptyMap(),
+    ) : WebContent()
+
+    data class Data(
+        val data: String,
+        val baseUrl: String? = null,
+        val encoding: String = "utf-8",
+        val mimeType: String? = null,
+        val historyUrl: String? = null,
+    ) : WebContent()
+
+    data class File(
+        val fileName: String,
+        val readType: WebViewFileReadType,
+    ) : WebContent()
+
+    data object NavigatorOnly : WebContent()
+}
+
+enum class WebViewFileReadType {
+    ASSET_RESOURCES,
+    COMPOSE_RESOURCE_FILES,
+}
+```
+
+## LoadingState and WebViewError
+
+```kotlin
+sealed class LoadingState {
+    data object Initializing : LoadingState()
+    data class Loading(val progress: Float) : LoadingState()
+    data object Finished : LoadingState()
+}
+
+@Immutable
+data class WebViewError(
+    val code: Int,
+    val description: String,
+    val isFromMainFrame: Boolean,
+)
+```
+
+## WebViewNavigator
+
+Programmatic navigation and script evaluation. Hoist with `rememberWebViewNavigator`.
+
+```kotlin
+@Stable
+class WebViewNavigator(
+    val coroutineScope: CoroutineScope,
+    val requestInterceptor: RequestInterceptor? = null,
+) {
+    var canGoBack: Boolean
+    var canGoForward: Boolean
+
+    fun loadUrl(url: String, additionalHttpHeaders: Map<String, String> = emptyMap())
+    fun loadHtml(
+        html: String,
+        baseUrl: String? = null,
+        mimeType: String? = null,
+        encoding: String? = "utf-8",
+        historyUrl: String? = null,
+    )
+    fun loadHtmlFile(
+        fileName: String,
+        readType: WebViewFileReadType = WebViewFileReadType.ASSET_RESOURCES,
+    )
+    fun evaluateJavaScript(script: String, callback: ((String) -> Unit)? = null)
+    fun navigateBack()
+    fun navigateForward()
+    fun reload()
+    fun stopLoading()
+}
+
+@Composable
+fun rememberWebViewNavigator(
+    coroutineScope: CoroutineScope = rememberCoroutineScope(),
+    requestInterceptor: RequestInterceptor? = null,
+): WebViewNavigator
+```
+
+Bare HTTP(S) host URLs without a path gain a trailing slash before load (browser-style normalization).
+
+## WebSettings
+
+```kotlin
+@Stable
+class WebSettings {
+    var isJavaScriptEnabled: Boolean          // default true
+    var customUserAgentString: String?
+    var zoomLevel: Double                     // default 1.0
+    var supportZoom: Boolean                  // default true
+    var allowFileAccessFromFileURLs: Boolean  // default false
+    var allowUniversalAccessFromFileURLs: Boolean // default false
+    var logSeverity: KLogSeverity             // default None
+    var backgroundColor: Color                // default Transparent
+
+    val androidWebSettings: PlatformWebSettings.AndroidWebSettings
+    val desktopWebSettings: PlatformWebSettings.DesktopWebSettings
+    val iOSWebSettings: PlatformWebSettings.IOSWebSettings
+    val wasmJSWebSettings: PlatformWebSettings.WasmJSWebSettings
+}
+```
+
+Each platform applies the subset it supports. Use the nested `*WebSettings` objects for engine-specific knobs.
+
+## Cookies
+
+```kotlin
+interface CookieManager {
+    suspend fun setCookie(url: String, cookie: Cookie)
+    suspend fun getCookies(url: String): List<Cookie>
+    suspend fun removeAllCookies()
+    suspend fun removeCookies(url: String)
+}
+
+data class Cookie(
+    val name: String,
+    val value: String,
+    val domain: String? = null,
+    val path: String? = null,
+    val expiresDate: Long? = null,
+    val isSessionOnly: Boolean = false,
+    val sameSite: Cookie.HTTPCookieSameSitePolicy? = null,
+    val isSecure: Boolean? = null,
+    val isHttpOnly: Boolean? = null,
+    val maxAge: Long? = null,
+)
+```
+
+Access the manager through `state.cookieManager`.
+
+## Request interception
+
+```kotlin
+interface RequestInterceptor {
+    fun onInterceptUrlRequest(
+        request: WebRequest,
+        navigator: WebViewNavigator,
+    ): WebRequestInterceptResult
+}
+
+data class WebRequest(
+    val url: String,
+    val headers: MutableMap<String, String> = mutableMapOf(),
+    val isForMainFrame: Boolean = false,
+    val isRedirect: Boolean = false,
+    val method: String = "GET",
+)
+
+sealed interface WebRequestInterceptResult {
+    data object Allow : WebRequestInterceptResult
+    data object Reject : WebRequestInterceptResult
+    class Modify(val request: WebRequest) : WebRequestInterceptResult
+}
+```
+
+Interception applies to navigator-driven main-frame navigations only.
+
+## JS bridge
+
+```kotlin
+@Immutable
+open class WebViewJsBridge(
+    val navigator: WebViewNavigator? = null,
+    val jsBridgeName: String = "kmpJsBridge",
+) {
+    fun register(handler: IJsMessageHandler)
+    fun unregister(handler: IJsMessageHandler)
+    fun clear()
+}
+
+interface IJsMessageHandler {
+    fun methodName(): String
+    fun handle(
+        message: JsMessage,
+        navigator: WebViewNavigator?,
+        callback: (String) -> Unit,
+    )
+}
+
+@Composable
+fun rememberWebViewJsBridge(navigator: WebViewNavigator? = null): WebViewJsBridge
+```
+
+After each finished load (or URL change), the library injects `window.<jsBridgeName>` with `callNative(methodName, params, callback)`. Register handlers before or after attach; clear happens when `WebView` leaves composition.
+
+## What's next
+
+- [Getting started](/docs/webview/getting-started) — the same API used across a full browser chrome.
+- [WebView overview](/docs/webview) — supported targets and platform backends.

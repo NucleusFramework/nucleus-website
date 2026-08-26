@@ -14,8 +14,47 @@ interface FeatureItem {
   new?: boolean;
 }
 
-/** Lead with the 2.4 headlines, then the broader OS surface. */
+/** Lead with the 2.5 headlines, then the broader OS surface. */
 const ITEMS: FeatureItem[] = [
+  {
+    name: { en: 'Spell check', fr: 'Correction orthographique' },
+    desc: {
+      en: 'The OS spell engine in Compose text fields — Hunspell, NSSpellChecker, Windows Spell Checking. Suggestions in the context menu.',
+      fr: 'Le moteur de correction de l\'OS dans les champs Compose — Hunspell, NSSpellChecker, Windows Spell Checking. Suggestions dans le menu contextuel.',
+    },
+    icon: 'spellcheck',
+    href: '/docs/os/spell-check',
+    new: true,
+  },
+  {
+    name: { en: 'Native context menus', fr: 'Menus contextuels natifs' },
+    desc: {
+      en: 'One flag swaps the Compose menu for the platform one — NSMenu, Fluent, Adwaita, Breeze, with shortcut labels.',
+      fr: 'Un drapeau remplace le menu Compose par celui de la plateforme — NSMenu, Fluent, Adwaita, Breeze, avec libellés de raccourcis.',
+    },
+    icon: 'menu',
+    href: '/docs/window/context-menu',
+    new: true,
+  },
+  {
+    name: { en: 'Overlay windows', fr: 'Fenêtres overlay' },
+    desc: {
+      en: 'Watermarks and desktop widgets — click-through, always-on-bottom, visible on every workspace.',
+      fr: 'Watermarks et widgets de bureau — traversants, toujours en arrière-plan, visibles sur tous les bureaux.',
+    },
+    icon: 'window',
+    href: '/docs/tao/overlay-windows',
+    new: true,
+  },
+  {
+    name: { en: 'NativeView', fr: 'NativeView' },
+    desc: {
+      en: 'Embed NSView, HWND, or GtkWidget inside Compose — now with Compose blended over it in the same scene.',
+      fr: 'Intégrez un NSView, un HWND ou un GtkWidget dans Compose — désormais avec Compose fondu par-dessus dans la même scène.',
+    },
+    icon: 'native',
+    href: '/docs/tao/native-views',
+  },
   {
     name: { en: 'GPU render context', fr: 'Contexte de rendu GPU' },
     desc: {
@@ -24,7 +63,6 @@ const ITEMS: FeatureItem[] = [
     },
     icon: 'texture',
     href: '/docs/tao/gpu-render-context',
-    new: true,
   },
   {
     name: { en: 'TextureView', fr: 'TextureView' },
@@ -34,26 +72,15 @@ const ITEMS: FeatureItem[] = [
     },
     icon: 'texture',
     href: '/docs/tao/texture-view',
-    new: true,
   },
   {
     name: { en: 'AwakeMode', fr: 'AwakeMode' },
     desc: {
-      en: 'Keep the system awake for long jobs without forcing the screen on — SYSTEM_ONLY vs SYSTEM_AND_DISPLAY.',
-      fr: 'Gardez le système éveillé pour les jobs longs sans forcer l\'écran — SYSTEM_ONLY vs SYSTEM_AND_DISPLAY.',
+      en: 'Keep the system awake for long jobs without forcing the screen on — one handle per feature, no stepping on each other.',
+      fr: 'Gardez le système éveillé pour les jobs longs sans forcer l\'écran — un handle par fonctionnalité, sans interférence.',
     },
     icon: 'update',
     href: '/docs/lifecycle/energy-manager',
-    new: true,
-  },
-  {
-    name: { en: 'NativeView', fr: 'NativeView' },
-    desc: {
-      en: 'Embed NSView, HWND, or GtkWidget inside Compose — sized to the layout slot, disposed with composition.',
-      fr: 'Intégrez un NSView, un HWND ou un GtkWidget dans Compose — dimensionné au slot de layout, libéré avec la composition.',
-    },
-    icon: 'native',
-    href: '/docs/tao/native-views',
   },
   {
     name: { en: 'Differential updates', fr: 'Mises à jour différentielles' },
@@ -192,6 +219,8 @@ function FeatIcon({ name }: { name: string }) {
     case 'link': return <svg viewBox="0 0 24 24" fill="none"><path d="M10 14l4-4M9 7l1-1a4 4 0 015.7 5.7l-1 1M15 17l-1 1a4 4 0 01-5.7-5.7l1-1" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
     case 'shield': return <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M9 12l2 2 4-4" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case 'chip': return <svg viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" stroke={c} strokeWidth={sw}/><rect x="9" y="9" width="6" height="6" stroke={c} strokeWidth={sw}/><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
+    case 'spellcheck': return <svg viewBox="0 0 24 24" fill="none"><path d="M4 14L7.5 6l3.5 8M5.2 11.4h4.6" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/><path d="M14 9.5l2.5 2.5L21 7" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"/><path d="M3 18.5c1-1.2 2-1.2 3 0s2 1.2 3 0 2-1.2 3 0 2 1.2 3 0 2-1.2 3 0" stroke={c} strokeWidth={sw} strokeLinecap="round" opacity="0.65"/></svg>;
+    case 'menu': return <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2.5" stroke={c} strokeWidth={sw}/><path d="M7.5 9h9M7.5 12h9M7.5 15h5" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
     default: return null;
   }
 }

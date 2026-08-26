@@ -1,0 +1,237 @@
+---
+title: Fenêtres overlay
+description: Construisez des watermarks, des widgets de bureau et des overlays informatifs avec des fenêtres transparentes, traversantes, en arrière-plan et visibles sur tous les bureaux, sur le backend Tao.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Un overlay est une fenêtre qui sort de la pile de fenêtres habituelle : un watermark qui ignore
+les clics, un widget épinglé sous toutes les autres fenêtres, un badge qui suit l'utilisateur
+d'un bureau à l'autre. Cette page couvre les drapeaux de fenêtre qui rendent ces formes possibles
+et le comportement de chacun par plateforme.
+
+## Ajouter la dépendance
+
+Ces drapeaux sont des paramètres de `DecoratedWindow` dans `nucleus-application`, implémentés par
+le backend Tao :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+<Callout type="info">
+Les drapeaux d'overlay sont une fonctionnalité Tao. Sur les backends AWT, ils sont acceptés et
+ignorés : le même code y produit une fenêtre ordinaire.
+</Callout>
+
+## Construire un watermark traversant
+
+Un overlay passif est transparent, sans décoration, non focusable, et laisse le pointeur passer
+vers ce qui se trouve derrière :
+
+```kotlin
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    val state = rememberWindowState(
+        position = WindowPosition.Aligned(Alignment.BottomEnd),
+        size = DpSize(360.dp, 160.dp),
+    )
+
+    DecoratedWindow(
+        onCloseRequest = { },
+        state = state,
+        title = "Watermark",
+        resizable = false,
+        undecorated = true,
+        transparent = true,
+        alwaysOnTop = true,
+        focusable = false,
+        clickThrough = true,
+        hiddenFromDock = true,
+        visibleOnAllWorkspaces = true,
+        forceX11 = true,
+    ) {
+        Watermark()
+    }
+}
+```
+
+Associez `clickThrough = true` à `focusable = false` : une fenêtre qu'on ne peut pas cliquer ne
+doit pas non plus prendre le focus clavier.
+
+## Épingler un widget sous les autres fenêtres
+
+Un widget de bureau, c'est la même forme avec l'empilement inversé — `alwaysOnBottom` au lieu de
+`alwaysOnTop`, et les clics conservés pour que le widget reste interactif :
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    state = rememberWindowState(
+        position = WindowPosition.Aligned(Alignment.BottomEnd),
+        size = DpSize(300.dp, 340.dp),
+    ),
+    title = "Nucleus widget",
+    resizable = false,
+    undecorated = true,
+    transparent = true,
+    hiddenFromDock = true,
+    nativeContextMenu = true,
+    visibleOnAllWorkspaces = true,
+    forceX11 = true,
+    alwaysOnBottom = true,
+) {
+    WidgetSurface()
+}
+```
+
+`alwaysOnTop` et `alwaysOnBottom` sont mutuellement exclusifs : renseigner l'un annule l'autre, et
+le dernier positionné gagne.
+
+<Callout type="warn">
+Passer en arrière-plan n'équivaut pas à appartenir au bureau. La fenêtre reste dans la barre des
+tâches et dans Alt+Tab si vous ne renseignez pas aussi `hiddenFromDock`, et ce n'est pas une
+véritable fenêtre de type bureau. Sous Wayland natif, une surface collée au fond d'écran exige
+`wlr-layer-shell`, que Tao n'implémente pas.
+</Callout>
+
+## Basculer les drapeaux à l'exécution
+
+`clickThrough`, `alwaysOnBottom` et `visibleOnAllWorkspaces` sont des paramètres réactifs :
+changez l'état qu'ils lisent et la fenêtre suit. Pour un contrôle impératif, appelez les setters
+sur le handle `TaoWindow` :
+
+```kotlin
+import dev.nucleusframework.window.tao.TaoWindow
+
+fun applyOverlayMode(window: TaoWindow, passive: Boolean) {
+    window.setIgnoreCursorEvents(passive)
+    window.setAlwaysOnBottom(passive)
+    window.setVisibleOnAllWorkspaces(passive)
+}
+```
+
+`transparent` et `forceX11` ne se règlent qu'à la création : ils décrivent la surface native, qui
+ne change plus une fois la fenêtre existante.
+
+## Prendre une surface X11 sous Wayland
+
+L'empilement côté client, le positionnement et la persistance entre bureaux n'existent pas dans
+les protocoles Wayland : les drapeaux d'overlay y sont donc sans effet sur une surface Wayland
+native. `forceX11 = true` donne à une seule fenêtre une surface XWayland, sans basculer le reste
+de l'application hors de Wayland :
+
+```kotlin
+DecoratedWindow(onCloseRequest = { }, forceX11 = true, /* … */) { Watermark() }
+```
+
+Relisez ce que la fenêtre a réellement obtenu :
+
+```kotlin
+import dev.nucleusframework.core.runtime.Platform
+import dev.nucleusframework.window.tao.TaoWindow
+
+fun surfaceLabel(window: TaoWindow?): String? {
+    if (window == null || Platform.Current != Platform.Linux) return null
+    return if (window.isNativeWaylandSurface) "Wayland" else "X11"
+}
+```
+
+`isNativeWaylandSurface` interroge la surface native vivante et non l'environnement : une fenêtre
+`forceX11` renvoie donc `false` pendant que ses voisines sous Wayland renvoient `true`. La valeur
+n'a de sens qu'une fois la fenêtre prête.
+
+Pour basculer tout le processus sur XWayland, définissez `NUCLEUS_TAO_LINUX_RENDERER=x11` (ou
+`GDK_BACKEND=x11`) avant le lancement.
+
+Quand un drapeau atterrit sur une surface Wayland native, Nucleus émet un avertissement une fois
+par fenêtre et par fonctionnalité via `java.util.logging`, en nommant le drapeau et la raison de
+son inefficacité. Si `forceX11` ne trouve aucun serveur X sur `DISPLAY` — session sans XWayland —
+la fenêtre reste sous Wayland et le signale.
+
+## Comportement par plateforme
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+`clickThrough` renseigne `NSWindow.ignoresMouseEvents`. `alwaysOnBottom` utilise un niveau de
+fenêtre inférieur au niveau normal, et `visibleOnAllWorkspaces` rejoint tous les Spaces via
+`NSWindowCollectionBehaviorCanJoinAllSpaces`.
+
+Une fenêtre transparente conserve son ombre, car AppKit épouse la forme du contenu dessiné.
+Flotter au-dessus du Space plein écran d'une autre application demande un niveau de fenêtre que
+Tao n'expose pas.
+</Tab>
+<Tab value="Windows">
+`clickThrough` applique `WS_EX_TRANSPARENT | WS_EX_LAYERED` et initialise l'alpha du calque, ce
+qui préserve la transparence par pixel. `alwaysOnBottom` utilise `HWND_BOTTOM`.
+
+`visibleOnAllWorkspaces` est sans effet, et inutile : une fenêtre masquée de la barre des tâches
+(`hiddenFromDock = true`) n'est pas suivie par le Virtual Desktop Manager et apparaît déjà sur
+tous les bureaux.
+
+Une fenêtre entièrement transparente perd l'ombre système et la bordure DWM de 1 px, qui épousent
+la fenêtre rectangulaire et non votre contenu. Le hit-testing n'est pas affecté.
+</Tab>
+<Tab value="Linux">
+`clickThrough` installe une région d'entrée GDK vide. `alwaysOnBottom` se traduit par
+`_NET_WM_STATE_BELOW` et `visibleOnAllWorkspaces` par `gtk_window_stick()` — X11 et XWayland
+uniquement.
+
+La transparence, elle, fonctionne sur les deux backends. L'empilement, le positionnement et les
+drapeaux de bureau exigent X11 : utilisez `forceX11` par fenêtre, ou
+`NUCLEUS_TAO_LINUX_RENDERER=x11` pour le processus.
+</Tab>
+</Tabs>
+
+## Référence de l'API
+
+### Paramètres de DecoratedWindow
+
+| Paramètre | Défaut | Réactif | Description |
+|---|---|---|---|
+| `transparent` | `false` | Non | Construit la surface native avec un canal alpha ; le fond opaque et les couleurs de barre de titre sont effacés. |
+| `clickThrough` | `false` | Oui | La fenêtre ignore les événements pointeur ; ils atteignent ce qui est derrière. |
+| `alwaysOnBottom` | `false` | Oui | Maintient la fenêtre sous les fenêtres normales. Annule `alwaysOnTop`. |
+| `visibleOnAllWorkspaces` | `false` | Oui | Affiche la fenêtre sur tous les bureaux ou Spaces. |
+| `forceX11` | `false` | Non | Linux uniquement : demande une surface X11 (XWayland) pour cette fenêtre. |
+
+`alwaysOnBottom` est également disponible sur `HostedWindow`. `transparent`, `clickThrough`,
+`visibleOnAllWorkspaces` et `forceX11` sont en plus exposés sur les wrappers de fenêtre Material
+et Jewel.
+
+### Membres de TaoWindow
+
+| Membre | Description |
+|---|---|
+| `setIgnoreCursorEvents(ignore: Boolean)` | `clickThrough` impératif. |
+| `setAlwaysOnBottom(alwaysOnBottom: Boolean)` | `alwaysOnBottom` impératif. |
+| `setVisibleOnAllWorkspaces(visible: Boolean)` | `visibleOnAllWorkspaces` impératif. |
+| `isNativeWaylandSurface: Boolean` | Si cette fenêtre a fini sur une surface Wayland native. |
+
+Récupérez le handle depuis la portée de la fenêtre avec `nucleusWindow.unsafe.taoWindow`.
+
+## Notes
+
+- Une fenêtre largement transparente rend mieux avec un chrome sur mesure qu'avec la `TitleBar`
+  standard ; combinez `transparent = true` et `undecorated = true` pour un overlay sans bordure.
+- Les scènes Compose sont informées de la transparence de la fenêtre : les voiles de dialogue et
+  les popups se fondent donc sur le fond alpha au lieu de peindre sur un voile gris.
+- `WindowPosition.Aligned` ne peut pas être respecté sous Wayland natif — le compositeur décide du
+  placement. Nucleus le signale une fois par processus.
+
+## Et ensuite
+
+- [DecoratedWindow sur Tao](/docs/tao/decorated-window) — les autres paramètres de fenêtre.
+- [Wayland natif](/docs/tao/wayland) — détection de session et repli X11.
+- [Menus contextuels](/docs/window/context-menu) — le menu dont un widget interactif a besoin.

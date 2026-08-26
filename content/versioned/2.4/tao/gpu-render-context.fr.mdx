@@ -1,0 +1,141 @@
+---
+title: Contexte de rendu GPU
+description: Donnez aux renderers GPU in-process le DirectContext Skia et le device natif de la scène pour composer sans second GPU ni copie par frame.
+---
+
+`TaoGpuRenderContext` publie le contexte GPU de la surface Compose englobante sur le backend
+Tao : le `DirectContext` Skia avec lequel la scène dessine, plus le device natif derrière
+(Metal sur macOS, ANGLE GLES sur Windows, EGL/GLES natif sur Linux). Un renderer in-process —
+moteur de carte, viewport 3D, bibliothèque de charting — alloue ses cibles de rendu **sur ce
+même device** et laisse Compose les sampler sans second GPU, sans handle partageable et sans
+copie inter-device par frame.
+
+C'est le complément de [`TextureView`](/docs/tao/texture-view), pas un remplacement.
+`TextureView` est le contrat pour les producteurs **externes** (moteurs hors-process, décodeurs
+matériels sur leur propre device). Utilisez `TaoGpuRenderContext` lorsque votre renderer peut
+créer ses objets GPU sur le contexte de la scène.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Les types vivent dans `dev.nucleusframework.window.tao`.
+
+## Obtenir le contexte
+
+Appelez `rememberTaoGpuRenderContext()` dans une surface qui possède un contexte GPU
+(contenu d'un `DecoratedWindow`, couche popup native, overlay `NativeView`, ou panneau tray).
+Il renvoie `null` pendant le démarrage, le teardown, ou dans un environnement non matériel :
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import dev.nucleusframework.window.tao.TaoGpuRenderContext
+import dev.nucleusframework.window.tao.TaoOpenGlRenderContext
+import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
+
+@Composable
+fun MapViewport() {
+    val renderContext = rememberTaoGpuRenderContext() ?: return
+    // Clé l'état du renderer sur l'instance : un contexte reconstruit a une nouvelle identité.
+    val renderer = remember(renderContext) { MapEngineRenderer(renderContext) }
+    DisposableEffect(renderer) {
+        onDispose { renderer.close() }
+    }
+    LaunchedEffect(renderer) {
+        while (true) {
+            // Travail GPU à l'intérieur de withFrameNanos — voir Frame pacing ci-dessous.
+            withFrameNanos { renderer.renderFrame() }
+        }
+    }
+    // … sampler la sortie du moteur dans Compose
+}
+```
+
+## Backends
+
+| Type | Plateformes | API supplémentaire |
+|------|-------------|--------------------|
+| `TaoMetalRenderContext` | macOS | `metalDevicePtr` — `id<MTLDevice>` emprunté |
+| `TaoOpenGlRenderContext` | Linux, Windows | `withContextCurrent { }` — lie le contexte GL de la surface |
+
+Les deux exposent :
+
+| Membre | Description |
+|--------|-------------|
+| `backend: TaoRenderBackend` | `METAL` ou `OPENGL` |
+| `skiaContext: DirectContext` | Contexte Skia avec lequel la scène peint (emprunté) |
+| `runOnGpuThread { }` | Accès exclusif pour le travail Skia / GPU (Metal bascule sur le thread de rendu ; GL s'exécute en ligne sur le thread de la boucle d'événements après un contrôle de thread) |
+
+Sur Windows, `OPENGL` est ANGLE-on-D3D11 GLES — pas OpenGL desktop. Résolvez les points
+d'entrée via `eglGetProcAddress` d'ANGLE, comme Skia pour la scène.
+
+## Propriété et durée de vie
+
+Chaque handle est **emprunté**. Ne le retenez pas, ne le libérez pas, ne le freez pas.
+Arrêtez d'utiliser un contexte dès que la surface en publie un autre (ou `null`).
+
+`rememberTaoGpuRenderContext()` renvoie une **nouvelle instance** chaque fois que le
+contexte sous-jacent est reconstruit — détachement de fenêtre, cycle hide/show Wayland
+(reconstruction complète de la pile EGL), teardown d'un popup ou d'un panneau tray. Clé
+l'état du renderer sur cette instance :
+
+```kotlin
+val renderer = remember(renderContext) { EngineRenderer(renderContext) }
+DisposableEffect(renderContext) {
+    onDispose {
+        renderContext.runOnGpuThread { renderer.releaseGpuResources() }
+    }
+}
+```
+
+## Frame pacing
+
+Émettez le travail GPU **à l'intérieur** du callback `withFrameNanos` (ou pendant la
+composition / layout / draw), pas dans le code qui suit la suspension :
+
+- Sur Linux, l'hôte confie le contexte EGL à un thread de swap pour le
+  `eglSwapBuffers` bloquant juste après chaque frame. Une continuation post-frame perd la
+  course et obtient `withContextCurrent → null` presque à chaque vsync.
+- Le callback de frame s'exécute dans la passe de rendu, pendant que le contexte est
+  attachable.
+
+Lorsque la scène a des imports `TextureView` actifs ou des consommateurs
+`TaoGpuRenderContext`, Tao maintient le VSync pendant la boucle modale move/resize Windows
+et les bursts de resize Linux, pour que le contenu piloté par l'horloge de frame reste au
+rythme de l'affichage au lieu de tourner à la vitesse de la pompe d'événements.
+
+## TextureView vs contexte de rendu GPU
+
+| | `TextureView` | `TaoGpuRenderContext` |
+|--|---------------|------------------------|
+| Producteur | Externe / hors-process | In-process, même device |
+| Import | D3D11 partagé / IOSurface / DMA-BUF | Allouer sur `skiaContext` |
+| Usage typique | Décodeur vidéo, moteur de jeu, caméra | Moteurs type MapLibre, viewports 3D, charts |
+
+## Notes
+
+- Appelez chaque membre depuis le thread de composition (thread de la boucle d'événements Tao ;
+  thread principal du process sur macOS). Passez le travail GPU par `runOnGpuThread` /
+  `withContextCurrent`.
+- `withContextCurrent` imbriqué est sûr ; le contexte courant précédent est restauré ensuite
+  et le cache d'état GL de Skia est invalidé, donc les consommateurs n'ont rien à faire.
+- Chaque hôte de fenêtre Windows possède un contexte ANGLE GLES non partagé. Les purges du
+  cache GPU sur le chemin de resize lient d'abord ce contexte pour que les textures d'une
+  fenêtre sœur restent intactes. Les surfaces popup / tray macOS et Linux peuvent aussi
+  posséder des contextes privés.
+
+## Et ensuite
+
+- [TextureView](/docs/tao/texture-view) — importer des frames GPU externes dans la scène.
+- [Vues natives](/docs/tao/native-views) — embarquer des widgets natifs interactifs.
+- [DecoratedWindow](/docs/tao/decorated-window) — héberger des fenêtres Tao depuis la composition.
+- [Le backend Tao](/docs/tao) — architecture et sélection du backend.

@@ -1,0 +1,152 @@
+---
+title: Notifications on Windows
+description: Send Windows toast notifications from Kotlin with adaptive layouts, images, buttons, text input, and progress bars.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`notification-windows` lets you send Windows 10/11 toast notifications from Kotlin. It wraps the WinRT `ToastNotificationManager` API in a DSL that covers adaptive text, images, progress bars, selection boxes, text inputs, and headers, and works for both MSIX-packaged and unpackaged (EXE/MSI) apps.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.notification-windows:<version>")
+}
+```
+
+## Send a notification
+
+Call `initialize()` once before showing any toast, then build content with the `toast { }` DSL and pass it to `show`:
+
+```kotlin
+import dev.nucleusframework.notification.windows.*
+
+WindowsNotificationCenter.initialize()
+
+WindowsNotificationCenter.show(
+    toast {
+        visual {
+            text("Build finished")
+            text("artifact-2.0.0.zip uploaded")
+            heroImage("https://example.com/hero.png")
+        }
+        actions {
+            button("Open", arguments = "open")
+            button("Show in folder", arguments = "folder")
+        }
+    },
+)
+```
+
+Every method is a no-op on non-Windows platforms. Check `WindowsNotificationCenter.isAvailable` before calling if you share code across operating systems.
+
+## How it works
+
+A toast on Windows is an XML payload dispatched through `ToastNotificationManager` and identified by an AUMID (Application User Model ID). The library resolves the AUMID for you based on how the app is packaged.
+
+<Callout type="info" title="AUMID handling">
+- **MSIX / APPX**: the AUMID resolves automatically from the package identity.
+- **Unpackaged (EXE/MSI/dev)**: Nucleus derives the AUMID from `NucleusApp.aumid` and registers it on the current process.
+- Override it with `WindowsNotificationCenter.initialize(aumid = "Vendor.App")`.
+</Callout>
+
+<Callout type="warn" title="Start Menu shortcut required for unpackaged apps">
+Unpackaged apps need a Start Menu `.lnk` shortcut whose AUMID property matches the one used at runtime. Without it, toasts may fail to appear or to persist in Action Center. `initialize` creates or updates this shortcut by default (`ShortcutPolicy.REQUIRE_CREATE`), and the Nucleus Gradle plugin sets it up when you build the Windows installer formats.
+</Callout>
+
+## API reference
+
+### Build adaptive content
+
+The `toast { }` builder exposes `visual`, `actions`, `audio`, and `header` blocks. Enum values are `UPPER_SNAKE_CASE`.
+
+```kotlin
+toast {
+    visual {
+        text("Sync in progress")
+        appLogo("logo.png", crop = AdaptiveImageCrop.CIRCLE)
+        progressBar(
+            status = "Uploading",
+            title = "report.pdf",
+            valueStringOverride = "3 of 5 files",
+            value = 0.6,
+        )
+    }
+    actions {
+        button("Pause", arguments = "pause")
+        button("Cancel", arguments = "cancel", activationType = ActivationType.BACKGROUND)
+    }
+    audio(ToastAudioSource.REMINDER)
+    scenario = ToastScenario.REMINDER
+}
+```
+
+`ToastActionsBuilder` provides `textBox`, `selectionBox`, `button`, and `contextMenuItem`. The `status` string is the only required argument of `progressBar`.
+
+### Listen for events
+
+Register a listener with `addListener`. The callbacks receive flat parameters, not event-argument objects:
+
+```kotlin
+WindowsNotificationCenter.addListener(object : ToastNotificationListener {
+    override fun onActivated(
+        tag: String,
+        group: String,
+        arguments: String,
+        userInputs: Map<String, String>,
+    ) { /* ... */ }
+
+    override fun onDismissed(tag: String, group: String, reason: DismissalReason) { /* ... */ }
+
+    override fun onFailed(tag: String, group: String, errorCode: Int) { /* ... */ }
+})
+```
+
+Remove a listener with `WindowsNotificationCenter.removeListener(listener)`.
+
+### Update an existing toast
+
+Show a toast with a `tag` and `group`, then push new data-bound values with `update`. This drives progress bars without replacing the toast:
+
+```kotlin
+WindowsNotificationCenter.update(
+    tag = "upload",
+    group = "transfers",
+    data = ToastNotificationData(
+        sequenceNumber = 1,
+        values = mapOf("progressValue" to "0.8"),
+    ),
+)
+```
+
+`ToastNotificationData` takes `sequenceNumber` first (a monotonically increasing number that avoids races) and the `values` map second.
+
+### Read the Action Center history
+
+`getHistory` delivers the toasts currently in Action Center through a callback. Each `HistoryEntry` exposes `tag` and `group`:
+
+```kotlin
+WindowsNotificationCenter.getHistory { entries, error ->
+    entries.forEach { entry -> println("${entry.tag} / ${entry.group}") }
+}
+```
+
+### Remove toasts
+
+- `remove(tag, group)` removes a single toast.
+- `removeGroup(group)` removes every toast in a group.
+- `clearAll()` clears the app's Action Center entries.
+- `uninitialize()` releases native resources on shutdown.
+
+## Notes
+
+- Keep the AUMID consistent across the Start Menu shortcut, your `nucleus { }` Gradle config, and runtime. A mismatch is the usual cause of a toast that appears once and then never again.
+- `tag` and `group` are limited to 16 characters each.
+- Hero images and app logos accept remote `http(s)://` URLs in unpackaged apps as long as the URL resolves quickly. For offline-safe behavior, ship a local file via `ms-appx:///` (MSIX) or `file:///` (unpackaged).
+
+## What's next
+
+- [Notifications overview](/docs/os/notifications) — the cross-platform notification DSL.
+- [Notifications on macOS](/docs/os/notification-macos) — `UNUserNotificationCenter` from Kotlin.
+- [Notifications on Linux](/docs/os/notification-linux) — Freedesktop notifications over D-Bus.

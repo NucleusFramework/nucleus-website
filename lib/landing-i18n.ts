@@ -226,8 +226,8 @@ export const featuresT = {
     ),
   } as Bi,
   subtitle: {
-    en: 'TextureView and NativeView put GPU frames and platform widgets inside Compose. Differential auto-update ships only the blocks that changed. Task Scheduler runs background work like WorkManager even when the app is closed. Plus the full OS surface — notifications, tray, hotkeys, dark mode — one Kotlin shape per capability.',
-    fr: 'TextureView et NativeView placent textures GPU et widgets natifs dans Compose. L\'auto-update différentiel ne télécharge que les blocs modifiés. Le Task Scheduler lance du travail en arrière-plan comme WorkManager, même app fermée. Et toute la surface OS — notifications, tray, raccourcis globaux, mode sombre — une API Kotlin par capacité.',
+    en: 'Spell check wires the OS engine into Compose text fields, and one flag swaps Compose menus for the platform\'s. Overlay flags cover watermarks and desktop widgets. TextureView and NativeView put GPU frames and platform widgets inside Compose. Plus the full OS surface — notifications, tray, hotkeys, dark mode — one Kotlin shape per capability.',
+    fr: 'La correction orthographique relie le moteur de l\'OS aux champs de texte Compose, et un drapeau remplace les menus Compose par ceux de la plateforme. Les drapeaux d\'overlay couvrent watermarks et widgets de bureau. TextureView et NativeView placent textures GPU et widgets natifs dans Compose. Et toute la surface OS — notifications, tray, raccourcis globaux, mode sombre — une API Kotlin par capacité.',
   } as Bi<string>,
   newIn: { en: 'New in {line}', fr: 'Nouveau dans {line}' } as Bi<string>,
   cta: { en: 'See what shipped in this release', fr: 'Voir le contenu de cette version' } as Bi<string>,

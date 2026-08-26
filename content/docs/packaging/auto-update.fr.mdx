@@ -102,7 +102,8 @@ L'hébergement se configure dans `nativeDistributions.publish { }` (voir
 
 - **GitHub Releases** — le [workflow de release](/docs/packaging/ci-cd#release) gère tout de bout en bout.
 - **S3** — renseignez les credentials via des variables d'environnement ; le plugin upload à côté du YAML.
-- **HTTP générique** — upload vous-même sur n'importe quel host statique ; l'updater récupère `<baseUrl>/latest-*.yml`.
+- **HTTPS générique** — upload vous-même sur n'importe quel host statique ; l'updater récupère
+  `<baseUrl>/latest-*.yml`. L'URL de base doit être en `https` (voir [Providers](#providers)).
 
 Le bloc `publish { }` ne fait que générer la config electron-builder — il n'upload pas. C'est la CI qui upload.
 
@@ -270,9 +271,16 @@ dessus — dialogue forcé pour les bumps majeurs, installation silencieuse pour
 ### Providers
 
 - `GitHubProvider(owner, repo, token? = null)`
-- `GenericProvider(baseUrl)`
+- `GenericProvider(baseUrl)` — le `baseUrl` doit être en `https`. Une origine non-`https` lève
+  une `IllegalArgumentException` à la construction. `http` n'est accepté que pour les hôtes
+  loopback (`localhost`, `127.0.0.0/8`, `::1`), afin que les tests d'intégration servent des
+  fixtures sans TLS.
 
 Les en-têtes d'authentification personnalisés proviennent de `authHeaders()` du provider, pas de la config.
+
+Le manifeste, les sommes de contrôle et l'artefact viennent tous de cette même origine : en
+`http` simple, un attaquant en position d'interception réécrirait les trois ensemble — le
+SHA-512 du manifeste ne protège rien si l'attaquant écrit aussi le manifeste.
 
 ### Commandes d'installation
 
@@ -296,6 +304,9 @@ Les en-têtes d'authentification personnalisés proviennent de `authHeaders()` d
 - Les mises à jour Linux sans mot de passe (`signing.silentUpdate`) ajoutent une deuxième
   vérification, plus forte : une signature GPG validée contre la clé bundlée dans l'app.
 - Les tokens GitHub passent par l'en-tête `Authorization`, jamais dans les paramètres d'URL.
+- Le script d'installation détaché s'exécute depuis un répertoire créé pour chaque mise à jour,
+  accessible au seul propriétaire (POSIX `0700`), et non depuis un chemin fixe du répertoire
+  temporaire partagé.
 - Pour le Mac App Store, le Microsoft Store, Snapcraft et Flathub, le store gère les mises à jour ;
   ignorez `updater-runtime` entièrement.
 

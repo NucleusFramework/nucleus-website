@@ -1,0 +1,277 @@
+---
+title: Scaffold de fenêtre et chrome
+description: Construisez des mises en page plein fenêtre et des barres de titre personnalisées sur Tao avec WindowScaffold, les zones de drag, WindowControls et les matériaux de plateforme.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`DecoratedWindow` + `TitleBar` plaçaient toujours le contenu principal **sous** une bande de chrome
+fixe. Cela bloquait les mises en page plein fenêtre : pas de liste sous la toolbar, pas de sidebar
+en verre qui rejoint les feux de circulation, pas de headerbar de design system qui déplace encore
+la fenêtre. Depuis la 2.2, `WindowScaffold` et un petit jeu de primitives de chrome résolvent cela
+sans abandonner les zones de caption natives, l'ordre des boutons ni le drag.
+
+## TL;DR
+
+- Composez le chrome avec `WindowScaffold` — n'importe quel slot de barre de titre, placement
+  `Docked` ou `Overlay`.
+- Activez le drag avec `Modifier.windowDragArea` ; excluez des enfants avec `noWindowDrag`.
+- Placez min/max/fermer système avec `WindowControls` (ou padez avec `LocalWindowChromeInsets` sous
+  macOS).
+- Thématisez le client vide avec `WindowBackground` ; forcez clair/sombre natif avec
+  `WindowAppearance`.
+- Matériaux de plateforme : `Modifier.windowGlassRegion` sous macOS, `WindowsBackdrop` sous
+  Windows 11.
+
+## Ajouter la dépendance
+
+Les API de scaffold sont livrées dans `decorated-window-tao` (même artefact que le backend Tao) :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+}
+```
+
+Les sites d'appel existants `DecoratedWindow` + `TitleBar` continuent de fonctionner. Le scaffold
+est purement additif.
+
+## Démarrage rapide
+
+```kotlin
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.TitleBarPlacement
+import dev.nucleusframework.window.WindowBackground
+import dev.nucleusframework.window.WindowControls
+import dev.nucleusframework.window.WindowScaffold
+import dev.nucleusframework.window.windowDragArea
+
+fun main() = nucleusApplication {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Démo scaffold") {
+        MaterialTheme {
+            WindowBackground(MaterialTheme.colorScheme.background)
+            WindowScaffold(
+                titleBar = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .windowDragArea()
+                            .padding(horizontal = 12.dp),
+                    ) {
+                        Text("Mon app", Modifier.align(Alignment.CenterStart))
+                        WindowControls(Modifier.align(Alignment.CenterEnd))
+                    }
+                },
+                titleBarPlacement = TitleBarPlacement.Overlay(),
+            ) { contentPadding ->
+                Box(Modifier.fillMaxSize().padding(contentPadding)) {
+                    /* contenu — défile sous la barre overlay si paddé */
+                }
+            }
+        }
+    }
+}
+```
+
+## Comment ça marche
+
+`WindowScaffold` est l'unique enfant prévu de la lambda de contenu d'un `DecoratedWindow`. Il :
+
+1. **Mesure** le slot `titleBar` et publie la hauteur vers la couche native (centrage des feux de
+   circulation macOS, zone de caption / drag tactile Windows) — en remplacement du contrat
+   hard-codé `TitleBarStyle.metrics.height`.
+2. **Fournit** `LocalWindowChromeInsets` pour que le chrome et le contenu évitent les zones de
+   contrôles réservées par la plateforme (feux de circulation, padding de bord KDE).
+3. En mode **`Overlay`**, laisse le contenu remplir toute la hauteur derrière la barre et renvoie la
+   hauteur mesurée de la barre en `PaddingValues` supérieur.
+
+Rien n'est implicitement draggable au niveau du scaffold. Un chrome personnalisé doit déclarer sa
+surface de déplacement avec `windowDragArea` — le même chemin que le `TitleBar` stock.
+
+### Placement de la barre de titre
+
+| Placement | Comportement |
+|---|---|
+| `TitleBarPlacement.Docked` | Layout classique : la barre prend de la hauteur, le contenu remplit le reste. Par défaut. |
+| `TitleBarPlacement.Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Le contenu est en `fillMaxSize` ; la barre flotte au-dessus. Le contenu reçoit la hauteur de la barre en padding supérieur. |
+
+`autoHideInFullscreen` retire la barre en plein écran pour un contenu immersif.
+`passThroughToContent` hit-teste aussi les appuis contre le contenu **sous** la barre, pour que les
+contrôles fusionnés dans la bande de barre de titre (hamburger d'un panneau de nav réduit, bande de
+tabs) restent interactifs. Désactivé par défaut : avec un contenu full-bleed qui défile derrière un
+chrome opaque, un clic sur la barre activerait sinon ce qui se trouve en dessous.
+
+## Primitives de chrome
+
+### Zones de drag
+
+```kotlin
+modifier = Modifier
+    .windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+```
+
+Un appui primaire non consommé suivi d'un déplacement démarre le move natif de la fenêtre. Les
+enfants interactifs (boutons, champs de texte) s'excluent en consommant l'appui. Les détecteurs de
+geste qui ne revendiquent le pointeur qu'une fois qu'il **bouge** — barres de défilement, sliders,
+poignées de redimensionnement — laissent l'appui non consommé : encapsulez-les :
+
+```kotlin
+Scrollbar(Modifier.noWindowDrag())
+```
+
+Préférez `Modifier.windowDragArea(window = taoWindow)` quand le chrome détient déjà un
+`TaoWindow` (barres de titre, scènes secondaires). La forme sans argument lit
+`LocalTaoWindow` ; la surcharge explicite reste correcte si des CompositionLocals de la
+fenêtre parente sont bridgés dans une scène enfant (les barres de titre stock le font
+depuis 2.3.2).
+
+`WindowDoubleClickAction.None` désactive le double-clic → maximiser sur cette zone.
+
+### Contrôles de fenêtre
+
+`WindowControls` dessine la bande système min / maximiser-restaurer / fermer **en dehors** de
+`TitleBar`, pour qu'un design system la place dans sa propre toolbar :
+
+```kotlin
+WindowControls(
+    modifier = Modifier.align(Alignment.CenterEnd),
+    renderer = WindowControlsRenderer.Platform, // par défaut
+)
+```
+
+Nucleus possède la sémantique (ordre et côté des boutons, y compris le `button-layout` Linux ;
+maximiser ↔ restaurer ; échange plein écran ; fermer → `onCloseRequest`). Le renderer ne dessine
+que. Sous macOS, `WindowControlsRenderer.Platform` ne dessine rien et réserve l'empreinte des feux
+de circulation — padez avec **soit** `WindowControls` **soit**
+`LocalWindowChromeInsets.controlsInsets`, jamais les deux. En plein écran natif, les feux de
+circulation de remplacement ne peuvent pas miniaturiser la fenêtre : le bouton minimiser est
+désactivé et ne semble plus cliquable ; fermer et zoomer restent sur le même chemin au survol.
+
+Fournissez un `WindowControlsRenderer` personnalisé pour dessiner les boutons dans le style du
+design system.
+
+### Insets de chrome
+
+```kotlin
+val insets = LocalWindowChromeInsets.current
+Row(Modifier.padding(insets.controlsInsets)) { /* contenu de barre de titre */ }
+```
+
+`controlsInsets` est la zone de sécurité horizontale pour les contrôles système ; `titleBarHeight`
+est la hauteur mesurée du slot (`0.dp` quand la barre est masquée).
+
+## Matériaux de plateforme et apparence
+
+### Fond de fenêtre
+
+Tao donne à chaque fenêtre son propre `ComposeScene`, si bien que le thème vit souvent **à
+l'intérieur** de la fenêtre. `WindowBackground` fixe la couleur de clear depuis cet arbre — la
+couleur visible pendant un redimensionnement live, autour des panneaux flottants, et partout où
+Compose ne peint rien :
+
+```kotlin
+WindowBackground(MaterialTheme.colorScheme.background)
+```
+
+### Apparence de fenêtre
+
+Force les surfaces natives (verre, feux de circulation, menus, glyphes de chrome Windows) à suivre
+le thème de **l'application** plutôt que le réglage OS :
+
+```kotlin
+WindowAppearance(
+    if (dark) WindowAppearanceMode.Dark else WindowAppearanceMode.Light,
+)
+```
+
+No-op sous Linux. Retombe sur l'apparence dérivée du système quand le composable quitte la
+composition.
+
+### Régions de verre macOS
+
+`Modifier.windowGlassRegion` héberge un vrai panneau `NSSplitViewController` sous la surface
+Compose pour qu'AppKit applique le matériau teinté papier peint de System Settings — le bureau
+transparaît, les fenêtres intermédiaires jamais :
+
+```kotlin
+Box(
+    Modifier
+        .width(248.dp)
+        .fillMaxHeight()
+        .windowGlassRegion(WindowGlassRegionKind.Sidebar, cornerRadius = 12.dp),
+) { /* contenu de sidebar ; laissez des zones non peintes pour le matériau */ }
+```
+
+Kinds : `Sidebar`, `ContentList`, `Inspector` (macOS 14+). Le composant ne doit pas peindre un fond
+opaque plein. macOS uniquement ; no-op ailleurs. Il n'y a pas de verre macOS plein fenêtre — ce
+n'est pas un pattern AppKit.
+
+### Backdrops Windows 11
+
+```kotlin
+WindowsBackdrop(
+    style = WindowsBackdropStyle.Mica,       // ou Acrylic, MicaAlt
+    tint = Color.Unspecified,                // teinte d'app sur le matériau
+    tier = WindowsBackdropTier.Auto,         // Modern / LegacyMica / Windows10Acrylic
+)
+```
+
+DWM compose le matériau derrière la fenêtre partout où l'app ne peint rien. Laissez des panneaux ou
+des marges non peints pour le révéler ; un fond opaque full-bleed le masque. `WindowBackground` est
+suspendu tant qu'un backdrop est actif et restauré quand il quitte la composition.
+
+Dégrade sur les Windows plus anciens : Windows 11 pré-22H2 mappe les styles Mica vers l'ancien
+attribut mono-matériau ; Windows 10 retombe sur l'acrylic quand disponible. No-op silencieux sous
+macOS et Linux.
+
+## Overlays transparents et sans cadre
+
+La transparence plein fenêtre est un flag de création sur le `DecoratedWindow` **Tao** (AWT hors
+périmètre). L'umbrella `NucleusApplicationScope.DecoratedWindow` ne le retransmet pas —
+utilisez `taoApplication` ou la surcharge de scope Tao :
+
+```kotlin
+import dev.nucleusframework.window.tao.taoApplication
+import dev.nucleusframework.window.tao.DecoratedWindow
+
+fun main() = taoApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        undecorated = true,   // pas de cadre, pas d'ombre DWM
+        transparent = true,   // le client vide compose le bureau
+    ) {
+        Box(Modifier.size(48.dp).background(Color(0xFFFF00AA)))
+    }
+}
+```
+
+Les hôtes clearent en alpha-0 ; les clears opaques de `WindowBackground` / barre de titre sont
+contraints en transparent pour que les régions vides restent transparentes. Les teintes
+semi-transparentes s'appliquent toujours.
+
+## Notes
+
+- Prévu comme unique enfant de la lambda de contenu de la fenêtre ; il remplit la hauteur restante.
+- Le `TitleBar` stock reste valable pour les apps qui n'ont pas besoin d'une mise en page plein
+  fenêtre — aucune migration requise.
+- `passThroughToContent` est opt-in pour une raison : activez-le seulement quand du contenu
+  interactif est censé vivre sous la bande de chrome.
+
+## Suite
+
+- [DecoratedWindow sur Tao](/docs/tao/decorated-window) — paramètres de fenêtre et membres du scope.
+- [Window & toolkits](/docs/window) — API de fenêtre partagée et thèmes de toolkit.
+- [Accessibilité](/docs/tao/accessibility) — sémantique Compose projetée vers VoiceOver, Narrator, Orca.

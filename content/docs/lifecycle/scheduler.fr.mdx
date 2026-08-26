@@ -216,6 +216,35 @@ Se définissent dans le bloc `constraints { }` ; toutes sont vérifiées à l'ex
 Un déclenchement périodique non satisfait est ignoré silencieusement et revérifié au prochain
 tir. Un déclenchement calendaire ou on-boot non satisfait programme un réessai avec backoff.
 
+### SchedulerConfig
+
+Chaque backend invoque l'exécutable courant, résolu via
+`ProcessHandle.current().info().command()`. Si votre application démarre par un launcher
+maison, dirigez le scheduler vers ce launcher :
+
+```kotlin
+import dev.nucleusframework.scheduler.SchedulerConfig
+
+SchedulerConfig.executablePath = "/opt/myapp/myapp-launcher"
+SchedulerConfig.executableArguments = listOf("--background")
+```
+
+La commande obtenue est `<executablePath> <executableArguments…> --nucleus-scheduler-run <taskId>`.
+
+| Propriété | Type | Défaut | Comportement |
+|---|---|---|---|
+| `executablePath` | `String?` | `null` | Chemin absolu du programme invoqué par le scheduler de l'OS. `null` ou vide résout l'exécutable courant. |
+| `executableArguments` | `List<String>` | `emptyList()` | Arguments insérés avant le drapeau `--nucleus-scheduler-run`. |
+
+`executablePath` doit être absolu : les scripts wrapper générés vérifient que le fichier existe
+toujours et désenregistrent la tâche s'il a disparu, par exemple après une désinstallation.
+
+<Callout type="warn">
+Renseignez les deux propriétés avant le premier appel à `enqueue`. Les valeurs sont figées dans
+le plist, l'unit ou la tâche générés au moment de la mise en file : un changement ultérieur ne
+s'applique qu'aux tâches planifiées ensuite.
+</Callout>
+
 ## Notes
 
 - Ne mettez pas de secrets dans `inputData` — c'est persisté en JSON clair dans le fichier de

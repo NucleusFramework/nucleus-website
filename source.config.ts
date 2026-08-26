@@ -11,6 +11,10 @@ export const docs = defineDocs({
 // scripts/snapshot-docs.mjs). One export per past version — the script prints
 // the exact line to add. Also register it in lib/source.ts DOC_VERSIONS.
 // Full procedure: .docs-versioning.md
+export const docs_2_4 = defineDocs({
+  dir: 'content/versioned/2.4',
+});
+
 export const docs_2_3 = defineDocs({
   dir: 'content/versioned/2.3',
 });

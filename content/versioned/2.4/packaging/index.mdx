@@ -1,0 +1,98 @@
+---
+title: One DSL, eighteen installers
+description: Declare the desktop distribution formats you need in the Gradle plugin's DSL and build each one the host operating system supports.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus declares every desktop distribution format in one `nucleus { }` Gradle block. You choose the
+formats with `targetFormats(...)`, and a single task builds each one the host operating system can
+produce. `TargetFormat` defines 18 formats, covering direct installers, store packages, and plain
+archives.
+
+## Declare the formats
+
+The packaging DSL ships with the Gradle plugin, so there is no separate dependency to add:
+
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework") version "<version>"
+}
+```
+
+List the formats you want inside `nativeDistributions`:
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        mainClass = "com.example.MainKt"
+
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Dmg, TargetFormat.Pkg,
+                TargetFormat.Exe, TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
+                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman,
+                TargetFormat.Snap, TargetFormat.Flatpak,
+                TargetFormat.Zip,
+            )
+            packageName = "MyApp"
+            packageVersion = "1.0.0"
+        }
+    }
+}
+```
+
+## Build the installers
+
+```shell
+./gradlew packageDistributionForCurrentOS
+```
+
+Every format requested for the host operating system is written under `build/compose/binaries/`.
+
+<Callout type="info">
+Formats the host operating system cannot produce are skipped silently. The same build script runs
+unchanged on macOS, Windows, and Linux, which suits matrix CI.
+</Callout>
+
+## Supported formats
+
+`TargetFormat` defines 18 constants. The table groups them by how you ship each build:
+
+| OS | Direct distribution | Store | Archives |
+|----|---------------------|-------|----------|
+| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7z |
+| Windows | Exe, NSIS, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
+| Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
+
+The full set of enum constants is `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`,
+`NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, and `SevenZ`.
+Pass any of them to `targetFormats(...)`. The declaring type is
+`dev.nucleusframework.desktop.application.dsl.TargetFormat`.
+
+## How it works
+
+Nucleus runs jpackage to produce a platform `app-image`, then hands that image to electron-builder's
+`--prepackaged` mode to drive each installer format. The hybrid keeps jpackage's JVM runtime tuning
+while using electron-builder for the formats jpackage does not support, such as NSIS, AppX, Snap,
+Flatpak, and AppImage.
+
+When you mix direct-distribution formats with store formats, Nucleus runs two pipelines: a regular
+`createDistributable` for formats like DMG, NSIS, and DEB, and a `createSandboxedDistributable` for
+the store formats PKG, AppX, and Flatpak. The sandboxed pipeline pre-extracts native libraries,
+injects sandbox-aware JVM arguments, and applies the matching entitlements. See
+[Sandboxing](/docs/packaging/sandboxing).
+
+## Configure each platform
+
+Per-OS settings live under `nativeDistributions.macOS { }`, `windows { }`, and `linux { }`:
+
+- [Building for macOS](/docs/packaging/macos) — DMG, PKG, universal binaries, and layered icons.
+- [Building for Windows](/docs/packaging/windows) — Exe, NSIS, MSI, AppX, and Portable.
+- [Building for Linux](/docs/packaging/linux) — DEB, RPM, AppImage, Pacman, Snap, and Flatpak.
+
+## What's next
+
+- [Code signing](/docs/packaging/code-signing) — sign and notarize builds for each platform.
+- [Publishing](/docs/packaging/publishing) — push installers to GitHub Releases, S3, or a generic host.
+- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` DSL.

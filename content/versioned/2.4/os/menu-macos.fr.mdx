@@ -1,0 +1,210 @@
+---
+title: Barre de menus macOS
+description: Construisez la barre de menus macOS native depuis Compose, avec des items, des raccourcis clavier, des icônes, des badges et des sous-menus pilotés par l'état.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`menu-macos` vous permet de construire la barre de menus macOS native — la bande en haut
+de l'écran, pas dans votre fenêtre — depuis Compose. Vous déclarez les menus et les items sous
+forme d'arbre, et le `NSMenu` natif est reconstruit dès que l'état qu'il lit change.
+
+<Callout type="info">
+Ce module n'a d'effet que sur macOS. `NativeMenuBar` ne fait rien sur les autres
+plateformes, vous pouvez donc laisser l'appel dans du code partagé.
+</Callout>
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.menu-macos:<version>")
+}
+```
+
+Cela tire les constantes [`sf-symbols`](https://developer.apple.com/sf-symbols/) de
+manière transitive, ce qui vous permet de référencer un symbole par son nom sans risque de
+faute de frappe.
+
+## Construire une barre de menus
+
+Appelez `NativeMenuBar` depuis un composable proche de la racine de votre application. Le
+premier appel à `Menu` devient le menu de l'application (l'entrée en gras portant le nom
+de votre app).
+
+```kotlin
+import androidx.compose.runtime.Composable
+import dev.nucleusframework.menu.macos.*
+import dev.nucleusframework.sfsymbols.SFSymbolObjectsAndTools
+import kotlin.system.exitProcess
+
+@Composable
+fun App() {
+    NativeMenuBar {
+        Menu("MyApp") {
+            Item("À propos de MyApp") { showAbout() }
+            Separator()
+            Item("Quitter", shortcut = NativeKeyShortcut("q")) { exitProcess(0) }
+        }
+
+        Menu("Fichier") {
+            Item(
+                "Nouveau",
+                shortcut = NativeKeyShortcut("n"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.DOCUMENT_BADGE_PLUS),
+            ) { newDocument() }
+
+            Item(
+                "Ouvrir…",
+                shortcut = NativeKeyShortcut("o"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.FOLDER),
+            ) { open() }
+        }
+
+        MenuHelp("Aide") {
+            Item("Documentation") { openDocs() }
+        }
+    }
+    // … contenu de la fenêtre
+}
+```
+
+## Fonctionnement
+
+`NativeMenuBar` sauvegarde la barre de menus courante à la première composition, puis
+installe un nouveau `NSMenu` construit depuis votre DSL. La lambda de construction est un
+corps composable ordinaire : elle s'exécute pendant la composition, et le menu natif est
+reconstruit dès qu'un état lu à l'intérieur change. Quand le composable quitte la
+composition, la barre de menus sauvegardée est restaurée.
+
+Comme le menu est lié à la composition, hébergez `NativeMenuBar` à la racine de votre
+application plutôt que dans le contenu d'une fenêtre. Ainsi le menu survit à l'ouverture
+et à la fermeture des fenêtres.
+
+Les menus déclarés avec `MenuWindow` et `MenuHelp` sont confiés à AppKit comme les menus
+Window et Help bien connus. macOS les remplit alors lui-même : la liste des fenêtres et
+« Tout ramener au premier plan » pour Window, et un champ de recherche en haut du menu
+Aide.
+
+## Référence de l'API
+
+### Ajouter des menus et des sous-menus
+
+`Menu` ajoute un menu de premier niveau au niveau de la barre, ou un sous-menu à
+l'intérieur d'un autre menu. Les sous-menus s'imbriquent à n'importe quelle profondeur.
+
+```kotlin
+NativeMenuBar {
+    Menu("Édition") {
+        Item("Annuler", shortcut = NativeKeyShortcut("z")) { undo() }
+        Item("Rétablir", shortcut = NativeKeyShortcut("z", shift = true)) { redo() }
+        Separator()
+        Menu("Rechercher") {
+            Item("Rechercher…", shortcut = NativeKeyShortcut("f")) { find() }
+            Item("Suivant", shortcut = NativeKeyShortcut("g")) { findNext() }
+        }
+    }
+}
+```
+
+Utilisez `MenuWindow` et `MenuHelp` pour les menus standard Window et Help. Leur contenu
+est optionnel — macOS les complète.
+
+### Ajouter des items
+
+`Item` ajoute un item de menu classique. La lambda finale est le callback de clic,
+dispatché sur le thread Swing (EDT). Paramètres courants : `enabled`, `shortcut`, `icon`,
+`state`, `badge`, `subtitle`, `toolTip` et `tag`.
+
+```kotlin
+Item(
+    "Exporter…",
+    shortcut = NativeKeyShortcut("e", shift = true),
+    subtitle = "Enregistrer une copie en PDF",
+    enabled = document != null,
+) { export() }
+```
+
+### Ajouter des cases à cocher et des boutons radio
+
+`CheckboxItem` et `RadioButtonItem` mappent pour vous leur état booléen sur la coche de
+l'item. C'est à vous de gérer la sélection.
+
+```kotlin
+var darkMode by remember { mutableStateOf(false) }
+
+NativeMenuBar {
+    Menu("Affichage") {
+        CheckboxItem(
+            "Mode sombre",
+            checked = darkMode,
+            onCheckedChange = { darkMode = it },
+        )
+        Separator()
+        RadioButtonItem("Clair", selected = !darkMode) { darkMode = false }
+        RadioButtonItem("Sombre", selected = darkMode) { darkMode = true }
+    }
+}
+```
+
+Pour un contrôle plus fin, `Item` accepte directement un `state` valant
+`NsMenuItemState.OFF`, `NsMenuItemState.ON` ou `NsMenuItemState.MIXED`.
+
+### Ajouter des séparateurs, des en-têtes et une recherche
+
+```kotlin
+Menu("Historique") {
+    SearchField(placeholder = "Rechercher dans l'historique")
+    SectionHeader("Aujourd'hui")
+    Item("nucleusframework.dev") { open(url) }
+    Separator()
+    SectionHeader("Plus tôt")
+    Item("developer.apple.com") { open(url) }
+}
+```
+
+`SearchField` filtre les autres items du menu par titre au fur et à mesure de la saisie.
+`SectionHeader` nécessite macOS 14+ et se replie sur un item désactivé sur les systèmes
+plus anciens.
+
+### Définir des raccourcis clavier
+
+`NativeKeyShortcut` utilise par défaut le modificateur Command (⌘). Ajoutez `shift`,
+`option`, `control` ou `function` selon les besoins, et utilisez les constantes
+`NativeKey` pour les touches non imprimables.
+
+```kotlin
+Item("Enregistrer", shortcut = NativeKeyShortcut("s")) { save() }
+Item("Enregistrer sous…", shortcut = NativeKeyShortcut("s", shift = true)) { saveAs() }
+Item("Annuler", shortcut = NativeKeyShortcut(NativeKey.ESCAPE, command = false)) { cancel() }
+```
+
+### Ajouter des icônes
+
+`NsMenuItemImage` fournit l'image d'un item depuis un SF Symbol, une image AppKit nommée
+ou un chemin de fichier.
+
+```kotlin
+Item("Réglages", icon = NsMenuItemImage.SystemSymbol(SFSymbolGeneral.GEAR)) { openSettings() }
+```
+
+Le module `sf-symbols` expose chaque catégorie de symboles — `SFSymbolGeneral`,
+`SFSymbolObjectsAndTools`, `SFSymbolPower`, et d'autres — sous forme de constantes typées.
+`NsMenuItemImage.SystemSymbol` accepte aussi un nom de symbole sous forme de chaîne brute.
+
+### Ajouter des badges
+
+`NsMenuItemBadge` affiche un badge stylé par le système à droite d'un item (macOS 14+).
+Utilisez `Count` pour un simple nombre, `Text` pour une chaîne personnalisée, ou `Alerts`,
+`NewItems` et `Updates` pour des libellés localisés par le système.
+
+```kotlin
+Item("Boîte de réception", badge = NsMenuItemBadge.Count(unreadCount)) { openInbox() }
+Item("Mise à jour logicielle", badge = NsMenuItemBadge.Updates(pendingUpdates)) { openUpdates() }
+```
+
+## Et ensuite
+
+- [Barre d'état système](/docs/os/system-tray) — un item de statut dans la barre de menus et son menu contextuel.
+- [Mode sombre](/docs/os/dark-mode) — détectez l'apparence système pour piloter un item de menu à cocher.
+- [Icônes Freedesktop](/docs/os/freedesktop-icons) — le jeu d'icônes nommées équivalent pour Linux.

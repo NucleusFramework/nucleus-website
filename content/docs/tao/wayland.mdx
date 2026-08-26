@@ -59,6 +59,31 @@ automatically. The Compose code does not change.
 | Screen capture       | Portal only                        | Direct                           |
 | Pen pressure         | `wp_tablet_v2`                      | Not exposed                      |
 | Multi-touch gestures | `pointer-gestures-unstable-v1`     | Limited                          |
+| Clipboard            | `wl_data_device` on the window's seat | `CLIPBOARD` selection          |
+| Window stacking      | No client-side protocol            | `_NET_WM_STATE_ABOVE` / `BELOW`  |
+
+## Copy and paste
+
+On Linux, Tao reads and writes the clipboard through GDK rather than AWT. AWT's clipboard is
+X11-only, so in a Wayland-native window it pasted nothing — the Wayland selection reaches
+XWayland only while an X11 window is active — and it threw outright in a session with no
+XWayland at all.
+
+Use the standard Compose API; there is nothing Nucleus-specific to call:
+
+```kotlin
+import androidx.compose.ui.platform.LocalClipboard
+
+val clipboard = LocalClipboard.current
+val scope = rememberCoroutineScope()
+
+scope.launch { clipboard.setClipEntry(entry) }
+```
+
+Plain text, images, and file lists are carried in both directions. Images cross as PNG, and file
+lists as `text/uri-list` plus the GNOME copied-files target, so pasting into a file manager works.
+HTML is not carried in either direction, and only the `CLIPBOARD` selection is used — never
+X11's PRIMARY (middle-click) selection.
 
 ## Notes
 
