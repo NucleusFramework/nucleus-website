@@ -139,8 +139,10 @@ Les bibliothèques et couches de navigation ne doivent pas figer le `Window` / `
 de Compose Desktop (`androidx.compose.ui.window`, non supporté sous Tao) ni un type de
 fenêtre de design system. Depuis 2.3.2, `nucleusApplication` fournit aussi
 `LocalNucleusWindowHost` et `LocalNucleusDialogHost`. Les défauts ouvrent un
-`DecoratedWindow` / `DecoratedDialog` plain (parité complète des paramètres, y compris les
-réglages Tao `popupFor`, `nativePopupLayers` et `hiddenFromDock`). Les sites d'appel utilisent
+`DecoratedWindow` / `DecoratedDialog` plain, et acceptent les réglages Tao `popupFor`,
+`nativePopupLayers`, `nativeContextMenu`, `hiddenFromDock` et `alwaysOnBottom`. Les autres
+drapeaux d'overlay — `transparent`, `clickThrough`, `visibleOnAllWorkspaces` et `forceX11` — ne
+sont disponibles que sur `DecoratedWindow` lui-même. Les sites d'appel utilisent
 `HostedWindow` / `HostedDialog` :
 
 ```kotlin
@@ -210,6 +212,14 @@ fonctionne que la dépendance soit `-tao`, `-jbr` ou `-jni`.
 | `resizable` | `Boolean` | Défaut `true`. |
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Flags de fenêtre standard. |
 | `undecorated` | `Boolean` | Fenêtre sans cadre ni contrôles. Pris en compte par Tao ; ignoré par AWT. |
+| `isDialog` | `Boolean` | Défaut `false`. Ouvre la fenêtre en classe dialogue. |
+| `transparent` | `Boolean` | Défaut `false`. Transparence par pixel de la fenêtre. Uniquement à la création. Voir [Fenêtres overlay](/docs/tao/overlay-windows#construire-un-watermark-traversant). |
+| `clickThrough` | `Boolean` | Défaut `false`. Les événements pointeur traversent vers ce qui est derrière. Réactif. |
+| `alwaysOnBottom` | `Boolean` | Défaut `false`. Maintient la fenêtre sous les fenêtres normales. Annule `alwaysOnTop`. Réactif. |
+| `visibleOnAllWorkspaces` | `Boolean` | Défaut `false`. Affiche la fenêtre sur tous les bureaux ou Spaces. Réactif. |
+| `forceX11` | `Boolean` | Défaut `false`. Linux uniquement : prend une surface X11 (XWayland) pour cette seule fenêtre. Uniquement à la création. |
+| `macOSStyle` | `MacOSStyle` | Défaut `MacOSStyle.Classic`. Traitement de la barre de titre sous macOS. |
+| `compositionLocalContext` | `CompositionLocalContext?` | Composition locals à transporter dans la composition de la nouvelle fenêtre. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao uniquement : attache la fenêtre comme popup superposée à une autre. Sous Wayland natif, les positions sont dans la zone **contenu** du parent (l'origine CSD title bar masquée est appliquée dans `setOuterPosition`). |
 | `nativePopupLayers` | `Boolean` | Défaut `false`. Matérialise les couches Compose `Popup` en fenêtres natives transparentes (NSPanel / WS_POPUP HWND). Tao uniquement. |
 | `hiddenFromDock` | `Boolean` | Défaut `false`. Masque la fenêtre de la barre des tâches / du Dock de l'OS. Pris en compte par Tao ; ignoré par AWT. |
@@ -217,10 +227,15 @@ fonctionne que la dépendance soit `-tao`, `-jbr` ou `-jni`.
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Renvoie `true` pour consommer l'événement. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Slot barre de titre plus votre UI. |
 
-Le `DecoratedWindow` natif Tao (via `taoApplication` ou la surcharge de scope Tao) accepte aussi
-`transparent: Boolean = false` pour la transparence plein fenêtre. L'umbrella
-`NucleusApplicationScope.DecoratedWindow` ne retransmet pas ce flag — voir
-[overlays transparents](/docs/tao/window-scaffold#overlays-transparents-et-sans-cadre).
+Le tableau ci-dessus décrit la surcharge Tao `ApplicationScope.DecoratedWindow`. Le
+`NucleusApplicationScope.DecoratedWindow` agnostique du backend, dans `nucleus-application`,
+accepte les mêmes drapeaux de fenêtre — dont `transparent`, `clickThrough`, `alwaysOnBottom`,
+`visibleOnAllWorkspaces` et `forceX11` — et ajoute
+[`nativeContextMenu`](/docs/window/context-menu#activer-le-menu-natif). Il n'expose pas
+`macOSStyle`, `isDialog` ni `compositionLocalContext`.
+
+Les drapeaux que seul le backend Tao sait honorer sont acceptés et ignorés sous AWT : le même
+code compile et tourne donc sur l'un comme sur l'autre.
 
 ### Masquer de la barre des tâches / du Dock
 

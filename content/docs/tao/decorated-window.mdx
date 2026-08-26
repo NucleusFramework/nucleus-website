@@ -136,9 +136,10 @@ Libraries and navigation layers should not hard-code Compose Desktop's AWT
 `androidx.compose.ui.window.Window` / `Dialog` (unsupported under Tao) or a specific
 design-system window type. From 2.3.2, `nucleusApplication` also provides
 `LocalNucleusWindowHost` and `LocalNucleusDialogHost`. The defaults open a plain
-`DecoratedWindow` / `DecoratedDialog` (full parameter parity, including Tao knobs such as
-`popupFor`, `nativePopupLayers`, and `hiddenFromDock`). Call sites use `HostedWindow` /
-`HostedDialog`:
+`DecoratedWindow` / `DecoratedDialog`, and take the Tao knobs `popupFor`, `nativePopupLayers`,
+`nativeContextMenu`, `hiddenFromDock`, and `alwaysOnBottom`. The remaining overlay flags —
+`transparent`, `clickThrough`, `visibleOnAllWorkspaces`, and `forceX11` — are only on
+`DecoratedWindow` itself. Call sites use `HostedWindow` / `HostedDialog`:
 
 ```kotlin
 import androidx.compose.runtime.Composable
@@ -206,6 +207,14 @@ provides them through composition locals. The same theme works whether the depen
 | `resizable` | `Boolean` | Default `true`. |
 | `enabled` / `focusable` / `alwaysOnTop` | `Boolean` | Standard window flags. |
 | `undecorated` | `Boolean` | Borderless window with no controls. Honored by Tao; ignored by AWT. |
+| `isDialog` | `Boolean` | Default `false`. Open as a dialog-class window. |
+| `transparent` | `Boolean` | Default `false`. Per-pixel window transparency. Creation-time only. See [Overlay windows](/docs/tao/overlay-windows#build-a-click-through-watermark). |
+| `clickThrough` | `Boolean` | Default `false`. Pointer events pass through to whatever is behind. Reactive. |
+| `alwaysOnBottom` | `Boolean` | Default `false`. Keep the window below normal windows. Clears `alwaysOnTop`. Reactive. |
+| `visibleOnAllWorkspaces` | `Boolean` | Default `false`. Show on every workspace or Space. Reactive. |
+| `forceX11` | `Boolean` | Default `false`. Linux only: take an X11 (XWayland) surface for this window alone. Creation-time only. |
+| `macOSStyle` | `MacOSStyle` | Default `MacOSStyle.Classic`. Title-bar treatment on macOS. |
+| `compositionLocalContext` | `CompositionLocalContext?` | Composition locals to carry into the new window's composition. |
 | `popupFor` | `NucleusWindow?` | Linux/Tao only: attach this window as a popup overlay of another. On native Wayland, positions are in the parent **content** area (hidden-titlebar CSD origin is applied inside `setOuterPosition`). |
 | `nativePopupLayers` | `Boolean` | Default `false`. Materialise Compose `Popup` layers as native transparent windows (NSPanel / WS_POPUP HWND). Tao only. |
 | `hiddenFromDock` | `Boolean` | Default `false`. Hide this window from the OS taskbar/Dock. Honored by Tao; ignored by AWT. |
@@ -213,10 +222,15 @@ provides them through composition locals. The same theme works whether the depen
 | `onPreviewKeyEvent` / `onKeyEvent` | `(KeyEvent) -> Boolean` | Return `true` to consume the event. |
 | `content` | `@Composable NucleusDecoratedWindowScope.() -> Unit` | Title bar slot plus your UI. |
 
-The Tao-native `DecoratedWindow` (via `taoApplication` or the Tao `ApplicationScope` overload)
-also accepts `transparent: Boolean = false` for full-window transparency. The umbrella
-`NucleusApplicationScope.DecoratedWindow` does not forward that flag — see
-[transparent overlays](/docs/tao/window-scaffold#transparent-and-borderless-overlays).
+The table above lists the Tao `ApplicationScope.DecoratedWindow` overload. The
+backend-agnostic `NucleusApplicationScope.DecoratedWindow` in `nucleus-application` takes the
+same window flags — including `transparent`, `clickThrough`, `alwaysOnBottom`,
+`visibleOnAllWorkspaces`, and `forceX11` — and adds
+[`nativeContextMenu`](/docs/window/context-menu#turn-on-the-native-menu). It does not expose
+`macOSStyle`, `isDialog`, or `compositionLocalContext`.
+
+Flags that only the Tao backend can honor are accepted and ignored on AWT, so the same source
+compiles and runs on either backend.
 
 ### Hiding from the taskbar/Dock
 
