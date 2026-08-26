@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/page';
@@ -42,9 +41,13 @@ function makeDocLink(lang: string, baseUrl: string) {
         }
       }
     }
-    if (typeof nextHref === 'string' && nextHref.startsWith('/') && !nextHref.startsWith('//')) {
-      return <Link href={nextHref} {...rest} />;
-    }
+    // Deliberately a plain <a>, not next/link. The site ships as a static
+    // export, where the App Router fetches each route's RSC payload from
+    // `<route>/index.txt`. On a cross-page link carrying a #fragment the router
+    // falls back to a hard navigation and sends the browser to that payload
+    // URL, so the reader lands on `…/wayland/index.txt#copy-and-paste` and sees
+    // the raw flight data instead of the page. A full navigation costs nothing
+    // here: every route is prerendered HTML on a CDN.
     return <a href={nextHref} {...rest} />;
   };
 }
