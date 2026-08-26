@@ -10,7 +10,7 @@ You'll build installers on a per-OS, per-architecture matrix, merge the macOS bu
 universal binary, bundle the Windows builds for the Microsoft Store, generate auto-update
 metadata, and publish everything to a GitHub Release.
 
-Nucleus ships six composite actions in the [`NucleusFramework/Nucleus`](https://github.com/NucleusFramework/Nucleus)
+Nucleus ships seven composite actions in the [`NucleusFramework/Nucleus`](https://github.com/NucleusFramework/Nucleus)
 repository. You reference them by path from your own workflow — there is nothing to copy into
 your project.
 
@@ -34,16 +34,17 @@ Add a step that points at an action in the Nucleus repository:
 - uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
 ```
 
-The six actions are:
+The seven actions are:
 
 | Action | What it does |
 |--------|--------------|
-| `setup-nucleus` | Installs the JBR (or GraalVM Liberica NIK), Linux packaging tools, Gradle, and Node. |
+| `setup-nucleus` | Installs a JDK (Microsoft Build of OpenJDK on Windows, Temurin elsewhere), Linux packaging tools, Gradle, and Node. |
 | `setup-macos-signing` | Creates a temporary keychain and imports a `.p12` certificate for `codesign`. |
 | `build-macos-universal` | Merges arm64 and x64 `.app` bundles with `lipo`, re-signs, and repackages as ZIP, DMG, and PKG. |
 | `build-windows-appxbundle` | Combines amd64 and arm64 `.appx` files into a `.msixbundle` and signs it. |
 | `generate-update-yml` | Computes SHA-512 hashes and emits the `latest-*.yml` metadata the auto-updater reads. |
 | `publish-release` | Creates the GitHub Release with `gh release create` and uploads the installers and YAML. |
+| `validate-release-ref` | Checks that a release tag was cut from the branch that owns it. |
 
 ## Build on every platform
 
@@ -77,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
         with:
-          jbr-version: '25.0.2b329.66'
+          java-version: '25'
           packaging-tools: 'true'
           flatpak: 'true'
           snap: 'true'
@@ -102,24 +103,23 @@ Inputs:
 
 | Input | Default | Purpose |
 |-------|---------|---------|
-| `jbr-version` | `25.0.2b329.66` | JetBrains Runtime version to install. |
-| `jbr-variant` | `jbrsdk` | JBR variant (`jbrsdk`, `jbrsdk_jcef`, …). |
-| `jbr-download-url` | — | Override the full JBR download URL. |
+| `java-version` | `25` | JDK used to run Gradle and bundled by jpackage. A bare LTS major resolves to the latest per-OS build. |
+| `java-package` | `jdk` | JDK package variant (`jdk`, `jre`). |
 | `packaging-tools` | `true` | Install the Linux packaging tools (Linux only). |
 | `flatpak` | `false` | Install Flatpak and the Freedesktop Platform/SDK 24.08 (Linux only). |
 | `snap` | `false` | Install snapd and Snapcraft (Linux only). |
-| `graalvm` | `false` | Pin a GraalVM toolchain (Liberica NIK) instead of the auto-downloaded Oracle GraalVM. |
-| `graalvm-java-version` | `25` | GraalVM Java version. |
+| `graalvm` | `false` | Prepare a native-image build: native build tools (Xcode/MSVC) and the toolchain cache. |
+| `graalvm-version` | `25i2` | Toolchain version — cache-key component only. Keep in sync with `graalvm { toolchain { } }`. |
+| `graalvm-distribution` | `community` | Toolchain distribution — cache-key component only (`community` or `oracle`). |
 | `setup-gradle` | `true` | Set up Gradle via `gradle/actions/setup-gradle`. |
 | `setup-node` | `true` | Set up Node.js. |
 | `node-version` | `24` | Node.js version. |
 
-Native builds download and cache GraalVM Community Edition automatically — the default — so
-`graalvm: 'true'` is no longer needed for native compilation. Set it only to pin your own
-toolchain: the action then installs Liberica NIK instead of the JBR, exports `GRAALVM_HOME`
-(which takes precedence over the auto-download when it matches the configured distribution),
-selects Xcode 26 on macOS, and sets up MSVC on Windows via `ilammy/msvc-dev-cmd@v1`. The platform toolchains (Xcode, MSVC) are still required
-for native builds regardless.
+The Nucleus plugin downloads and caches the GraalVM JDK itself, so `graalvm: 'true'` never
+installs a JDK. It only prepares what the plugin cannot: it selects Xcode 26 on macOS, sets up
+MSVC on Windows via `ilammy/msvc-dev-cmd@v1`, and caches the toolchain directory. The two
+`graalvm-*` inputs feed the cache key only — keep them in sync with your
+`graalvm { toolchain { } }` block so switching distribution does not restore the wrong cache.
 
 ## Sign macOS builds
 

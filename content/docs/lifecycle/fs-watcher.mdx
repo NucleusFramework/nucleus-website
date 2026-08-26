@@ -68,9 +68,10 @@ may miss changes that happen between registration and the first collector subscr
 ## How it works
 
 Each `FsWatcher` owns one native watcher handle. macOS uses FSEvents, Windows uses
-`ReadDirectoryChangesW`, and Linux uses inotify, all reached through a single JNI bridge. When
-no native backend is available — or when you select `FsWatchBackendStrategy.Polling` — the
-watcher scans registered paths on an interval instead.
+`ReadDirectoryChangesW`, and Linux uses inotify, all reached through a single JNI bridge.
+Polling is opt-in via `FsWatchBackendStrategy.Polling` and runs inside that same native library.
+There is no JVM-side fallback: when the native library is unavailable, `isSupported()` returns
+`false` and `create()` throws `FsWatchException` for every strategy.
 
 Registrations are coalesced. If you watch a directory recursively and then watch a file already
 inside it, both share one native watch; events are still routed to each logical registration and
@@ -129,7 +130,7 @@ FsWatchSource`, `active: Boolean`, and `close()` to stop watching that path alon
 
 `FsWatchBackendStrategy` is a sealed interface:
 
-- `FsWatchBackendStrategy.Auto` — use the native backend when available.
+- `FsWatchBackendStrategy.Auto` — the native backend. Currently identical to `NativeOnly`; neither degrades to polling.
 - `FsWatchBackendStrategy.NativeOnly` — require the native backend.
 - `FsWatchBackendStrategy.Polling(interval, compareContents)` — poll on an interval
   (default 2 s); set `compareContents = true` to detect changes by content rather than metadata.

@@ -70,9 +70,10 @@ premier collecteur.
 ## Fonctionnement
 
 Chaque `FsWatcher` détient un handle de watcher natif. macOS utilise FSEvents, Windows utilise
-`ReadDirectoryChangesW` et Linux utilise inotify, tous atteints via un unique pont JNI. Quand
-aucun backend natif n'est disponible — ou quand vous choisissez `FsWatchBackendStrategy.Polling` — le
-watcher scrute les chemins enregistrés à intervalle régulier.
+`ReadDirectoryChangesW` et Linux utilise inotify, tous atteints via un unique pont JNI. Le
+polling s'active explicitement via `FsWatchBackendStrategy.Polling` et tourne dans cette même
+bibliothèque native. Il n'y a pas de repli côté JVM : si la bibliothèque native est indisponible,
+`isSupported()` renvoie `false` et `create()` lève `FsWatchException` pour toutes les stratégies.
 
 Les enregistrements sont fusionnés. Si vous surveillez un dossier de façon récursive puis un
 fichier déjà situé à l'intérieur, les deux partagent une seule surveillance native ; les
@@ -132,7 +133,7 @@ FsWatchSource`, `active: Boolean` et `close()` pour arrêter de surveiller ce se
 
 `FsWatchBackendStrategy` est une sealed interface :
 
-- `FsWatchBackendStrategy.Auto` — utilise le backend natif quand il est disponible.
+- `FsWatchBackendStrategy.Auto` — le backend natif. Actuellement identique à `NativeOnly` ; aucun des deux ne se replie sur le polling.
 - `FsWatchBackendStrategy.NativeOnly` — exige le backend natif.
 - `FsWatchBackendStrategy.Polling(interval, compareContents)` — scrute à intervalle régulier
   (2 s par défaut) ; mettez `compareContents = true` pour détecter les changements par contenu

@@ -74,12 +74,14 @@ dependencies {
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.window.fluent.FluentDecoratedWindow
 import dev.nucleusframework.window.fluent.FluentTitleBar
+import io.github.composefluent.FluentTheme
 
 fun main() = nucleusApplication {
-    FluentDecoratedWindow(onCloseRequest = ::exitApplication, title = "Settings") {
-        FluentTitleBar { /* … */ }
-        // FluentTheme + Mica / components
-        App()
+    FluentTheme {
+        FluentDecoratedWindow(onCloseRequest = ::exitApplication, title = "Settings") {
+            FluentTitleBar { /* … */ }
+            App()
+        }
     }
 }
 ```
@@ -125,13 +127,17 @@ dependencies {
 
 ```kotlin
 import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
 import dev.nucleusframework.window.jewel.JewelDecoratedWindow
 import dev.nucleusframework.window.jewel.JewelTitleBar
+import org.jetbrains.jewel.intui.standalone.theme.IntUiTheme
 
 fun main() = nucleusApplication {
-    JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
-        JewelTitleBar { state -> /* … */ }
-        MyContent()
+    IntUiTheme(isDark = isSystemInDarkMode()) {
+        JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
+            JewelTitleBar { state -> /* … */ }
+            MyContent()
+        }
     }
 }
 ```
@@ -169,8 +175,11 @@ macOS, Fluent and Yaru are **full design systems** (widgets, theme, icons) plus 
 desktop window module that wraps Nucleus `DecoratedWindow` / Tao. Jewel and Material in this
 repo are **window chrome adapters** only — you still pick the widget library yourself.
 
-On desktop, apply the design-system `Theme` **inside** the decorated window content so native
-surfaces (glass, caption, Mica) can follow the app theme rather than the OS setting alone.
+Where the theme goes depends on the pack. Fluent, Jewel and Material derive the window chrome
+from the **ambient** theme, so wrap the window call — `FluentTheme { FluentDecoratedWindow { … } }`
+— and they re-provide the theme inside the content themselves. `JewelDecoratedWindow` reads
+`JewelTheme.globalColors` and throws without a provider. The macOS 26 and Yaru wrappers take
+their theme **inside** the window content instead.
 
 <Callout type="info">
 For full-window layouts and custom chrome without a design-system pack, use
