@@ -7,6 +7,91 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.4
+
+**Sortie : 2026-08-27**
+
+### Corrections de bugs
+
+- **Dépôt entrant Linux sur les popups tray** (#605 / #607) — une popup `TrayApp` sous Linux
+  est une fenêtre X11 override-redirect, donc GTK `gtk_drag_dest_set` ne peut pas s'y attacher.
+  XDND 5 est implémenté sur le thread d'événements du panneau et dispatché via `TaoSceneDnD`,
+  comme pour `DecoratedWindow`. Voir
+  [Fonctionnement](/docs/tao/drag-and-drop#fonctionnement).
+- **Scroll des popups tray sous macOS** (#608) — les `NSPanel` popup transmettaient le
+  `scrollingDelta` AppKit brut. `TaoWindow` le reformate déjà en `preciseWheelRotation` AWT
+  (Y inversé, physique /10 pour les deltas précis). Les popups tray et overlay empruntent
+  maintenant le même mapping : le signe de la molette et l'amplitude du trackpad correspondent
+  à la fenêtre principale. Voir [Notes](/docs/os/tray-app#notes).
+
+---
+
+## v2.5.3
+
+**Sortie : 2026-08-27**
+
+### Corrections de bugs
+
+- **Dépôt entrant sur les popups tray Windows et macOS** (#604) — les popups `TrayApp` sont
+  des panneaux natifs sans owner (`WS_POPUP` / `NSPanel`), pas des `TaoWindow` : elles n'avaient
+  donc pas de cible de dépôt. Les fichiers déposés atteignent maintenant `dragAndDropTarget`
+  Compose via `TaoSceneDnD`. Les builds native-image Windows incluent les métadonnées JNI de
+  ce chemin. Voir [Fonctionnement](/docs/tao/drag-and-drop#fonctionnement).
+- **Pré-édition IME Windows** (#558 / #603) — la composition n'était jamais transmise : l'IME
+  peignait sa propre fenêtre flottante près du coin supérieur gauche, et les touches qu'il
+  avait consommées (`VK_PROCESSKEY`) arrivaient quand même à Compose : Entrée de conversion
+  insérait un saut de ligne, les flèches de candidats déplaçaient le curseur, Retour arrière
+  effaçait du texte déjà validé. La pré-édition se dessine maintenant en ligne, la liste de
+  candidats suit le curseur, et les touches consommées sont ignorées. Voir
+  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+
+---
+
+## v2.5.2
+
+**Sortie : 2026-08-27**
+
+### Corrections de bugs
+
+- **Scroll des popups tray sous Windows** (#601) — les `WndProc` des popups et overlays
+  rapportaient les unités de molette Win32 brutes. `TaoWindow` les inverse déjà vers
+  `preciseWheelRotation` AWT ; les couches popup standalone et owned font de même, donc le
+  scroll de `TrayApp` n'est plus inversé. Voir [Notes](/docs/os/tray-app#notes).
+- **Frames GPU d'une popup tray Windows masquée** (#602) — une popup tray standalone masquée
+  ne soumet plus de frames GPU.
+- **Encodage UTF-8 de javac/javadoc** (#600) — les tâches compilateur et javadoc épinglent
+  `-encoding UTF-8`, pour que du KDoc non-ASCII ne fasse plus échouer le build Windows.
+
+---
+
+## v2.5.1
+
+**Sortie : 2026-08-27**
+
+### Nouvelles fonctionnalités
+
+- **Le canal innovation GraalVM pointe sur 25.3** (#598) — `GraalvmChannel.INNOVATION`
+  résout `25i3`. Voir
+  [Provisionner la toolchain](/docs/performance/graalvm/configuration#provisionner-la-toolchain).
+
+### Corrections de bugs
+
+- **Tremblement à l'animation de `WindowState.size`** (#576 / #597) — l'animation
+  programmatique de la hauteur laissait le HWND/NSWindow une frame en avance sur la scène
+  Compose, et les échos de resize natif réécrivaient `WindowState.size` à l'envers. La taille
+  intérieure est appliquée de façon synchrone, `EVENT_RESIZED` est poussé dans le même tour, et
+  les échos programmatiques en vol sont ignorés. Voir
+  [Paramètres de DecoratedWindow](/docs/tao/decorated-window#paramètres-de-decoratedwindow).
+- **Pré-édition IME macOS** (#595 / #596 / #599) — la composition CJK était invisible et
+  l'Entrée de validation fuitait comme un saut de ligne. `setMarkedText` / `unmarkText` sont
+  transmis comme pré-édition, le commit passe par `commitText`, et les touches consommées par
+  l'IME sont ignorées. Le sélecteur d'accents PressAndHold reste inhibé tant qu'une composition
+  est en cours, pour qu'un commit de segment n'arme pas le sélecteur et ne détourne pas le
+  commit suivant (segments dupliqués, tofu U+F7xx). Voir
+  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+
+---
+
 ## v2.5.0
 
 **Sortie : 2026-08-26**

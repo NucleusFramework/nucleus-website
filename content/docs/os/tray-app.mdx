@@ -135,27 +135,25 @@ fun main() = nucleusApplication {
 
 ## Hide the Dock icon on macOS
 
-A tray app usually does not need a Dock icon. On macOS, set `LSUIElement = true` in the app's
-`Info.plist`. The Nucleus Gradle plugin exposes `macOS.infoPlist.extraKeysRawXml` for this:
+On the Tao backend, do not set `LSUIElement` in `Info.plist`. Pass
+`dockIconFollowsWindows = true` to `nucleusApplication` instead:
 
-```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        nativeDistributions {
-            macOS {
-                infoPlist {
-                    extraKeysRawXml = """
-                        <key>LSUIElement</key>
-                        <true/>
-                    """.trimIndent()
-                }
-            }
-        }
+```kotlin
+fun main() = nucleusApplication(dockIconFollowsWindows = true) {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+    ) {
+        Text("Popup content")
     }
 }
 ```
 
-The app then runs with no Dock entry and no menu bar — only the tray icon.
+The app starts as an accessory (no Dock icon, no menu bar). A Dock tile appears only while at
+least one `DecoratedWindow` with `hiddenFromDock = false` is visible. `TrayApp` popups are
+standalone panels and never count, so a tray-only app stays out of the Dock. The flag is
+ignored off macOS and on the AWT backend. See
+[Hiding from the taskbar/Dock](/docs/tao/decorated-window#hiding-from-the-taskbardock).
 
 ## API reference
 
@@ -186,6 +184,10 @@ The app then runs with no Dock entry and no menu bar — only the tray icon.
 - From 2.1.0, `getTrayPosition()` and `TrayPosition` live in `composenativetray-app`
   (`dev.nucleusframework.composenativetray.trayapp`). They need the Tao backend for screen
   geometry. Prefer `TrayApp` if you only need a popup next to the icon.
+- The popup is a standalone native panel, not a `DecoratedWindow`. File drops reach Compose
+  `dragAndDropTarget` the same way as a regular window (Windows and macOS from 2.5.3, Linux
+  from 2.5.4). Wheel and trackpad scroll uses the same AWT mapping as the main window (Windows
+  from 2.5.2, macOS from 2.5.4). A hidden Windows popup no longer submits GPU frames (2.5.2).
 
 ## What's next
 

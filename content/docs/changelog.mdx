@@ -6,6 +6,86 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.4
+
+**Released: 2026-08-27**
+
+### Bug fixes
+
+- **Linux inbound drop on tray popups** (#605 / #607) — a `TrayApp` popup on Linux is an
+  override-redirect X11 window, so GTK `gtk_drag_dest_set` cannot attach. Inbound XDND 5 is
+  implemented on the panel event thread and dispatched through `TaoSceneDnD`, matching
+  `DecoratedWindow`. See [How it works](/docs/tao/drag-and-drop#how-it-works).
+- **macOS tray popup scroll** (#608) — popup `NSPanel`s forwarded raw AppKit
+  `scrollingDelta`. `TaoWindow` already reshapes those to AWT `preciseWheelRotation` (negate Y,
+  physical /10 for precise deltas). Tray and overlay popups now use the same mapping, so wheel
+  sign and trackpad magnitude match the main window. See [Notes](/docs/os/tray-app#notes).
+
+---
+
+## v2.5.3
+
+**Released: 2026-08-27**
+
+### Bug fixes
+
+- **Inbound drop on Windows and macOS tray popups** (#604) — `TrayApp` popups are ownerless
+  native panels (`WS_POPUP` / `NSPanel`), not `TaoWindow`s, so they had no drop target. Inbound
+  file drops now reach Compose `dragAndDropTarget` through `TaoSceneDnD`. Windows native-image
+  builds include the JNI metadata for that path. See
+  [How it works](/docs/tao/drag-and-drop#how-it-works).
+- **Windows IME preedit** (#558 / #603) — composition was never forwarded, so the IME painted
+  its own floating window near the top-left of the window, and keys the IME had consumed
+  (`VK_PROCESSKEY`) still reached Compose: conversion Enter inserted a newline, candidate arrows
+  moved the caret, Backspace deleted committed text. Preedit now renders inline, the candidate
+  list follows the caret, and consumed keys are dropped. See
+  [Text input](/docs/tao/decorated-window#text-input).
+
+---
+
+## v2.5.2
+
+**Released: 2026-08-27**
+
+### Bug fixes
+
+- **Windows tray popup scroll** (#601) — popup and overlay `WndProc`s reported raw Win32 wheel
+  units. `TaoWindow` already negates those to AWT `preciseWheelRotation`; standalone and owned
+  popup layers now do the same, so `TrayApp` scrolling is no longer inverted. See
+  [Notes](/docs/os/tray-app#notes).
+- **Hidden Windows tray popup GPU frames** (#602) — a hidden standalone tray popup no longer
+  submits GPU frames.
+- **UTF-8 javac/javadoc encoding** (#600) — the compiler and javadoc tasks pin `-encoding UTF-8`,
+  so non-ASCII KDoc no longer fails the Windows build.
+
+---
+
+## v2.5.1
+
+**Released: 2026-08-27**
+
+### New features
+
+- **GraalVM innovation channel defaults to 25.3** (#598) — `GraalvmChannel.INNOVATION` resolves
+  to `25i3`. See
+  [Provision the toolchain](/docs/performance/graalvm/configuration#provision-the-toolchain).
+
+### Bug fixes
+
+- **Animated `WindowState.size` tremble** (#576 / #597) — programmatic height animation left the
+  HWND/NSWindow a frame ahead of the Compose scene, and native resize echoes wrote
+  `WindowState.size` backwards. Inner size is applied synchronously, `EVENT_RESIZED` is pushed
+  in the same turn, and in-flight programmatic echoes are ignored. See
+  [DecoratedWindow parameters](/docs/tao/decorated-window#decoratedwindow-parameters).
+- **macOS IME preedit** (#595 / #596 / #599) — CJK composition was invisible and the committing
+  Enter leaked as a newline. `setMarkedText` / `unmarkText` are forwarded as preedit, commit
+  goes through `commitText`, and keys the IME consumed are dropped. The PressAndHold accent
+  picker stays gated while a composition is live, so a segment commit cannot arm the picker and
+  hijack the next commit (duplicated segments, U+F7xx tofu). See
+  [Text input](/docs/tao/decorated-window#text-input).
+
+---
+
 ## v2.5.0
 
 **Released: 2026-08-26**

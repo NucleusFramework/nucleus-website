@@ -136,28 +136,25 @@ fun main() = nucleusApplication {
 
 ## Masquer l'icône du Dock sur macOS
 
-Une tray app n'a généralement pas besoin d'icône dans le Dock. Sur macOS, mettez `LSUIElement = true`
-dans l'`Info.plist` de l'app. Le plugin Gradle Nucleus expose `macOS.infoPlist.extraKeysRawXml`
-pour cela :
+Sur le backend Tao, ne définissez pas `LSUIElement` dans l'`Info.plist`. Passez
+`dockIconFollowsWindows = true` à `nucleusApplication` :
 
-```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        nativeDistributions {
-            macOS {
-                infoPlist {
-                    extraKeysRawXml = """
-                        <key>LSUIElement</key>
-                        <true/>
-                    """.trimIndent()
-                }
-            }
-        }
+```kotlin
+fun main() = nucleusApplication(dockIconFollowsWindows = true) {
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Dashboard",
+    ) {
+        Text("Contenu de la popup")
     }
 }
 ```
 
-L'app tourne alors sans entrée dans le Dock ni barre de menus — seule l'icône du tray reste.
+L'app démarre en accessoire (pas d'icône Dock, pas de barre de menus). Une tuile Dock n'apparaît
+que tant qu'au moins une `DecoratedWindow` avec `hiddenFromDock = false` est visible. Les popups
+`TrayApp` sont des panneaux autonomes et ne comptent jamais : une app tray-only reste hors du
+Dock. Le flag est ignoré hors macOS et sur le backend AWT. Voir
+[Masquer de la barre des tâches / du Dock](/docs/tao/decorated-window#masquer-de-la-barre-des-tâches--du-dock).
 
 ## Référence de l'API
 
@@ -188,6 +185,11 @@ L'app tourne alors sans entrée dans le Dock ni barre de menus — seule l'icôn
 - Depuis 2.1.0, `getTrayPosition()` et `TrayPosition` vivent dans `composenativetray-app`
   (`dev.nucleusframework.composenativetray.trayapp`). Ils ont besoin du backend Tao pour la
   géométrie d'écran. Préférez `TrayApp` si vous voulez seulement une popup à côté de l'icône.
+- La popup est un panneau natif standalone, pas une `DecoratedWindow`. Les fichiers déposés
+  atteignent `dragAndDropTarget` Compose comme une fenêtre normale (Windows et macOS depuis
+  2.5.3, Linux depuis 2.5.4). Le scroll molette et trackpad utilise le même mapping AWT que la
+  fenêtre principale (Windows depuis 2.5.2, macOS depuis 2.5.4). Une popup Windows masquée ne
+  soumet plus de frames GPU (2.5.2).
 
 ## Et ensuite
 
