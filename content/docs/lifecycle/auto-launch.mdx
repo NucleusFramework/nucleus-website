@@ -148,6 +148,11 @@ Override the defaults before the first `AutoLaunch` call:
   display lags.
 - macOS login detection reads the `keyAELaunchedAsLogInItem` marker from the AppleEvent that
   `loginwindow` dispatches at login. Apple ships no public API for this.
+- The generated Linux unit is ordered after `gnome-session-x11-services-ready.target` as well as
+  `graphical-session.target` (2.5.6). `graphical-session.target` alone is reached before
+  `gsd-xsettings` publishes `Xft.dpi`, so a toolkit that samples the display scale once at startup
+  froze at 1.0 and rendered a HiDPI app at half size when it was started at login. systemd ignores
+  ordering on units it has not loaded, so the dependency is inert outside GNOME.
 - `wasStartedAtLogin()` returns `false` in dev mode (`ExecutableRuntime.isDev()`) to avoid false
   positives from environment variables inherited from the parent shell. Production builds must set
   the `nucleus.executable.type` system property or ship the `.nucleus-executable-type` marker file,

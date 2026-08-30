@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.4   | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.6   | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -1660,10 +1660,19 @@ entry point you start from. The same holds for `WindowScaffold` and the chrome p
 ## Text input
 
 IME composition (Japanese, Chinese, Korean, and similar) is forwarded into Compose as preedit
-on macOS and Windows. Keys the IME already consumed — conversion Enter, candidate arrows,
+on macOS, Windows, and Linux. Keys the IME already consumed — conversion Enter, candidate arrows,
 Backspace on the preedit — are dropped so they do not also insert a newline, move the caret, or
-delete committed text. On macOS the PressAndHold accent picker stays gated while a composition
-is live, so a segment commit cannot arm the picker and hijack the next commit.
+delete committed text. The candidate window follows the caret on all three platforms.
+
+Linux resolves the platform input method the way GTK's own text widgets do: ibus or fcitx5
+through the GTK immodule on X11, and the text-input-v3 client on Wayland. Linux preedit requires
+2.5.6 or later — earlier releases pinned GTK's built-in fallback context, which never reaches a
+system input method.
+
+On macOS, whether a held letter repeats or opens the accent picker is left entirely to the
+operating system: Nucleus neither reads nor writes `ApplePressAndHoldEnabled`. A pick is applied
+from the `replacementRange` AppKit sends with it, so it replaces the base letter without touching
+the text around it (2.5.6; earlier releases forced the user default and inferred the picker state).
 
 ## Notes
 
@@ -2508,7 +2517,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.4/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2540,7 +2549,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.4/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2591,7 +2600,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.4/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -2928,6 +2937,14 @@ single wire format, which the scene host turns into Compose pointer events.
 The raw `TrackpadGestureListener` sits on that same wire, before the pointer-event synthesis.
 macOS and Linux emit magnify, rotate, and smart-magnify; Windows emits magnify only. There is no
 native source on other configurations, so the listener does not fire there.
+
+Tao reports cursor positions in 1/1024 px, so from 2.5.6 a move under 1 dp from the last
+dispatched position is suppressed before it reaches Compose. Without that deadband, a click
+drifting a fraction of a pixel between press and release starts a parent drag gesture, which
+consumes the change and cancels the tap. Press, release, exit, and scroll dispatch at the last
+dispatched position; motion past the deadband keeps its exact sub-pixel position. From the same
+release, `viewConfiguration.touchSlop` is density-scaled to 18.dp — AWT and Android parity —
+instead of 18 raw pixels, which halved every drag and scroll threshold on 2x displays.
 
 ## API reference
 
@@ -7076,7 +7093,12 @@ ignored off macOS and on the AWT backend. See
 - The popup is a standalone native panel, not a `DecoratedWindow`. File drops reach Compose
   `dragAndDropTarget` the same way as a regular window (Windows and macOS from 2.5.3, Linux
   from 2.5.4). Wheel and trackpad scroll uses the same AWT mapping as the main window (Windows
-  from 2.5.2, macOS from 2.5.4). A hidden Windows popup no longer submits GPU frames (2.5.2).
+  from 2.5.2, macOS from 2.5.4, Linux from 2.5.6). A hidden Windows popup no longer submits GPU
+  frames (2.5.2).
+- On macOS the panel is stationary and joins all spaces, so "Click wallpaper to reveal desktop"
+  on Sonoma and later leaves it in place and `TrayApp` dismisses it itself (2.5.5). Clicks on the
+  status item and on its context menu do not count as clicks outside the popup, so a right-click
+  opens the menu instead of hiding the popup (2.5.5).
 
 ## What's next
 
@@ -9709,6 +9731,11 @@ Override the defaults before the first `AutoLaunch` call:
   display lags.
 - macOS login detection reads the `keyAELaunchedAsLogInItem` marker from the AppleEvent that
   `loginwindow` dispatches at login. Apple ships no public API for this.
+- The generated Linux unit is ordered after `gnome-session-x11-services-ready.target` as well as
+  `graphical-session.target` (2.5.6). `graphical-session.target` alone is reached before
+  `gsd-xsettings` publishes `Xft.dpi`, so a toolkit that samples the display scale once at startup
+  froze at 1.0 and rendered a HiDPI app at half size when it was started at login. systemd ignores
+  ordering on units it has not loaded, so the dependency is inert outside GNOME.
 - `wasStartedAtLogin()` returns `false` in dev mode (`ExecutableRuntime.isDev()`) to avoid false
   positives from environment variables inherited from the parent shell. Production builds must set
   the `nucleus.executable.type` system property or ship the `.nucleus-executable-type` marker file,
@@ -14618,7 +14645,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.4` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.6` for production runs.
 
 ## Reference an action
 
@@ -16819,6 +16846,80 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.6
+
+**Released: 2026-08-30**
+
+### Bug fixes
+
+- **Linux IME preedit** (#558 / #613) — the Linux backend pinned `gtk::IMContextSimple`, GTK's
+  built-in fallback, which never reaches the system input method: CJK input was not degraded but
+  impossible, and typing `aiueo` then confirming left a stray `a`. The backend now uses
+  `gtk::IMMulticontext` — ibus or fcitx5 through the GTK immodule on X11, the text-input-v3 client
+  on Wayland — and routes its signals into the same `ImePreedit` / `ImeCommit` events as macOS and
+  Windows. Keys the input method consumed no longer reach Compose, including the orphan key
+  releases Wayland delivers for a filtered press, and the candidate window follows the caret. See
+  [Text input](/docs/tao/decorated-window#text-input).
+- **Linux candidate window covering the caret** (#613) — GTK places its windows around a cursor
+  *area* in logical pixels relative to the toplevel `GdkWindow`, not a point in physical pixels
+  relative to the client area, so the candidate list landed on the composition it described. The
+  caret rect is scaled and translated by the content widget's allocation, matching the correction
+  the Wayland subsurface already applies. See
+  [Text input](/docs/tao/decorated-window#text-input).
+- **Linux modifier state drift** (#613) — `ModifiersChanged` was emitted only when the key itself
+  was a modifier, so Compose tracked Ctrl, Shift, Alt, and Super from press and release
+  bookkeeping. Input methods on X11 re-inject the events they forward, and a dropped Control
+  release left Compose believing Ctrl was held for the rest of the session: a plain Return read as
+  Ctrl+Return. The state is now derived from the GDK modifier mask carried by every event, so it
+  self-heals on the next keystroke.
+- **macOS press-and-hold accents** (#611 / #612 / #617) — Nucleus forced `ApplePressAndHoldEnabled`
+  in four preference domains and guessed from a state machine when the accent picker was active.
+  A held letter then did nothing at all on keyboards where the picker cannot engage, and ordinary
+  fast typing armed the picker flag and routed the next commit into the replace path, deleting the
+  character just committed ("Xcode" landing as "Xcde"). Nucleus no longer reads or writes the user
+  default — the OS decides whether a held letter repeats or opens the picker — and the pick is
+  applied from the `replacementRange` AppKit sends with `insertText:`, select-then-insert. See
+  [Text input](/docs/tao/decorated-window#text-input).
+- **Sub-pixel pointer jitter eating clicks** (#615 / #619) — Tao reports cursor positions in
+  1/1024 px and macOS emits a `CursorMoved` before every `mouseDown` and `mouseUp`, so a click
+  drifting a fraction of a pixel produced a real move delta, started a parent drag gesture, and
+  cancelled the tap: selections needed two clicks. Moves under 1 dp from the last dispatched
+  position are now suppressed, and `viewConfiguration.touchSlop` is density-scaled to 18.dp
+  instead of 18 raw pixels, which had halved every drag and scroll threshold on 2x displays. See
+  [How it works](/docs/tao/multi-touch#how-it-works).
+- **Linux tray popup scroll** (#610) — standalone, overlay, and owner-based popups now feed wheel
+  events through the same AWT-shaped dispatch as `TaoWindow`, with the Windows lines-per-notch
+  value from `LocalScrollConfig`. Standalone popup frames paint inline when the caller is already
+  on the main thread, so a wheel flood cannot starve `MainEventsCleared`. See
+  [Notes](/docs/os/tray-app#notes).
+- **Auto-launch at half size on GNOME** (#614 / #616) — `graphical-session.target` is reached
+  before `gsd-xsettings` writes `Xft.dpi` into the X resource database, so a HiDPI app started at
+  login froze `sun.java2d.uiScale` at 1.0 while a manual launch was always correct. The generated
+  systemd user unit is ordered after `gnome-session-x11-services-ready.target`. systemd ignores
+  ordering on units that are not loaded, so this is a no-op on other desktops. See
+  [Notes](/docs/lifecycle/auto-launch#notes).
+
+---
+
+## v2.5.5
+
+**Released: 2026-08-28**
+
+### Bug fixes
+
+- **macOS tray popup and Show Desktop** (#609) — the standalone `NSPanel` had the default
+  collection behavior, so "Click wallpaper to reveal desktop" on Sonoma and later Exposé-slid the
+  popup away while Compose was already fading it. The panel is now stationary, joins all spaces,
+  is fullscreen-auxiliary, and is ignored by window cycling, so `TrayApp` dismisses it itself. See
+  [Notes](/docs/os/tray-app#notes).
+- **macOS tray popup dismissed by its own icon** (#609) — the outside-click monitor counted a
+  `mouseDown` on the `NSStatusItem` and on its native context menu as a click outside the panel,
+  so a right-click hid the popup before the menu appeared. Those windows are skipped for
+  standalone panels; the left-click toggle stays with the tray callback. See
+  [Notes](/docs/os/tray-app#notes).
+
+---
 
 ## v2.5.4
 

@@ -7,6 +7,88 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.6
+
+**Sortie : 2026-08-30**
+
+### Corrections de bugs
+
+- **Pré-édition IME sous Linux** (#558 / #613) — le backend Linux épinglait
+  `gtk::IMContextSimple`, le repli intégré de GTK, qui n'atteint jamais la méthode de saisie
+  système : la saisie CJK n'était pas dégradée mais impossible, et taper `aiueo` puis valider ne
+  laissait qu'un `a` parasite. Le backend utilise désormais `gtk::IMMulticontext` — ibus ou fcitx5
+  via l'immodule GTK sous X11, le client text-input-v3 sous Wayland — et route ses signaux vers
+  les mêmes événements `ImePreedit` / `ImeCommit` que macOS et Windows. Les touches consommées par
+  la méthode de saisie n'atteignent plus Compose, y compris les relâchements orphelins que Wayland
+  délivre pour une frappe filtrée, et la fenêtre de candidats suit le curseur. Voir
+  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+- **Fenêtre de candidats Linux par-dessus le curseur** (#613) — GTK place ses fenêtres autour
+  d'une *zone* de curseur, en pixels logiques et relative au `GdkWindow` toplevel, pas autour d'un
+  point en pixels physiques relatif à la zone client : la liste de candidats se posait donc sur la
+  composition qu'elle décrivait. Le rectangle du curseur est mis à l'échelle et translaté de
+  l'allocation du widget de contenu, la même correction que la sous-surface Wayland applique déjà.
+  Voir [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+- **Dérive de l'état des modificateurs sous Linux** (#613) — `ModifiersChanged` n'était émis que
+  si la touche elle-même était un modificateur : Compose suivait donc Ctrl, Shift, Alt et Super
+  par comptabilité des appuis et relâchements. Les méthodes de saisie sous X11 ré-injectent les
+  événements qu'elles transmettent, et un relâchement de Control perdu laissait Compose croire que
+  Ctrl restait enfoncé pour le reste de la session : une simple Entrée était lue comme
+  Ctrl+Entrée. L'état est maintenant dérivé du masque de modificateurs GDK porté par chaque
+  événement, et se répare donc à la frappe suivante.
+- **Accents press-and-hold sous macOS** (#611 / #612 / #617) — Nucleus forçait
+  `ApplePressAndHoldEnabled` dans quatre domaines de préférences et devinait via une machine à
+  états quand le sélecteur d'accents était actif. Une lettre maintenue ne faisait alors
+  strictement rien sur les claviers où le sélecteur ne peut pas s'activer, et une frappe rapide
+  ordinaire armait le drapeau puis routait le commit suivant vers le chemin de remplacement, ce
+  qui supprimait le caractère tout juste validé (« Xcode » devenant « Xcde »). Nucleus ne lit ni
+  n'écrit plus le default utilisateur — c'est l'OS qui décide si une lettre maintenue répète ou
+  ouvre le sélecteur — et le choix est appliqué à partir du `replacementRange` fourni par AppKit
+  avec `insertText:`, en sélectionnant puis en insérant. Voir
+  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+- **Jitter sous-pixel avalant les clics** (#615 / #619) — Tao rapporte les positions du curseur au
+  1/1024 de pixel et macOS émet un `CursorMoved` avant chaque `mouseDown` et `mouseUp` : un clic
+  dérivant d'une fraction de pixel produisait un vrai delta de mouvement, démarrait un geste de
+  drag parent et annulait le tap, si bien qu'une sélection demandait deux clics. Les mouvements de
+  moins de 1 dp depuis la dernière position dispatchée sont maintenant supprimés, et
+  `viewConfiguration.touchSlop` est mis à l'échelle de la densité (18.dp) au lieu de 18 pixels
+  bruts, ce qui divisait par deux tous les seuils de drag et de scroll sur les écrans 2x. Voir
+  [Fonctionnement](/docs/tao/multi-touch#fonctionnement).
+- **Scroll des popups tray sous Linux** (#610) — les popups standalone, overlay et owner-based
+  passent maintenant leurs événements molette par le même dispatch mis en forme AWT que
+  `TaoWindow`, avec la valeur lignes-par-cran Windows issue de `LocalScrollConfig`. Les frames des
+  popups standalone sont peintes en ligne quand l'appelant est déjà sur le thread principal, pour
+  qu'un flot de molette ne puisse pas affamer `MainEventsCleared`. Voir
+  [Notes](/docs/os/tray-app#notes).
+- **Démarrage au login en demi-taille sous GNOME** (#614 / #616) — `graphical-session.target` est
+  atteint avant que `gsd-xsettings` n'écrive `Xft.dpi` dans la base de ressources X : une app
+  HiDPI lancée au login figeait donc `sun.java2d.uiScale` à 1.0, alors qu'un lancement manuel
+  était toujours correct. L'unité systemd utilisateur générée est ordonnée après
+  `gnome-session-x11-services-ready.target`. systemd ignore l'ordonnancement sur les unités non
+  chargées : c'est donc sans effet sur les autres bureaux. Voir
+  [Notes](/docs/lifecycle/auto-launch#notes).
+
+---
+
+## v2.5.5
+
+**Sortie : 2026-08-28**
+
+### Corrections de bugs
+
+- **Popup tray macOS et Show Desktop** (#609) — le `NSPanel` standalone avait le collection
+  behavior par défaut : « Cliquer sur le fond d'écran pour révéler le bureau » sous Sonoma et
+  suivants faisait donc glisser la popup en Exposé alors que Compose était déjà en train de la
+  faire disparaître. Le panneau est maintenant stationnaire, présent sur tous les espaces,
+  auxiliaire en plein écran et ignoré par le cyclage de fenêtres, si bien que `TrayApp` la ferme
+  lui-même. Voir [Notes](/docs/os/tray-app#notes).
+- **Popup tray macOS fermée par sa propre icône** (#609) — le moniteur de clic extérieur comptait
+  un `mouseDown` sur le `NSStatusItem` et sur son menu contextuel natif comme un clic hors du
+  panneau : un clic droit masquait donc la popup avant l'apparition du menu. Ces fenêtres sont
+  ignorées pour les panneaux standalone ; le toggle du clic gauche reste géré par le callback du
+  tray. Voir [Notes](/docs/os/tray-app#notes).
+
+---
+
 ## v2.5.4
 
 **Sortie : 2026-08-27**

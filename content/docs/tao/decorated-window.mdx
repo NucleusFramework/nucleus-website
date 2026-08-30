@@ -321,10 +321,19 @@ entry point you start from. The same holds for `WindowScaffold` and the chrome p
 ## Text input
 
 IME composition (Japanese, Chinese, Korean, and similar) is forwarded into Compose as preedit
-on macOS and Windows. Keys the IME already consumed — conversion Enter, candidate arrows,
+on macOS, Windows, and Linux. Keys the IME already consumed — conversion Enter, candidate arrows,
 Backspace on the preedit — are dropped so they do not also insert a newline, move the caret, or
-delete committed text. On macOS the PressAndHold accent picker stays gated while a composition
-is live, so a segment commit cannot arm the picker and hijack the next commit.
+delete committed text. The candidate window follows the caret on all three platforms.
+
+Linux resolves the platform input method the way GTK's own text widgets do: ibus or fcitx5
+through the GTK immodule on X11, and the text-input-v3 client on Wayland. Linux preedit requires
+2.5.6 or later — earlier releases pinned GTK's built-in fallback context, which never reaches a
+system input method.
+
+On macOS, whether a held letter repeats or opens the accent picker is left entirely to the
+operating system: Nucleus neither reads nor writes `ApplePressAndHoldEnabled`. A pick is applied
+from the `replacementRange` AppKit sends with it, so it replaces the base letter without touching
+the text around it (2.5.6; earlier releases forced the user default and inferred the picker state).
 
 ## Notes
 
