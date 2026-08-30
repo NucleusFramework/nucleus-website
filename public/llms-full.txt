@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.6   | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.7   | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -2517,7 +2517,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2549,7 +2549,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2600,7 +2600,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.6/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -7094,7 +7094,9 @@ ignored off macOS and on the AWT backend. See
   `dragAndDropTarget` the same way as a regular window (Windows and macOS from 2.5.3, Linux
   from 2.5.4). Wheel and trackpad scroll uses the same AWT mapping as the main window (Windows
   from 2.5.2, macOS from 2.5.4, Linux from 2.5.6). A hidden Windows popup no longer submits GPU
-  frames (2.5.2).
+  frames (2.5.2). A frame scheduled from inside a scene pass — a scrollbar drag subcomposing new
+  lazy items, for example — is posted to the main queue instead of rendered inline, so it cannot
+  re-enter measure and layout (2.5.7).
 - On macOS the panel is stationary and joins all spaces, so "Click wallpaper to reveal desktop"
   on Sonoma and later leaves it in place and `TrayApp` dismisses it itself (2.5.5). Clicks on the
   status item and on its context menu do not count as clicks outside the popup, so a right-click
@@ -14645,7 +14647,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.6` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.7` for production runs.
 
 ## Reference an action
 
@@ -16846,6 +16848,23 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.7
+
+**Released: 2026-08-30**
+
+### Bug fixes
+
+- **Popup render re-entry on a scrollbar drag** (#620) — dragging a scrollbar inside a `TrayApp`
+  popup scrolls synchronously inside the pointer event, and the `LaunchedEffect`s of the lazy
+  items subcomposed by that scroll scheduled a frame the standalone pump rendered inline. Measure
+  and layout re-entered while the first pass was still on the stack, throwing
+  `performMeasureAndLayout called during measure layout` and leaving the drag with a non-zero
+  pending scroll. Every scene entry point of the standalone hosts — pointer, scroll, key dispatch,
+  and `setContent` — now runs under the pump's re-entrancy guard, so a frame scheduled mid-pass is
+  posted to the Tao main queue instead. See [Notes](/docs/os/tray-app#notes).
+
+---
 
 ## v2.5.6
 
