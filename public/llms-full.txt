@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.9   | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.10  | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -2575,7 +2575,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2607,7 +2607,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2658,7 +2658,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -13281,11 +13281,25 @@ flag; when `msi.perMachine` is unset, `perUserInstall` still applies for compati
 ```kotlin title="build.gradle.kts"
 windows {
     upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+    menuGroup = "My Company" // MSI start-menu folder from 2.5.10
     msi {
         perMachine = false // per-user MSI (Program Files → user-local)
+        oneClick = false   // assisted wizard (jpackage-style)
+        runAfterFinish = false
+        createDesktopShortcut = true
+        createStartMenuShortcut = true
+        // menuCategory = "My Company" // optional; windows.menuGroup is the default
+        // shortcutName = "My App"
     }
 }
 ```
+
+From 2.5.10 the remaining installer options reach electron-builder. Defaults match
+electron-builder (`oneClick`, `runAfterFinish`, and both shortcut flags are `true`). Set
+`oneClick = false` for the assisted wizard jpackage used to produce. `windows.menuGroup` is
+the default `menuCategory`, so a start-menu folder you already declare for NSIS applies to
+MSI as well. `windows.menu` / `windows.shortcut` are not mapped: their jpackage defaults
+(`false`) are the opposite of electron-builder's (`true`).
 
 ## Build an AppX or MSIX package
 
@@ -14705,7 +14719,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.9` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.10` for production runs.
 
 ## Reference an action
 
@@ -16319,6 +16333,12 @@ Three mutually exclusive modes:
 
 ### `windows.msi { }` — `MsiSettings`
 - `perMachine: Boolean` — install per-machine (Program Files, all users). Default `true`. Maps 1:1 to electron-builder `msi.perMachine`.
+- `oneClick: Boolean` — skip the wizard. Default `true`. Set `false` for an assisted installer.
+- `runAfterFinish: Boolean` — launch the app when the installer finishes. Default `true`.
+- `createDesktopShortcut: Boolean` — default `true`.
+- `createStartMenuShortcut: Boolean` — default `true`.
+- `menuCategory: String?` — start-menu submenu (and Program Files subdirectory). Default `null`; when unset, `windows.menuGroup` is used.
+- `shortcutName: String?` — shortcut label. Defaults to the application name.
 
 ### `windows.nsis { }` — `NsisSettings`
 - `oneClick: Boolean`
@@ -16906,6 +16926,25 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.10
+
+**Released: 2026-08-31**
+
+### Bug fixes
+
+- **MSI installer options** (#629) — the MSI target only forwarded `upgradeCode` and
+  `perMachine` to electron-builder, so every other Windows installer setting fell back to
+  an electron-builder default: `windows.menuGroup` was ignored and the shortcut landed in
+  the start menu root, `oneClick` defaulted to `true` so the installer ran with no UI, and
+  `runAfterFinish` launched the app as soon as the install finished. `MsiSettings` now
+  emits `oneClick`, `runAfterFinish`, `createDesktopShortcut`, `createStartMenuShortcut`,
+  `menuCategory`, and `shortcutName`. Defaults match electron-builder unless a project
+  opts in; `windows.menuGroup` is the default `menuCategory`. `windows.menu` /
+  `windows.shortcut` stay unmapped (jpackage `false` vs electron-builder `true`). See
+  [Build an MSI for enterprise deployment](/docs/packaging/windows#build-an-msi-for-enterprise-deployment).
+
+---
 
 ## v2.5.9
 
