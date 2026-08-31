@@ -6,6 +6,31 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.8
+
+**Released: 2026-08-31**
+
+### New features
+
+- **Native fatal-error dialog** (#622 / #623) — an exception that escaped a Tao event
+  dispatch used to be cleared at the JNI boundary, leaving a frozen, silent, unclosable
+  window. The default path now logs the stack at `SEVERE`, shows a blocking native dialog
+  (`CFUserNotification` on macOS, `MessageBoxW` on a dedicated thread on Windows,
+  `GtkMessageDialog` on Linux), exits the Tao loop, and rethrows so `nucleusApplication` /
+  `taoApplication` end with exit code 1. The dialog is shown after the loop has exited — a
+  modal pump inside a tao callback deadlocks the main thread. Skip it with
+  `-Dnucleus.tao.fatalErrorDialog=false` for unattended runs. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
+- **`WindowExceptionHandlerFactory`** (#621 / #625) — Tao mirror of Compose Desktop's AWT
+  factory. Provide `LocalWindowExceptionHandlerFactory` to catch failures during layout,
+  draw, input, IME, and accessibility; a handler that returns normally drops the frame and
+  keeps the window alive. Composition failures still kill the recomposer (Compose's own
+  design); swallowing one logs at `SEVERE` instead of leaving a window that never updates.
+  The default factory rethrows into the fatal dialog. `@ExperimentalComposeUiApi`. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
+
+---
+
 ## v2.5.7
 
 **Released: 2026-08-30**

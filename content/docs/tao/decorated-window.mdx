@@ -335,6 +335,57 @@ operating system: Nucleus neither reads nor writes `ApplePressAndHoldEnabled`. A
 from the `replacementRange` AppKit sends with it, so it replaces the base letter without touching
 the text around it (2.5.6; earlier releases forced the user default and inferred the picker state).
 
+## Handle uncaught exceptions
+
+From 2.5.8, an exception that escapes a Tao event dispatch no longer vanishes at the JNI
+boundary. The default path logs the stack at `SEVERE`, shows a blocking native error dialog
+(`CFUserNotification` on macOS, `MessageBoxW` on Windows, `GtkMessageDialog` on Linux), exits
+the Tao loop, and rethrows so `nucleusApplication` / `taoApplication` terminate with exit
+code 1. The dialog is shown after the loop has exited — a modal pump inside a tao callback
+deadlocks the main thread.
+
+Skip the dialog in unattended runs (CI, AOT training) with
+`-Dnucleus.tao.fatalErrorDialog=false`. The `SEVERE` log remains.
+
+To keep a window alive after a recoverable failure, provide a
+`LocalWindowExceptionHandlerFactory`. It is the Tao mirror of Compose Desktop's AWT factory
+and is `@ExperimentalComposeUiApi`. Handlers run on the thread the failure occurred on, and
+cover layout, draw, input, IME, accessibility, and `nativePopupLayers` popups of that window:
+
+```kotlin
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.window.WindowExceptionHandler
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.tao.LocalWindowExceptionHandlerFactory
+import dev.nucleusframework.window.tao.WindowExceptionHandlerFactory
+
+@OptIn(ExperimentalComposeUiApi::class)
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    CompositionLocalProvider(
+        LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { _ ->
+            WindowExceptionHandler { throwable ->
+                // Return normally to drop the frame and keep the window alive.
+                // Rethrow to take the fatal dialog and exit.
+            }
+        },
+    ) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Demo") {
+            MyContent()
+        }
+    }
+}
+```
+
+Returning normally is a real resume for layout, draw, input, IME, and accessibility: the
+offending frame is dropped and a new one is requested. A failure *inside composition* is
+not recoverable — Compose stops the recomposition loop before the backend sees the exception,
+and that loop cannot be restarted. Swallowing one logs at `SEVERE` instead of leaving a
+window that silently paints its last frame; close and recreate the window, or rethrow to
+take the fatal path. `DefaultWindowExceptionHandlerFactory` always rethrows.
+
 ## Notes
 
 - macOS requires `-XstartOnFirstThread`. The Nucleus Gradle plugin adds it for you.

@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.7   | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.8   | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -1325,6 +1325,9 @@ The Tao-specific API lives in `dev.nucleusframework.window.tao`:
 - `TaoCursorIcon`, `TaoTrackpadGesture`, `TaoTrackpadPhase`, `TaoMouseButton`, `TaoEventCode` —
   input constants.
 - `TaoDeepLinkBridge.setSink { uri -> … }` — deep link delivery.
+- `WindowExceptionHandlerFactory` / `LocalWindowExceptionHandlerFactory` — catch scene
+  failures, or let the default factory take the native fatal dialog. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
 
 `decorated-window-jbr` and `decorated-window-jni` are legacy and maintenance-only: they still
 ship and still work, but new features land on Tao only. Keep one on the classpath and select the
@@ -1673,6 +1676,57 @@ On macOS, whether a held letter repeats or opens the accent picker is left entir
 operating system: Nucleus neither reads nor writes `ApplePressAndHoldEnabled`. A pick is applied
 from the `replacementRange` AppKit sends with it, so it replaces the base letter without touching
 the text around it (2.5.6; earlier releases forced the user default and inferred the picker state).
+
+## Handle uncaught exceptions
+
+From 2.5.8, an exception that escapes a Tao event dispatch no longer vanishes at the JNI
+boundary. The default path logs the stack at `SEVERE`, shows a blocking native error dialog
+(`CFUserNotification` on macOS, `MessageBoxW` on Windows, `GtkMessageDialog` on Linux), exits
+the Tao loop, and rethrows so `nucleusApplication` / `taoApplication` terminate with exit
+code 1. The dialog is shown after the loop has exited — a modal pump inside a tao callback
+deadlocks the main thread.
+
+Skip the dialog in unattended runs (CI, AOT training) with
+`-Dnucleus.tao.fatalErrorDialog=false`. The `SEVERE` log remains.
+
+To keep a window alive after a recoverable failure, provide a
+`LocalWindowExceptionHandlerFactory`. It is the Tao mirror of Compose Desktop's AWT factory
+and is `@ExperimentalComposeUiApi`. Handlers run on the thread the failure occurred on, and
+cover layout, draw, input, IME, accessibility, and `nativePopupLayers` popups of that window:
+
+```kotlin
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.window.WindowExceptionHandler
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.tao.LocalWindowExceptionHandlerFactory
+import dev.nucleusframework.window.tao.WindowExceptionHandlerFactory
+
+@OptIn(ExperimentalComposeUiApi::class)
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    CompositionLocalProvider(
+        LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { _ ->
+            WindowExceptionHandler { throwable ->
+                // Return normally to drop the frame and keep the window alive.
+                // Rethrow to take the fatal dialog and exit.
+            }
+        },
+    ) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Demo") {
+            MyContent()
+        }
+    }
+}
+```
+
+Returning normally is a real resume for layout, draw, input, IME, and accessibility: the
+offending frame is dropped and a new one is requested. A failure *inside composition* is
+not recoverable — Compose stops the recomposition loop before the backend sees the exception,
+and that loop cannot be restarted. Swallowing one logs at `SEVERE` instead of leaving a
+window that silently paints its last frame; close and recreate the window, or rethrow to
+take the fatal path. `DefaultWindowExceptionHandlerFactory` always rethrows.
 
 ## Notes
 
@@ -2517,7 +2571,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2549,7 +2603,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2600,7 +2654,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.7/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -14647,7 +14701,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.7` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.8` for production runs.
 
 ## Reference an action
 
@@ -16848,6 +16902,31 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.8
+
+**Released: 2026-08-31**
+
+### New features
+
+- **Native fatal-error dialog** (#622 / #623) — an exception that escaped a Tao event
+  dispatch used to be cleared at the JNI boundary, leaving a frozen, silent, unclosable
+  window. The default path now logs the stack at `SEVERE`, shows a blocking native dialog
+  (`CFUserNotification` on macOS, `MessageBoxW` on a dedicated thread on Windows,
+  `GtkMessageDialog` on Linux), exits the Tao loop, and rethrows so `nucleusApplication` /
+  `taoApplication` end with exit code 1. The dialog is shown after the loop has exited — a
+  modal pump inside a tao callback deadlocks the main thread. Skip it with
+  `-Dnucleus.tao.fatalErrorDialog=false` for unattended runs. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
+- **`WindowExceptionHandlerFactory`** (#621 / #625) — Tao mirror of Compose Desktop's AWT
+  factory. Provide `LocalWindowExceptionHandlerFactory` to catch failures during layout,
+  draw, input, IME, and accessibility; a handler that returns normally drops the frame and
+  keeps the window alive. Composition failures still kill the recomposer (Compose's own
+  design); swallowing one logs at `SEVERE` instead of leaving a window that never updates.
+  The default factory rethrows into the fatal dialog. `@ExperimentalComposeUiApi`. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
+
+---
 
 ## v2.5.7
 

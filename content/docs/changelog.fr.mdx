@@ -7,6 +7,33 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.8
+
+**Sortie : 2026-08-31**
+
+### Nouvelles fonctionnalités
+
+- **Dialogue natif d'erreur fatale** (#622 / #623) — une exception qui s'échappait d'un
+  dispatch d'événement Tao était effacée à la frontière JNI, et laissait une fenêtre figée,
+  silencieuse et impossible à fermer. Le chemin par défaut journalise maintenant la pile en
+  `SEVERE`, affiche un dialogue natif bloquant (`CFUserNotification` sous macOS, `MessageBoxW`
+  sur un thread dédié sous Windows, `GtkMessageDialog` sous Linux), quitte la boucle Tao et
+  relance l'exception pour que `nucleusApplication` / `taoApplication` se terminent avec le
+  code de sortie 1. Le dialogue s'affiche après la sortie de la boucle — une pompe modale
+  dans un callback tao provoque un deadlock du thread principal. Désactivez-le avec
+  `-Dnucleus.tao.fatalErrorDialog=false` pour les exécutions non supervisées. Voir
+  [Gérer les exceptions non interceptées](/docs/tao/decorated-window#gérer-les-exceptions-non-interceptées).
+- **`WindowExceptionHandlerFactory`** (#621 / #625) — miroir Tao de la factory AWT de
+  Compose Desktop. Fournissez `LocalWindowExceptionHandlerFactory` pour attraper les pannes
+  pendant le layout, le draw, l'entrée, l'IME et l'accessibilité ; un handler qui retourne
+  normalement abandonne la frame et laisse la fenêtre vivante. Une panne pendant la
+  composition tue toujours le recomposer (c'est le design de Compose) ; l'avaler journalise
+  en `SEVERE` au lieu de laisser une fenêtre qui ne se met plus à jour. La factory par
+  défaut relance vers le dialogue fatal. `@ExperimentalComposeUiApi`. Voir
+  [Gérer les exceptions non interceptées](/docs/tao/decorated-window#gérer-les-exceptions-non-interceptées).
+
+---
+
 ## v2.5.7
 
 **Sortie : 2026-08-30**

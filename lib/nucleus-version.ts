@@ -9,7 +9,7 @@
  *   2. Snapshot the previous line (see .docs-versioning.md)
  *   3. Set DOC_VERSIONS latest label via NUCLEUS_LINE below
  */
-export const NUCLEUS_VERSION = '2.5.7' as const;
+export const NUCLEUS_VERSION = '2.5.8' as const;
 
 /** major.minor for badges and marketing (e.g. "2.5") */
 export const NUCLEUS_LINE = NUCLEUS_VERSION.split('.').slice(0, 2).join('.') as '2.5';

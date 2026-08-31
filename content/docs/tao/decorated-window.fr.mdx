@@ -346,6 +346,59 @@ partir du `replacementRange` qu'AppKit transmet avec lui, et remplace donc la le
 toucher au texte autour (2.5.6 ; les versions antérieures forçaient le default utilisateur et
 déduisaient l'état du sélecteur).
 
+## Gérer les exceptions non interceptées
+
+Depuis 2.5.8, une exception qui s'échappe d'un dispatch d'événement Tao ne disparaît plus à
+la frontière JNI. Le chemin par défaut journalise la pile en `SEVERE`, affiche un dialogue
+natif bloquant (`CFUserNotification` sous macOS, `MessageBoxW` sous Windows, `GtkMessageDialog`
+sous Linux), quitte la boucle Tao et relance l'exception pour que `nucleusApplication` /
+`taoApplication` se terminent avec le code de sortie 1. Le dialogue s'affiche après la sortie
+de la boucle — une pompe modale dans un callback tao provoque un deadlock du thread principal.
+
+Désactivez le dialogue pour les exécutions non supervisées (CI, entraînement AOT) avec
+`-Dnucleus.tao.fatalErrorDialog=false`. Le log `SEVERE` reste.
+
+Pour garder une fenêtre vivante après une panne récupérable, fournissez un
+`LocalWindowExceptionHandlerFactory`. C'est le miroir Tao de la factory AWT de Compose
+Desktop, annoté `@ExperimentalComposeUiApi`. Les handlers s'exécutent sur le thread où la
+panne s'est produite, et couvrent le layout, le draw, l'entrée, l'IME, l'accessibilité et
+les popups `nativePopupLayers` de cette fenêtre :
+
+```kotlin
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.window.WindowExceptionHandler
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.tao.LocalWindowExceptionHandlerFactory
+import dev.nucleusframework.window.tao.WindowExceptionHandlerFactory
+
+@OptIn(ExperimentalComposeUiApi::class)
+fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
+    CompositionLocalProvider(
+        LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { _ ->
+            WindowExceptionHandler { throwable ->
+                // Retourner normalement abandonne la frame et laisse la fenêtre vivante.
+                // Relancer prend le dialogue fatal et quitte.
+            }
+        },
+    ) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "Demo") {
+            MyContent()
+        }
+    }
+}
+```
+
+Retourner normalement est une vraie reprise pour le layout, le draw, l'entrée, l'IME et
+l'accessibilité : la frame fautive est abandonnée et une nouvelle est demandée. Une panne
+*pendant la composition* n'est pas récupérable — Compose arrête la boucle de recomposition
+avant que le backend ne voie l'exception, et cette boucle ne peut pas être relancée. L'avaler
+journalise en `SEVERE` au lieu de laisser une fenêtre qui repeint silencieusement sa dernière
+frame ; fermez et recréez la fenêtre, ou relancez pour prendre le chemin fatal.
+`DefaultWindowExceptionHandlerFactory` relance toujours.
+
 ## Notes
 
 - macOS exige `-XstartOnFirstThread`. Le plugin Gradle Nucleus l'ajoute pour vous.

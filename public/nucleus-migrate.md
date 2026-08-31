@@ -387,7 +387,7 @@ if __name__ == "__main__":
 
 ### Prerequisites
 
-JDK 17+ (25+ only for `enableAotCache`), Kotlin 2.0+, Gradle 8.0+. Nucleus 2.5.7 pairs with Kotlin 2.4.10 / Compose 1.12.0. Node.js is required for installer packaging (electron-builder pipeline).
+JDK 17+ (25+ only for `enableAotCache`), Kotlin 2.0+, Gradle 8.0+. Nucleus 2.5.8 pairs with Kotlin 2.4.10 / Compose 1.12.0. Node.js is required for installer packaging (electron-builder pipeline).
 
 ### Step 1 — Apply the plugin (keep the JetBrains Compose plugin)
 
@@ -943,7 +943,7 @@ A complete real-world KMP Compose Desktop → Nucleus 2.4 migration (+640/−627
 
 ### Migration order used
 
-1. **Version catalog**: `nucleus = "2.5.7"` version; libraries `dev.nucleusframework:nucleus.{nucleus-application, core-runtime, decorated-window-tao, decorated-window-material3, menu-macos}`; plugin alias `nucleus = { id = "dev.nucleusframework", version.ref = "nucleus" }`. ArtifactId convention: `nucleus.<module-dir>` (hence the double `nucleus.nucleus-application`).
+1. **Version catalog**: `nucleus = "2.5.8"` version; libraries `dev.nucleusframework:nucleus.{nucleus-application, core-runtime, decorated-window-tao, decorated-window-material3, menu-macos}`; plugin alias `nucleus = { id = "dev.nucleusframework", version.ref = "nucleus" }`. ArtifactId convention: `nucleus.<module-dir>` (hence the double `nucleus.nucleus-application`).
 2. **Plugins**: add `alias(libs.plugins.nucleus)`; remove nothing (JB Compose plugin stays).
 3. **DSL swap**: `compose.desktop { application {} }` → `nucleus { application {} }`, imports → `dev.nucleusframework.desktop.application.dsl.*`. Formats Msi→Nsis (+Zip, AppImage, Portable), `compressionLevel = CompressionLevel.Ultra` with `appImage`/`portable` overridden to `Store`, `cleanupNativeLibs = true`, `homepage` added for Deb. ProGuard `buildTypes.release` deleted (GraalVM `optimization = NativeImageOptimization.SIZE` replaces it as shrinker — note: the plain-JVM path then loses shrinking).
 4. **Toolchain alignment**: `jvmToolchain(21)` added to EVERY KMP module (multi-module mismatch otherwise); Gradle wrapper bumped to 9.5.1.
