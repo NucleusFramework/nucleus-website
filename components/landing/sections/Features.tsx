@@ -197,7 +197,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Écrivez en Kotlin/Native et appelez depuis la JVM. Sans C, sans glue.',
     },
     icon: 'chip',
-    href: '/docs/performance/native-access',
+    href: '/docs/performance/native-code',
   },
 ];
 
