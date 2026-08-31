@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.8   | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.9   | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -1680,11 +1680,15 @@ the text around it (2.5.6; earlier releases forced the user default and inferred
 ## Handle uncaught exceptions
 
 From 2.5.8, an exception that escapes a Tao event dispatch no longer vanishes at the JNI
-boundary. The default path logs the stack at `SEVERE`, shows a blocking native error dialog
-(`CFUserNotification` on macOS, `MessageBoxW` on Windows, `GtkMessageDialog` on Linux), exits
-the Tao loop, and rethrows so `nucleusApplication` / `taoApplication` terminate with exit
-code 1. The dialog is shown after the loop has exited — a modal pump inside a tao callback
-deadlocks the main thread.
+boundary. The default path logs the stack at `SEVERE`, shows a blocking native error dialog,
+exits the Tao loop, and rethrows so `nucleusApplication` / `taoApplication` terminate with
+exit code 1. The dialog is shown after the loop has exited — a modal pump inside a tao
+callback deadlocks the main thread.
+
+From 2.5.9 the dialog carries the full stack in a bounded scrollable monospace view with a
+Copy button: an `NSAlert` run by an out-of-process `osascript` child on macOS (compact
+`CFUserNotification` fallback), an in-memory `DLGTEMPLATE` on a fresh thread on Windows
+(`MessageBoxW` fallback), and a `GtkMessageDialog` on Linux.
 
 Skip the dialog in unattended runs (CI, AOT training) with
 `-Dnucleus.tao.fatalErrorDialog=false`. The `SEVERE` log remains.
@@ -2571,7 +2575,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2603,7 +2607,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2654,7 +2658,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.8/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.9/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -14701,7 +14705,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.8` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.9` for production runs.
 
 ## Reference an action
 
@@ -16902,6 +16906,25 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.9
+
+**Released: 2026-08-31**
+
+### Bug fixes
+
+- **Fatal dialog stack trace** (#627) — the 2.5.8 native dialog stuffed the throwable into
+  the message line. On Linux that doubled the title ("Fatal Error" twice on WMs that draw
+  dialog titlebars) and the unbounded secondary label sized the dialog to the whole screen.
+  The payload is now a short message plus `Throwable.stackTraceToString()`: all three
+  platforms render the trace in a bounded scrollable monospace view with a Copy button
+  (`NSAlert` via an out-of-process `osascript` child on macOS, an in-memory `DLGTEMPLATE`
+  on a fresh thread on Windows, `GtkMessageDialog` on Linux). Compact fallbacks
+  (`CFUserNotification` / `MessageBoxW`) keep the `toString()` summary, capped at 2000
+  chars so a `VerifyError` bytecode dump cannot silently hide the box. See
+  [Handle uncaught exceptions](/docs/tao/decorated-window#handle-uncaught-exceptions).
+
+---
 
 ## v2.5.8
 
