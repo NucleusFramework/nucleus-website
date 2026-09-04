@@ -18,7 +18,9 @@ function parseFrontmatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) return { data: {}, body: raw };
   const data = {};
-  for (const line of m[1].split('\n')) {
+  // Split on both endings: a CRLF checkout would otherwise leave a trailing \r,
+  // which `.*$` cannot match, and every key but the last would be dropped.
+  for (const line of m[1].split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/);
     if (!kv) continue;
     let val = kv[2].trim();
@@ -72,7 +74,9 @@ function resolveSection(dir, slugPrefix) {
     );
     const subDir = path.join(dir, name);
     if (filePath) {
-      const raw = fs.readFileSync(filePath, 'utf8');
+      // Normalize to LF: the emitted text is line-ending agnostic, and every
+      // regex below (blank-line collapsing included) assumes \n.
+      const raw = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
       const { data, body } = parseFrontmatter(raw);
       const slug = name === 'index' ? slugPrefix : [...slugPrefix, name];
       nodes.push({ type: 'page', slug, data, body: cleanBody(body) });

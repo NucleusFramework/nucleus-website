@@ -6,6 +6,82 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.13
+
+**Released: 2026-09-04**
+
+### Bug fixes
+
+- **Windows freeze on IME commit and taskbar restart** (#644) — two more instances of the
+  #640 lock class: the window-state lock was held across `ImeHandler::process_message`, which
+  peeks the queue on `WM_IME_ENDCOMPOSITION` (the Korean IME sends the committed string after
+  the end message, so the queue decides whether to defer), and across `set_skip_taskbar` on
+  `TaskbarCreated`, where the `CoCreateInstance` + `ITaskbarList` STA call pumps the queue
+  while it waits. Both re-entered the window procedure and re-locked a non-reentrant mutex,
+  parking the event-loop thread in `WaitOnAddress` for good. The IME commit-pending flag is
+  now computed before the lock is taken and passed in, and the skip-taskbar flag is read out
+  before the COM call. Wider blast radius than #640: nearly every IME arm took that lock.
+  Ported from tauri-apps/tao#1215 and #1264. See
+  [Text input](/docs/tao/decorated-window#text-input).
+- **Windows freeze on a keyboard-triggered nested message** (#640) — `PeekMessageW` delivers
+  pending cross-thread *sent* messages inline, re-entering the window procedure before the
+  peek returns. The keyboard callback held the global `KEY_EVENT_BUILDERS` map and the
+  key-press/release arms held `LAYOUT_CACHE` across such a peek, so the nested dispatch
+  deadlocked the event-loop thread against itself and the window stayed "Not Responding".
+  Reported as a freeze when moving a window between Windows 11 virtual desktops. The builder
+  is now taken out of the map for the duration and put back only if the slot still exists, and
+  the layout-cache guard ends before the peek. Only injected or sent key messages can nest
+  here, and they are now dropped instead of hanging the process.
+
+---
+
+## v2.5.12
+
+**Released: 2026-09-01**
+
+### Bug fixes
+
+- **`alwaysOnTop` dropped on Windows** (#631) — three layers lost `WS_EX_TOPMOST`:
+  `DecoratedWindowComposable` created every window with a hardcoded `alwaysOnTop = false` and
+  applied the real value from a later `LaunchedEffect`, losing the race against creation-time
+  style rewrites (acrylic, skip-taskbar); tao only issues its z-order `SetWindowPos` on a
+  `WindowFlags` cache diff, and asynchronously, so an external rewrite that dropped the
+  topmost band was never repaired. The initial value is now passed at window creation,
+  `setAlwaysOnTop` also applies the z-order synchronously, and the band is re-asserted after
+  the known clobber sites — every resize, and the backdrop apply, teardown, and
+  survivor-restore paths. See
+  [Platform behavior](/docs/tao/overlay-windows#platform-behavior).
+- **Input starving with two windows open on Windows** (#632) — any snapshot write in the
+  process wakes every scene's `Recomposer` through the global apply observer, and the Windows
+  host rendered and presented those frames unconditionally. Each `eglSwapBuffers` at interval
+  1 parks the shared event-loop thread until the next VBlank, so every visible window
+  re-presented at the animating window's rate and the VBlank waits serialized (a dashboard
+  lagging while a small always-on-top window was visible). The scene bundle now tracks a
+  visual-dirty flag fed by its `invalidateLayout` / `invalidateDraw` callbacks and the host
+  skips the present for a frame with no visual change. Presents that must swap regardless are
+  kept: a size or scale apply, the OS modal resize/move loop, a resolved clear-colour change,
+  and the first swap after `show()`. See
+  [How it works](/docs/tao/decorated-window#how-it-works).
+
+---
+
+## v2.5.11
+
+**Released: 2026-08-31**
+
+### New features
+
+- **`menuCategory` and `shortcutName` on the NSIS targets** (#630) — follow-up to #629. The
+  NSIS targets exposed most installer settings but not these two, so a start-menu group could
+  not be declared at all and the shortcut always landed in the start menu root — a blocker for
+  projects moving their MSI packaging to the recommended NSIS format while keeping the folder
+  they had under jpackage. Both are emitted for `nsis` and `nsis-web`, default to `null`
+  (nothing emitted, so existing installers are unchanged), and `windows.menuGroup` acts as the
+  default `menuCategory` exactly as it does for MSI. See
+  [Customize the NSIS installer](/docs/packaging/windows#customize-the-nsis-installer).
+
+---
+
 ## v2.5.10
 
 **Released: 2026-08-31**

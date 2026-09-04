@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.10  | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.13  | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -2575,7 +2575,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2607,7 +2607,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2658,7 +2658,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.10/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -13257,6 +13257,10 @@ windows {
         createDesktopShortcut = true
         runAfterFinish = true
 
+        // Start-menu folder, from 2.5.11; windows.menuGroup is the default
+        menuCategory = "My Company"
+        shortcutName = "My App"
+
         multiLanguageInstaller = true
         installerLanguages = listOf("en_US", "fr_FR", "de_DE", "ja_JP")
 
@@ -13266,6 +13270,11 @@ windows {
     }
 }
 ```
+
+From 2.5.11, `menuCategory` and `shortcutName` are available on the NSIS targets as well
+(`nsis` and `nsis-web`). Both default to `null` — the shortcut lands in the start menu root
+and carries the application name — and `windows.menuGroup` is the default `menuCategory`, so
+the group you already declare for jpackage-era packaging keeps working.
 
 ## Build an MSI for enterprise deployment
 
@@ -14719,7 +14728,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.10` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.13` for production runs.
 
 ## Reference an action
 
@@ -16345,6 +16354,8 @@ Three mutually exclusive modes:
 - `allowElevation: Boolean`, `perMachine: Boolean`
 - `allowToChangeInstallationDirectory: Boolean`
 - `createDesktopShortcut: Boolean`, `createStartMenuShortcut: Boolean`
+- `menuCategory: String?` — start-menu submenu (and Program Files subdirectory). Default `null`; when unset, `windows.menuGroup` is used.
+- `shortcutName: String?` — shortcut label. Defaults to the application name.
 - `runAfterFinish: Boolean`, `deleteAppDataOnUninstall: Boolean`
 - `multiLanguageInstaller: Boolean`, `installerLanguages: List<String>`
 - `installerIcon`, `uninstallerIcon`, `installerHeader`, `installerSidebar`
@@ -16926,6 +16937,82 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.13
+
+**Released: 2026-09-04**
+
+### Bug fixes
+
+- **Windows freeze on IME commit and taskbar restart** (#644) — two more instances of the
+  #640 lock class: the window-state lock was held across `ImeHandler::process_message`, which
+  peeks the queue on `WM_IME_ENDCOMPOSITION` (the Korean IME sends the committed string after
+  the end message, so the queue decides whether to defer), and across `set_skip_taskbar` on
+  `TaskbarCreated`, where the `CoCreateInstance` + `ITaskbarList` STA call pumps the queue
+  while it waits. Both re-entered the window procedure and re-locked a non-reentrant mutex,
+  parking the event-loop thread in `WaitOnAddress` for good. The IME commit-pending flag is
+  now computed before the lock is taken and passed in, and the skip-taskbar flag is read out
+  before the COM call. Wider blast radius than #640: nearly every IME arm took that lock.
+  Ported from tauri-apps/tao#1215 and #1264. See
+  [Text input](/docs/tao/decorated-window#text-input).
+- **Windows freeze on a keyboard-triggered nested message** (#640) — `PeekMessageW` delivers
+  pending cross-thread *sent* messages inline, re-entering the window procedure before the
+  peek returns. The keyboard callback held the global `KEY_EVENT_BUILDERS` map and the
+  key-press/release arms held `LAYOUT_CACHE` across such a peek, so the nested dispatch
+  deadlocked the event-loop thread against itself and the window stayed "Not Responding".
+  Reported as a freeze when moving a window between Windows 11 virtual desktops. The builder
+  is now taken out of the map for the duration and put back only if the slot still exists, and
+  the layout-cache guard ends before the peek. Only injected or sent key messages can nest
+  here, and they are now dropped instead of hanging the process.
+
+---
+
+## v2.5.12
+
+**Released: 2026-09-01**
+
+### Bug fixes
+
+- **`alwaysOnTop` dropped on Windows** (#631) — three layers lost `WS_EX_TOPMOST`:
+  `DecoratedWindowComposable` created every window with a hardcoded `alwaysOnTop = false` and
+  applied the real value from a later `LaunchedEffect`, losing the race against creation-time
+  style rewrites (acrylic, skip-taskbar); tao only issues its z-order `SetWindowPos` on a
+  `WindowFlags` cache diff, and asynchronously, so an external rewrite that dropped the
+  topmost band was never repaired. The initial value is now passed at window creation,
+  `setAlwaysOnTop` also applies the z-order synchronously, and the band is re-asserted after
+  the known clobber sites — every resize, and the backdrop apply, teardown, and
+  survivor-restore paths. See
+  [Platform behavior](/docs/tao/overlay-windows#platform-behavior).
+- **Input starving with two windows open on Windows** (#632) — any snapshot write in the
+  process wakes every scene's `Recomposer` through the global apply observer, and the Windows
+  host rendered and presented those frames unconditionally. Each `eglSwapBuffers` at interval
+  1 parks the shared event-loop thread until the next VBlank, so every visible window
+  re-presented at the animating window's rate and the VBlank waits serialized (a dashboard
+  lagging while a small always-on-top window was visible). The scene bundle now tracks a
+  visual-dirty flag fed by its `invalidateLayout` / `invalidateDraw` callbacks and the host
+  skips the present for a frame with no visual change. Presents that must swap regardless are
+  kept: a size or scale apply, the OS modal resize/move loop, a resolved clear-colour change,
+  and the first swap after `show()`. See
+  [How it works](/docs/tao/decorated-window#how-it-works).
+
+---
+
+## v2.5.11
+
+**Released: 2026-08-31**
+
+### New features
+
+- **`menuCategory` and `shortcutName` on the NSIS targets** (#630) — follow-up to #629. The
+  NSIS targets exposed most installer settings but not these two, so a start-menu group could
+  not be declared at all and the shortcut always landed in the start menu root — a blocker for
+  projects moving their MSI packaging to the recommended NSIS format while keeping the folder
+  they had under jpackage. Both are emitted for `nsis` and `nsis-web`, default to `null`
+  (nothing emitted, so existing installers are unchanged), and `windows.menuGroup` acts as the
+  default `menuCategory` exactly as it does for MSI. See
+  [Customize the NSIS installer](/docs/packaging/windows#customize-the-nsis-installer).
+
+---
 
 ## v2.5.10
 

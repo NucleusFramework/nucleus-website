@@ -7,6 +7,88 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.13
+
+**Sortie : 2026-09-04**
+
+### Corrections de bugs
+
+- **Gel Windows à la validation IME et au redémarrage de la barre des tâches** (#644) — deux
+  autres cas de la classe de bug #640 : le verrou d'état de fenêtre était tenu pendant
+  `ImeHandler::process_message`, qui inspecte la file sur `WM_IME_ENDCOMPOSITION` (l'IME
+  coréen envoie la chaîne validée après le message de fin, c'est donc la file qui décide s'il
+  faut différer), et pendant `set_skip_taskbar` sur `TaskbarCreated`, où l'appel STA
+  `CoCreateInstance` + `ITaskbarList` pompe la file pendant son attente. Les deux
+  réentraient la procédure de fenêtre et reprenaient un mutex non réentrant, laissant le thread
+  de la boucle d'événements garé dans `WaitOnAddress` définitivement. Le drapeau de validation IME
+  est maintenant calculé avant la prise du verrou et passé en paramètre, et le drapeau
+  skip-taskbar est lu avant l'appel COM. Rayon d'action plus large que #640 : presque toutes
+  les branches IME prenaient ce verrou. Porté de tauri-apps/tao#1215 et #1264. Voir
+  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+- **Gel Windows sur un message imbriqué déclenché au clavier** (#640) — `PeekMessageW` délivre
+  en ligne les messages *envoyés* depuis un autre thread : la procédure de fenêtre est
+  réentrée avant le retour du peek. Le callback clavier tenait la map globale
+  `KEY_EVENT_BUILDERS` et les branches press/release tenaient `LAYOUT_CACHE` pendant ce peek,
+  donc le dispatch imbriqué mettait le thread de la boucle d'événements en interblocage avec
+  lui-même et la fenêtre restait « Ne répond pas ». Signalé comme un gel en déplaçant une
+  fenêtre entre bureaux virtuels Windows 11. Le builder est maintenant sorti de la map le
+  temps de l'appel et remis seulement si l'emplacement existe encore, et le guard du cache de
+  layout se termine avant le peek. Seuls des messages clavier injectés ou envoyés peuvent
+  s'imbriquer ici ; ils sont désormais ignorés au lieu de figer le processus.
+
+---
+
+## v2.5.12
+
+**Sortie : 2026-09-01**
+
+### Corrections de bugs
+
+- **`alwaysOnTop` perdu sous Windows** (#631) — trois couches perdaient `WS_EX_TOPMOST` :
+  `DecoratedWindowComposable` créait chaque fenêtre avec un `alwaysOnTop = false` codé en dur
+  et n'appliquait la vraie valeur que depuis un `LaunchedEffect` ultérieur, ce qui perd la
+  course contre les réécritures de style faites à la création (acrylic, skip-taskbar) ; tao
+  n'émet son `SetWindowPos` de z-order que sur une différence de son cache `WindowFlags`, et
+  en asynchrone, donc une réécriture externe qui retirait la bande topmost n'était jamais
+  réparée. La valeur initiale est maintenant passée à la création, `setAlwaysOnTop` applique
+  aussi le z-order de façon synchrone, et la bande est réaffirmée après les points de perte
+  connus — chaque redimensionnement, et les chemins d'application, de démontage et de
+  restauration du backdrop. Voir
+  [Comportement par plateforme](/docs/tao/overlay-windows#comportement-par-plateforme).
+- **Entrées affamées avec deux fenêtres ouvertes sous Windows** (#632) — n'importe quelle
+  écriture de snapshot dans le processus réveille le `Recomposer` de chaque scène via
+  l'observateur global, et l'hôte Windows rendait et présentait ces frames sans condition.
+  Chaque `eglSwapBuffers` à l'intervalle 1 gare le thread partagé de la boucle d'événements
+  jusqu'au VBlank suivant, donc chaque fenêtre visible se re-présentait au rythme de la
+  fenêtre animée et les attentes de VBlank se sérialisaient (un tableau de bord qui rame
+  pendant qu'une petite fenêtre always-on-top est visible). Le bundle de scène suit désormais
+  un drapeau « visuel sale » alimenté par ses callbacks `invalidateLayout` / `invalidateDraw`
+  et l'hôte saute la présentation d'une frame sans changement visuel. Les présentations qui
+  doivent swapper quoi qu'il arrive sont conservées : application d'une taille ou d'une
+  échelle, boucle modale de redimensionnement/déplacement de l'OS, changement de couleur
+  d'effacement résolue, et premier swap après `show()`. Voir
+  [Comment ça marche](/docs/tao/decorated-window#comment-ça-marche).
+
+---
+
+## v2.5.11
+
+**Sortie : 2026-08-31**
+
+### Nouvelles fonctionnalités
+
+- **`menuCategory` et `shortcutName` sur les cibles NSIS** (#630) — suite de #629. Les cibles
+  NSIS exposaient la plupart des options d'installateur mais pas ces deux-là : un groupe de
+  menu Démarrer ne pouvait pas être déclaré du tout et le raccourci atterrissait toujours à la
+  racine du menu Démarrer — bloquant pour les projets qui migrent leur packaging MSI vers le
+  format NSIS recommandé tout en gardant le dossier qu'ils avaient sous jpackage. Les deux
+  sont émis pour `nsis` et `nsis-web`, valent `null` par défaut (rien n'est émis, les
+  installateurs existants sont inchangés), et `windows.menuGroup` sert de `menuCategory` par
+  défaut, exactement comme pour le MSI. Voir
+  [Personnaliser l'installateur NSIS](/docs/packaging/windows#personnaliser-linstallateur-nsis).
+
+---
+
 ## v2.5.10
 
 **Sortie : 2026-08-31**
