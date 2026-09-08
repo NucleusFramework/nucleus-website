@@ -7,6 +7,66 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.15
+
+**Sortie : 2026-09-07**
+
+### Nouvelles fonctionnalités
+
+- **Événements pan du trackpad sur macOS** (#654) — les gestes trackpad à deux doigts
+  arrivaient comme de simples événements Compose `Scroll`, indistinguables des crans de
+  molette, donc une carte ne pouvait pas lier le pan au trackpad et le zoom à la molette.
+  Les pas AppKit phasés deviennent maintenant `PointerEventType.PanStart` / `PanMove` /
+  `PanEnd` avec `panOffset` en pixels (`preciseWheelRotation` AWT × 10.dp). Les crans de
+  molette et les scrolls précis sans phase restent des `Scroll`. Le pan reste ouvert pendant
+  la queue d'inertie AppKit pour que Compose n'empile pas son propre fling.
+  `Modifier.scrollable` gère les deux ; un `pointerInput` personnalisé qui n'écoute que
+  `Scroll` doit aussi gérer Pan, ou démarrez le processus avec
+  `-Dnucleus.tao.trackpadPanEvents=false` pour recevoir des `Scroll` façon AWT pour tout.
+  Les vues natives consomment le pan et le transmettent pour que la vue défilante intégrée
+  fasse son rubber-band ; les popups partagent le même routeur. Voir
+  [Lire les pans du trackpad depuis Compose](/docs/tao/multi-touch#lire-les-pans-du-trackpad-depuis-compose).
+
+### Corrections de bugs
+
+- **Scroll trackpad horizontal inversé sur macOS** (#652) — tao négait `scrollingDeltaX` dans
+  le handler macOS `scroll_wheel`, puis Nucleus négait les deux axes en supposant des deltas
+  AppKit bruts, donc un swipe à deux doigts vers la gauche panait dans le mauvais sens par
+  rapport à AWT. AppKit suit déjà la convention `MouseScrollDelta` (comme winit) ; la
+  négation X supplémentaire a disparu, et la conversion des popups inverse les deux axes
+  d'un coup. Voir
+  [Lire les pans du trackpad depuis Compose](/docs/tao/multi-touch#lire-les-pans-du-trackpad-depuis-compose).
+- **Amplitude du scroll trackpad incluant le facteur d'échelle d'affichage** (#653) — Tao
+  convertissait les deltas logiques AppKit en pixels physiques avant de diviser par 10, donc
+  un swipe de 10 points avançait deux fois plus loin sur un écran 2× que sous AWT (qui
+  utilise `scrollingDelta * 0.1` sans scale). Les deltas précis sont maintenant transmis en
+  points logiques. Voir [Fonctionnement](/docs/tao/multi-touch#fonctionnement).
+
+---
+
+## v2.5.14
+
+**Sortie : 2026-09-04**
+
+### Corrections de bugs
+
+- **Contenu de fenêtre reclassé par un composable non-UI** (#636) — les ouvreurs de fenêtre
+  et de dialogue avaient leur cible de composition inférée, donc une seule factory non
+  annotée appelée dans le bloc `nucleusApplication` (le compilateur Compose grave
+  `@ComposableTarget` sur toute fonction non marquée qui transmet un lambda de contenu
+  déjà ciblé) reclassait tout le scope — fenêtres imbriquées comprises — et chaque appel
+  `@UiComposable` y produisait un warning, fatal sous `-Werror`. Le cas signalé était
+  `rememberMapState` de MapLibre Compose. Chaque ouvreur est maintenant
+  `@ComposableOpenTarget(-1)` avec un lambda de contenu `@UiComposable`, comme `Window` /
+  `Dialog` de Compose Desktop : appelable depuis n'importe quel applier, toujours en
+  composant de l'UI dans la composition propre de la nouvelle fenêtre. Couvre
+  `DecoratedWindow`/`DecoratedDialog`, `NucleusWindowHost`/`NucleusDialogHost`,
+  `HostedWindow`/`HostedDialog`, et les `DecoratedWindow`, `DecoratedDialog` et
+  `TaoStandalonePopup` de Tao. Les wrappers Material/Jewel héritent du même schéma par
+  inférence. Voir [Notes](/docs/tao/decorated-window#notes).
+
+---
+
 ## v2.5.13
 
 **Sortie : 2026-09-04**

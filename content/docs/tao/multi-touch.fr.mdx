@@ -73,10 +73,50 @@ Modifier.pointerInput(Unit) {
 }
 ```
 
+## Lire les pans du trackpad depuis Compose
+
+Depuis 2.5.15 sur macOS, les gestes trackpad à deux doigts arrivent comme
+`PointerEventType.PanStart` / `PanMove` / `PanEnd` avec `panOffset` en pixels. Les crans
+de molette restent des `Scroll`. `Modifier.scrollable` de Foundation gère les deux ; un
+`pointerInput` personnalisé qui n'écoute que `Scroll` ne verra pas le trackpad :
+
+```kotlin
+import androidx.compose.ui.input.pointer.PointerEventType
+
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.first()
+            when (event.type) {
+                PointerEventType.PanMove -> {
+                    val pan = change.panOffset  // pixels ; preciseWheelRotation AWT × 10.dp
+                    // Appliquez le pan.
+                }
+                PointerEventType.Scroll -> {
+                    val scroll = change.scrollDelta
+                    // Cran de molette ou scroll précis sans phase.
+                }
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+Démarrez le processus avec `-Dnucleus.tao.trackpadPanEvents=false` pour recevoir des
+événements `Scroll` façon AWT à chaque pas.
+
+<Callout type="info">
+Le pan reste ouvert pendant la queue d'inertie AppKit. Le fermer au lever des doigts
+empilerait le fling de Compose sur l'animation de la plateforme. Un `PanEnd` arrive après
+la queue, ou après un court délai de grâce s'il n'y a pas de queue.
+</Callout>
+
 ## Lire le flux de gestes brut
 
 Pour distinguer directement le type et la phase d'un geste — par exemple séparer un pincement
-d'un scroll à deux doigts — enregistrez un `TrackpadGestureListener` sur le `TaoWindow` courant :
+d'une rotation — enregistrez un `TrackpadGestureListener` sur le `TaoWindow` courant :
 
 ```kotlin
 import dev.nucleusframework.window.tao.LocalTaoWindow
@@ -121,6 +161,15 @@ zone morte garde sa position sous-pixel exacte. Depuis la même version,
 `viewConfiguration.touchSlop` est mis à l'échelle de la densité (18.dp — parité AWT et Android) au
 lieu de 18 pixels bruts, ce qui divisait par deux tous les seuils de drag et de scroll sur les
 écrans 2x.
+
+Depuis 2.5.15, le scroll trackpad macOS correspond à AWT : AppKit suit déjà la convention
+`MouseScrollDelta`, donc la négation supplémentaire de `scrollingDeltaX` a disparu, et les
+deltas précis sont transmis en points logiques (AWT n'applique jamais le facteur d'échelle
+d'affichage). Les pas phasés passent par `TaoTrackpadPanRouter` et deviennent des événements
+Pan à `10.dp` par unité de molette AWT — le même facteur que `MacOSCocoaConfig` de Compose
+Desktop applique à un cran. Les crans de molette et les scrolls précis sans phase restent
+des Scroll. Les vues natives consomment le pan et le transmettent pour que la vue défilante
+intégrée fasse son rubber-band ; les popups partagent le même routeur que la fenêtre.
 
 ## Référence de l'API
 
@@ -167,7 +216,8 @@ object TaoTrackpadPhase {
 val type: PointerType         // Mouse | Touch | Stylus | Eraser
 val pressure: Float           // 0f si le périphérique ne rapporte pas de pression
 val position: Offset          // position sub-pixel
-val scrollDelta: Offset       // molette et scroll trackpad
+val scrollDelta: Offset       // molette et scroll précis sans phase
+val panOffset: Offset         // pan trackpad (macOS, 2.5.15+) ; pixels
 ```
 
 ## Et ensuite

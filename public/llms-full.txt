@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.13  | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.15  | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -1745,6 +1745,10 @@ take the fatal path. `DefaultWindowExceptionHandlerFactory` always rethrows.
 - `NucleusApplicationScope` implements Compose's `ApplicationScope`, so libraries scoped to the
   plain Compose receiver (for example system-tray composables) resolve inside
   `nucleusApplication { }`.
+- From 2.5.14, `DecoratedWindow` / `DecoratedDialog` (and the hosted and Tao variants) are
+  `@ComposableOpenTarget(-1)` with a `@UiComposable` content lambda. A non-UI-targeted
+  composable called in the `nucleusApplication` block no longer reclassifies the window
+  content, so `@UiComposable` calls inside the window stay valid under `-Werror`.
 
 ## What's next
 
@@ -2333,7 +2337,10 @@ routes to the matching embedding path. On macOS the `NsView` is added as a sibli
 Tao content view; on Windows the `HWnd` is reparented under the main Tao HWND; on Linux
 the `GtkWidget` is added to Tao's GTK content widget. Each path tracks the Compose layout
 slot with `onGloballyPositioned` and forwards the bounds to the native side, so the
-embedded view follows resizes and scrolls with no extra wiring.
+embedded view follows resizes and scrolls with no extra wiring. From 2.5.15, a trackpad
+pan over a `NativeView` is consumed and forwarded (`PanStart` / `PanMove` / `PanEnd`) so
+the embedded scroll view rubber-bands; the Compose scrollable above does not open a
+competing pan session.
 
 If the returned variant doesn't match the current OS — or the platform's scene plumbing
 isn't available — `NativeView` renders an empty `Box(modifier)` instead of failing. This
@@ -2575,7 +2582,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2607,7 +2614,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2658,7 +2665,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.13/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -2959,10 +2966,48 @@ Modifier.pointerInput(Unit) {
 }
 ```
 
+## Read trackpad pans from Compose
+
+From 2.5.15 on macOS, two-finger trackpad gestures arrive as `PointerEventType.PanStart` /
+`PanMove` / `PanEnd` with `panOffset` in pixels. Mouse-wheel notches stay `Scroll`.
+Foundation's `Modifier.scrollable` handles both; a custom `pointerInput` that only listens
+for `Scroll` will not see the trackpad:
+
+```kotlin
+import androidx.compose.ui.input.pointer.PointerEventType
+
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.first()
+            when (event.type) {
+                PointerEventType.PanMove -> {
+                    val pan = change.panOffset  // pixels; AWT preciseWheelRotation × 10.dp
+                    // Apply the pan.
+                }
+                PointerEventType.Scroll -> {
+                    val scroll = change.scrollDelta
+                    // Wheel notch or phase-less precise scroll.
+                }
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+Start the process with `-Dnucleus.tao.trackpadPanEvents=false` to receive AWT-style `Scroll`
+events for every step instead.
+
+The pan stays open across AppKit's inertial momentum tail. Closing it when the fingers lift
+would stack Compose's own fling on top of the platform animation. A `PanEnd` arrives after
+the tail, or after a short grace if no tail follows.
+
 ## Read the raw gesture stream
 
 To distinguish gesture kinds and phases directly — for example, telling a pinch apart from
-a two-finger scroll — register a `TrackpadGestureListener` on the current `TaoWindow`:
+a rotate — register a `TrackpadGestureListener` on the current `TaoWindow`:
 
 ```kotlin
 import dev.nucleusframework.window.tao.LocalTaoWindow
@@ -3003,6 +3048,15 @@ consumes the change and cancels the tap. Press, release, exit, and scroll dispat
 dispatched position; motion past the deadband keeps its exact sub-pixel position. From the same
 release, `viewConfiguration.touchSlop` is density-scaled to 18.dp — AWT and Android parity —
 instead of 18 raw pixels, which halved every drag and scroll threshold on 2x displays.
+
+From 2.5.15, macOS trackpad scrolling matches AWT: AppKit already follows the
+`MouseScrollDelta` convention, so the extra negation of `scrollingDeltaX` is gone, and
+precise deltas are handed over in logical points (AWT never applies the display scale).
+Phased steps go through `TaoTrackpadPanRouter` and become Pan events at `10.dp` per AWT
+wheel unit — the same factor Compose Desktop's `MacOSCocoaConfig` applies to a notch.
+Wheel notches and phase-less precise scrolls stay Scroll. Native views consume the pan
+and forward it so the embedded scroll view rubber-bands; popups share the same router as
+the window.
 
 ## API reference
 
@@ -3049,7 +3103,8 @@ object TaoTrackpadPhase {
 val type: PointerType         // Mouse | Touch | Stylus | Eraser
 val pressure: Float           // 0f when the device reports no pressure
 val position: Offset          // sub-pixel position
-val scrollDelta: Offset       // scroll wheel and trackpad scroll
+val scrollDelta: Offset       // scroll wheel and phase-less precise scroll
+val panOffset: Offset         // trackpad pan (macOS, 2.5.15+); pixels
 ```
 
 ## What's next
@@ -14728,7 +14783,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.13` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.15` for production runs.
 
 ## Reference an action
 
@@ -16937,6 +16992,61 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.15
+
+**Released: 2026-09-07**
+
+### New features
+
+- **Trackpad pan events on macOS** (#654) — two-finger trackpad gestures arrived as ordinary
+  Compose `Scroll` events, indistinguishable from wheel notches, so a map could not bind panning
+  to the trackpad and zoom to the wheel. Phased AppKit scroll steps now become
+  `PointerEventType.PanStart` / `PanMove` / `PanEnd` with `panOffset` in pixels (AWT
+  `preciseWheelRotation` × 10.dp). Wheel notches and phase-less precise scrolls stay `Scroll`.
+  The pan stays open across AppKit's momentum tail so Compose does not stack its own fling.
+  `Modifier.scrollable` handles both; a custom `pointerInput` that only listens for `Scroll`
+  must also handle Pan, or start the process with `-Dnucleus.tao.trackpadPanEvents=false` to
+  get AWT-style `Scroll` for everything. Native views consume the pan and forward it so the
+  embedded scroll view rubber-bands; popups share the same router. See
+  [Read trackpad pans from Compose](/docs/tao/multi-touch#read-trackpad-pans-from-compose).
+
+### Bug fixes
+
+- **Horizontal trackpad scroll reversed on macOS** (#652) — tao negated `scrollingDeltaX` in
+  the macOS `scroll_wheel` handler, then Nucleus negated both axes assuming raw AppKit deltas,
+  so a two-finger swipe left panned the wrong way relative to AWT. AppKit already follows the
+  `MouseScrollDelta` convention (as winit does); the extra X negation is gone, and popup
+  conversion flips both axes without a second guess. See
+  [Read trackpad pans from Compose](/docs/tao/multi-touch#read-trackpad-pans-from-compose).
+- **Trackpad scroll magnitude included display scale** (#653) — Tao converted AppKit logical
+  deltas to physical pixels before dividing by 10, so a 10-point swipe moved twice as far on a
+  2× display as under AWT (which uses `scrollingDelta * 0.1` with no scale). Precise deltas are
+  now handed over in logical points. See
+  [How it works](/docs/tao/multi-touch#how-it-works).
+
+---
+
+## v2.5.14
+
+**Released: 2026-09-04**
+
+### Bug fixes
+
+- **Window content reclassified by a non-UI composable** (#636) — the window and dialog
+  openers had their composition target inferred, so a single unmarked factory called in the
+  `nucleusApplication` block (the Compose compiler bakes `@ComposableTarget` onto any unmarked
+  function that forwards a target-marked content lambda) reclassified the whole scope — nested
+  windows included — and every `@UiComposable` call in it warned, which is fatal under
+  `-Werror`. The reported case was MapLibre Compose's `rememberMapState`. Each opener is now
+  `@ComposableOpenTarget(-1)` with a `@UiComposable` content lambda, matching Compose Desktop's
+  `Window`/`Dialog`: callable from any applier, always composing UI in the new window's own
+  composition. Covers `DecoratedWindow`/`DecoratedDialog`, `NucleusWindowHost` /
+  `NucleusDialogHost`, `HostedWindow`/`HostedDialog`, and Tao's `DecoratedWindow`,
+  `DecoratedDialog`, and `TaoStandalonePopup`. The Material/Jewel wrappers inherit the same
+  scheme through inference. See [Notes](/docs/tao/decorated-window#notes).
+
+---
 
 ## v2.5.13
 
