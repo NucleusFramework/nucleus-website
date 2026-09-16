@@ -94,7 +94,7 @@ function resolveSection(dir, slugPrefix) {
 }
 
 function urlFor(slug) {
-  return slug.length === 0 ? `${SITE_URL}/docs` : `${SITE_URL}/docs/${slug.join('/')}`;
+  return slug.length === 0 ? `${SITE_URL}/en/docs` : `${SITE_URL}/en/docs/${slug.join('/')}`;
 }
 
 function flattenPages(nodes, out = []) {
@@ -132,7 +132,7 @@ const llmsTxt = `# Nucleus
 
 > Nucleus is a Kotlin framework for building native cross-platform desktop apps on top of Compose Multiplatform. It combines a Gradle plugin, runtime libraries, and GitHub Actions to handle OS integration (30+ runtime modules), packaging (18 distribution formats), performance (GraalVM Native Image and JVM AOT cache), and native window decorations (Tao backend).
 
-- Docs: ${SITE_URL}/docs
+- Docs: ${SITE_URL}/en/docs
 - GitHub: https://github.com/NucleusFramework/Nucleus
 - Gradle Plugin Portal: https://plugins.gradle.org/plugin/dev.nucleusframework
 - Maven Central: https://central.sonatype.com/search?q=dev.nucleusframework
@@ -149,7 +149,7 @@ ${renderIndexNodes(tree, 1)}
 // llms-full.txt — every page's full content, in sidebar order
 // ---------------------------------------------------------------------------
 const fullParts = [
-  `# Nucleus — full documentation\n\n> ${rootIndexPage?.data.description ?? ''}\n\nSource: ${SITE_URL}/docs\n`,
+  `# Nucleus — full documentation\n\n> ${rootIndexPage?.data.description ?? ''}\n\nSource: ${SITE_URL}/en/docs\n`,
 ];
 
 for (const page of allPages) {

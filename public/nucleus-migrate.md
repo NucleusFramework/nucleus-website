@@ -31,7 +31,7 @@ You are performing an interactive migration to Nucleus: **detect → interview �
 | Reference: CI/CD | Phase 3.8 — setup-nucleus action, release matrix, update feeds |
 | Reference: Real-world example (Flocon) | Anytime — ordering template and the 10 costliest gotchas |
 
-Live docs: https://nucleusframework.dev (full text: https://nucleusframework.dev/llms-full.txt). Official build-migration guide: https://nucleusframework.dev/docs/migrate/from-jb-compose
+Live docs: https://nucleusframework.dev (full text: https://nucleusframework.dev/llms-full.txt). Official build-migration guide: https://nucleusframework.dev/en/docs/migrate/from-jb-compose
 
 ### Phase 1 — Scan
 
