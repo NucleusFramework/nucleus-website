@@ -176,6 +176,8 @@ Trois modes mutuellement exclusifs :
 - `debMaintainer: String?`, `debPackageVersion`, `debDepends: List<String>`
 - `rpmLicenseType: String?`, `rpmPackageVersion`, `rpmRequires: List<String>`
 - `pacmanPackageVersion: String?`, `pacmanDepends: List<String>` — pour la cible `Pacman` (Arch Linux)
+- `afterInstall: RegularFileProperty`, `afterRemove: RegularFileProperty` — concaténés après le template Nucleus, puis electron-builder. Les macros (`${executable}`, `${sanitizedProductName}`) ne se substituent **que entre simples quotes**. Deb / Rpm / Pacman uniquement. Voir [scripts d'installation et de désinstallation](/docs/packaging/linux#ajouter-des-scripts-dinstallation-et-de-désinstallation)
+- `beforeInstall: RegularFileProperty`, `beforeRemove: RegularFileProperty` — passés bruts à fpm (`--before-install` / `--before-remove`) ; aucune substitution de macro electron-builder. Pacman `pre_remove` n'a pas de `$1=upgrade` — arrêtez/désactivez inconditionnellement et réactivez dans `afterInstall`
 - `appImage { … }` — voir [AppImage](#linux--appimage--appimagesettings)
 - `snap { … }` — voir [Snap](#linux--snap--snapsettings)
 - `flatpak { … }` — voir [Flatpak](#linux--flatpak--flatpaksettings)
@@ -229,6 +231,7 @@ Les valeurs par défaut sont lues depuis `compose.desktop.linux.sign` et `compos
 ## GraalVM — `GraalvmSettings`
 
 - `isEnabled: Property<Boolean>` (défaut `false`)
+- `headless: Property<Boolean>` (défaut `false`) — daemons/CLIs : saute la metadata plateforme L3 AWT/Java2D, les packs L1 GUI toujours inclus et les libs natives GUI compagnons ; inscrit `-Djava.awt.headless=true`. Voir [Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless)
 - `imageName: Property<String>`
 - `march: Property<NativeImageMarch>` — `NATIVE` / `COMPATIBILITY` ; non défini, retombe sur un défaut par plateforme (`COMPATIBILITY`, ou `NATIVE` sous macOS Apple Silicon)
 - `optimization: Property<NativeImageOptimization>` — `QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` ; non défini, conserve `-O2`

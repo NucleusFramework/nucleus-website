@@ -157,6 +157,54 @@ linux {
 }
 ```
 
+## Add install and remove scripts
+
+Deb, Rpm, and Pacman packages run maintainer scripts as root. Point `linux { }` at your
+own files; Nucleus concatenates the after-scripts after its own template (desktop
+integration, AppArmor, optional polkit silent-update helper) and passes the before-scripts
+raw to fpm. GraalVM native-image packages honor the same four properties.
+
+```kotlin title="build.gradle.kts"
+linux {
+    afterInstall.set(project.file("packaging/linux/after-install.sh"))
+    afterRemove.set(project.file("packaging/linux/after-remove.sh"))
+    beforeInstall.set(project.file("packaging/linux/before-install.sh"))
+    beforeRemove.set(project.file("packaging/linux/before-remove.sh"))
+}
+```
+
+| Property | When it runs | How it is wired |
+|----------|--------------|-----------------|
+| `afterInstall` | After the payload is unpacked | Concatenated after Nucleus's template, then electron-builder |
+| `afterRemove` | After the payload is deleted | Concatenated after Nucleus's template, then electron-builder |
+| `beforeInstall` | Before the payload is unpacked | Passed raw to fpm (`--before-install`) |
+| `beforeRemove` | Before the payload is deleted | Passed raw to fpm (`--before-remove`) |
+
+Typical use: install a systemd unit that ships under `appResourcesRootDir`, then enable it
+from `afterInstall`. Stop the unit in `beforeInstall` so binaries under `/opt` can be
+replaced, and disable it in `afterRemove`.
+
+electron-builder substitutes `${sanitizedProductName}` and `${executable}` in
+`afterInstall` / `afterRemove` **only when the token is single-quoted**:
+
+```shell title="packaging/linux/after-install.sh"
+systemctl enable '${executable}-daemon.service'
+systemctl start '${executable}-daemon.service'
+```
+
+A double-quoted `"${executable}"` is left as literal text, so
+`systemctl enable "${executable}.service"` silently no-ops instead of failing. `beforeInstall`
+and `beforeRemove` get no macro substitution at all — hardcode unit and path names there.
+
+<Callout type="warn">
+Pacman's `.INSTALL` `pre_remove` hook (where `beforeRemove` lands) does not receive the
+deb-style `$1=upgrade` argument. Stop and disable the unit unconditionally, and re-enable
+it in `afterInstall` so an upgrade does not leave the service dead.
+</Callout>
+
+AppImage, Snap, and Flatpak do not run these scripts. AppImage is not installed; Snap and
+Flatpak have their own hook surfaces.
+
 ## Publish to the Snap Store
 
 Snap targets the [Snap Store](https://snapcraft.io/). The default `plugs` cover
@@ -251,7 +299,8 @@ No manual `desktopEntries` override is needed.
 `linux { }` exposes `iconFile`, `packageVersion`, `shortcut`, `startupWMClass`,
 `packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
 `debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
-`rpmRequires`, `pacmanPackageVersion`, and `pacmanDepends`. Sub-blocks are
+`rpmRequires`, `pacmanPackageVersion`, `pacmanDepends`, `afterInstall`,
+`afterRemove`, `beforeInstall`, and `beforeRemove`. Sub-blocks are
 `appImage { }`, `snap { }`, `flatpak { }`, and `signing { }`.
 
 `appRelease` sets the package release number — the digit after the `-` in DEB and

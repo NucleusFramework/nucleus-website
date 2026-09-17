@@ -43,6 +43,33 @@ built in. In 2.0 you installed a GraalVM toolchain yourself and passed size flag
 `buildArgs`.
 </Callout>
 
+## Build a headless image
+
+Default is a GUI image: Nucleus registers AWT/Java2D/Skiko reachability metadata and copies
+companion native libs (`libawt`, `libfontmanager`, Skiko, …) next to the binary. JNI
+registration of AWT types then makes `native-image` pull `libawt` / `libawt_xawt` even when
+app code never references `java.awt`.
+
+For a daemon or CLI, set `headless = true`:
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    isEnabled = true
+    headless = true
+}
+```
+
+That skip list is:
+
+- Level 3 platform metadata (`sun.awt.windows.*` / `sun.lwawt.macosx.*` / `sun.awt.X11.*`,
+  Java2D pipelines, font managers). The `main` class reflection entry is still written.
+- Always-on Level 1 packs: `jdk-awt`, `jdk-fonts`, `jdk-graphics2d`, Skiko, Compose, tray,
+  media player, webview.
+- Copying companion GUI native libs into the packaged output.
+- Bakes `-Djava.awt.headless=true` into the image.
+
+Leave it `false` for any app that opens a window, a tray, or otherwise needs AWT/Skiko.
+
 ## Provision the toolchain
 
 By default Nucleus downloads and caches **GraalVM Community Edition** under
@@ -113,6 +140,7 @@ set `autoDownload = false` and pick a `jvmVendor`.
 | Property | Type | Default | Notes |
 |----------|------|---------|-------|
 | `isEnabled` | `Property<Boolean>` | `false` | Master switch for the native-image build. |
+| `headless` | `Property<Boolean>` | `false` | Daemons/CLIs: skip GUI metadata and native libs. See [Build a headless image](#build-a-headless-image). |
 | `imageName` | `Property<String>` | package name | Output binary name. |
 | `march` | `Property<NativeImageMarch>` | per-platform | `NATIVE` targets the build CPU; `COMPATIBILITY` targets older CPUs. Unset defaults to `COMPATIBILITY`, except Apple-Silicon macOS which defaults to `NATIVE`. |
 | `optimization` | `Property<NativeImageOptimization>` | native-image `-O2` | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` is Oracle GraalVM only. |
@@ -202,7 +230,7 @@ for `buildArgs` for anything without a dedicated property:
 
 | Argument | Purpose |
 |----------|---------|
-| `-Djava.awt.headless=false` | Enables GUI support, required for desktop apps. |
+| `-Djava.awt.headless=false` | Enables GUI support. Prefer `graalvm { headless = false }` (the default) over this raw flag; use `headless = true` for daemons. |
 | `-H:-IncludeMethodData` | Drops method metadata, reducing binary size by several MB. |
 
 Nucleus does **not** force SLF4J to initialize at build time. The API and the app-selected

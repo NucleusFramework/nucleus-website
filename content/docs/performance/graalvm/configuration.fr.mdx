@@ -43,6 +43,34 @@ Profile-Guided Optimization est intégrée. En 2.0, vous installiez vous-même u
 GraalVM et passiez les flags de taille via `buildArgs`.
 </Callout>
 
+## Construire une image headless
+
+Par défaut l'image est GUI : Nucleus enregistre la metadata de reachability AWT/Java2D/Skiko
+et copie les libs natives compagnons (`libawt`, `libfontmanager`, Skiko, …) à côté du
+binaire. L'enregistrement JNI des types AWT fait alors tirer `libawt` / `libawt_xawt` par
+`native-image` même si le code de l'app ne référence jamais `java.awt`.
+
+Pour un daemon ou une CLI, mettez `headless = true` :
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    isEnabled = true
+    headless = true
+}
+```
+
+Ce qui est sauté :
+
+- La metadata plateforme de niveau 3 (`sun.awt.windows.*` / `sun.lwawt.macosx.*` /
+  `sun.awt.X11.*`, pipelines Java2D, gestionnaires de polices). L'entrée de réflexion de la
+  classe `main` est tout de même écrite.
+- Les packs de niveau 1 toujours inclus : `jdk-awt`, `jdk-fonts`, `jdk-graphics2d`, Skiko,
+  Compose, tray, media player, webview.
+- La copie des libs natives GUI compagnons dans la sortie empaquetée.
+- Inscrit `-Djava.awt.headless=true` dans l'image.
+
+Laissez `false` pour toute app qui ouvre une fenêtre, un tray, ou a besoin d'AWT/Skiko.
+
 ## Provisionner la toolchain
 
 Par défaut, Nucleus télécharge et met en cache **GraalVM Community Edition** sous
@@ -115,6 +143,7 @@ Pour builder sur une autre toolchain communautaire (Liberica NIK, Mandrel), poin
 | Propriété | Type | Défaut | Notes |
 |-----------|------|--------|-------|
 | `isEnabled` | `Property<Boolean>` | `false` | Interrupteur principal du build native-image. |
+| `headless` | `Property<Boolean>` | `false` | Daemons/CLIs : saute la metadata et les libs natives GUI. Voir [Construire une image headless](#construire-une-image-headless). |
 | `imageName` | `Property<String>` | nom du package | Nom du binaire de sortie. |
 | `march` | `Property<NativeImageMarch>` | par plateforme | `NATIVE` cible le CPU de build ; `COMPATIBILITY` cible des CPU plus anciens. Non défini, retombe sur `COMPATIBILITY`, sauf macOS Apple Silicon qui retombe sur `NATIVE`. |
 | `optimization` | `Property<NativeImageOptimization>` | `-O2` de native-image | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` est réservé à Oracle GraalVM. |
@@ -204,7 +233,7 @@ type-safe. Préférez `optimization` à un `-Os`/`-O*` brut et `allCharsets` à
 
 | Argument | Rôle |
 |----------|------|
-| `-Djava.awt.headless=false` | Active le support GUI, requis pour les apps desktop. |
+| `-Djava.awt.headless=false` | Active le support GUI. Préférez `graalvm { headless = false }` (le défaut) à ce flag brut ; utilisez `headless = true` pour les daemons. |
 | `-H:-IncludeMethodData` | Retire les métadonnées de méthodes, réduisant le binaire de plusieurs Mo. |
 
 Nucleus ne force **pas** SLF4J à s'initialiser au build time. L'API et le backend choisi par

@@ -6,6 +6,45 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.16
+
+**Released: 2026-09-17**
+
+### New features
+
+- **Linux install and remove scripts** (#664) — `linux { }` now takes `afterInstall`,
+  `afterRemove`, `beforeInstall`, and `beforeRemove` file properties. User after-scripts
+  are concatenated after Nucleus's own template (desktop integration, AppArmor, optional
+  polkit silent-update helper) and run through electron-builder for Deb, Rpm, and Pacman;
+  before-scripts are passed raw to fpm (`--before-install` / `--before-remove`). GraalVM
+  native-image packages honor the same four properties. electron-builder substitutes
+  `${sanitizedProductName}` / `${executable}` only in single-quoted tokens; a double-quoted
+  `"${executable}"` is left literal, so a systemd `systemctl enable "${executable}.service"`
+  line silently no-ops. Pacman `pre_remove` does not get deb-style `$1=upgrade` — stop and
+  disable the unit unconditionally and re-enable it in `afterInstall`. See
+  [Add install and remove scripts](/docs/packaging/linux#add-install-and-remove-scripts).
+- **Headless GraalVM images** (#665) — `graalvm { headless = true }` skips L3 AWT/Java2D
+  platform metadata, the always-on L1 GUI packs (`jdk-awt`, `jdk-fonts`, `jdk-graphics2d`,
+  Skiko/Compose/tray), and the companion GUI native libs (`libawt`, `libfontmanager`,
+  Skiko, …), and bakes `-Djava.awt.headless=true`. Default is `false` (GUI). Without this,
+  JNI registration of AWT types makes `native-image` pull `libawt` / `libawt_xawt` even
+  when app code never references `java.awt`. Use it for daemons and CLIs. See
+  [Build a headless image](/docs/performance/graalvm/configuration#build-a-headless-image).
+
+### Bug fixes
+
+- **Linux EGL crash on GPUs without GL 3.3 compatibility** (#670) — the X11 and Wayland
+  attach paths asked for one thing only: a GL 3.3 compatibility-profile context. Mesa's
+  r600 driver on AMD RV610 caps the compat profile at 3.0 (core reaches 3.3), so the
+  request failed and the app aborted. Attach now tries 3.3 compat, then 3.3 core
+  (hardware-accelerated on that GPU), then Mesa llvmpipe via `LIBGL_ALWAYS_SOFTWARE=1`
+  (Mesa reads that variable at `eglInitialize`, so the display is terminated and attach
+  re-enters once). Existing hardware that accepts the compat request is untouched. Both
+  fallbacks log one line on stderr. See
+  [Crash on launch with an older Linux GPU](/docs/reference/troubleshooting#crash-on-launch-with-an-older-linux-gpu).
+
+---
+
 ## v2.5.15
 
 **Released: 2026-09-07**

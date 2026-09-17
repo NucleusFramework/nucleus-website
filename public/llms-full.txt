@@ -157,7 +157,7 @@ Any JDK 17+ works for development.
 
 | Nucleus Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
-| 2.5.0 – 2.5.15  | 2.4.10+        | 1.12.0          |
+| 2.5.0 – 2.5.16  | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
 The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
@@ -1291,7 +1291,10 @@ GPU device, use [`TaoGpuRenderContext`](/docs/tao/gpu-render-context).
 
 Tao opens a native OS window directly: an `NSWindow` on macOS, an `HWND` on Windows, and a
 `wl_surface` (or an X11 window) on Linux. Compose renders into that surface through Skiko —
-Metal on macOS, ANGLE GLES over Direct3D 11 on Windows, EGL/GLES on Linux. Nothing routes through Swing's event-dispatch
+Metal on macOS, ANGLE GLES over Direct3D 11 on Windows, EGL/GLES on Linux. On Linux the EGL
+attach asks for a GL 3.3 compatibility context, then a 3.3 core context, then Mesa llvmpipe
+(`LIBGL_ALWAYS_SOFTWARE=1`) so GPUs that only offer core 3.3 still hardware-accelerate, and
+machines with neither still open a window. Nothing routes through Swing's event-dispatch
 thread.
 
 Compose Desktop's `SwingPanel` does not work on the Tao backend and crashes the app at
@@ -2582,7 +2585,7 @@ val source = nucleusD3D11SharedTextureSource(
   - plain `D3D11_RESOURCE_MISC_SHARED` — true zero-copy; the producer must `Flush()` after each
     frame or a redraw may sample a partial frame.
 
-The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/mediafoundation-demo)
+The [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.16/examples/mediafoundation-demo)
 sample shows Media Foundation decode into a shared D3D11 texture.
 
 **macOS**
@@ -2614,7 +2617,7 @@ val metalSource = nucleusMetalTextureSource(
 - A texture that is neither render-target-capable on the window's Metal device nor
   `IOSurface`-backed cannot be imported; hand over an `IOSurface` source instead.
 
-The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/avfoundation-demo)
+The [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.16/examples/avfoundation-demo)
 sample decodes with AVFoundation/VideoToolbox into an `IOSurface`.
 
 **Linux**
@@ -2665,7 +2668,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
   `controller.markFrameAvailable(acquireFenceFd)` (Linux DMA-BUF only; requires
   `EGL_ANDROID_native_fence_sync`). Elsewhere the fd is ignored and remains yours.
 
-The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.15/examples/gstreamer-demo)
+The [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/v2.5.16/examples/gstreamer-demo)
 sample feeds GStreamer frames as an `EGLImage`.
 
 ## How it works
@@ -11276,7 +11279,7 @@ GraalVM Native Image ahead-of-time compiles a Compose Desktop app into a single 
 
 ## When to use GraalVM Native Image
 
-- Background services, menu-bar apps, and system-tray tools that stay idle but must remain responsive.
+- Background services, menu-bar apps, and system-tray tools that stay idle but must remain responsive. Daemons and CLIs can set `graalvm { headless = true }` to drop AWT/Skiko from the image — see [Build a headless image](/docs/performance/graalvm/configuration#build-a-headless-image).
 - Utilities and launchers where startup time matters.
 - Store distribution (App Store, MSIX, Snap) and small self-contained installers that ship no separate JRE.
 - Memory-constrained environments such as sandboxes and low-spec hardware.
@@ -11384,6 +11387,33 @@ Edition, `march` and `optimization` are now type-safe enums, and Profile-Guided 
 built in. In 2.0 you installed a GraalVM toolchain yourself and passed size flags through
 `buildArgs`.
 
+## Build a headless image
+
+Default is a GUI image: Nucleus registers AWT/Java2D/Skiko reachability metadata and copies
+companion native libs (`libawt`, `libfontmanager`, Skiko, …) next to the binary. JNI
+registration of AWT types then makes `native-image` pull `libawt` / `libawt_xawt` even when
+app code never references `java.awt`.
+
+For a daemon or CLI, set `headless = true`:
+
+```kotlin title="build.gradle.kts"
+graalvm {
+    isEnabled = true
+    headless = true
+}
+```
+
+That skip list is:
+
+- Level 3 platform metadata (`sun.awt.windows.*` / `sun.lwawt.macosx.*` / `sun.awt.X11.*`,
+  Java2D pipelines, font managers). The `main` class reflection entry is still written.
+- Always-on Level 1 packs: `jdk-awt`, `jdk-fonts`, `jdk-graphics2d`, Skiko, Compose, tray,
+  media player, webview.
+- Copying companion GUI native libs into the packaged output.
+- Bakes `-Djava.awt.headless=true` into the image.
+
+Leave it `false` for any app that opens a window, a tray, or otherwise needs AWT/Skiko.
+
 ## Provision the toolchain
 
 By default Nucleus downloads and caches **GraalVM Community Edition** under
@@ -11452,6 +11482,7 @@ set `autoDownload = false` and pick a `jvmVendor`.
 | Property | Type | Default | Notes |
 |----------|------|---------|-------|
 | `isEnabled` | `Property<Boolean>` | `false` | Master switch for the native-image build. |
+| `headless` | `Property<Boolean>` | `false` | Daemons/CLIs: skip GUI metadata and native libs. See [Build a headless image](#build-a-headless-image). |
 | `imageName` | `Property<String>` | package name | Output binary name. |
 | `march` | `Property<NativeImageMarch>` | per-platform | `NATIVE` targets the build CPU; `COMPATIBILITY` targets older CPUs. Unset defaults to `COMPATIBILITY`, except Apple-Silicon macOS which defaults to `NATIVE`. |
 | `optimization` | `Property<NativeImageOptimization>` | native-image `-O2` | `QUICK_BUILD` (`-Ob`), `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` (`-Os`). `LEVEL_3` is Oracle GraalVM only. |
@@ -11541,7 +11572,7 @@ for `buildArgs` for anything without a dedicated property:
 
 | Argument | Purpose |
 |----------|---------|
-| `-Djava.awt.headless=false` | Enables GUI support, required for desktop apps. |
+| `-Djava.awt.headless=false` | Enables GUI support. Prefer `graalvm { headless = false }` (the default) over this raw flag; use `headless = true` for daemons. |
 | `-H:-IncludeMethodData` | Drops method metadata, reducing binary size by several MB. |
 
 Nucleus does **not** force SLF4J to initialize at build time. The API and the app-selected
@@ -11697,7 +11728,10 @@ SQLite JDBC, `androidx.sqlite` bundled, Coil, JNA, FileKit, SLF4J, Sentry, and o
 Each file may declare a `matchPackages` condition. The `filterGraalvmLibraryMetadata` task reads
 these files from the plugin JAR and includes a file only when the corresponding packages are on
 the runtime classpath; files without a condition are always included. Libraries in the curated
-set are covered without extra configuration.
+set are covered without extra configuration. With `graalvm { headless = true }`, the always-on
+GUI packs (`jdk-awt`, `jdk-fonts`, `jdk-graphics2d`, Skiko, Compose, tray, media player,
+webview) are skipped even when they have no `matchPackages` filter. See
+[Build a headless image](/docs/performance/graalvm/configuration#build-a-headless-image).
 
 ## Level 2 — GraalVM Reachability Metadata Repository
 
@@ -11716,7 +11750,8 @@ The `generateGraalvmPlatformMetadata` task writes reflection metadata for the cu
 system: `sun.awt.windows.*` on Windows, `sun.lwawt.macosx.*` on macOS, and `sun.awt.X11.*` on
 Linux, along with Java2D pipelines, font managers, and security providers. It also injects a
 reflection entry for your `main` class. No per-platform configuration is required in your build
-script.
+script. With `graalvm { headless = true }`, the AWT/Java2D platform file is not copied; only
+the `main` class reflection entry is written.
 
 ## Level 4 — static bytecode analysis
 
@@ -13623,6 +13658,52 @@ linux {
 }
 ```
 
+## Add install and remove scripts
+
+Deb, Rpm, and Pacman packages run maintainer scripts as root. Point `linux { }` at your
+own files; Nucleus concatenates the after-scripts after its own template (desktop
+integration, AppArmor, optional polkit silent-update helper) and passes the before-scripts
+raw to fpm. GraalVM native-image packages honor the same four properties.
+
+```kotlin title="build.gradle.kts"
+linux {
+    afterInstall.set(project.file("packaging/linux/after-install.sh"))
+    afterRemove.set(project.file("packaging/linux/after-remove.sh"))
+    beforeInstall.set(project.file("packaging/linux/before-install.sh"))
+    beforeRemove.set(project.file("packaging/linux/before-remove.sh"))
+}
+```
+
+| Property | When it runs | How it is wired |
+|----------|--------------|-----------------|
+| `afterInstall` | After the payload is unpacked | Concatenated after Nucleus's template, then electron-builder |
+| `afterRemove` | After the payload is deleted | Concatenated after Nucleus's template, then electron-builder |
+| `beforeInstall` | Before the payload is unpacked | Passed raw to fpm (`--before-install`) |
+| `beforeRemove` | Before the payload is deleted | Passed raw to fpm (`--before-remove`) |
+
+Typical use: install a systemd unit that ships under `appResourcesRootDir`, then enable it
+from `afterInstall`. Stop the unit in `beforeInstall` so binaries under `/opt` can be
+replaced, and disable it in `afterRemove`.
+
+electron-builder substitutes `${sanitizedProductName}` and `${executable}` in
+`afterInstall` / `afterRemove` **only when the token is single-quoted**:
+
+```shell title="packaging/linux/after-install.sh"
+systemctl enable '${executable}-daemon.service'
+systemctl start '${executable}-daemon.service'
+```
+
+A double-quoted `"${executable}"` is left as literal text, so
+`systemctl enable "${executable}.service"` silently no-ops instead of failing. `beforeInstall`
+and `beforeRemove` get no macro substitution at all — hardcode unit and path names there.
+
+Pacman's `.INSTALL` `pre_remove` hook (where `beforeRemove` lands) does not receive the
+deb-style `$1=upgrade` argument. Stop and disable the unit unconditionally, and re-enable
+it in `afterInstall` so an upgrade does not leave the service dead.
+
+AppImage, Snap, and Flatpak do not run these scripts. AppImage is not installed; Snap and
+Flatpak have their own hook surfaces.
+
 ## Publish to the Snap Store
 
 Snap targets the [Snap Store](https://snapcraft.io/). The default `plugs` cover
@@ -13717,7 +13798,8 @@ No manual `desktopEntries` override is needed.
 `linux { }` exposes `iconFile`, `packageVersion`, `shortcut`, `startupWMClass`,
 `packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
 `debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
-`rpmRequires`, `pacmanPackageVersion`, and `pacmanDepends`. Sub-blocks are
+`rpmRequires`, `pacmanPackageVersion`, `pacmanDepends`, `afterInstall`,
+`afterRemove`, `beforeInstall`, and `beforeRemove`. Sub-blocks are
 `appImage { }`, `snap { }`, `flatpak { }`, and `signing { }`.
 
 `appRelease` sets the package release number — the digit after the `-` in DEB and
@@ -14783,7 +14865,7 @@ your project.
 - Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
 
 The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.15` for production runs.
+Use `@main` while experimenting and pin to a tag such as `@v2.5.16` for production runs.
 
 ## Reference an action
 
@@ -16439,6 +16521,8 @@ Three mutually exclusive modes:
 - `debMaintainer: String?`, `debPackageVersion`, `debDepends: List<String>`
 - `rpmLicenseType: String?`, `rpmPackageVersion`, `rpmRequires: List<String>`
 - `pacmanPackageVersion: String?`, `pacmanDepends: List<String>` — for the `Pacman` (Arch Linux) target
+- `afterInstall: RegularFileProperty`, `afterRemove: RegularFileProperty` — concatenated after Nucleus's template, then electron-builder. Macros (`${executable}`, `${sanitizedProductName}`) substitute **only when single-quoted**. Deb / Rpm / Pacman only. See [install and remove scripts](/docs/packaging/linux#add-install-and-remove-scripts)
+- `beforeInstall: RegularFileProperty`, `beforeRemove: RegularFileProperty` — passed raw to fpm (`--before-install` / `--before-remove`); no electron-builder macro substitution. Pacman `pre_remove` has no `$1=upgrade` — stop/disable unconditionally and re-enable in `afterInstall`
 - `appImage { … }` — see [AppImage](#linux--appimage--appimagesettings)
 - `snap { … }` — see [Snap](#linux--snap--snapsettings)
 - `flatpak { … }` — see [Flatpak](#linux--flatpak--flatpaksettings)
@@ -16492,6 +16576,7 @@ Defaults read from `compose.desktop.linux.sign` and `compose.desktop.linux.signi
 ## GraalVM — `GraalvmSettings`
 
 - `isEnabled: Property<Boolean>` (default `false`)
+- `headless: Property<Boolean>` (default `false`) — daemons/CLIs: skip L3 AWT/Java2D platform metadata, always-on L1 GUI packs, and companion GUI native libs; bake `-Djava.awt.headless=true`. See [Build a headless image](/docs/performance/graalvm/configuration#build-a-headless-image)
 - `imageName: Property<String>`
 - `march: Property<NativeImageMarch>` — `NATIVE` / `COMPATIBILITY`; unset defaults per-platform (`COMPATIBILITY`, or `NATIVE` on Apple-Silicon macOS)
 - `optimization: Property<NativeImageOptimization>` — `QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE`; unset keeps `-O2`
@@ -16813,6 +16898,21 @@ Desktop on the AWT/JBR backend does not handle it reliably.
 native Skia surfaces on Wayland without going through AWT. To stay on AWT, set
 `WLR_NO_HARDWARE_CURSORS=1` or run under XWayland.
 
+### Crash on launch with an older Linux GPU
+
+**Symptom.** A Tao window aborts at open on Linux. stderr mentions a failed GL 3.3 context,
+or the process exits from `TaoComposeSceneHostLinux` with a `require()` failure.
+
+**Cause.** Linux EGL attach used to request only a GL 3.3 **compatibility** profile. Some
+drivers (Mesa r600 on AMD RV610, for example) cap the compat profile at 3.0 while the
+**core** profile reaches 3.3, so the request could never succeed and the window aborted.
+
+**Fix.** Upgrade to 2.5.16 or later. Attach now tries 3.3 compat, then 3.3 core, then Mesa
+llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, one-shot, skipped if you already set that variable).
+Both fallbacks log one line on stderr. Hardware that already accepts the compat request is
+unchanged. Force software rendering yourself with `LIBGL_ALWAYS_SOFTWARE=1` if you want
+llvmpipe without waiting for the fallback.
+
 ## Migration to 2.0
 
 ### Unresolved reference 'JewelDecoratedWindow'
@@ -16992,6 +17092,45 @@ Release notes for every Nucleus release, newest first.
 
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
+
+## v2.5.16
+
+**Released: 2026-09-17**
+
+### New features
+
+- **Linux install and remove scripts** (#664) — `linux { }` now takes `afterInstall`,
+  `afterRemove`, `beforeInstall`, and `beforeRemove` file properties. User after-scripts
+  are concatenated after Nucleus's own template (desktop integration, AppArmor, optional
+  polkit silent-update helper) and run through electron-builder for Deb, Rpm, and Pacman;
+  before-scripts are passed raw to fpm (`--before-install` / `--before-remove`). GraalVM
+  native-image packages honor the same four properties. electron-builder substitutes
+  `${sanitizedProductName}` / `${executable}` only in single-quoted tokens; a double-quoted
+  `"${executable}"` is left literal, so a systemd `systemctl enable "${executable}.service"`
+  line silently no-ops. Pacman `pre_remove` does not get deb-style `$1=upgrade` — stop and
+  disable the unit unconditionally and re-enable it in `afterInstall`. See
+  [Add install and remove scripts](/docs/packaging/linux#add-install-and-remove-scripts).
+- **Headless GraalVM images** (#665) — `graalvm { headless = true }` skips L3 AWT/Java2D
+  platform metadata, the always-on L1 GUI packs (`jdk-awt`, `jdk-fonts`, `jdk-graphics2d`,
+  Skiko/Compose/tray), and the companion GUI native libs (`libawt`, `libfontmanager`,
+  Skiko, …), and bakes `-Djava.awt.headless=true`. Default is `false` (GUI). Without this,
+  JNI registration of AWT types makes `native-image` pull `libawt` / `libawt_xawt` even
+  when app code never references `java.awt`. Use it for daemons and CLIs. See
+  [Build a headless image](/docs/performance/graalvm/configuration#build-a-headless-image).
+
+### Bug fixes
+
+- **Linux EGL crash on GPUs without GL 3.3 compatibility** (#670) — the X11 and Wayland
+  attach paths asked for one thing only: a GL 3.3 compatibility-profile context. Mesa's
+  r600 driver on AMD RV610 caps the compat profile at 3.0 (core reaches 3.3), so the
+  request failed and the app aborted. Attach now tries 3.3 compat, then 3.3 core
+  (hardware-accelerated on that GPU), then Mesa llvmpipe via `LIBGL_ALWAYS_SOFTWARE=1`
+  (Mesa reads that variable at `eglInitialize`, so the display is terminated and attach
+  re-enters once). Existing hardware that accepts the compat request is untouched. Both
+  fallbacks log one line on stderr. See
+  [Crash on launch with an older Linux GPU](/docs/reference/troubleshooting#crash-on-launch-with-an-older-linux-gpu).
+
+---
 
 ## v2.5.15
 

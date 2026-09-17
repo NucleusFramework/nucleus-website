@@ -245,6 +245,23 @@ Compose Desktop sur le backend AWT/JBR ne la gère pas de façon fiable.
 des surfaces Skia natives sur Wayland sans passer par AWT. Pour rester sur AWT, définissez
 `WLR_NO_HARDWARE_CURSORS=1` ou lancez l'application sous XWayland.
 
+### Crash au lancement sur un GPU Linux ancien
+
+**Symptôme.** Une fenêtre Tao abort à l'ouverture sous Linux. stderr mentionne un contexte
+GL 3.3 refusé, ou le process quitte depuis `TaoComposeSceneHostLinux` sur un `require()`
+en échec.
+
+**Cause.** L'attach EGL Linux ne demandait qu'un profil GL 3.3 **compatibility**. Certains
+drivers (Mesa r600 sur AMD RV610, par exemple) plafonnent le profil compat à 3.0 alors que
+le profil **core** atteint 3.3, donc la requête ne pouvait jamais réussir et la fenêtre
+abortait.
+
+**Solution.** Passez à 2.5.16 ou plus récent. L'attach essaie maintenant 3.3 compat, puis
+3.3 core, puis Mesa llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, une seule fois, sauté si vous
+avez déjà défini cette variable). Les deux replis loguent une ligne sur stderr. Le
+matériel qui accepte déjà la requête compat n'est pas touché. Forcez le rendu logiciel
+vous-même avec `LIBGL_ALWAYS_SOFTWARE=1` si vous voulez llvmpipe sans attendre le repli.
+
 ## Migration vers 2.0
 
 ### Unresolved reference 'JewelDecoratedWindow'

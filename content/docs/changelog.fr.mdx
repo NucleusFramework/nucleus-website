@@ -7,6 +7,48 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.16
+
+**Sortie : 2026-09-17**
+
+### Nouvelles fonctionnalités
+
+- **Scripts d'installation et de désinstallation Linux** (#664) — `linux { }` accepte
+  maintenant les propriétés fichier `afterInstall`, `afterRemove`, `beforeInstall` et
+  `beforeRemove`. Les scripts after utilisateur sont concaténés après le template Nucleus
+  (intégration desktop, AppArmor, helper polkit optionnel pour la mise à jour silencieuse)
+  et passent par electron-builder pour Deb, Rpm et Pacman ; les scripts before sont passés
+  bruts à fpm (`--before-install` / `--before-remove`). Les paquets native-image GraalVM
+  honorent les quatre mêmes propriétés. electron-builder substitue `${sanitizedProductName}`
+  / `${executable}` uniquement dans les jetons entre simples quotes ; un `"${executable}"`
+  entre doubles quotes reste littéral, donc un `systemctl enable "${executable}.service"`
+  systemd ne fait rien sans erreur. Pacman `pre_remove` ne reçoit pas le `$1=upgrade` façon
+  deb — arrêtez et désactivez l'unité inconditionnellement et réactivez-la dans
+  `afterInstall`. Voir
+  [Ajouter des scripts d'installation et de désinstallation](/docs/packaging/linux#ajouter-des-scripts-dinstallation-et-de-désinstallation).
+- **Images GraalVM headless** (#665) — `graalvm { headless = true }` saute la metadata
+  plateforme L3 AWT/Java2D, les packs L1 GUI toujours inclus (`jdk-awt`, `jdk-fonts`,
+  `jdk-graphics2d`, Skiko/Compose/tray) et les libs natives GUI compagnons (`libawt`,
+  `libfontmanager`, Skiko, …), et inscrit `-Djava.awt.headless=true`. Défaut `false` (GUI).
+  Sans ça, l'enregistrement JNI des types AWT fait tirer `libawt` / `libawt_xawt` par
+  `native-image` même si le code de l'app ne référence jamais `java.awt`. À utiliser pour
+  les daemons et les CLIs. Voir
+  [Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless).
+
+### Corrections de bugs
+
+- **Crash EGL Linux sur les GPU sans compatibilité GL 3.3** (#670) — les chemins d'attach
+  X11 et Wayland demandaient une seule chose : un contexte GL 3.3 profil compatibility.
+  Le driver Mesa r600 sur AMD RV610 plafonne le profil compat à 3.0 (le core atteint 3.3),
+  donc la requête échouait et l'app abortait. L'attach essaie maintenant 3.3 compat, puis
+  3.3 core (accéléré matériellement sur ce GPU), puis Mesa llvmpipe via
+  `LIBGL_ALWAYS_SOFTWARE=1` (Mesa lit cette variable à `eglInitialize`, donc le display
+  est terminé et l'attach se relance une fois). Le matériel qui accepte déjà la requête
+  compat n'est pas touché. Les deux replis loguent une ligne sur stderr. Voir
+  [Crash au lancement sur un GPU Linux ancien](/docs/reference/troubleshooting#crash-au-lancement-sur-un-gpu-linux-ancien).
+
+---
+
 ## v2.5.15
 
 **Sortie : 2026-09-07**

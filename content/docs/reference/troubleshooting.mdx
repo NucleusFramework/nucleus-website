@@ -238,6 +238,21 @@ Desktop on the AWT/JBR backend does not handle it reliably.
 native Skia surfaces on Wayland without going through AWT. To stay on AWT, set
 `WLR_NO_HARDWARE_CURSORS=1` or run under XWayland.
 
+### Crash on launch with an older Linux GPU
+
+**Symptom.** A Tao window aborts at open on Linux. stderr mentions a failed GL 3.3 context,
+or the process exits from `TaoComposeSceneHostLinux` with a `require()` failure.
+
+**Cause.** Linux EGL attach used to request only a GL 3.3 **compatibility** profile. Some
+drivers (Mesa r600 on AMD RV610, for example) cap the compat profile at 3.0 while the
+**core** profile reaches 3.3, so the request could never succeed and the window aborted.
+
+**Fix.** Upgrade to 2.5.16 or later. Attach now tries 3.3 compat, then 3.3 core, then Mesa
+llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, one-shot, skipped if you already set that variable).
+Both fallbacks log one line on stderr. Hardware that already accepts the compat request is
+unchanged. Force software rendering yourself with `LIBGL_ALWAYS_SOFTWARE=1` if you want
+llvmpipe without waiting for the fallback.
+
 ## Migration to 2.0
 
 ### Unresolved reference 'JewelDecoratedWindow'
