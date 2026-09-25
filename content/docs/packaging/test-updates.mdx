@@ -1,0 +1,114 @@
+---
+title: Test updates
+description: Try the update UI, a real download and a full install against your next build, without publishing a release.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+You can test [auto-update](/docs/packaging/auto-update) end to end without publishing a release.
+Pick the level that matches what you want to check:
+
+| You want to | Use | What runs for real |
+| --- | --- | --- |
+| Build the update UI | [Simulation](#simulate-an-update) | Nothing leaves the machine |
+| Check and download your next build | [Feed redirect](#point-the-app-at-a-local-build) from `./gradlew run` | Manifest, download, checksum |
+| Update an installed copy | [Feed redirect](#update-an-installed-app) of the installed app | Everything, install and restart included |
+
+## Simulate an update
+
+```shell
+./gradlew run -Pnucleus.updater.simulate=update
+./gradlew run -Pnucleus.updater.simulate=download-error
+./gradlew run -Pnucleus.updater.simulate.justUpdatedFrom=1.2.0
+```
+
+Every `NucleusUpdater` in the app then plays a scripted update: `checkForUpdates()` offers the
+next version, `downloadUpdate()` reports progress, and `installAndRestart()` logs what it would
+install and returns. Scenarios: `update`, `up-to-date`, `check-error`, `download-error`,
+`checksum-error`. Failures surface as the real exceptions.
+
+To script it in code, for example from a debug menu:
+
+```kotlin
+NucleusUpdater {
+    provider = GitHubProvider("myorg", "myapp")
+    simulation = UpdateSimulation(UpdateSimulation.Scenario.DOWNLOAD_ERROR, downloadDuration = 3.seconds)
+}
+```
+
+`updater.simulation` is non-null while a simulation plays.
+
+## Point the app at a local build
+
+Bump `packageVersion`, package, and point the app at the packaging output:
+
+```shell
+./gradlew packageNsis
+./gradlew run -Pnucleus.updater.feedUrl=build/compose/binaries/main/nsis
+```
+
+The packaging output of every auto-updatable format is a complete feed: the plugin writes the
+`latest*.yml` manifest even without a `publish` block. `./gradlew run` checks and downloads for
+real, and skips the install: an unpackaged run never installs anything.
+
+`feedUrl` also takes a `file:` URL, an `https` server, or `http` to `127.0.0.1`.
+
+## Update an installed app
+
+An installed app ignores these switches unless you allow them, since whoever sets the variable
+would choose what the app installs:
+
+```kotlin
+NucleusUpdater {
+    provider = GitHubProvider("myorg", "myapp")
+    allowLaunchOverrides = BuildConfig.isInternal
+}
+```
+
+Then install the current version, bump `packageVersion`, and serve the next build:
+
+```shell
+./gradlew serveUpdateFeed
+NUCLEUS_UPDATER_FEED_URL=http://127.0.0.1:8421 "C:\Users\me\AppData\Local\Programs\MyApp\MyApp.exe"
+```
+
+`serveUpdateFeed` packages the auto-updatable formats of the current OS and serves them with byte
+ranges, so differential downloads work as in production. Slow it down with
+`-Pnucleus.updater.serve.throttle=2m` or `-Pnucleus.updater.serve.latency=500`, and move it with
+`-Pnucleus.updater.serve.port`.
+
+<Callout type="info">
+Every switch has a system property and an environment variable: `nucleus.updater.feedUrl` is
+`NUCLEUS_UPDATER_FEED_URL`, `nucleus.updater.simulate` is `NUCLEUS_UPDATER_SIMULATE`. The updater
+logs each switch it applies or ignores.
+</Callout>
+
+## Write automated tests
+
+`updater-testing` runs a local release host that serves your artifacts and fails on demand:
+
+```kotlin title="build.gradle.kts"
+testImplementation("dev.nucleusframework:nucleus.updater-testing:<version>")
+```
+
+```kotlin
+UpdateFeedServer().use { feed ->
+    feed.publish("2.0.0", File("build/compose/binaries/main/nsis/myapp-2.0.0-win-x64-nsis.exe"))
+    feed.fault(FeedFault.Truncate(afterBytes = 4096), path = "*.exe", times = 1)
+
+    val updater = NucleusUpdater {
+        currentVersion = "1.0.0"
+        executableType = "nsis"
+        provider = GenericProvider(feed.baseUrl)
+    }
+    // drive checkForUpdates() / downloadUpdate() and assert on feed.requests
+}
+```
+
+Faults: `Status`, `Delay`, `Throttle`, `Truncate`, `Corrupt`, `IgnoreRange`.
+
+## What's next
+
+- [Auto-update](/docs/packaging/auto-update): the updater API and supported formats.
+- [Publishing](/docs/packaging/publishing): ship the release for real.
+- [CI/CD](/docs/packaging/ci-cd): build every format on each OS.

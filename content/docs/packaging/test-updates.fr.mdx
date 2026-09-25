@@ -1,0 +1,115 @@
+---
+title: Tester les mises à jour
+description: Essayez l'UI de mise à jour, un vrai téléchargement et une installation complète contre votre prochain build, sans publier de release.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Vous pouvez tester la [mise à jour automatique](/docs/packaging/auto-update) de bout en bout sans
+publier de release. Choisissez le niveau qui correspond à ce que vous voulez vérifier :
+
+| Vous voulez | Utilisez | Ce qui tourne pour de vrai |
+| --- | --- | --- |
+| Construire l'UI de mise à jour | [Simulation](#simuler-une-mise-à-jour) | Rien ne quitte la machine |
+| Vérifier et télécharger votre prochain build | [Redirection du flux](#pointer-lapplication-vers-un-build-local) depuis `./gradlew run` | Manifeste, téléchargement, checksum |
+| Mettre à jour une copie installée | [Redirection du flux](#mettre-à-jour-une-application-installée) de l'application installée | Tout, installation et redémarrage compris |
+
+## Simuler une mise à jour
+
+```shell
+./gradlew run -Pnucleus.updater.simulate=update
+./gradlew run -Pnucleus.updater.simulate=download-error
+./gradlew run -Pnucleus.updater.simulate.justUpdatedFrom=1.2.0
+```
+
+Chaque `NucleusUpdater` de l'application joue alors une mise à jour scriptée : `checkForUpdates()`
+propose la version suivante, `downloadUpdate()` rapporte la progression, et `installAndRestart()`
+journalise ce qu'il installerait puis rend la main. Scénarios : `update`, `up-to-date`,
+`check-error`, `download-error`, `checksum-error`. Les échecs remontent avec les vraies exceptions.
+
+Pour la scripter dans le code, par exemple depuis un menu de debug :
+
+```kotlin
+NucleusUpdater {
+    provider = GitHubProvider("myorg", "myapp")
+    simulation = UpdateSimulation(UpdateSimulation.Scenario.DOWNLOAD_ERROR, downloadDuration = 3.seconds)
+}
+```
+
+`updater.simulation` n'est pas `null` tant qu'une simulation tourne.
+
+## Pointer l'application vers un build local
+
+Augmentez `packageVersion`, empaquetez, puis pointez l'application vers la sortie du packaging :
+
+```shell
+./gradlew packageNsis
+./gradlew run -Pnucleus.updater.feedUrl=build/compose/binaries/main/nsis
+```
+
+La sortie de chaque format auto-updatable est un flux complet : le plugin écrit le manifeste
+`latest*.yml` même sans bloc `publish`. `./gradlew run` vérifie et télécharge pour de vrai, puis
+saute l'installation : une exécution non empaquetée n'installe jamais rien.
+
+`feedUrl` accepte aussi une URL `file:`, un serveur `https`, ou `http` vers `127.0.0.1`.
+
+## Mettre à jour une application installée
+
+Une application installée ignore ces options tant que vous ne les autorisez pas, car celui qui
+définit la variable choisirait ce que l'application installe :
+
+```kotlin
+NucleusUpdater {
+    provider = GitHubProvider("myorg", "myapp")
+    allowLaunchOverrides = BuildConfig.isInternal
+}
+```
+
+Installez ensuite la version actuelle, augmentez `packageVersion` et servez le build suivant :
+
+```shell
+./gradlew serveUpdateFeed
+NUCLEUS_UPDATER_FEED_URL=http://127.0.0.1:8421 "C:\Users\me\AppData\Local\Programs\MyApp\MyApp.exe"
+```
+
+`serveUpdateFeed` empaquette les formats auto-updatables de l'OS courant et les sert avec des
+plages d'octets : les téléchargements différentiels fonctionnent comme en production. Ralentissez-le
+avec `-Pnucleus.updater.serve.throttle=2m` ou `-Pnucleus.updater.serve.latency=500`, et changez son
+port avec `-Pnucleus.updater.serve.port`.
+
+<Callout type="info">
+Chaque option existe en propriété système et en variable d'environnement : `nucleus.updater.feedUrl`
+correspond à `NUCLEUS_UPDATER_FEED_URL`, `nucleus.updater.simulate` à `NUCLEUS_UPDATER_SIMULATE`.
+L'updater journalise chaque option qu'il applique ou ignore.
+</Callout>
+
+## Écrire des tests automatisés
+
+`updater-testing` fait tourner un hôte de release local qui sert vos artefacts et échoue à la
+demande :
+
+```kotlin title="build.gradle.kts"
+testImplementation("dev.nucleusframework:nucleus.updater-testing:<version>")
+```
+
+```kotlin
+UpdateFeedServer().use { feed ->
+    feed.publish("2.0.0", File("build/compose/binaries/main/nsis/myapp-2.0.0-win-x64-nsis.exe"))
+    feed.fault(FeedFault.Truncate(afterBytes = 4096), path = "*.exe", times = 1)
+
+    val updater = NucleusUpdater {
+        currentVersion = "1.0.0"
+        executableType = "nsis"
+        provider = GenericProvider(feed.baseUrl)
+    }
+    // pilotez checkForUpdates() / downloadUpdate() et vérifiez feed.requests
+}
+```
+
+Pannes disponibles : `Status`, `Delay`, `Throttle`, `Truncate`, `Corrupt`, `IgnoreRange`.
+
+## Et ensuite
+
+- [Mise à jour automatique](/docs/packaging/auto-update) : l'API de l'updater et les formats pris en charge.
+- [Publication](/docs/packaging/publishing) : publier la release pour de vrai.
+- [CI/CD](/docs/packaging/ci-cd) : construire chaque format sur chaque OS.
