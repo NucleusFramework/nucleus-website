@@ -25,6 +25,7 @@ export const LATEST_DOC_REDIRECTS: Record<string, string> = {
   'concepts/runtimes': 'performance',
   'why-nucleus': '',
   'start/project-setup': 'start/install',
+  'migrate/from-1.x': '2.5/migrate/from-1.x',
   ecosystem: 'os/file-dialogs',
   'ecosystem/file-dialog': 'os/file-dialogs',
   'os/notification-macos': 'os/notifications/macos',
