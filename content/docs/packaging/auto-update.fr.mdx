@@ -32,7 +32,7 @@ when (val result = updater.checkForUpdates()) {
             println("${progress.percent.toInt()}%")
             progress.file?.let { installer = it }
         }
-        // Lance l'installateur, quitte, puis relance l'application
+        // Installe la mise à jour et relance l'application sur la nouvelle version
         installer?.let(updater::installAndRestart)
     }
     UpdateResult.NotAvailable -> println("Up to date")
@@ -57,6 +57,33 @@ vaut `0.0.0-dev`), elle renvoie `NotAvailable`. Le tag choisit le canal : `v1.0.
 L'updater remplace le `.app` à partir du ZIP de la release, et se rabat sur le DMG. Ajoutez
 `TargetFormat.Zip` à côté de `TargetFormat.Dmg` ou `TargetFormat.Pkg` pour que `latest-mac.yml` le
 référence.
+</Callout>
+
+## Mettre à jour sans fermer l'application sous Windows
+
+Sur une installation NSIS par utilisateur, `installAndRestart` installe la nouvelle version
+pendant que l'application tourne, la démarre, puis ferme l'ancienne dès que la nouvelle fenêtre
+est à l'écran. L'utilisateur ne voit jamais l'application disparaître. Si l'installation échoue,
+l'application reste sur sa version actuelle. Une application construite sur `nucleusApplication`
+n'a aucun code à ajouter.
+
+- Une application sans fenêtre Nucleus (uniquement dans la zone de notification, par exemple)
+  appelle `UpdateHandoff.signalReady()` dès qu'elle est utilisable. Sinon, l'ancienne version
+  quitte après un délai.
+- `installAndRestart(file, relaunchArguments)` démarre la nouvelle version avec les arguments que
+  vous passez, par exemple le document ouvert dans cette instance. Nucleus ne rejoue pas la ligne
+  de commande d'origine.
+- Quand plusieurs instances tournent, les autres apprennent la mise à jour installée via
+  `updater.pendingRestartVersion`, sans rien télécharger. Proposez une action « Redémarrer pour
+  mettre à jour » et appelez `restartToInstalledVersion(relaunchArguments)`.
+
+Les installations par machine, le MSI, les builds portables et les images natives GraalVM gardent
+la mise à jour classique : l'application se ferme, l'installateur tourne, l'application se relance.
+
+<Callout type="warn" title="Modifié en 3.0">
+Les installations NSIS gardent désormais le launcher à la racine et placent le runtime et
+l'application dans `versions\<version>\`. Le code qui construit des chemins relatifs au répertoire
+d'installation doit suivre cette nouvelle disposition. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
 </Callout>
 
 ## Téléchargements différentiels
@@ -135,7 +162,9 @@ journalise la raison et revient à la demande de mot de passe.
 
 - `suspend fun checkForUpdates(): UpdateResult`
 - `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>` : la dernière émission a `file != null`.
-- `fun installAndRestart(installerFile: File)` : lance l'installateur, quitte et relance.
+- `fun installAndRestart(installerFile: File, relaunchArguments: List<String> = emptyList())` : installe et relance sur la nouvelle version. Mise à jour à chaud sur les installations NSIS par utilisateur.
+- `val pendingRestartVersion: StateFlow<String?>` : une version installée par une autre instance, ou `null`.
+- `fun restartToInstalledVersion(relaunchArguments: List<String> = emptyList()): Boolean` : bascule sur cette version.
 - `fun installAndQuit(installerFile: File)` : installe en silence et quitte sans relancer.
 - `fun isUpdateSupported(): Boolean` : indique si l'installation courante peut se mettre à jour.
 - `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?`

@@ -32,7 +32,7 @@ when (val result = updater.checkForUpdates()) {
             println("${progress.percent.toInt()}%")
             progress.file?.let { installer = it }
         }
-        // Launches the installer, exits, and relaunches the app
+        // Installs the update and relaunches the app on the new version
         installer?.let(updater::installAndRestart)
     }
     UpdateResult.NotAvailable -> println("Up to date")
@@ -55,6 +55,31 @@ when (val result = updater.checkForUpdates()) {
 <Callout type="warn" title="Ship a ZIP on macOS">
 The updater replaces the `.app` from the release's ZIP, and falls back to the DMG. Add
 `TargetFormat.Zip` next to `TargetFormat.Dmg` or `TargetFormat.Pkg` so `latest-mac.yml` lists it.
+</Callout>
+
+## Update without closing the app on Windows
+
+On a per-user NSIS install, `installAndRestart` installs the new version while the app keeps
+running, starts it, and closes the old one once the new window is on screen. The user never sees
+the app disappear. If the install fails, the app stays on its current version. You write no extra
+code in an app built on `nucleusApplication`.
+
+- An app with no Nucleus window (tray-only, for example) calls `UpdateHandoff.signalReady()` once
+  it is usable. Otherwise the old version exits after a timeout.
+- `installAndRestart(file, relaunchArguments)` starts the new version with the arguments you pass,
+  for example the document this instance has open. Nucleus does not replay the original command
+  line.
+- When several instances run, the others learn about the installed update through
+  `updater.pendingRestartVersion` without downloading anything. Offer a "Restart to update" action
+  and call `restartToInstalledVersion(relaunchArguments)`.
+
+Per-machine installs, MSI, portable builds and GraalVM native images keep the classic update: the
+app closes, the installer runs, the app relaunches.
+
+<Callout type="warn" title="Changed in 3.0">
+NSIS installs now keep the launcher at the install root and the runtime and app in
+`versions\<version>\`. Code that builds paths relative to the install directory must follow the
+new layout. See [Migrate from 2.x](/docs/migrate/from-2.x).
 </Callout>
 
 ## Differential downloads
@@ -130,7 +155,9 @@ logs why and falls back to the password prompt.
 
 - `suspend fun checkForUpdates(): UpdateResult`
 - `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>`: the last emission has `file != null`.
-- `fun installAndRestart(installerFile: File)`: runs the installer, exits, and relaunches.
+- `fun installAndRestart(installerFile: File, relaunchArguments: List<String> = emptyList())`: installs and relaunches on the new version. Hot update on per-user NSIS installs.
+- `val pendingRestartVersion: StateFlow<String?>`: a version another instance installed, or `null`.
+- `fun restartToInstalledVersion(relaunchArguments: List<String> = emptyList()): Boolean`: switches to that version.
 - `fun installAndQuit(installerFile: File)`: installs silently and exits without relaunching.
 - `fun isUpdateSupported(): Boolean`: whether the current install can update itself.
 - `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?`

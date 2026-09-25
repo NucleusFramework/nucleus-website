@@ -46,7 +46,8 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
   la demande : un gestionnaire qui ne quitte jamais bloque la fermeture. Voir
   [Gérer un quit système](/docs/lifecycle/application#gérer-un-quit-système).
 - **Les callbacks natifs s'exécutent sur le thread UI de l'hôte** (#687). Notifications,
-  contrôles média et launchers passent par le nouveau `NucleusUiThread` au lieu de l'EDT AWT.
+  contrôles média et launchers passent par le nouveau `NucleusUiThread` au lieu de l'EDT AWT, et
+  les listeners des raccourcis globaux ne tournent plus sur un thread natif (#721).
   Voir [Les callbacks natifs sur le thread UI](/docs/concepts/threading#les-callbacks-natifs-sur-le-thread-ui).
 - **Le pincement arrive en événements Compose `Scale`** (#662). `detectTransformGestures` ne le
   voit plus ; utilisez `Modifier.transformable` ou un listener `PointerEventType.Scale*`. Voir
@@ -72,6 +73,15 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Nouvelles fonctionnalités
 
+- **Mise à jour à chaud sous Windows** (#720). Sur une installation NSIS par utilisateur,
+  `installAndRestart` installe la nouvelle version pendant que l'application tourne, puis bascule
+  dessus dès que sa première fenêtre est à l'écran. Les autres instances découvrent la mise à jour
+  via `pendingRestartVersion`. Les installations NSIS placent désormais le runtime et
+  l'application dans `versions\<version>\`. Voir
+  [Mettre à jour sans fermer l'application sous Windows](/docs/packaging/auto-update#mettre-à-jour-sans-fermer-lapplication-sous-windows).
+- **Dialogues FileKit rattachés à une fenêtre** (#722). `withFileKitDialogSettings` renseigne le
+  parent du sélecteur sous Windows, X11 et Wayland. FileKit passe en 0.16.0. Voir
+  [Rattacher le dialogue à une fenêtre](/docs/os/file-dialogs#rattacher-le-dialogue-à-une-fenêtre).
 - **Fenêtres satellites et docking** (#635, #663, #695, `@ExperimentalNucleusApi`). Les palettes
   suivent le document actif, s'ancrent dans un `DockLayout` et en ressortent. Côtés partagés ou
   empilés, tailles par panneau, `dockSides`, `floatable`, `reorderable` et bornes d'épaisseur.
@@ -118,6 +128,9 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 ### Corrections de bugs
 
 - **Le PKG App Store n'est plus notarisé** (#681).
+- **Mises à jour Windows avec un profil accentué** (#720). Les scripts de mise à jour sont écrits
+  avec un BOM, donc Windows PowerShell 5.1 les lit en UTF-8. `consumeUpdateEvent` et
+  `wasJustUpdated` ne signalent plus une mise à jour dont l'installation a échoué.
 - **`jdk.jlink` est retiré de `includeAllModules`** (#682) sur les JDK JEP 493.
 - **`FsWatcher` partage un seul watcher natif par instance** (#683) et signale les renommages
   macOS en `Moved`. Voir [Gérer les renommages](/docs/lifecycle/fs-watcher#gérer-les-renommages).

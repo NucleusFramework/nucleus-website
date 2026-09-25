@@ -49,9 +49,22 @@ wins, a call inside `content` replaces the automatic one, and
 
 ## Attach the dialog to a window
 
-To make the picker modal to a window, pass the window's platform handle from
-`nucleusWindow.unsafe.taoWindow`: `nativeHandle` on Windows, `nsWindowHandle` on macOS, and
-`xdgPortalParent()` on Linux (X11 and Wayland).
+Wrap the FileKit call in `withFileKitDialogSettings` on the window that opens it. The picker then
+stays above that window instead of floating free:
+
+```kotlin
+val window = LocalNucleusWindow.current
+
+scope.launch {
+    val file = window.withFileKitDialogSettings { settings ->
+        FileKit.openFilePicker(dialogSettings = settings)
+    }
+}
+```
+
+Pass your own `FileKitDialogSettings` as the first argument to keep a title or macOS options:
+Nucleus only fills in `parent`, and leaves settings that already have one untouched. It works on
+Windows, X11 and Wayland. macOS needs no parent: the picker is already modal to the app.
 
 ## What's next
 

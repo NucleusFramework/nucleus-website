@@ -20,15 +20,13 @@ dependencies {
 ## Enregistrer un raccourci
 
 ```kotlin
-val scope = rememberCoroutineScope()
-
 DisposableEffect(Unit) {
     GlobalHotKeyManager.initialize()
     val handle = GlobalHotKeyManager.register(
         keyCode = KeyEvent.VK_K,
         modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT,
     ) { _, _ ->
-        scope.launch { showQuickSwitcher() }
+        showQuickSwitcher()
     }
     onDispose { GlobalHotKeyManager.unregister(handle) }
 }
@@ -37,8 +35,8 @@ DisposableEffect(Unit) {
 - `register` renvoie un handle, ou `-1` si le système refuse la combinaison. `lastError` en donne
   la raison.
 - `keyCode` prend les constantes de `java.awt.event.KeyEvent`. Le module ne démarre pas AWT.
-- Le listener s'exécute sur un thread natif. Passez par une portée de composition ou
-  `Dispatchers.Main` avant de toucher à l'état.
+- Le listener s'exécute sur le thread UI : il peut modifier l'état Compose directement. Un appui
+  encore en file quand vous appelez `unregister` est ignoré.
 - `GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { … }` associe une touche multimédia sous
   Windows et Linux. Sous macOS, l'appel renvoie `-1` ; utilisez les
   [contrôles média](/docs/os/media-control).

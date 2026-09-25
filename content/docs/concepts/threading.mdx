@@ -23,6 +23,7 @@ These modules call your code on the UI thread, so you can update Compose state d
 | `media-control` | Play, pause, next, previous, stop, seek |
 | `launcher-macos` / `launcher-linux` | Dock menu and Unity quicklist item clicks |
 | `menu-macos` | Menu actions and delegate events |
+| `global-hotkey` | Hotkey presses |
 
 <Callout type="warn" title="Changed in 3.0">
 These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as
@@ -30,14 +31,11 @@ These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as
 [Migrate from 2.x](/docs/migrate/from-2.x).
 </Callout>
 
-Other modules call you on the thread that received the event. `global-hotkey`, for example, calls
-its listener from a native thread. Post to the UI thread with `NucleusUiThread` before touching UI
-state:
+Other callbacks run on the thread that received the event, such as the `notification-macos`
+delegate. Post to the UI thread with `NucleusUiThread` before touching UI state:
 
 ```kotlin
-GlobalHotKeyManager.register(keyCode = KeyEvent.VK_F12) { _, _ ->
-    NucleusUiThread.post { viewModel.onHotKey() }
-}
+NucleusUiThread.post { viewModel.onNotificationClicked(id) }
 ```
 
 `post` always queues the block, even from the UI thread, so callback order stays the same.

@@ -44,7 +44,8 @@ The major version marks the API breaks: read the
   so a handler that never exits vetoes the quit. See
   [Handle a system quit](/docs/lifecycle/application#handle-a-system-quit).
 - **Native callbacks run on the host UI thread** (#687). Notifications, media controls and the
-  launchers post through the new `NucleusUiThread` instead of the AWT EDT. See
+  launchers post through the new `NucleusUiThread` instead of the AWT EDT, and global hotkey
+  listeners no longer run on a native thread (#721). See
   [Native callbacks on the UI thread](/docs/concepts/threading#native-callbacks-on-the-ui-thread).
 - **Pinch arrives as Compose `Scale` events** (#662). `detectTransformGestures` no longer sees
   it; use `Modifier.transformable` or a `PointerEventType.Scale*` listener. See
@@ -69,6 +70,14 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **Hot update on Windows** (#720). On a per-user NSIS install, `installAndRestart` installs the
+  new version while the app keeps running and swaps to it once its first window is on screen.
+  Other instances pick the update up through `pendingRestartVersion`. NSIS installs now keep the
+  runtime and app in `versions\<version>\`. See
+  [Update without closing the app on Windows](/docs/packaging/auto-update#update-without-closing-the-app-on-windows).
+- **FileKit dialogs attached to a window** (#722). `withFileKitDialogSettings` fills in the
+  picker's parent on Windows, X11 and Wayland. FileKit moves to 0.16.0. See
+  [Attach the dialog to a window](/docs/os/file-dialogs#attach-the-dialog-to-a-window).
 - **Satellite windows and docking** (#635, #663, #695, `@ExperimentalNucleusApi`). Palettes
   follow the focused document, dock into a `DockLayout` and float back out. Split or layered
   sides, per-panel sizes, `dockSides`, `floatable`, `reorderable` and extent limits. See
@@ -110,6 +119,9 @@ The major version marks the API breaks: read the
 ### Bug fixes
 
 - **App Store PKG is no longer notarized** (#681).
+- **Windows updates with accented profile paths** (#720). Update scripts are written with a BOM,
+  so Windows PowerShell 5.1 reads them as UTF-8. `consumeUpdateEvent` and `wasJustUpdated` no
+  longer report an update whose install failed.
 - **`jdk.jlink` is filtered out of `includeAllModules`** (#682) on JEP 493 JDKs.
 - **`FsWatcher` shares one native watcher per instance** (#683) and reports macOS renames as
   `Moved`. See [Handle renames](/docs/lifecycle/fs-watcher#handle-renames).

@@ -51,9 +51,23 @@ L'appel automatique à `FileKit.init` est nouveau. Votre propre `FileKit.init(�
 
 ## Rattacher le dialogue à une fenêtre
 
-Pour rendre le sélecteur modal à une fenêtre, passez le handle natif de la fenêtre depuis
-`nucleusWindow.unsafe.taoWindow` : `nativeHandle` sous Windows, `nsWindowHandle` sous macOS et
-`xdgPortalParent()` sous Linux (X11 et Wayland).
+Enveloppez l'appel FileKit dans `withFileKitDialogSettings` sur la fenêtre qui l'ouvre. Le
+sélecteur reste alors au-dessus de cette fenêtre au lieu de flotter seul :
+
+```kotlin
+val window = LocalNucleusWindow.current
+
+scope.launch {
+    val file = window.withFileKitDialogSettings { settings ->
+        FileKit.openFilePicker(dialogSettings = settings)
+    }
+}
+```
+
+Passez vos propres `FileKitDialogSettings` en premier argument pour garder un titre ou des options
+macOS : Nucleus ne renseigne que `parent`, et ne touche pas des réglages qui en ont déjà un. Cela
+fonctionne sous Windows, X11 et Wayland. macOS n'a pas besoin de parent : le sélecteur y est déjà
+modal pour l'application.
 
 ## Et ensuite
 

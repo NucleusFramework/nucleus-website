@@ -20,15 +20,13 @@ dependencies {
 ## Register a hotkey
 
 ```kotlin
-val scope = rememberCoroutineScope()
-
 DisposableEffect(Unit) {
     GlobalHotKeyManager.initialize()
     val handle = GlobalHotKeyManager.register(
         keyCode = KeyEvent.VK_K,
         modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT,
     ) { _, _ ->
-        scope.launch { showQuickSwitcher() }
+        showQuickSwitcher()
     }
     onDispose { GlobalHotKeyManager.unregister(handle) }
 }
@@ -36,8 +34,8 @@ DisposableEffect(Unit) {
 
 - `register` returns a handle, or `-1` when the system refuses the binding. `lastError` says why.
 - `keyCode` takes the `java.awt.event.KeyEvent` constants. The module does not start AWT.
-- The listener runs on a native thread. Switch to a composition scope or `Dispatchers.Main` before
-  you touch state.
+- The listener runs on the UI thread, so it can update Compose state directly. A press still
+  queued when you call `unregister` is dropped.
 - `GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { … }` binds a media key on Windows and
   Linux. On macOS it returns `-1`; use [media controls](/docs/os/media-control) there.
 

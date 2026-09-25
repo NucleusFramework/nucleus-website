@@ -506,19 +506,17 @@ These modules call your code on the UI thread, so you can update Compose state d
 | `media-control` | Play, pause, next, previous, stop, seek |
 | `launcher-macos` / `launcher-linux` | Dock menu and Unity quicklist item clicks |
 | `menu-macos` | Menu actions and delegate events |
+| `global-hotkey` | Hotkey presses |
 
 These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as
 `SwingUtilities.isEventDispatchThread()` checks, must change. See
 [Migrate from 2.x](/docs/migrate/from-2.x).
 
-Other modules call you on the thread that received the event. `global-hotkey`, for example, calls
-its listener from a native thread. Post to the UI thread with `NucleusUiThread` before touching UI
-state:
+Other callbacks run on the thread that received the event, such as the `notification-macos`
+delegate. Post to the UI thread with `NucleusUiThread` before touching UI state:
 
 ```kotlin
-GlobalHotKeyManager.register(keyCode = KeyEvent.VK_F12) { _, _ ->
-    NucleusUiThread.post { viewModel.onHotKey() }
-}
+NucleusUiThread.post { viewModel.onNotificationClicked(id) }
 ```
 
 `post` always queues the block, even from the UI thread, so callback order stays the same.
@@ -4403,10 +4401,9 @@ such as Windows toast progress bars, macOS scheduled delivery, or Linux urgency 
 
 ## Callback threads
 
-`notification-common`, `notification-linux`, `notification-windows`, `media-control`, and
-`menu-macos` call your code on the UI thread. `global-hotkey` listeners and the
-`notification-macos` delegate run on native threads: move the work to `Dispatchers.Main` before
-you touch UI state.
+`notification-common`, `notification-linux`, `notification-windows`, `media-control`,
+`menu-macos`, and `global-hotkey` call your code on the UI thread. The `notification-macos`
+delegate runs on a native thread: move the work to `Dispatchers.Main` before you touch UI state.
 
 In 2.x, `notification-linux`, `notification-windows`, and `media-control` called back on the AWT
 event dispatch thread. See [Migrate from 2.x](/docs/migrate/from-2.x).
@@ -5961,9 +5958,22 @@ wins, a call inside `content` replaces the automatic one, and
 
 ## Attach the dialog to a window
 
-To make the picker modal to a window, pass the window's platform handle from
-`nucleusWindow.unsafe.taoWindow`: `nativeHandle` on Windows, `nsWindowHandle` on macOS, and
-`xdgPortalParent()` on Linux (X11 and Wayland).
+Wrap the FileKit call in `withFileKitDialogSettings` on the window that opens it. The picker then
+stays above that window instead of floating free:
+
+```kotlin
+val window = LocalNucleusWindow.current
+
+scope.launch {
+    val file = window.withFileKitDialogSettings { settings ->
+        FileKit.openFilePicker(dialogSettings = settings)
+    }
+}
+```
+
+Pass your own `FileKitDialogSettings` as the first argument to keep a title or macOS options:
+Nucleus only fills in `parent`, and leaves settings that already have one untouched. It works on
+Windows, X11 and Wayland. macOS needs no parent: the picker is already modal to the app.
 
 ## What's next
 
@@ -6295,15 +6305,13 @@ dependencies {
 ## Register a hotkey
 
 ```kotlin
-val scope = rememberCoroutineScope()
-
 DisposableEffect(Unit) {
     GlobalHotKeyManager.initialize()
     val handle = GlobalHotKeyManager.register(
         keyCode = KeyEvent.VK_K,
         modifiers = HotKeyModifier.CONTROL + HotKeyModifier.SHIFT,
     ) { _, _ ->
-        scope.launch { showQuickSwitcher() }
+        showQuickSwitcher()
     }
     onDispose { GlobalHotKeyManager.unregister(handle) }
 }
@@ -6311,8 +6319,8 @@ DisposableEffect(Unit) {
 
 - `register` returns a handle, or `-1` when the system refuses the binding. `lastError` says why.
 - `keyCode` takes the `java.awt.event.KeyEvent` constants. The module does not start AWT.
-- The listener runs on a native thread. Switch to a composition scope or `Dispatchers.Main` before
-  you touch state.
+- The listener runs on the UI thread, so it can update Compose state directly. A press still
+  queued when you call `unregister` is dropped.
 - `GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { … }` binds a media key on Windows and
   Linux. On macOS it returns `-1`; use [media controls](/docs/os/media-control) there.
 
@@ -10154,7 +10162,7 @@ when (val result = updater.checkForUpdates()) {
             println("${progress.percent.toInt()}%")
             progress.file?.let { installer = it }
         }
-        // Launches the installer, exits, and relaunches the app
+        // Installs the update and relaunches the app on the new version
         installer?.let(updater::installAndRestart)
     }
     UpdateResult.NotAvailable -> println("Up to date")
@@ -10176,6 +10184,29 @@ when (val result = updater.checkForUpdates()) {
 
 The updater replaces the `.app` from the release's ZIP, and falls back to the DMG. Add
 `TargetFormat.Zip` next to `TargetFormat.Dmg` or `TargetFormat.Pkg` so `latest-mac.yml` lists it.
+
+## Update without closing the app on Windows
+
+On a per-user NSIS install, `installAndRestart` installs the new version while the app keeps
+running, starts it, and closes the old one once the new window is on screen. The user never sees
+the app disappear. If the install fails, the app stays on its current version. You write no extra
+code in an app built on `nucleusApplication`.
+
+- An app with no Nucleus window (tray-only, for example) calls `UpdateHandoff.signalReady()` once
+  it is usable. Otherwise the old version exits after a timeout.
+- `installAndRestart(file, relaunchArguments)` starts the new version with the arguments you pass,
+  for example the document this instance has open. Nucleus does not replay the original command
+  line.
+- When several instances run, the others learn about the installed update through
+  `updater.pendingRestartVersion` without downloading anything. Offer a "Restart to update" action
+  and call `restartToInstalledVersion(relaunchArguments)`.
+
+Per-machine installs, MSI, portable builds and GraalVM native images keep the classic update: the
+app closes, the installer runs, the app relaunches.
+
+NSIS installs now keep the launcher at the install root and the runtime and app in
+`versions\<version>\`. Code that builds paths relative to the install directory must follow the
+new layout. See [Migrate from 2.x](/docs/migrate/from-2.x).
 
 ## Differential downloads
 
@@ -10250,7 +10281,9 @@ logs why and falls back to the password prompt.
 
 - `suspend fun checkForUpdates(): UpdateResult`
 - `fun downloadUpdate(info: UpdateInfo): Flow<DownloadProgress>`: the last emission has `file != null`.
-- `fun installAndRestart(installerFile: File)`: runs the installer, exits, and relaunches.
+- `fun installAndRestart(installerFile: File, relaunchArguments: List<String> = emptyList())`: installs and relaunches on the new version. Hot update on per-user NSIS installs.
+- `val pendingRestartVersion: StateFlow<String?>`: a version another instance installed, or `null`.
+- `fun restartToInstalledVersion(relaunchArguments: List<String> = emptyList()): Boolean`: switches to that version.
 - `fun installAndQuit(installerFile: File)`: installs silently and exits without relaunching.
 - `fun isUpdateSupported(): Boolean`: whether the current install can update itself.
 - `fun wasJustUpdated(): Boolean`, `fun consumeUpdateEvent(): UpdateEvent?`
@@ -10816,7 +10849,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | Change | What to do | Docs |
 | --- | --- | --- |
 | Cmd+Q and Dock → Quit call every window's `onCloseRequest`. | Check that your close handlers exit or close. [Step](#check-your-close-handlers) | [Application](/docs/lifecycle/application) |
-| Notification, media control and launcher callbacks run on the host UI thread, not the AWT EDT. | Remove Swing assumptions in those callbacks. [Step](#move-native-callbacks-off-the-awt-edt) | [Threading](/docs/concepts/threading) |
+| Notification, media control, launcher and global hotkey callbacks run on the host UI thread, not the AWT EDT or a native thread. | Remove Swing assumptions in those callbacks. [Step](#move-native-callbacks-off-the-awt-edt) | [Threading](/docs/concepts/threading) |
 | Trackpad pinch arrives as `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd`. | Move pinch code to `Modifier.transformable` or a Scale listener. [Step](#handle-pinch-and-pan-events) | [Trackpad gestures](/docs/input/trackpad-gestures) |
 | macOS trackpad scrolling arrives as `PanStart` / `PanMove` / `PanEnd`. | Handle Pan in custom `Scroll` handlers. [Step](#handle-pinch-and-pan-events) | [Trackpad gestures](/docs/input/trackpad-gestures) |
 | Single instance is off in dev runs. | Pass `enableSingleInstance = true` to test it from `run`. [Step](#test-single-instance-in-dev-runs) | [Single instance](/docs/lifecycle/single-instance) |
@@ -10825,6 +10858,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | Windows: opaque windows render text with LCD (ClearType) antialiasing. | Update screenshot baselines, or opt out. [Step](#review-lcd-text-on-windows) | [HiDPI](/docs/windows/hidpi) |
 | JRE fonts are stripped from jlink runtime images. | Keep them if you draw text through AWT or Swing. [Step](#keep-jre-fonts-for-awt-text) | [Configuration](/docs/start/configuration) |
 | Nucleus JNI libraries ship next to the packaged app, not inside its JARs. | Load them through `NativeLibraryLoader`, not as resources. [Step](#load-nucleus-native-libraries-through-the-loader) | [Packaging](/docs/packaging) |
+| Windows NSIS installs keep the runtime and app in `versions\<version>\`, and `installAndRestart` updates without closing the app. | Don't build paths from the install root. Call `UpdateHandoff.signalReady()` if the app shows no Nucleus window. | [Auto-update](/docs/packaging/auto-update#update-without-closing-the-app-on-windows) |
 
 **Build and CI changes**
 
@@ -12426,7 +12460,8 @@ The major version marks the API breaks: read the
   so a handler that never exits vetoes the quit. See
   [Handle a system quit](/docs/lifecycle/application#handle-a-system-quit).
 - **Native callbacks run on the host UI thread** (#687). Notifications, media controls and the
-  launchers post through the new `NucleusUiThread` instead of the AWT EDT. See
+  launchers post through the new `NucleusUiThread` instead of the AWT EDT, and global hotkey
+  listeners no longer run on a native thread (#721). See
   [Native callbacks on the UI thread](/docs/concepts/threading#native-callbacks-on-the-ui-thread).
 - **Pinch arrives as Compose `Scale` events** (#662). `detectTransformGestures` no longer sees
   it; use `Modifier.transformable` or a `PointerEventType.Scale*` listener. See
@@ -12451,6 +12486,14 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **Hot update on Windows** (#720). On a per-user NSIS install, `installAndRestart` installs the
+  new version while the app keeps running and swaps to it once its first window is on screen.
+  Other instances pick the update up through `pendingRestartVersion`. NSIS installs now keep the
+  runtime and app in `versions\<version>\`. See
+  [Update without closing the app on Windows](/docs/packaging/auto-update#update-without-closing-the-app-on-windows).
+- **FileKit dialogs attached to a window** (#722). `withFileKitDialogSettings` fills in the
+  picker's parent on Windows, X11 and Wayland. FileKit moves to 0.16.0. See
+  [Attach the dialog to a window](/docs/os/file-dialogs#attach-the-dialog-to-a-window).
 - **Satellite windows and docking** (#635, #663, #695, `@ExperimentalNucleusApi`). Palettes
   follow the focused document, dock into a `DockLayout` and float back out. Split or layered
   sides, per-panel sizes, `dockSides`, `floatable`, `reorderable` and extent limits. See
@@ -12492,6 +12535,9 @@ The major version marks the API breaks: read the
 ### Bug fixes
 
 - **App Store PKG is no longer notarized** (#681).
+- **Windows updates with accented profile paths** (#720). Update scripts are written with a BOM,
+  so Windows PowerShell 5.1 reads them as UTF-8. `consumeUpdateEvent` and `wasJustUpdated` no
+  longer report an update whose install failed.
 - **`jdk.jlink` is filtered out of `includeAllModules`** (#682) on JEP 493 JDKs.
 - **`FsWatcher` shares one native watcher per instance** (#683) and reports macOS renames as
   `Moved`. See [Handle renames](/docs/lifecycle/fs-watcher#handle-renames).

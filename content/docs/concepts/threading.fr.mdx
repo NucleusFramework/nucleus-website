@@ -25,6 +25,7 @@ directement.
 | `media-control` | Lecture, pause, suivant, précédent, arrêt, déplacement |
 | `launcher-macos` / `launcher-linux` | Clics dans le menu du Dock et la quicklist Unity |
 | `menu-macos` | Actions de menu et événements du délégué |
+| `global-hotkey` | Appuis sur un raccourci |
 
 <Callout type="warn" title="Modifié en 3.0">
 Ces callbacks tournaient auparavant sur l'EDT AWT. Le code qui supposait l'EDT, comme les
@@ -32,14 +33,12 @@ vérifications `SwingUtilities.isEventDispatchThread()`, doit changer. Voir
 [Migrer depuis 2.x](/docs/migrate/from-2.x).
 </Callout>
 
-Les autres modules vous appellent sur le thread qui a reçu l'événement. `global-hotkey`, par
-exemple, appelle son listener depuis un thread natif. Postez sur le thread UI avec
-`NucleusUiThread` avant de toucher à l'état de l'UI :
+Les autres callbacks s'exécutent sur le thread qui a reçu l'événement, comme le délégué de
+`notification-macos`. Postez sur le thread UI avec `NucleusUiThread` avant de toucher à l'état de
+l'UI :
 
 ```kotlin
-GlobalHotKeyManager.register(keyCode = KeyEvent.VK_F12) { _, _ ->
-    NucleusUiThread.post { viewModel.onHotKey() }
-}
+NucleusUiThread.post { viewModel.onNotificationClicked(id) }
 ```
 
 `post` met toujours le bloc en file, même depuis le thread UI : l'ordre des callbacks reste
