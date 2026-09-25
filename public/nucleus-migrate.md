@@ -83,7 +83,7 @@ Produce a short numbered plan from the answers (only the selected phases), show 
 
 **Ordering (skip unselected):**
 
-1. **Prerequisites**: Gradle wrapper 9.0+, Kotlin 2.4.10+, Compose Multiplatform 1.12.0, consistent `jvmToolchain(N)` across ALL modules (KMP especially). Skip Node.js: the plugin downloads it for installer packaging.
+1. **Prerequisites**: Gradle wrapper 9.0+, Kotlin 2.4.20+, Compose Multiplatform 1.12.1, consistent `jvmToolchain(N)` across ALL modules (KMP especially). Skip Node.js: the plugin downloads it for installer packaging.
 2. **Gradle migration** (Gradle reference): add plugin, swap `compose.desktop.application {}` → `nucleus.application {}` (they cannot coexist), swap DSL imports, add runtime deps.
    *Checkpoint*: `./gradlew tasks --group nucleus` lists tasks; `./gradlew run` still launches the unmodified app.
 3. **Window shell** (Window shell reference): main() → `nucleusApplication {}` + `[Material|Jewel]DecoratedWindow`, title bar, theme-wraps-window inversion, secondary windows via `HostedWindow`/scope pattern.
@@ -451,7 +451,7 @@ Use this checklist in 2.x → 3.0 mode. The full guide is https://nucleusframewo
 
 ### Build
 
-1. Bump the plugin and every `dev.nucleusframework` coordinate to the 3.0 line `[nucleus_2x_version]`. Requirements: Kotlin 2.4.10+, Compose Multiplatform 1.12.0, Gradle 9.0+, JDK 17+.
+1. Bump the plugin and every `dev.nucleusframework` coordinate to the 3.0 line `[nucleus_2x_version]`. Requirements: Kotlin 2.4.20+, Compose Multiplatform 1.12.1, Gradle 9.0+, JDK 17+.
 2. Remove `nucleus.decorated-window-awt`, `-jbr` and `-jni` `[decorated_window_legacy]`. Declare `nucleus.decorated-window-tao` in the app module even though `nucleus-application` brings it: the plugin adds `-XstartOnFirstThread` to macOS Hot Reload tasks only when it sees a declared dependency.
 3. `macOS.appStore` and `TargetFormat.isStoreFormat` no longer compile `[macos_appstore_legacy]` `[is_store_format]`. Use `macOS { pkg { appStore = … } }` (default `true`, the App Store; `false` builds a Developer ID PKG) and `JvmApplicationDistributions.isSandboxed(format)`. 2.x ignored `macOS.appStore`, so ask the user which channel they ship before writing a value.
 4. jlink images no longer carry JRE fonts. If the app draws text through AWT or Swing, set `nativeDistributions { stripJreFonts = false }`.
@@ -499,7 +499,7 @@ Use this checklist in 2.x → 3.0 mode. The full guide is https://nucleusframewo
 
 ### Prerequisites
 
-JDK 17+ (25+ only for `enableAotCache`), Kotlin 2.4.10+, Compose Multiplatform 1.12.0 (1.11.x does not run), Gradle 9.0+. You do not install Node.js: the plugin downloads it into `~/.gradle/nucleus/nodejs` for the electron-builder formats. Pin the line with `nativeDistributions { nodejs { version = "22" } }`, or set `nodejs { autoDownload = false }` to use the `node` on `PATH`.
+JDK 17+ (25+ only for `enableAotCache`), Kotlin 2.4.20+, Compose Multiplatform 1.12.1 (1.11.x does not run), Gradle 9.0+. You do not install Node.js: the plugin downloads it into `~/.gradle/nucleus/nodejs` for the electron-builder formats. Pin the line with `nativeDistributions { nodejs { version = "22" } }`, or set `nodejs { autoDownload = false }` to use the `node` on `PATH`.
 
 ### Step 1 — Apply the plugin (keep the JetBrains Compose plugin)
 
@@ -507,9 +507,9 @@ Plugin id `dev.nucleusframework` resolves from the **Gradle Plugin Portal** (no 
 
 ```kotlin
 plugins {
-    kotlin("jvm") version "2.4.10"                      // or multiplatform
-    id("org.jetbrains.compose") version "1.12.0"        // KEEP — Hot Reload + IDE integration
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
+    kotlin("jvm") version "2.4.20"                      // or multiplatform
+    id("org.jetbrains.compose") version "1.12.1"        // KEEP — Hot Reload + IDE integration
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.20"
     id("dev.nucleusframework") version "<nucleus-version>"
 }
 
