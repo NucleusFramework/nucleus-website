@@ -7,6 +7,59 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v2.5.18
+
+**Sortie : 2026-09-23**
+
+### Corrections de bugs
+
+- **Les natives Linux exigeaient glibc 2.39** (#699) — les bibliothèques JNI Linux (Tao,
+  fenêtre décorée, notifications, helpers tray, …) étaient compilées sur `ubuntu-latest`,
+  que GitHub a basculé sur Ubuntu 24.04 ; chaque `.so` publié exigeait donc glibc 2.39 et
+  ne se chargeait pas sur des distributions encore supportées comme Ubuntu 22.04 LTS
+  (2.35), Debian 12 et Devuan 5 (2.36). Le build natif est maintenant épinglé sur
+  `ubuntu-22.04` / `ubuntu-22.04-arm`, ce qui ramène le plancher à glibc 2.35. Voir
+  [Une bibliothèque native ne se charge pas sur une distribution Linux ancienne](/docs/reference/troubleshooting#une-bibliothèque-native-ne-se-charge-pas-sur-une-distribution-linux-ancienne).
+
+---
+
+## v2.5.17
+
+**Sortie : 2026-09-22**
+
+### Nouvelles fonctionnalités
+
+- **Hooks de mise à jour Pacman** (#685) — `linux { }` gagne les propriétés fichier
+  `afterUpgrade` et `beforeUpgrade`, passées brutes à fpm (`--after-upgrade` /
+  `--before-upgrade`). Sous Pacman, une mise à jour n'exécute que `pre_upgrade` /
+  `post_upgrade` : aucun des quatre scripts d'installation/désinstallation ne tourne, donc
+  un service mis en place dans `afterInstall` mourait à la première mise à jour.
+  Enregistrez-le ou redémarrez-le aussi dans `afterUpgrade`. Deb et Rpm ignorent ces deux
+  propriétés — leurs scriptlets d'installation tournent déjà lors des mises à jour. Voir
+  [Ajouter des scripts d'installation et de désinstallation](/docs/packaging/linux#ajouter-des-scripts-dinstallation-et-de-désinstallation).
+
+### Corrections de bugs
+
+- **Le répertoire d'installation Linux ne contient plus d'espaces** (#685) — Deb, Rpm et
+  Pacman installaient le payload sous `/opt/${sanitizedProductName}`, dérivé de `appName`.
+  Le sanitizer d'electron-builder garde les espaces, donc un nom d'affichage comme `My App`
+  cassait chaque chemin non quoté dans les scripts d'installation et les lignes
+  `ExecStart=` systemd. Sous Linux, le nom de produit vient maintenant de
+  `linux.packageName ?: packageName`, et le payload atterrit dans `/opt/<packageName>`.
+  Les scripts qui codent en dur l'ancien chemin `/opt/<App Name>` doivent être mis à jour.
+- **Signature Developer ID des bundles GraalVM macOS** (#692) — `packageGraalvmDmg` avec
+  `compose.desktop.mac.sign=true` abortait sur `code object is not signed at all` pour
+  `Contents/MacOS/.nucleus-executable-type`, et même un bundle corrigé à la main était
+  rejeté par Gatekeeper après notarisation. Trois corrections : le marqueur de type
+  d'exécutable est écrit dans `Contents/Resources/` (le runtime lit toujours l'ancien
+  emplacement) ; chaque dylib et exécutable sous `Contents/MacOS/` est re-signé avec
+  l'identité Developer ID ; et `fontconfig.bfc` passe de `Contents/MacOS/lib/` à
+  `Contents/Resources/`, avec `sun.awt.fontconfig` pointé dessus au démarrage. Les bundles
+  JVM (jpackage) ne sont pas affectés. Voir
+  [La notarisation échoue : "code object is not signed at all"](/docs/reference/troubleshooting#la-notarisation-échoue--code-object-is-not-signed-at-all).
+
+---
+
 ## v2.5.16
 
 **Sortie : 2026-09-17**

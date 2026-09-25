@@ -167,7 +167,7 @@ Les paquets Deb, Rpm et Pacman exécutent des scripts mainteneur en root. Pointe
 `linux { }` vers vos propres fichiers ; Nucleus concatène les scripts after après son
 propre template (intégration desktop, AppArmor, helper polkit optionnel pour la mise à
 jour silencieuse) et passe les scripts before bruts à fpm. Les paquets native-image
-GraalVM honorent les quatre mêmes propriétés.
+GraalVM honorent les mêmes propriétés.
 
 ```kotlin title="build.gradle.kts"
 linux {
@@ -175,6 +175,9 @@ linux {
     afterRemove.set(project.file("packaging/linux/after-remove.sh"))
     beforeInstall.set(project.file("packaging/linux/before-install.sh"))
     beforeRemove.set(project.file("packaging/linux/before-remove.sh"))
+    // Pacman only: the install/remove scripts do not run on an upgrade
+    afterUpgrade.set(project.file("packaging/linux/after-upgrade.sh"))
+    beforeUpgrade.set(project.file("packaging/linux/before-upgrade.sh"))
 }
 ```
 
@@ -184,10 +187,16 @@ linux {
 | `afterRemove` | Après la suppression du payload | Concaténé après le template Nucleus, puis electron-builder |
 | `beforeInstall` | Avant le dépaquetage du payload | Passé brut à fpm (`--before-install`) |
 | `beforeRemove` | Avant la suppression du payload | Passé brut à fpm (`--before-remove`) |
+| `afterUpgrade` | Après le remplacement du payload par une mise à jour Pacman | Passé brut à fpm (`--after-upgrade`) |
+| `beforeUpgrade` | Avant le remplacement du payload par une mise à jour Pacman | Passé brut à fpm (`--before-upgrade`) |
 
 Usage typique : installer une unité systemd livrée sous `appResourcesRootDir`, puis
 l'activer depuis `afterInstall`. Arrêtez l'unité dans `beforeInstall` pour que les
 binaires sous `/opt` puissent être remplacés, et désactivez-la dans `afterRemove`.
+
+Le payload est installé sous `/opt/<packageName>` (`linux.packageName`, à défaut
+`packageName`), jamais sous le nom d'affichage `appName` : le chemin ne contient donc pas
+d'espaces et reste sûr dans des lignes `ExecStart=` non quotées.
 
 electron-builder substitue `${sanitizedProductName}` et `${executable}` dans
 `afterInstall` / `afterRemove` **uniquement quand le jeton est entre simples quotes** :
@@ -198,14 +207,17 @@ systemctl start '${executable}-daemon.service'
 ```
 
 Un `"${executable}"` entre doubles quotes reste du texte littéral, donc
-`systemctl enable "${executable}.service"` ne fait rien sans erreur. `beforeInstall` et
-`beforeRemove` n'ont aucune substitution de macro — codez en dur les noms d'unité et
-les chemins.
+`systemctl enable "${executable}.service"` ne fait rien sans erreur. `beforeInstall`,
+`beforeRemove`, `afterUpgrade` et `beforeUpgrade` n'ont aucune substitution de macro —
+codez en dur les noms d'unité et les chemins.
 
 <Callout type="warn">
-Le hook `pre_remove` de `.INSTALL` Pacman (où atterrit `beforeRemove`) ne reçoit pas
-l'argument `$1=upgrade` façon deb. Arrêtez et désactivez l'unité inconditionnellement, et
-réactivez-la dans `afterInstall` pour qu'une mise à jour ne laisse pas le service mort.
+Quand Pacman remplace un paquet installé par une version plus récente, son `.INSTALL`
+n'appelle que `pre_upgrade` / `post_upgrade`. Ni `afterInstall`, ni `afterRemove`, ni
+`beforeInstall`, ni `beforeRemove` ne tournent, et il n'y a aucun repli vers eux. Arrêtez
+l'unité dans `beforeUpgrade` et réactivez-la ou redémarrez-la dans `afterUpgrade`, sinon
+une mise à jour laisse le service mort. Deb et Rpm ignorent les deux propriétés upgrade :
+leurs scriptlets d'installation tournent déjà lors des mises à jour.
 </Callout>
 
 AppImage, Snap et Flatpak n'exécutent pas ces scripts. AppImage n'est pas installé ; Snap
@@ -307,7 +319,7 @@ Aucun override manuel de `desktopEntries` n'est nécessaire.
 `packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
 `debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
 `rpmRequires`, `pacmanPackageVersion`, `pacmanDepends`, `afterInstall`,
-`afterRemove`, `beforeInstall` et `beforeRemove`. Les sous-blocs sont
+`afterRemove`, `beforeInstall`, `beforeRemove`, `afterUpgrade` et `beforeUpgrade`. Les sous-blocs sont
 `appImage { }`, `snap { }`, `flatpak { }` et `signing { }`.
 
 `appRelease` fixe le numéro de release du paquet — le chiffre après le `-` dans les

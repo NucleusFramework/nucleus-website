@@ -33,6 +33,25 @@ et re-signez. Vérifiez avec `codesign -dv --verbose=4 <Your.app>` et cherchez u
 Nucleus par défaut le fait déjà, donc seuls les scripts CI personnalisés rencontrent cette
 erreur.
 
+### La notarisation échoue : "code object is not signed at all"
+
+**Symptôme.** `packageGraalvmDmg` (ou `notarizeGraalvmDmg`) avec
+`compose.desktop.mac.sign=true` aborte sur `code object is not signed at all` pour le
+sous-composant `<App>.app/Contents/MacOS/.nucleus-executable-type`. Ou le bundle est
+notarisé, mais `spctl -a -t exec` répond simplement `rejected`.
+
+**Cause.** Avant 2.5.17, les bundles GraalVM plaçaient des fichiers non-code sous
+`Contents/MacOS/` : le marqueur de type d'exécutable et `lib/fontconfig.bfc`. `codesign`
+traite chaque fichier de ce dossier comme du code imbriqué, et Gatekeeper rejette les
+fichiers non Mach-O n'importe où sous `Contents/MacOS/`. Les dylibs GraalVM qui s'y
+trouvent gardaient aussi leur signature ad hoc.
+
+**Solution.** Passez à 2.5.17 ou plus récent. Le marqueur et `fontconfig.bfc` vivent
+maintenant dans `Contents/Resources/`, et chaque dylib sous `Contents/MacOS/` est re-signée
+avec votre Developer ID. Les fichiers ajoutés via `appResourcesRootDir` atterrissent
+toujours dans `Contents/MacOS/` sous macOS — n'y livrez que des binaires Mach-O, sinon
+Gatekeeper rejette le bundle notarisé de la même façon.
+
 ## Microsoft Store
 
 ### Upload rejeté : "MinVersion &lt;= 10.0.17134.0"
@@ -230,6 +249,19 @@ chargeur et relancez si une montée de version a laissé une extraction partiell
 
 Voir le [chargeur de bibliothèques natives](/docs/performance/native-library-loader) pour
 l'ordre de chargement, la disposition JAR et les règles de sidecars.
+
+### Une bibliothèque native ne se charge pas sur une distribution Linux ancienne
+
+**Symptôme.** Sur Ubuntu 22.04, Debian 12, Devuan 5 ou une autre distribution antérieure à
+Ubuntu 24.04, l'app crashe au lancement ou un module rapporte `isAvailable == false`.
+stderr affiche `version 'GLIBC_2.3x' not found` pour une bibliothèque `libnucleus_*.so`.
+
+**Cause.** Jusqu'à 2.5.17, les natives Linux étaient compilées sur `ubuntu-latest`
+(Ubuntu 24.04) et exigeaient donc glibc 2.39.
+
+**Solution.** Passez à 2.5.18 ou plus récent. Les natives sont compilées sur Ubuntu 22.04
+et demandent glibc 2.35 ou plus récent. Vérifiez la version de votre système avec
+`ldd --version`.
 
 ## Rendu
 

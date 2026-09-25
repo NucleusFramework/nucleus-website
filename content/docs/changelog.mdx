@@ -6,6 +6,56 @@ description: Release notes for every Nucleus release, newest first.
 This page lists the changes in each Nucleus release, newest first. Every entry records
 the new modules, features, bug fixes, and breaking changes in that version.
 
+## v2.5.18
+
+**Released: 2026-09-23**
+
+### Bug fixes
+
+- **Linux natives require glibc 2.39** (#699) — the Linux JNI libraries (Tao, decorated
+  window, notifications, tray helpers, …) were built on `ubuntu-latest`, which GitHub moved
+  to Ubuntu 24.04, so every published `.so` needed glibc 2.39 and failed to load on
+  still-supported distributions such as Ubuntu 22.04 LTS (2.35), Debian 12, and Devuan 5
+  (2.36). The native build is now pinned to `ubuntu-22.04` / `ubuntu-22.04-arm`, bringing
+  the floor back to glibc 2.35. See
+  [Native library fails to load on an older Linux distribution](/docs/reference/troubleshooting#native-library-fails-to-load-on-an-older-linux-distribution).
+
+---
+
+## v2.5.17
+
+**Released: 2026-09-22**
+
+### New features
+
+- **Pacman upgrade hooks** (#685) — `linux { }` gains `afterUpgrade` and `beforeUpgrade`
+  file properties, passed raw to fpm (`--after-upgrade` / `--before-upgrade`). On Pacman,
+  an upgrade runs only `pre_upgrade` / `post_upgrade`: none of the four install/remove
+  scripts fire, so a service set up in `afterInstall` died on the first upgrade. Register or
+  restart it in `afterUpgrade` too. Deb and Rpm ignore both properties — their install
+  scriptlets already run on upgrades. See
+  [Add install and remove scripts](/docs/packaging/linux#add-install-and-remove-scripts).
+
+### Bug fixes
+
+- **Linux install directory no longer contains spaces** (#685) — Deb, Rpm, and Pacman
+  installed the payload under `/opt/${sanitizedProductName}`, derived from `appName`.
+  electron-builder's sanitizer keeps spaces, so a display name such as `My App` broke every
+  unquoted path in install scripts and systemd `ExecStart=` lines. On Linux the product name
+  now comes from `linux.packageName ?: packageName`, so the payload lands in
+  `/opt/<packageName>`. Scripts that hardcode the old `/opt/<App Name>` path must be updated.
+- **Developer ID signing of GraalVM macOS bundles** (#692) — `packageGraalvmDmg` with
+  `compose.desktop.mac.sign=true` aborted with `code object is not signed at all` on
+  `Contents/MacOS/.nucleus-executable-type`, and even a manually fixed bundle was rejected by
+  Gatekeeper after notarization. Three fixes: the executable-type marker is written to
+  `Contents/Resources/` (the runtime still reads the old location); every dylib and
+  executable under `Contents/MacOS/` is re-signed with the Developer ID identity; and
+  `fontconfig.bfc` moves from `Contents/MacOS/lib/` to `Contents/Resources/`, with
+  `sun.awt.fontconfig` pointed at it at startup. JVM (jpackage) bundles are unaffected. See
+  [Notarization fails: "code object is not signed at all"](/docs/reference/troubleshooting#notarization-fails-code-object-is-not-signed-at-all).
+
+---
+
 ## v2.5.16
 
 **Released: 2026-09-17**

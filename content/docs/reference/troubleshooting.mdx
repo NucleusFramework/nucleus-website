@@ -31,6 +31,25 @@ custom `codesign` step (for example, to sign `lipo`-merged universal binaries ou
 **Fix.** Add `--options runtime` to every `codesign` invocation. The default Nucleus
 pipeline already does this, so only custom CI scripts hit this error.
 
+### Notarization fails: "code object is not signed at all"
+
+**Symptom.** `packageGraalvmDmg` (or `notarizeGraalvmDmg`) with
+`compose.desktop.mac.sign=true` aborts with
+`code object is not signed at all` in subcomponent
+`<App>.app/Contents/MacOS/.nucleus-executable-type`. Or the bundle notarizes, but
+`spctl -a -t exec` answers a bare `rejected`.
+
+**Cause.** Before 2.5.17, GraalVM bundles put non-code files under `Contents/MacOS/`: the
+executable-type marker and `lib/fontconfig.bfc`. `codesign` treats every file there as
+nested code, and Gatekeeper rejects non-Mach-O files anywhere under `Contents/MacOS/`. The
+GraalVM dylibs there also kept their ad-hoc signature.
+
+**Fix.** Upgrade to 2.5.17 or later. The marker and `fontconfig.bfc` now live in
+`Contents/Resources/`, and every dylib under `Contents/MacOS/` is re-signed with your
+Developer ID. Files you add through `appResourcesRootDir` still land in `Contents/MacOS/`
+on macOS — ship only Mach-O binaries there, or Gatekeeper rejects the notarized bundle the
+same way.
+
 ## Microsoft Store
 
 ### Upload rejected: "MinVersion &lt;= 10.0.17134.0"
@@ -224,6 +243,18 @@ relaunch if an upgrade left a partial extract:
 
 See [Native library loader](/docs/performance/native-library-loader) for the full load
 order, JAR layout, and sidecar rules.
+
+### Native library fails to load on an older Linux distribution
+
+**Symptom.** On Ubuntu 22.04, Debian 12, Devuan 5, or another distribution older than
+Ubuntu 24.04, the app crashes at launch or a module reports `isAvailable == false`. stderr
+shows `version 'GLIBC_2.3x' not found` for a `libnucleus_*.so` library.
+
+**Cause.** Up to 2.5.17 the Linux natives were built on `ubuntu-latest` (Ubuntu 24.04), so
+they required glibc 2.39.
+
+**Fix.** Upgrade to 2.5.18 or later. The natives are built on Ubuntu 22.04 and need
+glibc 2.35 or newer. Check your system's version with `ldd --version`.
 
 ## Rendering
 
