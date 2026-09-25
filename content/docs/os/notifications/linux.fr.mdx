@@ -1,0 +1,94 @@
+---
+title: Notifications sous Linux
+description: Envoyez des notifications de bureau freedesktop via D-Bus depuis Kotlin, avec urgence, indications, sons, images et callbacks d'action.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-linux` envoie des notifications de bureau freedesktop sur GNOME, KDE, Cinnamon, Xfce
+et les autres bureaux. Ajoutez `dev.nucleusframework:nucleus.notification-linux` ; il apporte les
+noms d'icônes typés de [`freedesktop-icons`](/docs/os/icons/freedesktop).
+
+## Envoyer une notification
+
+```kotlin
+val id: Int = LinuxNotificationCenter.notify(
+    Notification(
+        appName = "MyApp",
+        summary = "Build finished",
+        body = "myapp.zip is ready",
+        appIcon = FreedesktopIcon.Status.DIALOG_INFORMATION,
+        hints = NotificationHints(
+            urgency = Urgency.NORMAL,
+            soundName = NotificationSound.Notification.DIALOG_INFORMATION,
+        ),
+        actions = listOf(
+            NotificationAction(NotificationAction.DEFAULT_KEY, "Open"), // body click
+            NotificationAction("archive", "Archive"),
+        ),
+    ),
+)
+```
+
+`notify` renvoie l'identifiant attribué par le serveur, ou `0` en cas d'échec. Passez-le comme
+`replacesId` pour remplacer une notification sur place, ou à `closeNotification(id)`.
+`expireTimeout` est en millisecondes : `-1` (par défaut) laisse le serveur décider, `0` garde la
+notification jusqu'à ce que l'utilisateur la ferme.
+
+## Recevoir les callbacks
+
+```kotlin
+LinuxNotificationCenter.addListener(object : LinuxNotificationListener {
+    override fun onActionInvoked(notificationId: Int, actionKey: String) { /* … */ }
+    override fun onClosed(notificationId: Int, reason: CloseReason) { /* … */ }
+    override fun onActivationToken(notificationId: Int, token: String) { /* … */ }
+})
+```
+
+Les trois méthodes ont une implémentation vide par défaut. `onActivationToken` livre le jeton X11
+ou Wayland qui sert à demander le focus d'une fenêtre. Les callbacks s'exécutent sur le thread UI.
+
+<Callout type="warn" title="Modifié en 3.0">
+En 2.x, les callbacks des listeners s'exécutaient sur l'event dispatch thread AWT. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Notes
+
+- Les serveurs affichent la spécification chacun à leur manière. GNOME Shell ignore souvent
+  `appIcon` ; définissez `hints.imagePath` pour une icône cohérente. `getServerInformation()` et
+  `getCapabilities()` indiquent le serveur en place et ce qu'il prend en charge.
+- La plupart des serveurs affichent les notifications `Urgency.CRITICAL` malgré le mode Ne pas
+  déranger et ne les font jamais expirer.
+- Sous Xvfb ou sur un runner CI sans affichage, `notify` réussit mais rien ne s'affiche.
+- Dans un build Flatpak, le manifeste doit autoriser l'accès à `org.freedesktop.Notifications`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Chaque appel à `notify` invoque la méthode `Notify` du service D-Bus
+  `org.freedesktop.Notifications` via un pont GDBus, sans JNA ni bibliothèque D-Bus Java.
+- Les actions et les fermetures arrivent sous forme de signaux D-Bus. La surveillance démarre avec
+  le premier listener et s'arrête quand vous retirez le dernier.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `LinuxNotificationCenter.isAvailable` | `false` hors Linux ou quand la bibliothèque native ne s'est pas chargée |
+| `Urgency` | `LOW`, `NORMAL`, `CRITICAL` |
+| `NotificationHints` | Tous facultatifs : `urgency`, `category`, `desktopEntry`, `imageData`, `imagePath`, `actionIcons`, `soundFile`, `soundName`, `suppressSound`, `resident`, `transient`, `x`, `y` |
+| `ImageData(width, height, rowstride, hasAlpha, data)` | Pixels RGB ou RGBA bruts. `channels` vaut `4` avec alpha, `3` sans ; `bitsPerSample` vaut `8`. |
+| `NotificationSound` | Noms du thème dans `Alert`, `Notification`, `Action`, `InputFeedback`, `Game` ; `Custom("x-myapp-…")` pour les autres |
+| `CloseReason` | `EXPIRED`, `DISMISSED`, `CLOSED`, `UNDEFINED` |
+| `closeNotification(id)` / `removeListener(listener)` | Fermer une notification / retirer un listener |
+
+## Et ensuite
+
+- [Noms d'icônes FreeDesktop](/docs/os/icons/freedesktop) : des noms typés pour `appIcon` et `imagePath`.
+- [Notifications cross-plateforme](/docs/os/notifications) : l'API de notification partagée.
+- [Lanceur Linux](/docs/os/dock-taskbar/linux) : badges et quicklists sur le dock Linux.

@@ -4,33 +4,15 @@ description: Read your app's id, version, vendor, display name, and Windows AUMI
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-`NucleusApp` lets you read your application's metadata — id, version, vendor, display name, and
-Windows AUMID — from Kotlin at runtime. The values come from what you configure in the Nucleus
-Gradle plugin and are injected at build time, so you don't hardcode them or read them off disk
-yourself.
-
-## Add the dependency
-
-`NucleusApp` lives in the `core-runtime` module, which the Nucleus Gradle plugin already pulls in.
-Add the coordinate explicitly only when you read metadata from a module that does not depend on it:
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
-}
-```
+`NucleusApp` reads your app's id, version, vendor, display name, and Windows AUMID from Kotlin.
+The Gradle plugin injects the values you configure, so you never hardcode them. `NucleusApp`
+ships in `core-runtime`, which comes with `nucleus-application`.
 
 ## Read the metadata
 
-`NucleusApp` is an object. Read its properties directly:
-
 ```kotlin
-import androidx.compose.foundation.layout.Column
-import androidx.compose.material.Text
-import androidx.compose.runtime.Composable
-import dev.nucleusframework.core.runtime.NucleusApp
-
 @Composable
 fun AboutDialog() {
     Column {
@@ -41,67 +23,43 @@ fun AboutDialog() {
 }
 ```
 
-Each property resolves once and is cached, so reading it repeatedly is cheap.
-
-Use `isConfigured` to tell whether the Nucleus plugin injected metadata at all:
-
-```kotlin
-if (NucleusApp.isConfigured) {
-    // Running as a packaged app
-    initAutoUpdater()
-}
-```
+`appId` and `aumid` are never null. Guard the other properties or supply a fallback.
+`isConfigured` tells you whether the plugin injected metadata at all.
 
 <Callout type="info">
-`isConfigured` is `true` under `./gradlew run` too, because the plugin injects `nucleus.app.id`
-into the `run` task. To gate auto-update, telemetry, or anything else you don't want firing in
-development, test `ExecutableRuntime.isDev()` instead.
+`isConfigured` is also `true` under `./gradlew run`. To keep auto-update or telemetry out of
+development runs, test `ExecutableRuntime.isDev()`. See
+[Executable type](/docs/lifecycle/executable-type).
 </Callout>
 
-## How it works
+<Accordions>
+<Accordion title="Under the hood">
 
-The Gradle plugin delivers metadata to `NucleusApp` through two channels. Each property resolves
-from them in order, and the first non-blank value wins:
+- Each property takes the first non-blank value from the `nucleus.app.*` system properties, then
+  the `nucleus/nucleus-app.properties` resource in packaged JARs. It resolves once and is cached.
+- The `run` task gets only `-Dnucleus.app.id` and `-Dnucleus.executable.type`.
+- `isConfigured` checks only `nucleus.app.id` and the resource file, not each property.
+- The same values name the single-instance lock, the Windows AUMID used by toasts, badges, and
+  jump lists, the MSIX startup task, and the FileKit data directory.
 
-1. **System properties** during `./gradlew run` — the plugin injects `-Dnucleus.app.id` and
-   `-Dnucleus.executable.type`. `NucleusApp` reads the other `nucleus.app.*` properties only if
-   you set them yourself.
-2. **A classpath resource** in packaged builds — `nucleus/nucleus-app.properties`, baked into the
-   application jar.
-
-For `appId` only, a third step applies: when neither source provides a value, `appId` derives from
-the main class name through `AppIdProvider`, falling back to `NucleusApp` if that too is missing.
-
-A single block in `build.gradle.kts` therefore flows into every runtime module without manual
-wiring. The same values back the single-instance lock identifier, the Windows AUMID used for toast
-notifications and badge counts, and the MSIX startup task id — all read through `NucleusApp`.
+</Accordion>
+</Accordions>
 
 ## API reference
 
-### NucleusApp
-
-An object exposing the injected metadata as read-only properties.
-
 | Property | Type | Value |
 |---|---|---|
-| `appId` | `String` | Application id. Matches the plugin's `packageName`. Falls back to the main class name. |
-| `appName` | `String?` | Display name, or `null` if not configured. |
-| `version` | `String?` | Application version, or `null` if not configured. |
-| `vendor` | `String?` | Application vendor, or `null` if not configured. |
-| `description` | `String?` | Application description, or `null` if not configured. |
-| `aumid` | `String` | Windows Application User Model ID. Falls back to `appId` when not set. |
-| `startupTaskId` | `String?` | MSIX startup task id, injected when `appx { addAutoLaunchExtension = true }`. Used by [Auto-launch](/docs/lifecycle/auto-launch). `null` otherwise. |
-| `isConfigured` | `Boolean` | `true` when the plugin injected metadata through the `nucleus.app.id` system property or the classpath resource. |
-
-## Notes
-
-- `appId` and `aumid` are non-null; every other value is nullable. Guard nullable reads or supply
-  your own fallback.
-- `isConfigured` checks the `nucleus.app.id` system property and the classpath resource, not the
-  other individual properties.
+| `appId` | `String` | Matches the plugin's `packageName`. Falls back to a value derived from the main class. |
+| `appName` | `String?` | Display name. |
+| `version` | `String?` | Application version. |
+| `vendor` | `String?` | Application vendor. |
+| `description` | `String?` | Application description. |
+| `aumid` | `String` | Windows Application User Model ID. Falls back to `appId`. |
+| `startupTaskId` | `String?` | MSIX startup task id, set when `appx { addAutoLaunchExtension = true }`. Read by [Auto-launch](/docs/lifecycle/background/launch-at-login). |
+| `isConfigured` | `Boolean` | `true` when the plugin injected metadata. |
 
 ## What's next
 
-- [Auto-launch](/docs/lifecycle/auto-launch) — start your app at login using `startupTaskId`.
-- [Executable type](/docs/lifecycle/executable-type) — distinguish a DMG, Flatpak, or `./gradlew run` at runtime.
-- [Single instance](/docs/lifecycle/single-instance) — the single-instance lock keyed on your app id.
+- [Executable type](/docs/lifecycle/executable-type): tell a DMG, a Flatpak, or `./gradlew run` apart.
+- [Single instance](/docs/lifecycle/single-instance): the lock named after your app id.
+- [Auto-launch](/docs/lifecycle/background/launch-at-login): start the app at login with `startupTaskId`.

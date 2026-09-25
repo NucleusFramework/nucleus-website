@@ -1,0 +1,207 @@
+---
+title: Fenêtres
+description: Ouvrez des fenêtres de bureau natives depuis Compose avec nucleusApplication et DecoratedWindow, réglez leur chrome et ouvrez les fenêtres secondaires via un hôte.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusApplication` démarre le runtime Nucleus et `DecoratedWindow` ouvre une fenêtre native dotée
+d'un slot de barre de titre Compose. Les deux sont fournis avec `nucleus-application`.
+
+## Ouvrir une fenêtre
+
+```kotlin
+fun main() = nucleusApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        state = rememberWindowState(size = DpSize(1024.dp, 720.dp)),
+        title = "MyApp",
+        minimumSize = DpSize(640.dp, 480.dp),
+    ) {
+        TitleBar { _ -> Text("MyApp", Modifier.align(Alignment.CenterHorizontally)) }
+        Box(Modifier.fillMaxSize()) { /* contenu de l'application */ }
+    }
+}
+```
+
+`TitleBar` déplace la fenêtre depuis ses zones vides et reçoit le `DecoratedWindowState` (focus,
+maximisation, plein écran). Appelez `DecoratedWindow` une seconde fois pour ouvrir une autre
+fenêtre. Pour un chrome personnalisé, le verre macOS ou Mica sous Windows 11, utilisez
+[`WindowScaffold`](/docs/windows/window-scaffold). Les options globales (instance unique, locale,
+politique du Dock, comportement de sortie) se trouvent dans [Application](/docs/lifecycle/application).
+
+<Callout type="warn" title="Modifié en 3.0">
+Nucleus n'a plus qu'un seul backend de fenêtre : `NucleusBackend`, `LocalNucleusBackend` et
+`backend =` disparaissent. Les `Window`, `Dialog` et `Tray` AWT de Compose Desktop ne sont pas pris
+en charge. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Régler le chrome de la fenêtre
+
+`resizable`, `minimizable` et `maximizable` valent `true` par défaut et réagissent aux changements.
+`resizable = false` retire aussi le bouton de maximisation : une fenêtre avec le seul bouton de
+fermeture demande donc deux flags.
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, resizable = false, minimizable = false) { /* ... */ }
+```
+
+Sous Linux, les raccourcis du bureau (Super+H, Alt+Espace) minimisent et maximisent toujours. Sous
+macOS, les feux tricolores se grisent et les éléments du menu **Window** suivent. `DecoratedDialog`
+passe `false` pour les deux.
+
+<Callout type="warn" title="Modifié en 3.0">
+`minimizable` et `maximizable` sont nouveaux sur chaque surcharge de `DecoratedWindow` et
+`HostedWindow`, ainsi que sur `NucleusWindowHost.Window`. Un `NucleusWindowHost` personnalisé doit
+les ajouter.
+</Callout>
+
+## Ouvrir une fenêtre depuis la composition
+
+`DecoratedWindow` et `DecoratedDialog` existent aussi sans receveur. Appelez-les depuis une
+destination de navigation ou l'action d'une ligne :
+
+```kotlin
+@Composable
+fun EditorWindow(onClose: () -> Unit) {
+    DecoratedWindow(onCloseRequest = onClose, title = "Editor") { EditorContent() }
+}
+```
+
+Elles lisent `LocalNucleusApplicationScope`, qui lève une exception hors de `nucleusApplication { }`.
+
+<Callout type="warn" title="Modifié en 3.0">
+Les fenêtres et dialogues Material et Jewel perdent leurs surcharges sans receveur. Appelez-les
+dans `with(LocalNucleusApplicationScope.current) { }`.
+</Callout>
+
+## Ouvrir les fenêtres via un hôte
+
+Une bibliothèque ou une couche de navigation appelle `HostedWindow` / `HostedDialog`. Ils passent
+par `LocalNucleusWindowHost` / `LocalNucleusDialogHost`, et l'application choisit le type de
+fenêtre une seule fois :
+
+```kotlin
+CompositionLocalProvider(LocalNucleusWindowHost provides MyMaterialWindowHost) {
+    NavigationGraph() // chaque HostedWindow en dessous utilise cet hôte
+}
+```
+
+Les hôtes par défaut ne dessinent pas de barre de titre : composez `TitleBar` dans le contenu. Pour
+thémer les fenêtres hébergées, implémentez la `fun interface` `NucleusWindowHost.Window`, et
+surchargez aussi la variante [API window v2](/docs/windows/window-state) : celle par défaut perd
+`maxSize` et `requestScreen`. `transparent`, `clickThrough`, `visibleOnAllWorkspaces` et `forceX11`
+n'existent que sur `DecoratedWindow`.
+
+## Utiliser le handle de fenêtre
+
+`nucleusWindow` dans la lambda de contenu, ou `LocalNucleusWindow` plus bas dans l'arbre, renvoie le
+handle `NucleusWindow` :
+
+```kotlin
+val focused by nucleusWindow.focusFlow.collectAsState()
+Button(onClick = { nucleusWindow.setMaximized(true) }) { Text(if (focused) "Maximize" else "…") }
+```
+
+| Groupe | Membres |
+| --- | --- |
+| État | `isFocused`, `isMinimized`, `isMaximized`, `isFullscreen`, et un `*Flow` pour chacun |
+| Géométrie | `boundsOnScreen()` : limites extérieures en dp, `null` avant l'apparition de la fenêtre |
+| Actions | `show`, `hide`, `toFront`, `requestFocus`, `setMinimized`, `setMaximized`, `setFullscreen`, `setAlwaysOnTop`, `setMinimumSize`, `setIcon`, `close` |
+| Natif | `unsafe.taoWindow`, `unsafe.taoHandle` (remplacent `awtWindow` / `awtDialog`, supprimés) |
+
+## Masquer une fenêtre de la barre des tâches ou du Dock
+
+`hiddenFromDock = true` garde la fenêtre visible mais la retire de la barre des tâches, d'Alt+Tab ou
+du Dock.
+
+- **macOS** : l'application perd son icône du Dock et sa barre de menus. Le réglage vaut pour toute
+  l'application : la dernière fenêtre qui le pose l'emporte. Pour une application de barre de
+  menus, utilisez plutôt `dockIconFollowsWindows = true`. Voir
+  [Masquer l'icône du Dock sur macOS](/docs/os/tray/tray-app#masquer-licône-du-dock-sur-macos).
+- **Linux** : Wayland natif l'ignore. Passez `forceX11 = true` ou consultez
+  [Linux et Wayland](/docs/windows/linux-wayland).
+
+## Saisie de texte
+
+La composition IME arrive dans les champs de texte Compose sous forme de preedit sur toutes les
+plateformes, et la fenêtre de candidats suit le curseur. Les touches que l'IME consomme
+n'atteignent pas le champ de texte.
+
+## Gérer les exceptions non interceptées
+
+Une exception qui s'échappe d'un événement de fenêtre est fatale : Nucleus la journalise, affiche
+un dialogue d'erreur et quitte avec le code 1 (`exitProcessOnExit = false` relance l'exception à la
+place). Désactivez le dialogue en CI avec `-Dnucleus.tao.fatalErrorDialog=false`.
+
+Pour garder une fenêtre en vie, fournissez `LocalWindowExceptionHandlerFactory`
+(`@ExperimentalComposeUiApi`) :
+
+```kotlin
+CompositionLocalProvider(
+    LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { _ ->
+        WindowExceptionHandler { throwable -> /* retourner pour ignorer la frame, relancer pour quitter */ }
+    },
+) {
+    DecoratedWindow(onCloseRequest = ::exitApplication) { MyContent() }
+}
+```
+
+Un échec pendant la composition ne peut pas reprendre : fermez et recréez la fenêtre, ou relancez
+l'exception.
+
+## Notes
+
+- Sur une JVM classique, macOS exige `-XstartOnFirstThread`. Le plugin Nucleus l'ajoute aux tâches
+  Hot Reload. Une image native n'en a pas besoin.
+- `NucleusApplicationScope` étend `ApplicationScope`, mais les composables qui démarrent AWT ne
+  fonctionnent pas.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Chaque fenêtre compose dans sa propre scène. Nucleus y relaie les composition locals du parent.
+- Le gestionnaire d'exceptions couvre la mise en page, le dessin, les entrées, l'IME,
+  l'accessibilité et les popups `nativePopupLayers`, et s'exécute sur le thread où l'échec a eu
+  lieu.
+- Sous Linux, les méthodes de saisie se résolvent comme pour les widgets GTK : ibus ou fcitx5 sous
+  X11, text-input-v3 sous Wayland. Sous macOS, l'OS décide si une lettre maintenue se répète ou
+  ouvre le sélecteur d'accents.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+### Paramètres de DecoratedWindow
+
+| Paramètre | Défaut | Notes |
+| --- | --- | --- |
+| `onCloseRequest` | requis | Bouton de fermeture, Alt+F4, Cmd+Q et Dock > Quitter. |
+| `state` | `rememberWindowState()` | Voir [État de fenêtre](/docs/windows/window-state). |
+| `visible` / `enabled` / `focusable` | `true` | |
+| `title` / `icon` | `""` / `null` | |
+| `resizable` / `minimizable` / `maximizable` | `true` | Réactifs. |
+| `alwaysOnTop` / `alwaysOnBottom` | `false` | Réactifs. `alwaysOnBottom` annule `alwaysOnTop`. |
+| `undecorated` | `false` | Fenêtre sans bordure ni contrôles. |
+| `popupFor` | `null` | Linux : rattache la fenêtre comme popup d'une autre. |
+| `nativePopupLayers` | `false` | Voir [Dialogues et popups](/docs/windows/dialogs-popups). |
+| `nativeContextMenu` | `false` | Voir [Menus contextuels](/docs/os/menus/context-menu). |
+| `hiddenFromDock` | `false` | Masque la fenêtre de la barre des tâches ou du Dock. |
+| `minimumSize` | `null` | La surcharge v2 utilise `minSize` et `maxSize`. |
+| `onPreviewKeyEvent` / `onKeyEvent` | `{ false }` | Renvoyez `true` pour consommer. |
+| `transparent` / `forceX11` | `false` | À la création uniquement. |
+| `clickThrough` / `visibleOnAllWorkspaces` | `false` | Réactifs. Voir [Fenêtres overlay](/docs/windows/overlay-windows). |
+
+### Modifiers de barre de titre
+
+- `Modifier.macOSLargeCornerRadius()` : grand rayon d'angle des fenêtres macOS 26.
+- `Modifier.newFullscreenControls()` : mise en page pour les contrôles plein écran natifs de macOS.
+
+## Et ensuite
+
+- [État de fenêtre](/docs/windows/window-state) : taille, position, écrans et API window v2.
+- [Scaffold et chrome de fenêtre](/docs/windows/window-scaffold) : mises en page plein cadre et matériaux.
+- [Dialogues et popups](/docs/windows/dialogs-popups) : dialogues modaux et surfaces de popup natives.
+- [Toolkits](/docs/toolkits) : thèmes de fenêtre Material, Jewel, Fluent, Yaru et macOS.

@@ -1,0 +1,60 @@
+---
+title: File dialogs
+description: Open, save and folder pickers with FileKit, set up for you by nucleusApplication.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus apps use [FileKit](https://filekit.mintlify.app) for native open, save and folder
+pickers. Add the dependency and call FileKit: Nucleus does the setup. For the full API (file
+types, multiple selection, savers, `PlatformFile`), see the
+[FileKit documentation](https://filekit.mintlify.app/dialogs/setup).
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("io.github.vinceglb:filekit-dialogs:<filekit-version>")
+}
+```
+
+## Pick a file
+
+```kotlin
+val scope = rememberCoroutineScope()
+
+Button(onClick = {
+    scope.launch {
+        val file = FileKit.openFilePicker(type = FileKitType.Image)
+        // file is null when the user cancels
+    }
+}) {
+    Text("Open image")
+}
+```
+
+## What Nucleus does for you
+
+- **Initialization.** `nucleusApplication` calls `FileKit.init(NucleusApp.appId)` when FileKit is
+  on the classpath. Dev runs, packaged apps and native images share one files directory.
+- **Uninstall.** On Windows that directory is `%APPDATA%\<appId>`, which the NSIS uninstaller
+  removes when you set `deleteAppDataOnUninstall`.
+- **Native image.** The Nucleus plugin ships FileKit's GraalVM metadata, so the pickers work in a
+  native image with no configuration.
+
+<Callout type="warn" title="Changed in 3.0">
+The automatic `FileKit.init` is new. Your own `FileKit.init(…)` before `nucleusApplication` still
+wins, a call inside `content` replaces the automatic one, and
+`nucleusApplication(args, initializeFileKit = false)` turns it off. See
+[Migrate from Nucleus 2.x](/docs/migrate/from-2.x#check-the-filekit-initialization).
+</Callout>
+
+## Attach the dialog to a window
+
+To make the picker modal to a window, pass the window's platform handle from
+`nucleusWindow.unsafe.taoWindow`: `nativeHandle` on Windows, `nsWindowHandle` on macOS, and
+`xdgPortalParent()` on Linux (X11 and Wayland).
+
+## What's next
+
+- [Application entry point](/docs/lifecycle/application): every `nucleusApplication` option.
+- [FileKit documentation](https://filekit.mintlify.app): the full picker and file API.
+- [Windows](/docs/windows): `nucleusWindow` and the native window handle.

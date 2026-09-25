@@ -1,0 +1,119 @@
+---
+title: Compare
+description: How Nucleus compares with vanilla Compose Multiplatform — and, secondarily, with other desktop stacks.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus extends Compose Multiplatform for teams that already write Kotlin and need to **ship** a desktop
+app — not just draw a window. The primary comparison is against **vanilla Compose Desktop**. Packaging
+tools and web-based stacks sit further down the page for context.
+
+## Nucleus vs vanilla Compose Multiplatform
+
+Compose Multiplatform is the foundation. Nucleus is the production layer on top: native chrome, OS modules,
+broader packaging, auto-update, and store pipelines. Migration is a [drop-in](/docs/migrate/from-jb-compose).
+
+| | **Nucleus** | Vanilla CMP |
+|--|------------|-------------|
+| Language | Kotlin | Kotlin |
+| UI | Compose + Skia GPU | Compose + Skia GPU |
+| Window decorations | Native (Liquid Glass, Fluent, Yaru, Jewel) | Limited |
+| OS APIs | 40+ Kotlin modules | Thin (`Tray`, `Notification`) |
+| Packaging formats | **18** | 6 (jpackage) |
+| Auto-update | Built-in (`updater-runtime`) | None |
+| Store pipelines | PKG, MSIX, Snap, Flatpak (+ sandbox) | No dedicated path |
+| Cold start | ~0.2 s (GraalVM) · ~1.0 s (JVM+AOT) | 1–2 s |
+| Binary size | ~40 MB (GraalVM) · ~60 MB (JVM)* | 80–120 MB |
+| Gradle shape | `nucleus.application { … }` (mirrors CMP) | `compose.desktop.application { … }` |
+
+Full decision guide: [Nucleus vs vanilla Compose Multiplatform](/docs/compare/cmp-default).
+
+### When to stay on vanilla CMP
+
+- You only need DMG / MSI / DEB from jpackage.
+- You do not need auto-update, store channels, GraalVM packaging, or native window decorations.
+- You already own bespoke signing and upload scripts you do not want to displace.
+
+### When to switch to Nucleus
+
+- You want store-ready packaging (Mac App Store, Microsoft Store, Snapcraft, Flathub).
+- You want auto-update, GraalVM Native Image, or JDK AOT cache wiring.
+- You want native decorations and 40+ OS modules without writing JNI per platform.
+- You already have a Compose Desktop project and want a [drop-in migration](/docs/migrate/from-jb-compose).
+
+## Packaging tools (JVM ecosystem)
+
+How Nucleus packaging compares with jpackage, Conveyor, install4j, and others — formats, auto-update,
+signing, CI, stores:
+
+→ [Packaging — Nucleus vs the rest](/docs/compare/packaging)
+
+## Other desktop stacks (Electron, Tauri)
+
+Electron and Tauri answer a different question: *how do I build desktop when my team is JavaScript?*
+Nucleus answers: *how does my Kotlin team ship desktop on top of Compose?*
+
+| | **Nucleus** | Electron | Tauri |
+|--|------------|----------|-------|
+| Language(s) | Kotlin | JS + Node (+ C++ for natives) | JS + Rust |
+| UI tech | Compose + Skia GPU | Chromium (Blink + V8) | OS WebView |
+| OS APIs | 40+ Kotlin modules, single process | Node native modules / IPC | Rust commands over IPC |
+| Shared with mobile | Same Kotlin as Android / iOS | Web bundle | Web bundle |
+| Packaging formats | **18** | 5–7 via electron-builder | 5 via tauri-bundler |
+| Cold start | ~0.2 s (GraalVM) | 2–3 s | &lt; 1 s |
+| RAM idle | 30–120 MB* | 200–500 MB | ~87 MB* |
+
+Choose **Electron** when shipping speed and a JS hiring pool matter more than RAM or native feel.
+Choose **Tauri** when you accept platform WebViews and a Rust/JS split for smaller binaries.
+Choose **Nucleus** when the team is already Kotlin and you want Compose end-to-end with real OS and shipping tooling.
+
+### Measured: startup, RAM, and process count
+
+Same Hello-World window, four stacks, identical protocol on one Windows 11 machine — wall-clock from
+process launch to first window handle, and **private working set** once the window settled.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (private WS) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0.17 s | ~0.10 s | **~30 MB** | 1 |
+| WinUI 3 | .NET 9 + Windows App SDK | ~0.20 s | ~0.28 s | ~32 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0.28 s | ~0.28 s | ~33 MB | 1 |
+| Tauri | Rust + WebView2 | ~0.74 s | ~0.12 s | ~87 MB | 7 |
+
+- **Task Manager under-reports WebView2 apps.** The Tauri process itself shows ~4 MB — the real footprint
+  (~87 MB) lives in six `msedgewebview2.exe` helpers. Nucleus is a single process.
+- **Nucleus lands in the same ~30 MB class as native WinUI 3 and Flutter** while staying pure
+  Kotlin/Compose.
+
+#### macOS
+
+Same protocol on macOS 26 (Apple silicon) — wall-clock to first on-screen window, and total **RSS across
+every process the app spawns**. RSS includes shared framework pages; compare within the table only.
+
+| Hello-World | Stack | Cold start | Warm start | RAM (RSS, all processes) | Processes |
+|--|--|--|--|--|--|
+| **Nucleus (Tao)** | GraalVM native image | ~0.32 s | ~0.20 s | ~115 MB | 1 |
+| SwiftUI | native reference | ~0.14 s | ~0.14 s | ~78 MB | 1 |
+| Flutter | Dart AOT + Skia | ~0.79 s | ~0.17 s | ~100 MB | 1 |
+| Tauri | Rust + WKWebView | ~0.91 s | ~0.19 s | ~173 MB | 4 |
+
+## Notes
+
+Performance numbers are typical for a Hello-World class app. Real-world cold start and RAM scale with
+what your app loads. Nucleus has two runtime targets: GraalVM native image for cold start and binary
+size, and JVM + AOT cache for throughput. See [performance](/docs/performance).
+
+<Callout type="info">
+In the comparison tables, Electron figures are drawn from public benchmarks. Nucleus, WinUI 3, Tauri,
+and related numbers — including Tauri RAM — were measured first-hand on a single Windows 11 machine
+(warm runs unless noted); see the **Measured** section.
+*Nucleus RAM was measured on Windows 11 with a Hello World build; binary size is the NSIS installer
+with maximum compression.
+</Callout>
+
+## What's next
+
+- [Nucleus vs vanilla Compose Multiplatform](/docs/compare/cmp-default) — what Nucleus adds on top of CMP.
+- [Packaging — 18 formats vs the rest](/docs/compare/packaging) — packaging pipeline comparison.
+- [Why Nucleus](/docs/why-nucleus) — product narrative for Kotlin teams.
+- [Migrating from JetBrains Compose Desktop](/docs/migrate/from-jb-compose) — drop-in steps.

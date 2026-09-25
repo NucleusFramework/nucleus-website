@@ -1,0 +1,161 @@
+---
+title: Point d'entrée de l'application
+description: Démarrez une app Nucleus avec nucleusApplication et contrôlez sa sortie, son instance unique et l'initialisation de FileKit.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusApplication` est le point d'entrée `main` d'une app Nucleus. Il démarre la boucle
+d'événements native, exécute votre contenu Compose et gère la sortie, le quit système, l'instance
+unique et FileKit. Il est fourni par `nucleus-application`.
+
+```kotlin
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        // contenu de la fenêtre
+    }
+}
+```
+
+Passez les arguments de `main` pour que les deep links et les lancements au login atteignent le
+runtime. L'app se termine sur `exitApplication()` ou à la fermeture de sa dernière fenêtre.
+Utilisez `DecoratedWindow` et non les `Window`, `Dialog` ou `Tray` AWT de Compose Desktop : ils
+compilent dans ce scope mais ne sont pas pris en charge.
+
+## Choisir le comportement à la sortie
+
+Par défaut, la JVM se termine quand la boucle d'événements s'arrête : code 0 après un quit
+normal, 1 après une erreur fatale. Passez `exitProcessOnExit = false` pour revenir dans votre
+`main`. Une erreur fatale est alors journalisée en `SEVERE` puis relancée, et vous appelez
+`exitProcess` vous-même, car le thread AWT peut maintenir la JVM en vie :
+
+```kotlin
+fun main(args: Array<String>) {
+    nucleusApplication(args, exitProcessOnExit = false) { /* ... */ }
+    flushLogs()
+    exitProcess(0)
+}
+```
+
+## Gérer un quit système
+
+Sur macOS, Cmd+Q, Dock → Quitter, la déconnexion et l'arrêt appellent `onCloseRequest` sur chaque
+fenêtre ouverte, de la plus récente à la plus ancienne : la logique du bouton de fermeture couvre
+donc le quit système. Une fenêtre accepte quand son handler appelle `exitApplication()` ou ferme
+la fenêtre. Une fenêtre qui reste ouverte oppose un veto. Une fenêtre ouverte pendant le quit,
+comme un dialogue « Enregistrer les modifications ? », retarde la sortie jusqu'à sa fermeture.
+
+<Callout type="warn" title="Modifié en 3.0">
+En 2.x, un quit système sur macOS terminait l'app sans appeler `onCloseRequest`. Un handler qui
+n'appelle jamais `exitApplication()` et ne ferme pas sa fenêtre annule désormais le quit. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Une fenêtre qui se cache dans le tray doit laisser passer un vrai quit. `isQuitting` vaut `true`
+pendant un quit système et repasse à `false` si une fenêtre oppose un veto :
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = { if (isQuitting) exitApplication() else visible = false },
+    visible = visible,
+) { /* ... */ }
+```
+
+## Garantir une instance unique
+
+Les builds empaquetés prennent le verrou d'[instance unique](/docs/lifecycle/single-instance).
+Les lancements de dev l'ignorent : vous pouvez déboguer à côté d'une copie empaquetée.
+
+<Callout type="warn" title="Modifié en 3.0">
+`enableSingleInstance` vaut désormais `!ExecutableRuntime.isDev()` au lieu de `true`. Passez
+`true` pour le tester depuis `./gradlew run`. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Initialiser FileKit
+
+Quand [FileKit](/docs/os/file-dialogs) est sur le classpath, `nucleusApplication` appelle
+`FileKit.init(NucleusApp.appId)` avant votre contenu. Les lancements de dev, les builds
+empaquetés et les images natives partagent alors un même dossier de données (`%APPDATA%\<appId>`
+sous Windows, que le désinstalleur supprime quand `deleteAppDataOnUninstall` est activé). Votre
+propre appel à `FileKit.init`, avant `nucleusApplication` ou dans `content`, l'emporte.
+`initializeFileKit = false` le désactive.
+
+## Définir la locale et la politique du Dock
+
+- `defaultLocale = Locale.FRENCH` impose la locale avant la construction de l'UI, y compris pour
+  le menu contextuel texte de Compose et la langue de correction par défaut.
+- `dockIconFollowsWindows = true` (macOS) démarre l'app sans icône dans le Dock et n'en affiche
+  une que tant qu'un `DecoratedWindow` avec `hiddenFromDock = false` est visible. Les popups du
+  tray ne comptent pas.
+
+## Surveiller une UI bloquée
+
+Sous Windows, Nucleus journalise `SEVERE` avec un thread dump quand la boucle d'événements ne
+répond plus, et appelle vos handlers sur leur propre thread :
+
+```kotlin
+onUnresponsive { showWaitOrQuit() }
+onResponsive { hideWaitOrQuit() }
+```
+
+Encadrez un appel long et connu par `expectUnresponsive { }` pour qu'il ne soit pas signalé. Les
+règles de détection et les options `-Dnucleus.tao.watchdog*` sont dans
+[Threading](/docs/concepts/threading).
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Avant la composition de votre contenu, `nucleusApplication` initialise le support GraalVM,
+  applique `defaultLocale`, prend le verrou d'instance unique, met en cache
+  [`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/background/launch-at-login), fixe l'AUMID Windows via
+  `launcher-windows` s'il est présent, initialise FileKit et démarre la boucle d'événements Tao,
+  qui sert de `Dispatchers.Main`.
+- Il désactive `ComposeUiFlags.pollSystemTheme` : `isSystemInDarkTheme()` suit le détecteur
+  réactif `darkmode-detector` au lieu d'interroger l'OS chaque seconde.
+- FileKit est en `compileOnly`. S'il est absent du classpath, l'appel échoue sur une
+  `LinkageError` interceptée.
+- `taoApplication`, dans `dev.nucleusframework.window.tao`, est la boucle d'événements brute
+  sous-jacente. Il gère le quit système mais n'a ni verrou d'instance unique, ni FileKit, ni pont
+  de thème, ni `onDeepLink`.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+### nucleusApplication
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `args` | `Array<String>` | `emptyArray()` | Arguments de `main`. Analysés pour les deep links et le marqueur de lancement au login. |
+| `enableSingleInstance` | `Boolean` | `!ExecutableRuntime.isDev()` | Prend le verrou d'instance unique. Une seconde instance transmet son deep link puis se termine. |
+| `defaultLocale` | `Locale?` | `null` | Impose `Locale.getDefault()` et les propriétés `user.*` avant le démarrage de l'UI. |
+| `dockIconFollowsWindows` | `Boolean` | `false` | macOS uniquement. N'affiche l'icône du Dock que tant qu'une fenêtre visible la demande. |
+| `exitProcessOnExit` | `Boolean` | `true` | Termine la JVM à la fin de l'app. `false` rend la main à l'appelant. |
+| `initializeFileKit` | `Boolean` | `true` | Appelle `FileKit.init(NucleusApp.appId)` si FileKit est présent et pas encore initialisé. |
+| `content` | `@Composable NucleusApplicationScope.() -> Unit` | requis | Le contenu de l'application. |
+
+### NucleusApplicationScope
+
+Étend l'`ApplicationScope` de Compose. `LocalNucleusApplicationScope` l'expose aux composables
+profonds de l'arbre.
+
+| Membre | Description |
+|---|---|
+| `exitApplication()` | Demande l'arrêt de la boucle d'événements. Pendant un quit système, vaut accord de la fenêtre. |
+| `isQuitting: Boolean` | `true` pendant qu'un quit système demande aux fenêtres de se fermer. |
+| `onDeepLink(block: (URI) -> Unit)` | Enregistre le callback de deep link. Voir [Deep links](/docs/lifecycle/deep-links). |
+| `onUnresponsive(block)` / `onResponsive(block)` | Callbacks de blocage de la boucle d'événements sous Windows. |
+| `expectUnresponsive(block): T` | Exécute `block` sans signaler le blocage qu'il provoque. |
+| `aotMode`, `isAotTraining`, `isAotRuntime` | Mode de cache AOT de la JVM en cours. Voir [Cache AOT](/docs/performance/aot-cache). |
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : `DecoratedWindow` et l'API de fenêtre.
+- [Instance unique](/docs/lifecycle/single-instance) : le verrou et le transfert du second lancement.
+- [Threading](/docs/concepts/threading) : le thread UI, les callbacks natifs et le watchdog.
+- [Apps de tray](/docs/os/tray/tray-app) : se cacher dans le tray et quitter depuis un menu.

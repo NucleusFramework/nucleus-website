@@ -1,0 +1,124 @@
+---
+title: Vues natives
+description: Intégrez une NSView, un HWND ou un GtkWidget dans une mise en page Compose avec NativeView.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`NativeView` intègre une vue native de la plateforme dans une mise en page Compose : c'est
+l'équivalent desktop d'`AndroidView` et d'`UIKitView`. Vous lui fournissez une `NSView*`, un `HWND`
+ou un `GtkWidget*`, et Nucleus la maintient sur son emplacement jusqu'à ce que le composable
+disparaisse. `NativeView` est inclus dans `nucleus-application`.
+
+## Intégrer une vue native
+
+Renvoyez une `NucleusPlatformView` depuis `factory` :
+
+```kotlin
+@Composable
+fun BrowserPane(url: String) {
+    NativeView(
+        factory = {
+            // createNativeWebView est votre propre code d'interop, qui renvoie une NSView* en Long.
+            val handle = createNativeWebView(url)
+            nucleusNsPlatformView(
+                handle = { handle },
+                onDispose = { releaseNativeWebView(handle) },
+            )
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+```
+
+C'est vous qui créez la vue native ; `factory` ne s'exécute qu'une fois. La vue suit son
+emplacement lors des changements de layout, du défilement et des redimensionnements. Utilisez
+`nucleusHwndPlatformView` sous Windows et `nucleusGtkPlatformView` sous Linux. Sur un autre OS,
+`NativeView` affiche une `Box(modifier)` vide : un point d'appel par plateforme suffit. Vous
+pouvez aussi implémenter `NucleusPlatformView.NsView`, `HWnd` ou `GtkWidget` sur votre propre
+classe.
+
+<Callout type="warn">
+Sous Linux, `NativeView` exige Wayland. Sous X11, le widget reste caché derrière la surface de la
+fenêtre et son rectangle laisse voir le bureau.
+</Callout>
+
+## Libérer la vue
+
+`dispose()`, ou le `onDispose` de la factory, s'exécute après que l'hôte a détaché le handle.
+Libérez la vue native à cet endroit. Sous Linux, gardez votre propre référence sur le widget
+(`g_object_ref_sink`) tant que vous utilisez le handle et relâchez-la dans `dispose()`, sinon GTK
+le finalise au détachement.
+
+## Superposer du contenu Compose
+
+Le slot `content` dessine de l'UI Compose au-dessus de la vue native :
+
+```kotlin
+NativeView(
+    factory = { /* ... */ },
+    modifier = Modifier.fillMaxSize(),
+) {
+    // Le bouton gère ses clics ; ailleurs, les clics atteignent la vue native.
+    Button(onClick = { /* recharger */ }) { Text("Recharger") }
+}
+```
+
+Compose fait le hit testing en premier : ce qui est dessiné par-dessus la vue garde ses pointer
+events. Les événements que Compose ne consomme pas vont à la vue native, pans au trackpad
+compris. Les `Popup` s'affichent au-dessus de la vue.
+
+## Arrondir les coins
+
+`Modifier.clip()` n'atteint pas les vues natives. Passez plutôt `cornerRadius = 12.dp` ;
+`Dp.Infinity` donne un cercle. `cornerRadius` n'a aucun effet sous Linux : dessinez une bordure
+arrondie dans `content`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Compose efface le rectangle de la vue en transparent, et le contenu natif apparaît au travers.
+- macOS : la `NSView` se trouve sous la couche Metal de Compose. Les déplacements s'appliquent dans
+  la même frame que la géométrie Compose.
+- Windows : le `HWND` enfant se trouve sous la fenêtre, et un overlay DirectComposition affiche
+  Compose au-dessus.
+- Linux : le widget se trouve dans le contenu GTK de la fenêtre, et le compositeur le mélange à
+  travers la surface GL. X11 ne mélange pas l'alpha d'une fenêtre enfant, d'où l'exigence de
+  Wayland. GTK 3 n'a pas de découpe arrondie par widget.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Paramètre de `NativeView` | Défaut | Notes |
+| --- | --- | --- |
+| `factory` | requis | `() -> NucleusPlatformView`, appelée une fois |
+| `modifier` | `Modifier` | Dimensionne et place l'emplacement |
+| `update` | `{}` | S'exécute après chaque recomposition. Poussez-y le nouvel état de la vue |
+| `cornerRadius` | `Dp.Unspecified` | Découpe arrondie ; non spécifié n'en applique aucune |
+| `content` | `{}` | Overlay Compose dessiné au-dessus de la vue |
+
+Les factories prennent une lambda `handle: () -> Long`, lue chaque fois que l'hôte a besoin du
+pointeur, et des callbacks optionnels :
+
+| Membre | Callback de factory | Appelé quand |
+| --- | --- | --- |
+| `resize(widthPx, heightPx)` | `onResize` | La taille de la vue change. |
+| `setBounds(xPx, yPx, widthPx, heightPx)` | `onSetBounds` | Le cadre change. Pour les vues qui dessinent hors d'un rectangle de fenêtre, comme WebView2. |
+| `setCornerRadius(radiusPx)` | `onSetCornerRadius` | La découpe arrondie change. |
+| `clearFocus()` | `onClearFocus` | La fenêtre ou une couche Compose prend le focus. |
+| `dispose()` | `onDispose` | Après le détachement. Libérez vos ressources natives. |
+
+Sous Windows, un `hwndHandle` de `0L` est valide pour une vue sans fenêtre enfant, comme WebView2
+en mode composition ; elle pilote son visuel via `setBounds` et `setCornerRadius`.
+
+`Modifier.consumeOverlayPointerEvents()` est déprécié et ne fait rien : utilisez
+`Modifier.pointerHoverIcon` à la place de son argument `cursor`.
+
+## Et ensuite
+
+- [WebView](/docs/webview) : une WebView prête à l'emploi construite sur `NativeView`.
+- [TextureView](/docs/native-content/texture-view) : afficher des frames GPU d'un producteur externe.
+- [Icônes de pointeur](/docs/input/pointer-icons) : curseurs pour l'overlay Compose.

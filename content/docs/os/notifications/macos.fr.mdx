@@ -1,0 +1,121 @@
+---
+title: Notifications sur macOS
+description: Liaisons Kotlin pour le framework UserNotifications d'Apple, avec autorisation, catégories, pièces jointes, saisie de texte, déclencheurs et niveaux d'interruption.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-macos` vous donne accès au framework UserNotifications d'Apple depuis Kotlin :
+autorisation, requêtes planifiées, catégories d'actions avec saisie de texte, pièces jointes et
+badge du Dock. Ajoutez `dev.nucleusframework:nucleus.notification-macos`.
+
+## Envoyer une notification
+
+```kotlin
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, error ->
+    if (!granted) return@requestAuthorization
+    NotificationCenter.add(
+        NotificationRequest(
+            identifier = "greeting",
+            content = NotificationContent(
+                title = "Hello",
+                body = "Welcome to Nucleus",
+                sound = NotificationSound.Default,
+                interruptionLevel = InterruptionLevel.TIME_SENSITIVE,
+                attachments = listOf(
+                    NotificationAttachment(identifier = "img", url = imageFile.absolutePath),
+                ),
+            ),
+            trigger = NotificationTrigger.TimeInterval(interval = 5.0), // null delivers now
+        ),
+    )
+}
+```
+
+<Callout type="warn">
+macOS ne livre les notifications qu'à une application empaquetée. En développement, lancez
+`./gradlew runDistributable` ou `./gradlew runGraalvmNative` : un simple `./gradlew run` n'a pas
+de bundle, et le système écarte ses notifications sans erreur.
+</Callout>
+
+Les méthodes du délégué et les callbacks de résultat s'exécutent sur un thread de travail.
+Basculez sur `Dispatchers.Main` avant de toucher à l'état Compose.
+
+## Ajouter des actions et une saisie de texte
+
+Enregistrez les catégories une fois, puis référencez-en une depuis
+`NotificationContent.categoryIdentifier` :
+
+```kotlin
+NotificationCenter.setNotificationCategories(setOf(
+    NotificationCategory(
+        identifier = "MESSAGE",
+        actions = listOf(
+            TextInputNotificationAction(
+                identifier = "REPLY",
+                title = "Reply",
+                textInputButtonTitle = "Send",
+                textInputPlaceholder = "Type a reply…",
+            ),
+        ),
+        options = setOf(CategoryOption.CUSTOM_DISMISS_ACTION),
+    ),
+))
+
+NotificationCenter.setDelegate(object : NotificationCenterDelegate {
+    override fun willPresent(notification: DeliveredNotification) =
+        setOf(PresentationOption.BANNER, PresentationOption.SOUND)
+
+    override fun didReceive(response: NotificationResponse) {
+        handle(response.actionIdentifier, response.userText)
+    }
+})
+```
+
+`willPresent` décide de l'affichage d'une notification quand votre application est au premier
+plan. La méthode s'exécute de façon synchrone : répondez vite ; un ensemble vide masque la
+notification. Surchargez `openSettings` pour réagir au bouton de réglages des notifications. Si
+vous utilisez aussi `notification-common`, n'appelez pas `setDelegate` : il installe le sien.
+
+## Notes
+
+- Les applications sandboxées ont besoin de l'entitlement des notifications : faites pointer
+  `macOS { entitlementsFile }` vers un fichier `.entitlements` qui le déclare.
+- Pour contourner les modes Concentration, définissez `InterruptionLevel.CRITICAL` et demandez
+  `AuthorizationOption.CRITICAL_ALERT`. Les sons critiques exigent le même entitlement.
+- Un identifiant de bundle incohérent cause la plupart des échecs silencieux. Vérifiez que
+  `NucleusApp.appId` correspond à l'identifiant de bundle du `.app` empaqueté.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Chaque appel encapsule la méthode `UNUserNotificationCenter` correspondante via un pont JNI.
+- Les callbacks s'exécutent sur un thread Nucleus nommé `NucleusNotificationCallback-N`.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `NotificationCenter.isAvailable` | `false` hors macOS, sans la bibliothèque native ou sans bundle d'application. Les appels sont alors sans effet ; les callbacks d'erreur reçoivent la raison. |
+| `AuthorizationOption` | `BADGE`, `SOUND`, `ALERT`, `CRITICAL_ALERT`, `PROVIDES_APP_NOTIFICATION_SETTINGS`, `PROVISIONAL`, `TIME_SENSITIVE` |
+| `getNotificationSettings { }` | `authorizationStatus` courant et réglages par fonctionnalité |
+| `NotificationTrigger.TimeInterval(interval, repeats)` | En secondes. Une répétition exige `interval >= 60`. |
+| `NotificationTrigger.Calendar(dateComponents, repeats)` | Une date construite avec `DateComponents`, par exemple chaque lundi à 9 h |
+| `NotificationSound` | `Default`, `Named(name)`, `DefaultCritical`, `CriticalNamed(name, volume)`, `DefaultCriticalWithVolume(volume)` |
+| `ActionOption` | `AUTHENTICATION_REQUIRED`, `DESTRUCTIVE`, `FOREGROUND` |
+| `setBadgeCount(n)` / `getBadgeCount { }` | Badge du Dock |
+| `getPendingNotifications { }` / `getDeliveredNotifications { }` | Requêtes en attente ou à l'écran |
+| `removePendingNotifications(ids)` / `removeDeliveredNotifications(ids)` | Retirer des entrées ; les variantes `removeAll…()` vident tout |
+
+## Et ensuite
+
+- [Notifications cross-plateforme](/docs/os/notifications) : l'API partagée `NotificationManager`.
+- [Notifications sous Windows](/docs/os/notifications/windows) : les toasts via `WindowsNotificationCenter`.
+- [Notifications sous Linux](/docs/os/notifications/linux) : les notifications freedesktop via `LinuxNotificationCenter`.
+- [Signature du code](/docs/packaging/code-signing) : signez et empaquetez l'application pour que macOS livre ses notifications.

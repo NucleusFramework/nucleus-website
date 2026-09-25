@@ -1,0 +1,238 @@
+---
+title: Tabs
+description: Declare documents as Chrome-like tabs that reorder, tear off into windows and merge back, with custom strips, previews and saved layouts.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TabWindows` and `Tab` give an app the Chrome tab model: a tab strip in every window's title bar,
+windows that appear when a tab is torn off and close when their last tab leaves. Tabs are
+`@ExperimentalNucleusApi` (see [Multi-window](/docs/multi-window)).
+
+## Declare tabs
+
+Create a `TabWorkspace`, compose `TabWindows` once, and declare every tab at application scope:
+
+```kotlin title="Main.kt"
+fun main() = nucleusApplication {
+    val workspace = rememberTabWorkspace()
+    TabWindows(workspace, onLastWindowClosed = ::exitApplication)
+
+    for (document in documents) {
+        key(document.id) {
+            Tab(workspace, id = document.id, title = document.name) { Editor(document) }
+            DropClosedTab(workspace, documents, document.id)
+        }
+    }
+}
+```
+
+`TabWindows` opens one window per group of tabs, with the strip in its title bar and the selected
+tab as its body. Never declare a `Tab` inside a window.
+
+When the user closes a tab, the workspace forgets it but your list still declares it. Drop it
+from the list, or the next composition registers it again:
+
+```kotlin
+@Composable
+private fun DropClosedTab(workspace: TabWorkspace, documents: MutableList<Document>, id: String) {
+    val closed = workspace.tab(id) == null
+    LaunchedEffect(closed) { if (closed) documents.removeAll { it.id == id } }
+}
+```
+
+## Tab and TabWindows parameters
+
+`Tab(workspace, id, title, group = null) { … }` opens in `group` on first declaration, else in the
+window focused last, else in a new window. The selected tab's `title` is the window title. The
+body runs with `TabScope`: `workspace`, `tab`, `select()`, `close()`.
+
+| `TabWindows` parameter | Default | Meaning |
+| --- | --- | --- |
+| `workspace` | required | The `TabWorkspace` |
+| `strip` | `{ TabStrip() }` | One window's strip, with `TabStripScope` as receiver |
+| `dragGhost` | `{ TabDragGhostCard(it) }` | The card under the pointer while a tab leaves its strip |
+| `nativeContextMenu` | `true` | Native context menu for text fields |
+| `windowWrapper` | `{ it() }` | Wraps each window, strip included: `WindowBackground`, a themed `Surface` |
+| `windowBodyWrapper` | `{ it() }` | Wraps what is under the strip: a `DockLayout`, a status bar |
+| `onLastWindowClosed` | `{}` | Called each time the workspace goes from holding tabs to holding none |
+
+Both wrappers receive the window's `NucleusDecoratedWindowScope` and must invoke their lambda.
+Set the theme around `TabWindows`, not inside a window: the workspace passes those locals to
+every window it opens.
+
+```kotlin
+MaterialTheme(colorScheme = colors) {
+    CompositionLocalProvider(LocalTitleBarStyle provides rememberMaterialTitleBarStyle(colors)) {
+        TabWindows(workspace, onLastWindowClosed = ::exitApplication)
+        // Tab declarations
+    }
+}
+```
+
+`rememberTabWorkspace(defaultWindowSize, captureThumbnails)` takes the size of new windows
+(960 × 640 dp by default) and whether to capture thumbnails (`false`).
+
+## Drag tabs
+
+With the stock strip, the user drags a tab along the strip to reorder it, out of the window to
+open a new one, or onto another window's strip to merge it. Dragging the only tab of a window
+moves the window itself. A tab pulled out of a maximized window opens at `defaultWindowSize`.
+
+`Modifier.tabDragHandle(workspace, tab)` is the grip `TabStrip` puts on every tab. On native
+Wayland it reorders inside the strip, then hands off to a platform drag when the pointer leaves:
+`draggedTab` is set while `dragKind` is still `null` during the local phase. A custom strip in the
+title bar also applies `Modifier.noWindowDrag()` to each grip, so the compositor's window move
+does not swallow the gesture.
+
+For a right-to-left strip, provide `LayoutDirection.Rtl` around `TabStrip`. Reorder and drop
+indices follow it.
+
+## Customize the stock strip
+
+| `TabStrip` parameter | Default | Meaning |
+| --- | --- | --- |
+| `reorderAnimation` | spring, `StiffnessMediumLow` | How a tab travels along the strip; `null` moves it at once |
+| `hoverPreview` | `null` | The card under a hovered tab. `TabHoverPreview.Default` for the stock card |
+| `tabLeading` / `tabTrailing` | `null` | Per-tab slots around the title: a file icon, a modified dot |
+| `dropGhostCard` | `{ TabDropGhostCard(it) }` | The card in the slot a tab from another window would fill |
+| `trailing` | `{}` | After the last tab: a new-tab button (a tab dropped on it is appended) |
+
+```kotlin
+TabWindows(
+    workspace = workspace,
+    strip = {
+        TabStrip(
+            hoverPreview = TabHoverPreview.Default,
+            tabTrailing = { tab -> if (tab.id in modified) Text("●") },
+            trailing = { IconButton(onClick = ::openDocument) { Text("+") } },
+        )
+    },
+)
+```
+
+`TabStripScope` exposes `workspace`, `group`, `tabs` (in strip order), `dropGhost` and
+`hoveredTab`.
+
+## Write a strip from scratch
+
+A strip from another design system needs three modifiers:
+
+| Modifier | Apply to |
+| --- | --- |
+| `Modifier.tabStripGeometry(workspace, group)` | The element spanning the whole strip |
+| `Modifier.tabSlot(group, index)` | Each tab, in strip order |
+| `Modifier.tabDragHandle(workspace, tab)` | Each tab's grip |
+
+While a tab from another window hovers the strip, `dropGhost` holds a
+`TabDropGhost(index, width, tab)`: compose `TabDropGhostCard(ghost)` at `index`. Add
+`TabHoverPreviewPopup(preview)` once for hover cards. `jewel-tabs-demo` wraps Jewel's `TabStrip`
+this way.
+
+## Draw previews
+
+**Thumbnails.** `TabEntry.thumbnail` is an `ImageBitmap?`. With `captureThumbnails = true` the
+workspace records each window's selected tab; call `captureThumbnail(tabId)` after a visible
+change. You can also assign one yourself before the tab is shown. `NativeView` and `TextureView`
+content is missing from captures. `TabPreview(tab, modifier, contentScale, placeholder)` draws
+the thumbnail.
+
+**Hover cards.** `TabHoverPreview(delay, offset, nativeLayer, content)` describes the card.
+`delay` defaults to 650 ms; `nativeLayer = false` draws the card inside the window, clipped. The stock card is
+`TabHoverPreviewCard(modifier, subtitle = null)`:
+
+```kotlin
+val preview = remember {
+    TabHoverPreview { TabHoverPreviewCard(subtitle = { Text(pathOf(tab.id), maxLines = 1) }) }
+}
+TabStrip(hoverPreview = preview)
+```
+
+**Drag and drop cards.** Draw `TabWindows(dragGhost)` and `TabStrip(dropGhostCard)` with the same
+composable, built on `TabGhostCard(tab, modifier)`, so the tab lands as it travelled.
+`dragGhost` runs outside `windowWrapper` and never on native Wayland.
+
+## Drive tabs from code
+
+| Call | Effect |
+| --- | --- |
+| `select(tabId)` | Make it the visible tab of its group |
+| `close(tabId)` | Remove it, state included; an empty group closes its window |
+| `move(tabId, group, index = null)` | Move it into `group` at `index` (`null` appends) and select it |
+| `reorder(tabId, index)` | Move it within its group |
+| `tearOff(tabId, screenRectPx, scaleFactor)` | Open it in a new window at a screen rect in physical pixels |
+
+Read `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (where new tabs open),
+`groupOf(window)`, `tabsOf(group)`, `selectedTab(group)`, and the drag in flight with
+`draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. A closed tab is gone: declaring it again
+creates a new tab in the active window.
+
+## Save and restore the layout
+
+`snapshot()` returns a `TabLayoutSnapshot(groups)`. Each `TabGroupSnapshot` holds `id`, `tabIds`,
+`selectedId`, `position` and `size`. `restore(snapshot)` moves the tabs and places the windows,
+including tabs declared later. It applies once; call it again after a tab is closed and
+redeclared.
+
+## Compose tabs with satellites
+
+Give each tab window its own `SatelliteWorkspace`, keyed by group id, and let its satellites draw
+the selected tab. A tab change then only swaps content.
+
+```kotlin
+TabWindows(
+    workspace = tabs,
+    windowWrapper = { content ->
+        tabs.groupOf(nucleusWindow.unsafe.taoWindow)?.let { JoinSatelliteWorkspace(panesOf(it.id)) }
+        content()
+    },
+    windowBodyWrapper = { body ->
+        val group = tabs.groupOf(nucleusWindow.unsafe.taoWindow)
+        if (group == null) body() else DockLayout(panesOf(group.id), Modifier.fillMaxSize()) { body() }
+    },
+)
+
+for (group in rememberTabGroups(tabs)) {
+    key(group.id) {
+        val document = tabs.selectedTab(group)?.let { documentOf(it.id) }
+        Satellite(panesOf(group.id), id = "inspector-${group.id}", title = "Inspector") {
+            Inspector(document)
+        }
+    }
+}
+```
+
+`rememberTabGroups` mirrors `workspace.groups` through an effect, since `Tab` creates groups
+during the composition that reads the list:
+
+```kotlin
+@Composable
+fun rememberTabGroups(workspace: TabWorkspace): List<TabWindowGroup> {
+    var groups by remember(workspace) { mutableStateOf(workspace.groups.toList()) }
+    LaunchedEffect(workspace) { snapshotFlow { workspace.groups.toList() }.collect { groups = it } }
+    return groups
+}
+```
+
+Open and close those satellites from a `LaunchedEffect`, never during composition.
+`tab-satellites-demo` and `reader-dock-demo` show both setups.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Only the selected tab of a window is composed, so `captureThumbnail` reaches only tabs on screen.
+- Another window's strip counts as entered once the ghost card reaches it; the strip under the
+  pointer still wins.
+- On native Wayland, a tab leaving its strip moves to a platform drag-and-drop session, and each
+  other strip resolves the drop in its own coordinates.
+- A tab change rebuilds neither wrapper. A tab is clipped to its slot only while it opens or
+  closes, so a carried card is never cut.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Satellites](/docs/multi-window/satellites): palettes, headers and owners.
+- [Docking](/docs/multi-window/docking): the `DockLayout` a tab window can host.
+- [Toolkits](/docs/toolkits): title-bar styles the stock strip picks up.

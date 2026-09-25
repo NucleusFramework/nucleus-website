@@ -1,0 +1,130 @@
+---
+title: Notifications on Windows
+description: Send Windows toast notifications from Kotlin with adaptive text, images, buttons, inputs, headers, and progress bars.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-windows` sends Windows 10 and 11 toasts from Kotlin, with adaptive text, images,
+progress bars, inputs, and headers. It works for MSIX apps and for unpackaged EXE and MSI
+installs. Add `dev.nucleusframework:nucleus.notification-windows`.
+
+## Send a toast
+
+```kotlin
+WindowsNotificationCenter.initialize()
+
+WindowsNotificationCenter.show(
+    toast {
+        visual {
+            text("Build finished")
+            text("artifact.zip uploaded")
+            heroImage("file:///C:/Users/me/hero.png")
+        }
+        actions {
+            button("Open", arguments = "open")
+            button("Cancel", arguments = "cancel", activationType = ActivationType.BACKGROUND)
+        }
+        scenario = ToastScenario.REMINDER
+    },
+)
+
+WindowsNotificationCenter.addListener(object : ToastNotificationListener {
+    override fun onActivated(
+        tag: String, group: String, arguments: String, userInputs: Map<String, String>,
+    ) { handle(arguments, userInputs) }
+    override fun onDismissed(tag: String, group: String, reason: DismissalReason) {}
+    override fun onFailed(tag: String, group: String, errorCode: Int) {}
+})
+```
+
+Every method does nothing off Windows. `arguments` carries the `launch` string or the clicked
+button's `arguments`; `userInputs` maps each input id to its value. Listener callbacks run on the
+UI thread.
+
+<Callout type="warn" title="Changed in 3.0">
+`ToastNotificationListener` callbacks ran on the AWT event dispatch thread in 2.x. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Set the app identity
+
+Windows identifies the sender by its AUMID. MSIX apps use the package identity; unpackaged apps
+use `NucleusApp.aumid`, which the Gradle plugin sets. Pass `initialize(aumid = "Vendor.App")` to
+override it.
+
+An unpackaged app also needs a Start Menu shortcut with the same AUMID, or toasts can fail to show
+or vanish from Action Center. The Windows installers create it, so install the app once to see
+toasts from a dev run. `shortcutPolicy` sets what `initialize` does with it:
+
+| `ShortcutPolicy` | Behavior |
+| --- | --- |
+| `REQUIRE_CREATE` | Create or update the shortcut. Default for installed apps. |
+| `REQUIRE_NO_CREATE` | Require an existing shortcut and never touch it. Default in dev runs, with a logged warning. |
+| `IGNORE` | Skip shortcut handling. |
+
+## Update a toast in place
+
+Show the toast with a `tag`, a `group`, `{key}` placeholders, and `initialData`, then push new
+values:
+
+```kotlin
+WindowsNotificationCenter.show(
+    toast { visual { progressBar(status = "{status}", value = 0.0) } },
+    tag = "upload",
+    group = "transfers",
+    initialData = ToastNotificationData(sequenceNumber = 1, values = mapOf("status" to "Starting")),
+)
+
+WindowsNotificationCenter.update(
+    tag = "upload",
+    group = "transfers",
+    data = ToastNotificationData(sequenceNumber = 2, values = mapOf("status" to "Almost done")),
+)
+```
+
+Increase `sequenceNumber` with each update so Windows drops stale ones. To bind the bar's value,
+build an `AdaptiveProgressBar(valueBind = "progressValue", status = …)` and send
+`"progressValue"` in `values`.
+
+## Notes
+
+- Keep one AUMID across the shortcut, your Gradle configuration, and run time. A mismatch
+  produces a toast that shows once and never again.
+- `tag` and `group` hold 16 characters at most.
+- Unpackaged apps can load `http(s)://` images when the server answers fast. For offline use,
+  ship a local file and use `file:///` (unpackaged) or `ms-appx:///` (MSIX).
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The module wraps the WinRT `ToastNotificationManager` API.
+- For unpackaged apps, `initialize` registers the AUMID on the process.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `toast { visual { } }` | `text`, `image`, `appLogo`, `heroImage`, `attribution`, `progressBar`, `group` (columns) |
+| `toast { actions { } }` | `textBox`, `selectionBox`, `button`, `contextMenuItem` |
+| `audio(source, customSource, loop, silent)` / `silentAudio()` | Sound |
+| `header(id, title, arguments)` | Group toasts in Action Center |
+| `launch`, `activationType`, `scenario`, `duration`, `displayTimestamp` | Toast properties |
+| `ToastScenario` | `DEFAULT`, `REMINDER`, `ALARM`, `INCOMING_CALL`, `URGENT` |
+| `ToastDuration` | `DEFAULT`, `SHORT`, `LONG` |
+| `DismissalReason` | `USER_CANCELED`, `APPLICATION_HIDDEN`, `TIMED_OUT` |
+| `showSimple(title, body, body2)` / `showFromXml` | Text-only toast / raw toast XML |
+| `getHistory { entries, error -> }` | Action Center entries |
+| `remove(tag, group)` / `removeGroup(group)` / `clearAll()` | Remove toasts |
+| `removeListener(listener)` / `uninitialize()` | Remove a listener / release native resources at shutdown |
+
+## What's next
+
+- [Cross-platform notifications](/docs/os/notifications): the shared notification DSL.
+- [Notifications on macOS](/docs/os/notifications/macos): `UNUserNotificationCenter` from Kotlin.
+- [Notifications on Linux](/docs/os/notifications/linux): freedesktop notifications over D-Bus.
+- [Windows packaging](/docs/packaging/windows): the installers that create the Start Menu shortcut.

@@ -1,0 +1,114 @@
+---
+title: Linux launcher
+description: Set count badges, progress bars, urgency flags, and right-click quicklist menus on the Linux launcher from Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`launcher-linux` draws count badges, progress bars, and urgency flags on your launcher icon, and
+attaches a right-click quicklist. Unity, KDE Plasma, Plank, and budgie-panel support it. XFCE
+without `docklike-plugin` does not: calls succeed and nothing is drawn.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-linux:<version>")
+}
+```
+
+## Set badges and progress
+
+Build the launcher URI from your `.desktop` file name, which `launcher-linux` never guesses, then
+set one property or several at once:
+
+```kotlin
+val appUri = LinuxLauncherEntry.appUri("myapp.desktop")
+
+LinuxLauncherEntry.setCount(appUri, 42)
+LinuxLauncherEntry.setProgress(appUri, 0.65) // 0.0..1.0
+
+LinuxLauncherEntry.update(
+    appUri,
+    LauncherProperties(count = 5, countVisible = true, progress = 0.8, progressVisible = true),
+)
+```
+
+`update` sends every non-null field in one signal. For a cross-platform progress bar that finds
+the `.desktop` file for you, use [Taskbar progress](/docs/os/dock-taskbar/progress).
+
+## Add a quicklist menu
+
+Create a `LinuxQuicklist` on a D-Bus object path of your choice, install the menu, then point the
+launcher entry at that path:
+
+```kotlin
+val quicklist = LinuxQuicklist("/com/example/MyApp/Menu")
+
+quicklist.listener = LinuxQuicklist.Listener { id ->
+    when (id) {
+        1 -> openNewWindow()
+        8 -> exitApp()
+    }
+}
+
+quicklist.setMenu(listOf(
+    DbusmenuItem(id = 1, label = "New Window", icon = FreedesktopIcon.Action.WINDOW_NEW),
+    DbusmenuItem.separator(id = 2),
+    DbusmenuItem(id = 8, label = "Quit", disposition = DbusmenuItem.Disposition.ALERT),
+))
+
+LinuxLauncherEntry.update(appUri, LauncherProperties(quicklist = quicklist.objectPath))
+```
+
+Icons come from [`freedesktop-icons`](/docs/os/icons/freedesktop). To change a toggle, call
+`setMenu(...)` again with the new `toggleState`. On shutdown, unset the quicklist and release it:
+
+```kotlin
+LinuxLauncherEntry.update(appUri, LauncherProperties(quicklist = ""))
+quicklist.dispose()
+```
+
+<Callout type="warn" title="Changed in 3.0">
+Quicklist clicks now arrive on the host UI thread instead of the Swing EDT. Under
+`nucleusApplication` that is the thread Compose uses. See [Threading](/docs/concepts/threading)
+and [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Nucleus emits an `Update` signal on the `com.canonical.Unity.LauncherEntry` D-Bus interface
+  with your `.desktop` URI. Each `LinuxQuicklist` registers a `com.canonical.dbusmenu` object,
+  and the shell re-reads its layout each time it opens the menu.
+- The native bridge uses GIO/GDBus, with no Java D-Bus library.
+- Without a session bus (`DBUS_SESSION_BUS_ADDRESS` unset), the module reports no bus instead of
+  spawning `dbus-launch`.
+- In a plain Compose Desktop or Swing host, quicklist clicks run on the AWT event dispatch thread.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+|---|---|
+| `LinuxLauncherEntry.isAvailable` | `false` off Linux or when the native library failed to load. |
+| `LinuxLauncherEntry.appUri(desktopFileId)` | Builds the `application://<id>` URI. |
+| `LinuxLauncherEntry.update(appUri, properties): Boolean` | Sends every non-null field. |
+| `setCount` / `clearCount` / `setProgress` / `clearProgress` / `setUrgent` / `setUpdating` | Wrappers over `update`. |
+| `registerQueryHandler(appUri)` / `unregister()` | Answers the shell's queries for the entry state, then stops. |
+| `LauncherProperties(count, countVisible, progress, progressVisible, urgent, quicklist, updating)` | All nullable; null fields are skipped. `quicklist = ""` unsets the menu. |
+| `LinuxQuicklist(objectPath)` | `listener`, `setMenu(items): Boolean`, `dispose()`. |
+| `LinuxQuicklist.Listener.onItemClicked(itemId: Int)` | `fun interface`, called on the host UI thread. |
+| `DbusmenuItem.separator(id)` | A separator. |
+
+`DbusmenuItem` fields: `id` (`> 0`), `label` (`_` marks a mnemonic), `icon` (a
+`FreedesktopIcon`), `enabled`, `visible`, `type` (`STANDARD`, `SEPARATOR`), `toggleType` (`NONE`,
+`CHECKBOX`, `RADIO`), `toggleState` (`-1` indeterminate, `0` unchecked, `1` checked), `shortcut`,
+`disposition` (`NORMAL`, `INFORMATIONAL`, `WARNING`, `ALERT`), and `children`.
+
+## What's next
+
+- [Taskbar progress](/docs/os/dock-taskbar/progress): cross-platform progress and attention.
+- [Freedesktop icons](/docs/os/icons/freedesktop): symbolic icon names for menu items.
+- [macOS Dock menu](/docs/os/dock-taskbar/macos): the Dock menu on macOS.

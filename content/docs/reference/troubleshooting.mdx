@@ -3,9 +3,10 @@ title: Troubleshooting
 description: Common build, packaging, signing, and runtime problems in Nucleus, with the cause and fix for each.
 ---
 
-This page lists recurring problems when building, packaging, signing, and shipping a
-Nucleus app. Entries are grouped by area, and each one states the symptom, the cause, and
-the fix.
+import { Callout } from 'fumadocs-ui/components/callout';
+
+This page lists recurring problems when you build, package, sign, and run a Nucleus app.
+Entries are grouped by area, and each one gives the symptom, the cause, and the fix.
 
 ## macOS signing and notarization
 
@@ -47,7 +48,7 @@ GraalVM dylibs there also kept their ad-hoc signature.
 **Fix.** Upgrade to 2.5.17 or later. The marker and `fontconfig.bfc` now live in
 `Contents/Resources/`, and every dylib under `Contents/MacOS/` is re-signed with your
 Developer ID. Files you add through `appResourcesRootDir` still land in `Contents/MacOS/`
-on macOS — ship only Mach-O binaries there, or Gatekeeper rejects the notarized bundle the
+on macOS. Ship only Mach-O binaries there, or Gatekeeper rejects the notarized bundle the
 same way.
 
 ## Microsoft Store
@@ -147,6 +148,35 @@ For your own code:
 2. Commit the generated `reachability-metadata.json` next to `META-INF/native-image/`.
 
 For unsupported libraries, see [GraalVM configuration](/docs/performance/graalvm/configuration).
+
+## Packaging
+
+### Node.js download fails during packaging
+
+**Symptom.** A `package*` task logs `Could not provision Node.js (…) — falling back to the one on
+PATH`, then fails with `node not found. Node.js 18+ is required for electron-builder packaging`.
+
+**Cause.** electron-builder runs on Node.js, and the plugin downloads one from `nodejs.org` on
+first use. The build host is offline or a proxy blocks the download, and no `node` sits on `PATH`
+either. The plugin picks Node.js in this order:
+
+1. The `compose.electronBuilder.nodePath` Gradle property (the `node` binary or its directory).
+2. The `NUCLEUS_NODE_HOME` environment variable.
+3. The installation the plugin provisions from `nativeDistributions { nodejs { } }`.
+4. `node` on `PATH`, used when `autoDownload` is `false` or the download fails.
+
+**Fix.** Point the plugin at a local install with the Gradle property or `NUCLEUS_NODE_HOME`. To
+use the `node` on `PATH` and skip the download attempt, turn provisioning off:
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    nodejs {
+        autoDownload = false
+    }
+}
+```
+
+See [Provision Node.js](/docs/packaging#provision-nodejs).
 
 ## Linux packaging
 
@@ -258,79 +288,183 @@ glibc 2.35 or newer. Check your system's version with `ldd --version`.
 
 ## Rendering
 
-### Wayland on NVIDIA: black window or garbled output
-
-**Symptom.** The Compose UI renders incorrectly under Wayland on NVIDIA drivers.
-
-**Cause.** NVIDIA's GBM and EGLStream support for Wayland is inconsistent, and Compose
-Desktop on the AWT/JBR backend does not handle it reliably.
-
-**Fix.** Switch to the [Tao backend](/docs/tao). `decorated-window-tao` renders through
-native Skia surfaces on Wayland without going through AWT. To stay on AWT, set
-`WLR_NO_HARDWARE_CURSORS=1` or run under XWayland.
-
 ### Crash on launch with an older Linux GPU
 
-**Symptom.** A Tao window aborts at open on Linux. stderr mentions a failed GL 3.3 context,
-or the process exits from `TaoComposeSceneHostLinux` with a `require()` failure.
+**Symptom.** A window aborts at open on Linux. stderr mentions a failed GL 3.3 context, or the
+process exits from `TaoComposeSceneHostLinux` with a `require()` failure.
 
-**Cause.** Linux EGL attach used to request only a GL 3.3 **compatibility** profile. Some
-drivers (Mesa r600 on AMD RV610, for example) cap the compat profile at 3.0 while the
-**core** profile reaches 3.3, so the request could never succeed and the window aborted.
+**Cause.** Before 2.5.16, the Linux EGL attach requested only a GL 3.3 **compatibility**
+profile. Some drivers (Mesa r600 on AMD RV610, for example) cap the compat profile at 3.0 while
+the **core** profile reaches 3.3. The request could never succeed, and the window aborted.
 
-**Fix.** Upgrade to 2.5.16 or later. Attach now tries 3.3 compat, then 3.3 core, then Mesa
-llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, one-shot, skipped if you already set that variable).
-Both fallbacks log one line on stderr. Hardware that already accepts the compat request is
-unchanged. Force software rendering yourself with `LIBGL_ALWAYS_SOFTWARE=1` if you want
-llvmpipe without waiting for the fallback.
+**Fix.** Upgrade to 2.5.16 or later. Attach tries 3.3 compat, then 3.3 core, then Mesa llvmpipe
+(`LIBGL_ALWAYS_SOFTWARE=1`, once, skipped if you already set that variable). Each fallback logs
+one line on stderr. Hardware that accepts the compat request behaves as before. Set
+`LIBGL_ALWAYS_SOFTWARE=1` yourself to force llvmpipe from the start.
 
-## Migration to 2.0
+## Event loop
+
+### Window hangs and the log shows a thread dump
+
+**Symptom.** On Windows, a window turns to "Not responding", and the log holds a `SEVERE` entry:
+`Tao event loop has not pumped messages for at least <n> ms — the UI is frozen. Thread dump
+follows.`
+
+**Cause.** The UI thread is blocked. A deadlock or long synchronous work keeps the event loop
+from pumping messages. The event-loop watchdog detects it and dumps every thread, event-loop
+thread first.
+
+**Fix.** Read the event-loop thread's stack at the top of the dump and move the blocking call
+off the UI thread. For work that has to stay there, wrap it in `expectUnresponsive { }` so the
+watchdog ignores it. Register `onUnresponsive` to report hangs from the field. See
+[Detect a stalled event loop](/docs/concepts/threading#detect-a-stalled-event-loop).
+
+## Input
+
+### Custom scroll handler ignores the macOS trackpad
+
+**Symptom.** On macOS, a `pointerInput` handler that reacts to `PointerEventType.Scroll` works
+with a mouse wheel but not with a two-finger trackpad swipe. `LazyColumn` and
+`Modifier.scrollable` still scroll.
+
+<Callout type="warn" title="Changed in 3.0">
+A trackpad swipe on macOS now arrives as `PanStart`, `PanMove`, and `PanEnd`. In 2.x it arrived
+as `Scroll`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** Your handler listens only for `Scroll`, so it never sees the pan events.
+
+**Fix.** Handle `PointerEventType.PanMove` and read `change.panOffset` next to your `Scroll`
+branch. To get every trackpad step back as `Scroll`, start the JVM with
+`-Dnucleus.tao.trackpadPanEvents=false`. See
+[Scroll with a trackpad on macOS](/docs/input/trackpad-gestures#scroll).
+
+### Pinch no longer reaches detectTransformGestures
+
+**Symptom.** A trackpad pinch no longer zooms content that uses `detectTransformGestures`.
+
+<Callout type="warn" title="Changed in 3.0">
+A pinch now reaches Compose as `ScaleStart`, `ScaleChange`, and `ScaleEnd`. In 2.x it was two
+synthetic touch pointers. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** `detectTransformGestures` tracks touch pointers and does not see Scale events.
+
+**Fix.** Move pinch handling to `Modifier.transformable` or to a listener for the `Scale*`
+events. See [Zoom with a pinch](/docs/input/trackpad-gestures#zoom-with-a-pinch).
+
+## Application lifecycle
+
+### Cmd+Q no longer quits the app
+
+**Symptom.** On macOS, Cmd+Q, Dock → Quit, or a logout leaves the app running.
+
+<Callout type="warn" title="Changed in 3.0">
+A system quit on macOS now calls `onCloseRequest` on every open window. In 2.x it terminated the
+app without asking. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** One of your windows has an `onCloseRequest` that neither calls `exitApplication()`
+nor closes the window, for example one that hides the window to the tray. A window that stays
+open vetoes the quit.
+
+**Fix.** Let a real quit through. Check `isQuitting` on the application scope:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = {
+        if (isQuitting) exitApplication() else visible = false
+    },
+    visible = visible,
+) { /* ... */ }
+```
+
+See [Handle a system quit](/docs/lifecycle/application#handle-a-system-quit).
+
+### Second instance is not forwarded in dev runs
+
+**Symptom.** Under `./gradlew run` or an IDE launch, a second copy starts its own window instead
+of handing its arguments to the first one.
+
+<Callout type="warn" title="Changed in 3.0">
+`enableSingleInstance` now defaults to `!ExecutableRuntime.isDev()`. In 2.x it was on in dev
+runs too. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** The single-instance lock is off in dev runs, so a debug copy can start next to a
+packaged one.
+
+**Fix.** Pass `enableSingleInstance = true` to `nucleusApplication` while you test the hand-off.
+See [Enable it in dev runs](/docs/lifecycle/single-instance#enable-it-in-dev-runs).
+
+## Development
+
+### Hot Reload window does not open on macOS
+
+**Symptom.** A Compose Hot Reload run on macOS starts the process, but no window appears.
+`./gradlew run` works.
+
+**Cause.** The window event loop must run on macOS thread 0, and Hot Reload's `JavaExec` task
+does not pass `-XstartOnFirstThread`. The Nucleus plugin adds the flag, but only when the
+project declares `nucleus.decorated-window-tao` itself. An app that gets it through
+`nucleus-application` has it only as a transitive dependency, so the plugin skips the flag.
+
+**Fix.** Declare the dependency explicitly:
+
+```kotlin title="build.gradle.kts"
+implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+```
+
+## Migration
+
+### Unresolved reference: NucleusBackend
+
+**Symptom.** After an upgrade to 3.0, compilation fails on `NucleusBackend`,
+`LocalNucleusBackend`, or the `backend =` argument of `nucleusApplication`.
+
+**Cause.** 3.0 has a single window backend. The AWT, JBR, and JNI window modules are deleted,
+and the backend selection API went with them.
+
+**Fix.** Drop the `NucleusBackend` import, the `backend` argument, and the
+`decorated-window-awt`, `-jbr`, or `-jni` dependency. See
+[Remove the backend selection](/docs/migrate/from-2.x#remove-the-backend-selection).
 
 ### Unresolved reference 'JewelDecoratedWindow'
 
-**Symptom.** The import is correct and the IDE resolves the function, but compilation
-fails.
+**Symptom.** The import is correct and the IDE resolves the function, but compilation fails.
 
-**Cause.** In 2.0, the composable is an extension on `NucleusApplicationScope`. A wrapper
-composable written for 1.x does not propagate the receiver.
+**Cause.** `JewelDecoratedWindow` is an extension on `NucleusApplicationScope`. A wrapper
+composable without that receiver cannot call it.
 
 **Fix.** Make your wrapper an extension as well:
 
 ```kotlin
+@Composable
 fun NucleusApplicationScope.MyOnboardingWindow() {
     JewelDecoratedWindow(/* ... */) { /* content */ }
 }
 ```
 
-See [migrate from 1.x](/docs/migrate/from-1.x).
+See [Migrate from 1.x](/docs/migrate/from-1.x).
 
-### NoClassDefFoundError: DecoratedDialogKt on Tao
+### Jewel dependency fails to resolve on an older JDK
 
-**Symptom.** The dialog crashes on Tao but works on AWT.
+**Symptom.** Gradle refuses the `nucleus.decorated-window-jewel` artifact with a message about
+an incompatible Java version.
 
-**Cause.** The code calls the AWT-only `JewelDecoratedDialog` (no receiver) under
-`NucleusBackend.Tao`.
+**Cause.** The Jewel toolkit is compiled for JDK 25, and your build targets an older one.
 
-**Fix.** Make the host composable an extension on `NucleusApplicationScope` so the call
-resolves to `NucleusApplicationScope.JewelDecoratedDialog`, which dispatches per backend.
-
-### Dependency requires JVM runtime version 11
-
-**Symptom.** Gradle fails to resolve the Jewel artifact with a message about JVM runtime
-version 11.
-
-**Cause.** The toolchain is not set to 25.
-
-**Fix.** Set the Kotlin JVM toolchain:
+**Fix.** Set the Kotlin JVM toolchain to 25:
 
 ```kotlin title="build.gradle.kts"
 kotlin { jvmToolchain(25) }
 ```
 
-See [migrate from 1.x](/docs/migrate/from-1.x).
+See [Install](/docs/start/install).
 
 ## What's next
 
-- [Packaging](/docs/packaging) — per-OS packaging, signing, and store targets.
-- [Performance](/docs/performance) — GraalVM native image and AOT details.
-- [Migrate from 1.x](/docs/migrate/from-1.x) — namespace and scope changes after upgrading.
+- [Migrate from 2.x](/docs/migrate/from-2.x): every breaking change in 3.0 and how to adapt.
+- [Threading](/docs/concepts/threading): the UI thread, native callbacks, and the watchdog.
+- [Packaging](/docs/packaging): per-OS packaging, signing, and store targets.
+- [Performance](/docs/performance): GraalVM native image and AOT details.

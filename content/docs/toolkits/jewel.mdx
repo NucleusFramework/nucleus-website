@@ -1,0 +1,76 @@
+---
+title: Jewel
+description: Style a Nucleus window with Jewel colors and metrics so the title bar and chrome match the IntelliJ Platform.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Jewel adapter styles `DecoratedWindow` with the colors and metrics of Jewel, the JetBrains
+design system, so the title bar and window chrome match the IntelliJ Platform.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    implementation("dev.nucleusframework:nucleus.decorated-window-jewel:<version>")
+    // A Jewel theme, for example the standalone Int UI theme
+    implementation("org.jetbrains.jewel:jewel-int-ui-standalone:<jewel-version>")
+}
+```
+
+- The adapter does not expose `nucleus-application`: declare it yourself.
+- Nucleus builds the adapter against Jewel `0.39.1-262.9437.29`.
+- The adapter targets JDK 25: compile with `kotlin { jvmToolchain(25) }`.
+
+## Create a Jewel window
+
+Open a `JewelDecoratedWindow` inside a Jewel theme such as `IntUiTheme`. Without one, the window
+has no colors to derive its chrome from.
+
+```kotlin
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.darkmodedetector.isSystemInDarkMode
+import dev.nucleusframework.window.jewel.JewelDecoratedWindow
+import dev.nucleusframework.window.jewel.JewelTitleBar
+import org.jetbrains.jewel.intui.standalone.theme.IntUiTheme
+
+fun main() = nucleusApplication {
+    IntUiTheme(isDark = isSystemInDarkMode()) {
+        JewelDecoratedWindow(onCloseRequest = ::exitApplication, title = "Tools") {
+            JewelTitleBar { /* title bar content */ }
+            // Jewel widgets go here
+        }
+    }
+}
+```
+
+Switching `isDark` flips the whole window between the light and dark IntelliJ palettes. Set
+`nativePopupLayers = true` to let Jewel popups (`ListComboBox`, `PopupMenu`, `Dropdown`, tooltips)
+leave the window bounds.
+
+<Callout type="warn" title="Changed in 3.0">
+`JewelDecoratedWindow` and `JewelDecoratedDialog` exist only as `NucleusApplicationScope`
+extensions. The AWT overload on Compose's `ApplicationScope` and the top-level dialog are gone.
+See [Migrate from Nucleus 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `NucleusApplicationScope.JewelDecoratedWindow(...)` | The usual window parameters, plus `undecorated`, `popupFor`, `nativeContextMenu`, `hiddenFromDock`, `titleBarStyle`, `nativePopupLayers`, `transparent`, `clickThrough`, `visibleOnAllWorkspaces`, `forceX11` |
+| `NucleusApplicationScope.JewelDecoratedDialog(...)` | Dialog variant |
+| `DecoratedWindowScope.JewelTitleBar(...)` | Title bar slot of a window |
+| `DecoratedDialogScope.JewelDialogTitleBar(...)` | Title bar slot of a dialog |
+| `rememberJewelWindowStyle()` / `rememberJewelTitleBarStyle()` | Styles derived from the active Jewel theme, for your own wrapper |
+| `ProvideJewelSpellcheckMenu { … }` | Jewel styling for the native context menu; the Jewel window and dialog install it |
+
+The Jewel window has no `minimizable` or `maximizable` parameter. To drop those caption buttons,
+open a `DecoratedWindow` inside `NucleusDecoratedWindowTheme` with the Jewel styles.
+
+## What's next
+
+- [Material 2 and 3](/docs/toolkits/material): chrome from a Compose `MaterialTheme`.
+- [Windows](/docs/windows): the `DecoratedWindow` and title bar API the adapter wraps.
+- [Dialogs and popups](/docs/windows/dialogs-popups): native popup layers and dialogs.

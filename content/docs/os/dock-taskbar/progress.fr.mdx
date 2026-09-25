@@ -1,0 +1,124 @@
+---
+title: Progression et attention
+description: Affichez une progression et des demandes d'attention sur l'icône du Dock, le bouton de la barre des tâches ou l'entrée du launcher Linux depuis Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Taskbar progress affiche une barre de progression et demande l'attention sur l'icône du Dock
+macOS, le bouton de la barre des tâches Windows ou l'entrée du launcher Linux. Si le bureau ne le
+prend pas en charge, les appels renvoient `false` au lieu de lever une exception.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:<version>")
+}
+```
+
+Un hôte Compose Desktop ou Swing classique utilise `taskbar-progress` seul. Voir
+[Utiliser l'API de base](#utiliser-lapi-de-base).
+
+## Afficher une progression depuis une fenêtre
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    val progress by download.progress.collectAsState()
+
+    LaunchedEffect(progress) {
+        if (progress < 1.0) nucleusWindow.showTaskbarProgress(progress)
+        else nucleusWindow.hideTaskbarProgress()
+    }
+    DisposableEffect(Unit) {
+        onDispose { nucleusWindow.hideTaskbarProgress() }
+    }
+}
+```
+
+La valeur est une fraction dans `0.0..1.0`. Effacez-la dans `onDispose` pour qu'une barre
+obsolète ne survive pas à l'écran qui l'a posée. `showTaskbarIndeterminate()`,
+`showTaskbarError()`, `showTaskbarPaused()`, `requestTaskbarAttention()` et
+`stopTaskbarAttention()` s'utilisent de la même façon.
+
+Sur macOS et Linux, la progression appartient à l'application, pas à la fenêtre : deux fenêtres
+partagent le même indicateur.
+
+Dans la composition, `rememberTaoTaskbarProgress()` renvoie un handle lié à la fenêtre courante
+(`null` hors fenêtre) : `taskbar?.showProgress(progress)`.
+
+## Utiliser l'API de base
+
+`TaskbarProgress` prend une `java.awt.Window`, pour les hôtes Compose Desktop et Swing :
+
+```kotlin
+TaskbarProgress.showProgress(window, 0.75)
+TaskbarProgress.showError(window, 1.0)
+TaskbarProgress.hideProgress(window)
+TaskbarProgress.requestAttention(window, TaskbarProgress.AttentionType.INFORMATIONAL)
+```
+
+<Callout type="warn" title="Modifié en 3.0">
+Les fenêtres `nucleusApplication` n'ont pas de `Window` AWT. Passez ces appels sur les extensions
+`nucleusWindow`. Voir [Migrer depuis la 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Définir le fichier desktop Linux
+
+Si la détection du fichier `.desktop` échoue, `isAvailable()` renvoie `false`. Indiquez le nom
+vous-même :
+
+```kotlin
+TaskbarProgress.linuxDesktopFilename = "myapp.desktop"
+```
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Linux utilise le protocole D-Bus Unity `LauncherEntry`, partagé avec
+  [`launcher-linux`](/docs/os/dock-taskbar/linux).
+- Les extensions `nucleusWindow` s'exécutent sur un thread dédié : `true` signifie « mis en
+  file », pas « affiché ».
+- La détection Linux essaie `NucleusApp.appId`, `GIO_LAUNCHED_DESKTOP_FILE`,
+  `BAMF_DESKTOP_FILE_HINT`, le nom de l'exécutable, puis une correspondance `Exec` dans les
+  répertoires d'applications XDG.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Extension `nucleusWindow` | `TaskbarProgress` | Effet |
+|---|---|---|
+| `showTaskbarProgress(value)` | `showProgress(window, value)` | `NORMAL` à `value` |
+| `showTaskbarIndeterminate()` | `showIndeterminate(window)` | `INDETERMINATE` |
+| `showTaskbarError(value = 1.0)` | `showError(window, value)` | `ERROR` à `value` |
+| `showTaskbarPaused(value = 1.0)` | `showPaused(window, value)` | `PAUSED` à `value` |
+| `hideTaskbarProgress()` | `hideProgress(window)` | `NO_PROGRESS` |
+| `setTaskbarProgress(value)` / `setTaskbarState(state)` | `setProgress` / `setState` | Fraction ou état seul |
+| `requestTaskbarAttention(type)` / `stopTaskbarAttention()` | `requestAttention` / `stopAttention` | Lance ou annule l'attention |
+
+`TaskbarProgress` expose aussi `isAvailable()`, `linuxDesktopFilename` et des variantes
+`*ForHwnd` pour un `HWND` Windows brut.
+
+| État | Windows | macOS | Linux |
+|---|---|---|---|
+| `INDETERMINATE` | Barre animée | Barre fixe | Comme `NORMAL` |
+| `NORMAL` | Vert | Bleu | Accent |
+| `ERROR` | Rouge | Rouge | Progression simple ; ajoutez `requestAttention` |
+| `PAUSED` | Jaune | Jaune | Progression simple |
+
+| `AttentionType` | Windows | macOS |
+|---|---|---|
+| `INFORMATIONAL` | Clignote quatre fois | Rebondit une fois |
+| `CRITICAL` | Clignote jusqu'au focus | Rebondit jusqu'à l'activation |
+
+Sur Linux, les deux posent le flag `urgent`.
+
+## Et ensuite
+
+- [Windows taskbar](/docs/os/dock-taskbar/windows) : icônes de superposition, jump lists et boutons de miniature.
+- [Linux launcher](/docs/os/dock-taskbar/linux) : badges, urgence et quicklists.
+- [macOS Dock menu](/docs/os/dock-taskbar/macos) : le menu du Dock.
+- [Energy manager](/docs/lifecycle/energy-manager) : garder la machine éveillée pendant un long travail.

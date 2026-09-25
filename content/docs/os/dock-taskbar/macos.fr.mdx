@@ -1,0 +1,89 @@
+---
+title: Menu du Dock macOS
+description: Remplissez le menu clic droit du Dock d'une app macOS avec des items, des sous-menus et des séparateurs, et gérez les clics depuis Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`launcher-macos` remplit le menu clic droit du Dock d'une app macOS avec des items, sous-menus,
+séparateurs et entrées désactivées, et vous rappelle sur le thread UI quand l'utilisateur en
+clique un.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-macos:<version>")
+}
+```
+
+## Remplir le menu du Dock
+
+Chaque item porte un `id` numérique, que le listener reçoit :
+
+```kotlin
+MacOsDockMenu.setDockMenu(listOf(
+    DockMenuItem(id = 1, title = "Nouvelle fenêtre"),
+    DockMenuItem.separator(id = 2),
+    DockMenuItem(
+        id = 3,
+        title = "Récents",
+        children = listOf(
+            DockMenuItem(id = 31, title = "project.kt"),
+            DockMenuItem(id = 32, title = "build.gradle.kts"),
+        ),
+    ),
+))
+
+MacOsDockMenu.listener = DockMenuListener { id ->
+    when (id) {
+        1 -> openNewWindow()
+        in 30..39 -> openRecent(id)
+    }
+}
+```
+
+`clearDockMenu()` rétablit le menu du Dock par défaut. Chaque méthode reste sans effet hors macOS
+ou si la bibliothèque native n'a pas pu se charger : testez `isAvailable` d'abord. Le Dock
+n'affiche que du texte : les images d'items ne sont pas prises en charge.
+
+<Callout type="warn" title="Modifié en 3.0">
+Le listener s'exécute désormais sur le thread UI de l'hôte et non plus sur l'EDT Swing. Sous
+`nucleusApplication`, c'est le thread de Compose : vous pouvez y modifier un état Compose
+directement. Voir [Threading](/docs/concepts/threading) et
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Testez depuis un build empaqueté ou `runDistributable`. Sous `./gradlew run`, la tuile du Dock
+appartient au launcher `java`, qui n'a pas d'identifiant de bundle.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le premier appel à `setDockMenu(...)` intercepte `applicationDockMenu:` sur le
+  `NSApplicationDelegate` en cours par method swizzling. AppKit demande ensuite le menu à Nucleus
+  à chaque clic droit.
+- Dans un hôte Compose Desktop ou Swing classique, le listener s'exécute sur l'event dispatch
+  thread d'AWT.
+- Le module fournit les métadonnées ProGuard et GraalVM qui gardent
+  `dev.nucleusframework.launcher.macos.NativeMacOsDockMenuBridge` accessible.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+|---|---|
+| `MacOsDockMenu.isAvailable` | `false` hors macOS ou si la bibliothèque native n'a pas pu se charger. |
+| `MacOsDockMenu.listener: DockMenuListener?` | Un listener global. Aiguillez sur `id` à l'intérieur. |
+| `MacOsDockMenu.setDockMenu(items)` | Remplace le menu. |
+| `MacOsDockMenu.clearDockMenu()` | Supprime le menu ; le comportement par défaut de l'OS revient. |
+| `DockMenuItem(id, title = "", enabled = true, children = emptyList())` | `id` doit être `> 0`. Des `children` non vides créent un sous-menu. |
+| `DockMenuItem.separator(id)` | Un séparateur. |
+| `DockMenuListener.onItemClicked(itemId: Int)` | `fun interface`, appelée sur le thread UI de l'hôte. |
+
+## Et ensuite
+
+- [Taskbar progress](/docs/os/dock-taskbar/progress) : progression et demandes d'attention sur l'icône du Dock.
+- [Deep links](/docs/lifecycle/deep-links) : recevoir des URL `myapp://` via les Apple Events.
+- [Windows taskbar](/docs/os/dock-taskbar/windows) : jump lists et barres de boutons de miniature.

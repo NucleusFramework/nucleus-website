@@ -1,0 +1,74 @@
+---
+title: Tray menu DSL
+description: Build the tray context menu in Kotlin with items, checkable items, submenus, dividers, shortcut hints, and state-driven content.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+The trailing lambda of `Tray` builds its native context menu. The lambda is `@Composable`: it
+reads state, calls `painterResource`, and branches with `if`, and the native menu follows each
+change.
+
+## Build a menu
+
+```kotlin
+var connected by remember { mutableStateOf(false) }
+var advanced by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Wifi, tooltip = "Network") {
+    Item(label = if (connected) "Disconnect" else "Connect") { connected = !connected }
+    Item(label = "Export", icon = Icons.Default.Upload) { export() }
+    Item(label = "Disabled", isEnabled = false)
+    CheckableItem(
+        label = "Advanced options",
+        checked = advanced,
+        onCheckedChange = { advanced = it },
+    )
+    if (advanced) {
+        SubMenu(label = "Advanced", icon = Icons.Default.Build) {
+            Item(label = "DNS settings") { openDns() }
+            SubMenu(label = "More") { Item(label = "Proxy") { openProxy() } }
+        }
+    }
+    Divider()
+    Item(label = "Quit") { exitApplication() }
+}
+```
+
+- `icon` accepts an `ImageVector` (with an optional `iconTint`), a `Painter`, or a
+  `DrawableResource`. Menu icons render at 16 px.
+- `SubMenu` nests to any depth.
+- `TrayApp` takes its `menu` as a plain `TrayMenuBuilder` lambda. It offers the same functions,
+  but they are not `@Composable`.
+
+## Show shortcut hints
+
+`shortcut` displays a key combination next to an item. It registers no hotkey; use
+[global hotkeys](/docs/os/global-hotkey) for that.
+
+```kotlin
+import dev.nucleusframework.composenativetray.menu.api.Key
+import dev.nucleusframework.composenativetray.menu.api.KeyShortcut
+
+Item(label = "New note", shortcut = KeyShortcut(Key.N, meta = true)) { newNote() }
+```
+
+macOS draws the native glyphs (⌘N), Windows shows right-aligned text (`Win+N`), and the Linux
+desktop renders its own.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The DSL records each call into a flat list of menu operations. The library rebuilds the native
+  menu only when a fingerprint of that list changes, so a recomposition that leaves the menu
+  identical makes no native call.
+- Linux sends shortcuts as the DBusMenu `shortcut` property.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [System tray](/docs/os/tray): icon sources, clicks, and platform behavior.
+- [Tray apps](/docs/os/tray/tray-app): open a popup window from the icon.
+- [macOS menu bar](/docs/os/menus/menu-bar): the application menu bar on macOS.

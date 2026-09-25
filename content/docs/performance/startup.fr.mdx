@@ -1,0 +1,70 @@
+---
+title: Optimisation du démarrage
+description: Activez le pack nucleusOptimization pour raccourcir le démarrage JVM et réduire la mémoire au repos, et empaquetez l'application avec l'OpenJDK courant grâce à lastJdk.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusOptimization` regroupe des réglages d'empaquetage JVM pensés pour les applications de
+bureau. Le pack est désactivé par défaut, et votre code source ne change pas quand vous l'activez.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization = true
+    nucleusOptimization { idleGc = false } // optional: force one knob on or off
+}
+```
+
+Chaque option est un `Boolean?` : `null` suit l'interrupteur principal, `true` ou `false` la
+force. Vous pouvez aussi laisser le pack désactivé et n'activer qu'une option.
+
+## Options
+
+| Option | Effet une fois activée |
+|--------|------------------------|
+| `serialGc` | Utilise le collecteur Serial quand `garbageCollector` n'est pas défini. |
+| `compactHeap` | Ajoute `-Xms32m` et `-XX:MaxRAMPercentage=25`, chacun seulement si `jvmArgs` ne le définit pas déjà. |
+| `singleJar` | Fusionne les JAR d'exécution en un seul. Avec ProGuard, l'option active `joinOutputJars` à la place. |
+| `idleGc` | Libère la mémoire quand l'application reste inutilisée. Voir [GC au repos](#gc-au-repos). |
+| `lastJdk` | Empaquette et lance l'application avec OpenJDK 27. Voir [Empaqueter avec le dernier JDK](#empaqueter-avec-le-dernier-jdk). |
+
+Le pack ne remplace jamais une valeur que vous avez posée (`garbageCollector`, `javaHome`, `-Xms`,
+`-XX:MaxRAMPercentage`), et n'active ni le [cache AOT](/docs/performance/aot-cache) ni ProGuard.
+Dans une image native GraalVM, seul `idleGc` s'applique.
+
+## Empaqueter avec le dernier JDK
+
+Avec `lastJdk`, le plugin télécharge OpenJDK 27 GA (BellSoft Liberica JDK 27 sur macOS Intel et
+Windows ARM) la première fois qu'une tâche d'empaquetage ou `run` en a besoin. L'application
+embarque ce runtime ; votre `jvmToolchain(...)` reste tel quel.
+
+- Définissez `NUCLEUS_JDK_HOME` sur un JDK 27 local pour éviter le téléchargement.
+- Un `javaHome` explicite désactive `lastJdk`.
+
+## GC au repos
+
+Le GC au repos appelle `System.gc()` tout de suite quand une fenêtre est réduite, ou 3 s après que
+toutes les fenêtres ont perdu le focus. Le démarrage n'en déclenche jamais. Il couvre les fenêtres
+ouvertes par `nucleusApplication` et fonctionne aussi en image native. Passez
+`-Dnucleus.optimization.idleGc=false` pour le couper le temps d'une exécution.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- `serialGc` et `compactHeap` s'appliquent aussi à la tâche `run`.
+- `lastJdk` fixe le build 35 publié sur [jdk.java.net/27](https://jdk.java.net/27/) et le met en
+  cache sous `<gradle-user-home>/nucleus/jdk`. Le repli prend le JDK Liberica complet, car Lite
+  n'a pas de `jmods` pour `jlink`. Un `NUCLEUS_JDK_HOME` qui n'est pas un JDK 27 ou sans
+  `bin/java` est ignoré avec un avertissement.
+- Une image native lit le GC au repos dans `nucleus/nucleus-app.properties`, faute de fichier
+  `.cfg` de lanceur.
+- Une image native tire son collecteur et son tas de `graalvm { garbageCollector; maxHeapSizePercent }`.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Cache AOT](/docs/performance/aot-cache) : supprimez le temps de chauffe de la JVM avec un cache Project Leyden.
+- [GraalVM Native Image](/docs/performance/graalvm) : compilez l'application en binaire natif.
+- [Référence du DSL Gradle](/docs/reference/gradle-dsl) : toutes les propriétés de `nucleus.application`.

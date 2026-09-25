@@ -1,0 +1,119 @@
+---
+title: Progress and attention
+description: Show progress and attention requests on the Dock icon, the taskbar button, or the Linux launcher entry from Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Taskbar progress draws a progress bar and requests attention on the macOS Dock icon, the Windows
+taskbar button, or the Linux launcher entry. When the desktop does not support it, calls return
+`false` instead of throwing.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:<version>")
+}
+```
+
+A plain Compose Desktop or Swing host uses `taskbar-progress` alone. See
+[Use the plain API](#use-the-plain-api).
+
+## Show progress from a window
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    val progress by download.progress.collectAsState()
+
+    LaunchedEffect(progress) {
+        if (progress < 1.0) nucleusWindow.showTaskbarProgress(progress)
+        else nucleusWindow.hideTaskbarProgress()
+    }
+    DisposableEffect(Unit) {
+        onDispose { nucleusWindow.hideTaskbarProgress() }
+    }
+}
+```
+
+The value is a fraction in `0.0..1.0`. Clear it in `onDispose` so a stale bar does not outlive the
+screen that set it. `showTaskbarIndeterminate()`, `showTaskbarError()`, `showTaskbarPaused()`,
+`requestTaskbarAttention()` and `stopTaskbarAttention()` work the same way.
+
+On macOS and Linux, progress belongs to the app, not the window: two windows share one indicator.
+
+Inside composition, `rememberTaoTaskbarProgress()` returns a handle bound to the current window
+(`null` outside one): `taskbar?.showProgress(progress)`.
+
+## Use the plain API
+
+`TaskbarProgress` takes a `java.awt.Window`, for Compose Desktop and Swing hosts:
+
+```kotlin
+TaskbarProgress.showProgress(window, 0.75)
+TaskbarProgress.showError(window, 1.0)
+TaskbarProgress.hideProgress(window)
+TaskbarProgress.requestAttention(window, TaskbarProgress.AttentionType.INFORMATIONAL)
+```
+
+<Callout type="warn" title="Changed in 3.0">
+`nucleusApplication` windows have no AWT `Window`. Move those calls to the `nucleusWindow`
+extensions. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Set the Linux desktop file
+
+If `.desktop` detection fails, `isAvailable()` returns `false`. Set the name yourself:
+
+```kotlin
+TaskbarProgress.linuxDesktopFilename = "myapp.desktop"
+```
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Linux uses the Unity `LauncherEntry` D-Bus protocol, shared with
+  [`launcher-linux`](/docs/os/dock-taskbar/linux).
+- The `nucleusWindow` extensions run on a worker thread: `true` means queued, not drawn.
+- Linux detection tries `NucleusApp.appId`, `GIO_LAUNCHED_DESKTOP_FILE`, `BAMF_DESKTOP_FILE_HINT`,
+  the executable name, then an `Exec` match in the XDG application directories.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| `nucleusWindow` extension | `TaskbarProgress` | Effect |
+|---|---|---|
+| `showTaskbarProgress(value)` | `showProgress(window, value)` | `NORMAL` at `value` |
+| `showTaskbarIndeterminate()` | `showIndeterminate(window)` | `INDETERMINATE` |
+| `showTaskbarError(value = 1.0)` | `showError(window, value)` | `ERROR` at `value` |
+| `showTaskbarPaused(value = 1.0)` | `showPaused(window, value)` | `PAUSED` at `value` |
+| `hideTaskbarProgress()` | `hideProgress(window)` | `NO_PROGRESS` |
+| `setTaskbarProgress(value)` / `setTaskbarState(state)` | `setProgress` / `setState` | Fraction or state alone |
+| `requestTaskbarAttention(type)` / `stopTaskbarAttention()` | `requestAttention` / `stopAttention` | Start or cancel attention |
+
+`TaskbarProgress` also has `isAvailable()`, `linuxDesktopFilename`, and `*ForHwnd` variants for a
+raw Windows `HWND`.
+
+| State | Windows | macOS | Linux |
+|---|---|---|---|
+| `INDETERMINATE` | Pulsing bar | Static bar | Same as `NORMAL` |
+| `NORMAL` | Green | Blue | Accent |
+| `ERROR` | Red | Red | Plain progress; add `requestAttention` |
+| `PAUSED` | Yellow | Yellow | Plain progress |
+
+| `AttentionType` | Windows | macOS |
+|---|---|---|
+| `INFORMATIONAL` | Flashes four times | Bounces once |
+| `CRITICAL` | Flashes until focused | Bounces until activated |
+
+On Linux, both set the `urgent` flag.
+
+## What's next
+
+- [Windows taskbar](/docs/os/dock-taskbar/windows): overlay icons, jump lists, and thumbnail toolbars.
+- [Linux launcher](/docs/os/dock-taskbar/linux): badges, urgency, and quicklists.
+- [macOS Dock menu](/docs/os/dock-taskbar/macos): the Dock menu.
+- [Energy manager](/docs/lifecycle/energy-manager): keep the machine awake during long work.

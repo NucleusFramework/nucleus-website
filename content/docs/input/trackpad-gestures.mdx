@@ -1,0 +1,105 @@
+---
+title: Trackpad gestures
+description: Handle trackpad scrolling, pinch-to-zoom and rotation with standard Compose modifiers.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Trackpad gestures reach Compose as standard pointer events. `Modifier.scrollable`, the lazy lists
+and `Modifier.transformable` handle them with no extra code, and you add no dependency beyond
+`nucleus-application`.
+
+## Events per gesture
+
+| Gesture | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Two-finger scroll | `PanStart` / `PanMove` / `PanEnd` | `Scroll` | `Scroll` |
+| Mouse wheel | `Scroll` | `Scroll` | `Scroll` |
+| Pinch, Ctrl + wheel | `ScaleStart` / `ScaleChange` / `ScaleEnd` | `Scale*` | `Scale*` |
+| Rotation | two `Touch` pointers | none | two `Touch` pointers |
+
+## Scroll
+
+Scrolling containers work as they are. Only a custom `pointerInput` handler needs care: on macOS a
+trackpad swipe arrives as `PanMove`, so a handler that listens for `Scroll` alone misses it.
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.first()
+            when (event.type) {
+                PointerEventType.PanMove -> move(change.panOffset)
+                PointerEventType.Scroll -> move(change.scrollDelta)
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+To receive every trackpad step as `Scroll` instead, start the JVM with
+`-Dnucleus.tao.trackpadPanEvents=false`.
+
+## Zoom with a pinch
+
+<Callout type="warn" title="Changed in 3.0">
+`detectTransformGestures` no longer sees a pinch. Use `Modifier.transformable` or listen for the
+`Scale*` events. See [Migrate from 2.x](/docs/migrate/from-2.x#handle-pinch-and-pan-events).
+</Callout>
+
+```kotlin
+@Composable
+fun ZoomableImage() {
+    var scale by remember { mutableFloatStateOf(1f) }
+    val state = rememberTransformableState { zoomChange, _, _ -> scale *= zoomChange }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .transformable(state),
+    )
+}
+```
+
+In a custom handler, read `PointerInputChange.scaleFactor` on `ScaleChange`. It is a ratio per
+event: above `1f` zooms in, below `1f` zooms out.
+
+## Rotate
+
+`Modifier.transformable` and `detectTransformGestures` read the rotation angle on macOS and Linux.
+Windows reports no trackpad rotation. A pinch and a rotation never run at the same time: the
+gesture that starts first keeps the trackpad until it ends.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- `panOffset` uses the same 10 dp per unit that Compose Desktop applies to a wheel notch, so a pan
+  and a notch scroll the same distance.
+- `PanEnd` arrives after macOS's momentum tail, so Compose does not start a second fling.
+- Ctrl + wheel has no end phase: `ScaleEnd` follows 120 ms after the last tick.
+- On Linux, GDK reports scale and rotation as one gesture. It starts as a pinch, and rotation takes
+  over once it has turned 10° with the zoom within ±10%.
+- `TaoWindow.onTrackpadGesture` exposes the raw stream (macOS and Windows). Registering a listener
+  replaces the one `DecoratedWindow` uses, which stops pinch and rotation events for that window.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | macOS trackpad scroll |
+| `PointerInputChange.panOffset` | Pan delta in pixels |
+| `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd` | Pinch and Ctrl + wheel |
+| `PointerInputChange.scaleFactor` | Zoom ratio per event |
+| `-Dnucleus.tao.trackpadPanEvents=false` | Send trackpad pans as `Scroll` |
+
+## What's next
+
+- [Pen and touch input](/docs/input/pen-stylus): touchscreen contacts and pressure.
+- [Pointer icons](/docs/input/pointer-icons): cursors beyond the four Compose defines.
+- [Migrate from 2.x](/docs/migrate/from-2.x): every behavior change in 3.0.

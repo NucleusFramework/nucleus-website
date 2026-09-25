@@ -1,0 +1,119 @@
+---
+title: Native views
+description: Embed an NSView, HWND or GtkWidget inside a Compose layout with NativeView.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`NativeView` embeds a platform-native view in a Compose layout, the desktop counterpart of
+`AndroidView` and `UIKitView`. You hand it an `NSView*`, `HWND` or `GtkWidget*`, and Nucleus keeps
+it on its layout slot until the composable leaves. It comes with `nucleus-application`.
+
+## Embed a native view
+
+Return a `NucleusPlatformView` from `factory`:
+
+```kotlin
+@Composable
+fun BrowserPane(url: String) {
+    NativeView(
+        factory = {
+            // createNativeWebView is your own interop code returning an NSView* as a Long.
+            val handle = createNativeWebView(url)
+            nucleusNsPlatformView(
+                handle = { handle },
+                onDispose = { releaseNativeWebView(handle) },
+            )
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+```
+
+You create the native view; `factory` runs once. The view follows its slot through layout
+changes, scrolling and resizes. Use `nucleusHwndPlatformView` on Windows and
+`nucleusGtkPlatformView` on Linux. On another OS, `NativeView` renders an empty `Box(modifier)`,
+so one call site per platform is enough. You can also implement `NucleusPlatformView.NsView`,
+`HWnd` or `GtkWidget` on your own class.
+
+<Callout type="warn">
+On Linux, `NativeView` requires Wayland. Under X11 the widget stays hidden behind the window
+surface and its rectangle shows the desktop.
+</Callout>
+
+## Release the view
+
+`dispose()`, or the factory's `onDispose`, runs after the host has detached the handle. Free the
+native view there. On Linux, hold your own reference to the widget (`g_object_ref_sink`) while
+you use the handle and drop it in `dispose()`, or GTK finalizes it on detach.
+
+## Overlay Compose content
+
+The `content` slot draws Compose UI on top of the native view:
+
+```kotlin
+NativeView(
+    factory = { /* ... */ },
+    modifier = Modifier.fillMaxSize(),
+) {
+    // The button handles its own clicks; clicks elsewhere reach the native view.
+    Button(onClick = { /* reload */ }) { Text("Reload") }
+}
+```
+
+Compose hit-tests first: anything drawn over the view keeps its pointer events. Events Compose
+does not consume go to the native view, trackpad pans included. `Popup`s draw above the view.
+
+## Clip to rounded corners
+
+`Modifier.clip()` does not reach native views. Pass `cornerRadius = 12.dp` instead; `Dp.Infinity`
+gives a circle. `cornerRadius` has no effect on Linux: draw a rounded border in `content`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Compose clears the view's rectangle to transparent, and the native content shows through.
+- macOS: the `NSView` sits below the Compose Metal layer. Moves apply in the same frame as the
+  Compose geometry.
+- Windows: the child `HWND` sits under the window, and a DirectComposition overlay renders Compose
+  above it.
+- Linux: the widget sits in the window's GTK content, and the compositor blends it through the GL
+  surface. X11 does not blend a child window's alpha, hence the Wayland requirement. GTK 3 has no
+  per-widget rounded clip.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| `NativeView` parameter | Default | Notes |
+| --- | --- | --- |
+| `factory` | required | `() -> NucleusPlatformView`, called once |
+| `modifier` | `Modifier` | Sizes and places the slot |
+| `update` | `{}` | Runs after every recomposition. Push new state into the view here |
+| `cornerRadius` | `Dp.Unspecified` | Rounded clip; unspecified applies none |
+| `content` | `{}` | Compose overlay drawn over the view |
+
+The factories take a `handle: () -> Long` lambda, read each time the host needs the pointer, and
+optional callbacks:
+
+| Member | Factory callback | Called when |
+| --- | --- | --- |
+| `resize(widthPx, heightPx)` | `onResize` | The view's size changes. |
+| `setBounds(xPx, yPx, widthPx, heightPx)` | `onSetBounds` | The frame changes. For views that draw outside a window rect, such as WebView2. |
+| `setCornerRadius(radiusPx)` | `onSetCornerRadius` | The rounded clip changes. |
+| `clearFocus()` | `onClearFocus` | The window or a Compose layer takes focus. |
+| `dispose()` | `onDispose` | After detach. Release your native resources. |
+
+On Windows, a `hwndHandle` of `0L` is valid for a view with no child window, such as WebView2 in
+composition mode; it drives its visual through `setBounds` and `setCornerRadius`.
+
+`Modifier.consumeOverlayPointerEvents()` is deprecated and does nothing: use
+`Modifier.pointerHoverIcon` for its `cursor` argument.
+
+## What's next
+
+- [WebView](/docs/webview): a ready-made WebView built on `NativeView`.
+- [TextureView](/docs/native-content/texture-view): show GPU frames from an external producer.
+- [Pointer icons](/docs/input/pointer-icons): cursors for the Compose overlay.

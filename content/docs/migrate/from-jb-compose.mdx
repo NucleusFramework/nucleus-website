@@ -1,216 +1,135 @@
 ---
-title: Migrating from JetBrains Compose Desktop
-description: Add Nucleus to an existing JetBrains Compose Desktop project and move its build configuration to the Nucleus DSL.
+title: Migrate from JetBrains Compose Desktop
+description: Move a JetBrains Compose Desktop app to Nucleus. Apply the plugin, rename the DSL block, and replace the AWT windows, dialogs, and tray with their Nucleus equivalents.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-In this tutorial, you'll migrate a project that uses the JetBrains Compose Desktop plugin to
-Nucleus. Nucleus extends `org.jetbrains.compose` rather than replacing it, so your existing
-configuration keeps working: you add the Nucleus plugin alongside it, move the application block
-to the Nucleus DSL, and optionally enable the packaging and runtime features Nucleus adds.
+Move a JetBrains Compose Desktop app to Nucleus: add the plugin, rename the application block,
+and replace the AWT windows with `DecoratedWindow`.
 
-<Callout title="Prefer not to do this by hand?">
-An AI coding agent can run this whole migration for you — including the window-shell and
-AWT-removal work this build-focused guide doesn't cover. One prompt, zero install:
-[Migrate with an AI agent](/docs/migrate/ai-agent).
+<Callout type="info" title="Let an agent do it">
+An AI coding agent can run the whole migration. See [Migrate with an AI agent](/docs/migrate/ai-agent).
 </Callout>
 
 ## Before you start
 
-You need an existing project that applies the `org.jetbrains.compose` plugin and builds with
-JDK 17 or later.
+- Compose Multiplatform 1.12 or later and JDK 17 or later.
+- The list of AWT and Swing APIs your UI uses (`Window`, `DialogWindow`, `Tray`, `SwingPanel`,
+  `JFileChooser`, `MenuBar`). Nucleus windows are not AWT windows, so each one needs a replacement.
 
 ## Add the plugin
 
-Apply the Nucleus plugin next to the JetBrains Compose plugin. Do not remove the JetBrains plugin —
-Nucleus extends it.
+Keep the JetBrains Compose plugin: Nucleus extends it.
 
-```diff
+```diff title="build.gradle.kts"
  plugins {
-     id("org.jetbrains.kotlin.jvm") version "2.4.10"
-     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
      id("org.jetbrains.compose") version "1.12.0"
 +    id("dev.nucleusframework") version "<version>"
  }
 ```
 
-## Update the imports
+## Move the build to the Nucleus DSL
 
-Replace the JetBrains Compose DSL imports with the Nucleus equivalents:
+1. Swap the DSL imports (`TargetFormat`, `CompressionLevel`, `SigningAlgorithm`, and the others):
+   `org.jetbrains.compose.desktop.application.dsl` becomes `dev.nucleusframework.desktop.application.dsl`.
+2. Rename `compose.desktop.application { }` to `nucleus.application { }`. The two blocks cannot
+   coexist. Every setting inside stays the same.
+3. Set `homepage`. Without it, `packageDeb` and `packageGraalvmDeb` fail with
+   `Please specify project homepage`.
 
-```diff
--import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-+import dev.nucleusframework.desktop.application.dsl.TargetFormat
-```
-
-The same applies to `CompressionLevel`, `SigningAlgorithm`, and the other DSL types.
-
-## Move to the Nucleus DSL
-
-Rename the `compose.desktop.application { }` block to `nucleus.application { }`. Every setting
-inside it stays the same:
-
-```diff
+```diff title="build.gradle.kts"
 -compose.desktop.application {
 +nucleus.application {
      mainClass = "com.example.MainKt"
-
      nativeDistributions {
-         targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-         packageName = "MyApp"
-         packageVersion = "1.0.0"
-
-         macOS {
-             bundleID = "com.example.myapp"
-             iconFile.set(project.file("icons/app.icns"))
-         }
-
-         windows {
-             iconFile.set(project.file("icons/app.ico"))
-         }
-
-         linux {
-             iconFile.set(project.file("icons/app.png"))
-         }
++        homepage = "https://myapp.example.com"
      }
  }
 ```
 
-<Callout type="info" title="Compose Hot Reload">
-Nucleus propagates `nucleus.application.mainClass` to `compose.desktop.application.mainClass`, so
-[Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) tasks
-(`hotRun`, `hotSnapshotMain`) resolve the entry point without extra configuration. On macOS with
-`decorated-window-tao`, `-XstartOnFirstThread` is injected into Hot Reload's `JavaExec` tasks
-automatically.
-</Callout>
+The rest of the build and the existing Gradle tasks (`run`, `packageDmg`, `packageDeb`) work
+unchanged, [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html)
+included.
 
-## Enable Nucleus features
+## Replace the entry point and windows
 
-The following settings are opt-in. Add the ones you need:
+Add `nucleus-application`, which brings the entry point and the window runtime. See
+[Modules](/docs/concepts/modules) for the optional ones.
 
-```kotlin
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+}
+```
+
+Swap `application { }` for `nucleusApplication { }` and `Window` for `DecoratedWindow`. Keep
+command-line early exits above `nucleusApplication`.
+
+```diff
+-import androidx.compose.ui.window.Window
+-import androidx.compose.ui.window.application
++import dev.nucleusframework.application.DecoratedWindow
++import dev.nucleusframework.application.nucleusApplication
++import dev.nucleusframework.window.TitleBar
+
+-fun main() = application {
+-    Window(onCloseRequest = ::exitApplication, title = "MyApp") {
++fun main(args: Array<String>) = nucleusApplication(args) {
++    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
++        TitleBar { Text(title) }
+         App()
+     }
+ }
+```
+
+Then replace each AWT API. Compose Desktop's `Window`, `DialogWindow` and `Tray` fail under
+`nucleusApplication`:
+
+| Compose Desktop (AWT) | Nucleus |
+| --- | --- |
+| `Window(…)` | [`DecoratedWindow(…)`](/docs/windows) |
+| `DialogWindow(…)` | [`DecoratedDialog(…)`](/docs/windows/dialogs-popups) |
+| `Tray(…)` | `Tray(…)` from [ComposeNativeTray](/docs/os/tray) |
+| `MenuBar { }` | [`menu-macos`](/docs/os/menus/menu-bar) for the macOS app menu |
+| `SwingPanel`, AWT `Canvas` | [`NativeView`](/docs/native-content/native-views) |
+| `JFileChooser`, `java.awt.FileDialog` | [FileKit](/docs/os/file-dialogs) |
+| `window.window` (`ComposeWindow`) | `nucleusWindow` and `LocalNucleusWindow` |
+| `rememberWindowState()` from `androidx.compose.ui.window.v2` | the same function from [`dev.nucleusframework.window.tao.v2`](/docs/windows/window-state) |
+
+For a Material 3, Material 2 or Jewel look, use `MaterialDecoratedWindow` or
+`JewelDecoratedWindow` ([Toolkits](/docs/toolkits)). AWT classes that need no window keep
+working: `BufferedImage`, `ImageIO`, `java.awt.Font`, and the AWT clipboard.
+
+## Run the app
+
+Run `./gradlew run`, then check the title bar, window drag, minimize and fullscreen, secondary
+windows, and each dialog you ported.
+
+## Enable Nucleus packaging features
+
+These settings are opt-in. Packaging needs no Node.js on the machine.
+
+```kotlin title="build.gradle.kts"
 nucleus.application {
-    mainClass = "com.example.MainKt"
-
     nativeDistributions {
-        targetFormats(
-            TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb,
-            TargetFormat.AppImage, TargetFormat.Snap, TargetFormat.Flatpak, // new
-        )
-        packageName = "MyApp"
-        packageVersion = "1.0.0"
-        homepage = "https://myapp.example.com" // required for DEB
-
+        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.AppImage, TargetFormat.Flatpak)
         cleanupNativeLibs = true
         enableAotCache = true
         splashImage = "splash.png"
-        compressionLevel = CompressionLevel.Maximum
-        artifactName = "\${name}-\${version}-\${os}-\${arch}.\${ext}"
-
-        // Deep links
         protocol("MyApp", "myapp")
-
-        // File associations
-        fileAssociation(
-            mimeType = "application/x-myapp",
-            extension = "myapp",
-            description = "MyApp Document",
-        )
-
-        // Publishing
-        publish {
-            github { enabled = true; owner = "myorg"; repo = "myapp" }
-        }
-
-        // NSIS customization
-        windows {
-            nsis {
-                oneClick = false
-                allowToChangeInstallationDirectory = true
-                createDesktopShortcut = true
-            }
-        }
+        publish { github { enabled = true; owner = "myorg"; repo = "myapp" } }
     }
 }
 ```
 
-## Add the runtime libraries
-
-The runtime libraries are also opt-in. Add the ones matching the features you enabled:
-
-```kotlin
-dependencies {
-    implementation(compose.desktop.currentOs)
-
-    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
-    implementation("dev.nucleusframework:nucleus.aot-runtime:<version>")           // if enableAotCache
-    implementation("dev.nucleusframework:nucleus.updater-runtime:<version>")       // if publishing
-    implementation("dev.nucleusframework:nucleus.taskbar-progress:<version>")
-    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")   // for nucleusApplication { }
-}
-```
-
-To use the unified `nucleusApplication { }` entry point with single-instance handling, deep links,
-and AOT wiring, see the [Nucleus 1.x to 2.0 guide](/docs/migrate/from-1.x). The same
-`application { } → nucleusApplication { }` swap applies whether you come from 1.x or vanilla
-Compose Multiplatform.
-
-## Set the homepage for DEB packages
-
-Nucleus packages with electron-builder rather than jpackage, and electron-builder requires
-`homepage` for DEB. Without it, the build fails:
-
-```
-Please specify project homepage, see https://electron.build/configuration
-```
-
-Set it on `nativeDistributions`:
-
-```kotlin
-nativeDistributions {
-    homepage = "https://myapp.example.com"
-}
-```
-
-This also applies to GraalVM Native Image DEB packaging (`packageGraalvmDeb`).
-
-## What changes
-
-| Feature | Before (compose) | After (nucleus) |
-|---------|------------------|-----------------|
-| DSL entry point | `compose.desktop.application` | `nucleus.application` |
-| DSL imports | `org.jetbrains.compose.desktop.application.dsl.*` | `dev.nucleusframework.desktop.application.dsl.*` |
-| Target formats | DMG, PKG, MSI, EXE, DEB, RPM | + NSIS, AppX, Portable, AppImage, Snap, Flatpak, archives |
-| Native lib cleanup | Manual | `cleanupNativeLibs = true` |
-| AOT cache | Not available | `enableAotCache = true` |
-| Splash screen | Manual | `splashImage = "splash.png"` |
-| Deep links | Manual, per-OS | `protocol("name", "scheme")` |
-| File associations | Limited | Cross-platform `fileAssociation()` |
-| NSIS config | Not available | Full `nsis { }` DSL |
-| AppX config | Not available | Full `appx { }` DSL |
-| Snap config | Not available | Full `snap { }` DSL |
-| Flatpak config | Not available | Full `flatpak { }` DSL |
-| Store pipeline | Not available | Sandboxed pipeline for PKG, AppX, Flatpak |
-| Auto-update | Not available | Built-in with YAML metadata |
-| Code signing | macOS only | + Windows PFX / Azure Artifact Signing |
-| DMG appearance | Not customizable | Full `dmg { }` DSL ([details](/docs/packaging/macos#package-a-dmg)) |
-| Artifact naming | Fixed | Template with `artifactName` |
-
-## What stays the same
-
-- `mainClass`, `jvmArgs`.
-- The `nativeDistributions` block (metadata, icons, resources).
-- `buildTypes` / ProGuard.
-- `modules()` / `includeAllModules`.
-- All existing Gradle tasks (`run`, `packageDmg`, `packageDeb`, and so on).
-- The `compose.desktop.currentOs` dependency.
-- Source set configuration.
-- [Compose Hot Reload](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html) — works without extra configuration.
+See [Packaging](/docs/packaging) for every option, and
+[Nucleus and vanilla Compose Multiplatform](/docs/compare/cmp-default#what-nucleus-adds) for
+what each feature adds over Compose Desktop.
 
 ## What's next
 
-- [Windowing](/docs/window) and [Tao](/docs/tao) — native window decorations and the Tao backend.
-- [Auto-update](/docs/packaging/auto-update) — ship updates with YAML metadata.
-- [GraalVM](/docs/performance/graalvm) — GraalVM Native Image packaging.
-- [From 1.x](/docs/migrate/from-1.x) — migrate a full 1.x codebase with the same plugin swap.
+- [Windows](/docs/windows): `nucleusApplication`, `DecoratedWindow` and the title bar.
+- [Configuration](/docs/start/configuration): the full `nucleus { }` DSL.
+- [Auto-update](/docs/packaging/auto-update): ship updates with YAML metadata.
+- [GraalVM](/docs/performance/graalvm): package a native image.

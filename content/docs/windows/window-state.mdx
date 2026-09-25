@@ -1,0 +1,179 @@
+---
+title: Window state
+description: Control and observe window size, position, placement, and screen with Compose's WindowState or the AWT-free window API v2 in dev.nucleusframework.window.tao.v2.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+A state object sets and reports a window's size, position, placement, and screen. `DecoratedWindow`
+accepts Compose's `WindowState` (v1, the default) and the window API v2 in
+`dev.nucleusframework.window.tao.v2`, which also moves windows between screens.
+
+## Use the v1 state
+
+```kotlin
+val state = rememberWindowState(
+    size = DpSize(1100.dp, 720.dp),
+    position = WindowPosition.Aligned(Alignment.Center),
+)
+
+DecoratedWindow(onCloseRequest = ::exitApplication, state = state) {
+    Button(onClick = { state.placement = WindowPlacement.Maximized }) { Text("Maximize") }
+}
+```
+
+`size`, `position`, `placement`, and `isMinimized` are mutable: write them to drive the window, read
+them to follow the user. Dialogs take `rememberDialogState()` the same way.
+
+## Size a window to its content
+
+Set an axis to `Dp.Unspecified` and the window measures its content once, then takes that size:
+
+```kotlin
+val state = rememberWindowState(size = DpSize(Dp.Unspecified, Dp.Unspecified))
+```
+
+A dialog with a parent centres on it, and one without centres on the screen. Later content changes
+don't resize the window.
+
+## Use the window API v2
+
+The v2 state replaces mutable properties with requests and adds screen selection:
+
+```kotlin
+import dev.nucleusframework.window.tao.v2.*
+
+@OptIn(ExperimentalComposeUiApi::class)
+fun main() = nucleusApplication {
+    val state = rememberWindowState(
+        initialScreenProvider = WindowScreenProvider.Primary,
+        initialBoundsProvider = WindowBoundsProvider(
+            sizeProvider = WindowSizeProvider.Fixed(1200.dp, 800.dp),
+            positionProvider = WindowPositionProvider.CenteredOnScreen,
+        ),
+    )
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, state = state) {
+        Button(onClick = { state.requestSize(900.dp, 600.dp) }) { Text("Resize") }
+    }
+}
+```
+
+The package mirrors Compose 1.12's `androidx.compose.ui.window.v2` member for member.
+`DecoratedWindow`, `DecoratedDialog`, `HostedWindow`, and `HostedDialog` each have a v2 overload
+that replaces `minimumSize` with `minSize` and `maxSize` (inner sizes). The `Decorated*` v2
+overloads need `@OptIn(ExperimentalComposeUiApi::class)`.
+
+<Callout type="warn" title="Changed in 3.0">
+Nucleus does not accept Compose's `androidx.compose.ui.window.v2` types: they depend on AWT. Change
+the import to `dev.nucleusframework.window.tao.v2`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Request geometry changes
+
+| Request | Effect |
+| --- | --- |
+| `requestSize(...)` | Resize. |
+| `requestPosition(...)` | Move. |
+| `requestBounds(...)` | Resize and move together. |
+| `requestPlacement(placement)` | `Floating`, `Maximized`, or `Fullscreen`. |
+| `requestMinimized(value)` | Minimize or restore. |
+| `requestScreen(provider)` | Move to another screen. |
+
+Size, position, and bounds requests also take a provider. The window applies requests asynchronously: bounds requests in
+order, and only the latest screen, placement, or minimized request. A bounds request restores a
+maximized or fullscreen window first.
+
+## Read the observed state
+
+The window writes `bounds` (decorations included), `position`, `size`, `screenId`, `placement`, and
+`isMinimized` back to the state. They throw until the window has been visible once:
+
+```kotlin
+val label = if (state.isInitialized) "${state.size} on ${state.screenId}" else "not shown yet"
+```
+
+`rememberSaveable` restores the last screen, placement, and bounds through `WindowState.Saver`.
+
+## Move a window to another screen
+
+```kotlin
+state.requestScreen { screens.last() }
+state.requestScreen(WindowScreenProvider.ById(savedScreenId))
+```
+
+The scope lists `screens`, `defaultScreen` (the current one), and `primaryScreen`. The window keeps
+its relative position and stays fully visible. `ById` falls back to the default screen while that
+display is unplugged. A `Screen` exposes `id`, `name`, `bounds`, `availableBounds` (minus taskbar,
+menu bar, and docks), `insets`, and `isPrimary`, in dp.
+
+To list displays outside a provider, call `TaoMonitors.all()`, `primary()`, `forWindow(taoWindow)`,
+or `byId(id)` (`null` when unplugged). Their geometry is in physical pixels: convert with
+`boundsDp(scale)` using the scale of the window you position.
+
+## Size and place with providers
+
+| `WindowSizeProvider` | Size |
+| --- | --- |
+| `Default` | 800 × 600 dp. |
+| `Current` | Keeps the current size. |
+| `Fixed(width, height)` | The given size. |
+| `Unconstrained` | Content size, capped at the screen's available size. |
+| `PreferredWidth(height)` / `PreferredHeight(width)` | Content size on one axis. |
+
+| `WindowPositionProvider` | Position |
+| --- | --- |
+| `Default` | The window manager places the window. |
+| `Current` | Keeps the current position. |
+| `CenteredOnScreen` / `CenteredInParentWindow` | Centre of the screen or parent. |
+| `Absolute(x, y)` | The given point. |
+| `AlignedToScreen(alignment, offset)` | Aligned inside the available bounds. |
+| `AlignedToParentWindow(anchor, alignment, offset, excludeParentInsets)` | Aligned around the parent. |
+
+The parent-window providers throw when the window has no parent. `WindowBoundsProvider(size,
+position)` combines the two. Prefer it over `WindowBoundsProvider.Absolute(rect)` when either side
+is `Default` or content-sized: a `DpRect` can't express those.
+
+A custom provider is a lambda with `windowMetrics`, `parentWindowMetrics`, `contentToWindowSize`, and
+`measureWindowContent`:
+
+```kotlin
+state.requestBounds {
+    val work = windowMetrics.screen.availableBounds
+    DpRect(work.left, work.top, work.left + (work.right - work.left) / 2, work.bottom)
+}
+```
+
+## Use a dialog state
+
+`DialogState` has the screen and bounds requests of `WindowState`, without placement or minimize.
+Create it with `rememberDialogState(initialScreenProvider, initialBoundsProvider)` or
+`rememberDialogStateWithBounds(initialPosition, initialSize)`, which centres on the screen by
+default. `rememberWindowStateWithBounds` is the window counterpart. See
+[Dialogs and popups](/docs/windows/dialogs-popups).
+
+## Known limits
+
+- X11 window managers apply their own policy to the initial position. Openbox places it at 0,0.
+- A themed `NucleusWindowHost` without the v2 overload drops `maxSize`. See
+  [Route windows through a host](/docs/windows#route-windows-through-a-host).
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The v2 package reads displays from `TaoMonitors` and geometry from the native window.
+- `measureWindowContent` returns the current content size clamped to the constraints until the
+  window exists, then runs a real measure pass.
+- On macOS, Nucleus never toggles zoom to restore a window: setting the frame un-zooms it.
+- When the platform names no primary monitor (GDK on Wayland), the first one takes `isPrimary`.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Windows](/docs/windows): `DecoratedWindow` parameters and the window handle.
+- [Dialogs and popups](/docs/windows/dialogs-popups): modal dialogs and their placement.
+- [HiDPI](/docs/windows/hidpi): scale factors across monitors.
+- [Multi-window apps](/docs/multi-window): satellites, docking, and tabs.

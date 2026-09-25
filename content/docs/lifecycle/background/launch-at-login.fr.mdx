@@ -1,0 +1,113 @@
+---
+title: Démarrage au login
+description: Activez, désactivez et interrogez le démarrage au login depuis Kotlin avec une API qui choisit le backend adapté au format de packaging courant.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Le module `autolaunch` active, désactive et interroge le démarrage au login avec une seule API
+sur Windows (MSIX et Win32), macOS 13+, Linux et Flatpak. Il respecte les choix faits par
+l'utilisateur en dehors de votre application.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.autolaunch:<version>")
+}
+```
+
+Pour MSIX, définissez `appx { addAutoLaunchExtension = true }`. Sans cela, l'API renvoie
+`UNSUPPORTED`.
+
+## Vérifier et basculer le démarrage au login
+
+```kotlin
+when (AutoLaunch.state()) {
+    AutoLaunchState.ENABLED          -> {}
+    AutoLaunchState.DISABLED         -> AutoLaunch.enable()
+    AutoLaunchState.DISABLED_BY_USER -> AutoLaunch.openSystemSettings()
+    AutoLaunchState.UNSUPPORTED      -> { /* macOS < 13, configuration Linux non prise en charge */ }
+    else -> {}
+}
+```
+
+<Callout type="warn">
+Ne réessayez pas sur `BLOCKED_BY_USER`. Une fois que l'utilisateur a désactivé l'application dans
+le Gestionnaire des tâches ou les Réglages Système, `enable()` renvoie `BLOCKED_BY_USER` tant
+qu'il ne la réactive pas là-bas. Envoyez-le vers `openSystemSettings()`.
+</Callout>
+
+## Détecter un lancement au login
+
+`wasStartedAtLogin(args)` indique si le login a démarré le processus, par exemple pour démarrer
+masqué. `nucleusApplication` met la réponse en cache au démarrage : les appels suivants peuvent
+passer un tableau vide.
+
+```kotlin
+LaunchedEffect(Unit) {
+    startedAtLogin = AutoLaunch.wasStartedAtLogin(emptyArray())
+}
+```
+
+Sur macOS, un appel fait avant `nucleusApplication` renvoie `false`. En dev, la méthode renvoie
+toujours `false`.
+
+## Notes
+
+- Sur MSIX, l'onglet Applications de démarrage du Gestionnaire des tâches ne se rafraîchit qu'au
+  login suivant. L'état stocké est déjà correct.
+- L'unité Linux démarre après `graphical-session.target` et
+  `gnome-session-x11-services-ready.target`. systemd ignore la seconde cible hors de GNOME.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+| Packaging | Backend | Détection du login |
+|---|---|---|
+| MSIX | `StartupTask` | Un ancêtre `sihost.exe` |
+| Win32 (MSI, NSIS) | `HKCU\...\CurrentVersion\Run` | `--nucleus-autostart` |
+| macOS (13+) | `SMAppService.mainApp` | L'Apple Event de login |
+| Linux (deb, rpm, AppImage) | Service utilisateur systemd dans `~/.config/systemd/user/` | `INVOCATION_ID` |
+| Flatpak | Portail Background | `--nucleus-autostart` |
+
+- Win32 lit `StartupApproved\Run` pour détecter une désactivation par l'utilisateur, et les mises
+  à jour conservent l'état.
+- `wasStartedAtLogin` met en cache les résultats positifs : l'interroger en boucle est sans risque.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| `AutoLaunch` | Renvoie | Notes |
+|---|---|---|
+| `state()` | `AutoLaunchState` | État courant. |
+| `enable()` / `disable()` | `AutoLaunchResult` | Active ou désactive le démarrage au login. |
+| `openSystemSettings()` | `Boolean` | Ouvre Applications de démarrage (Windows) ou Ouverture au démarrage (macOS). |
+| `wasStartedAtLogin(args)` | `Boolean` | Indique si le login a démarré ce processus. |
+| `isEnabled()` | `Boolean` | `ENABLED` ou `ENABLED_BY_POLICY`. |
+| `isUserLocked()` | `Boolean` | `DISABLED_BY_USER`. |
+| `diagnostic()` | `String` | Trace du backend pour les tickets de support. |
+| `preload()` | `Unit` | À appeler hors du thread UI pour éviter un blocage au premier appel sur macOS. |
+
+- `AutoLaunchState` : `ENABLED`, `DISABLED`, `DISABLED_BY_USER`, `DISABLED_BY_POLICY`,
+  `ENABLED_BY_POLICY` (lecture seule, stratégie de groupe MSIX), `UNSUPPORTED`.
+- `AutoLaunchResult` : `OK`, `UNCHANGED`, `BLOCKED_BY_USER`, `BLOCKED_BY_POLICY`, `UNSUPPORTED`, `ERROR`.
+
+`AutoLaunchConfig`, à définir avant le premier appel à `AutoLaunch` :
+
+| Propriété | Défaut | Effet |
+|---|---|---|
+| `taskId` | `NucleusApp.startupTaskId`, puis `appId` | `<uap5:StartupTask TaskId>` MSIX |
+| `executablePath` | L'exécutable courant | Commande `Run` Win32 |
+| `autostartArgument` | `"--nucleus-autostart"` | Marqueur de login ; `null` l'omet |
+| `registryValueName` | `NucleusApp.appName`, puis `appId` | Nom de la valeur `Run` Win32 |
+| `backgroundReason` | `null` | Invite du portail Flatpak |
+
+## Et ensuite
+
+- [Service management](/docs/lifecycle/background/service-management) : agents et daemons sur macOS.
+- [Point d'entrée de l'application](/docs/lifecycle/application) : ce que `nucleusApplication` prépare au démarrage.
+- [Scheduler](/docs/lifecycle/background/scheduler) : travail en arrière-plan après un lancement au login.

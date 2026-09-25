@@ -1,168 +1,59 @@
 ---
 title: Building for Linux
-description: Configure a Nucleus app to build DEB, RPM, AppImage, and pacman packages and publish to the Snap and Flatpak stores.
+description: Build DEB, RPM, AppImage, and Pacman packages for a Nucleus app, add maintainer scripts, and package for the Snap Store and Flathub.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-In this tutorial, you'll configure a Nucleus app to produce every Linux package
-format — DEB, RPM, AppImage, and pacman for direct distribution, plus Snap and
-Flatpak for the stores — from a single `linux { }` block, then build and inspect
-the output.
-
-## Before you start
-
-- The Nucleus Gradle plugin is applied to your project. See [Project setup](/docs/start/project-setup).
-- You are on a **Linux build host**. DEB, RPM, AppImage, pacman, Snap, and Flatpak
-  are Linux-only formats and do not cross-build from macOS or Windows.
-- Format-specific tooling is installed as noted in each step (for example `libfuse2`
-  for AppImage, `snapcraft` for Snap, `flatpak-builder` for Flatpak).
+This page covers the `linux { }` block: DEB, RPM, AppImage, Pacman, Snap, and Flatpak. Linux
+formats build only on a Linux host with `rpm` and `fakeroot` (RPM), `libfuse2` (AppImage), and
+`flatpak` plus `flatpak-builder` (Flatpak). The `setup-nucleus` CI action installs them.
 
 ## Configure the target formats
 
-In `build.gradle.kts`, list the Linux formats you want in `targetFormats(...)` and
-describe the package in the `linux { }` block:
-
 ```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        nativeDistributions {
-            targetFormats(
-                TargetFormat.Deb,
-                TargetFormat.Rpm,
-                TargetFormat.AppImage,
-                TargetFormat.Pacman,
-                TargetFormat.Snap,
-                TargetFormat.Flatpak,
-            )
-            homepage = "https://myapp.example.com"
+nativeDistributions {
+    targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman)
+    homepage = "https://myapp.example.com" // required by DEB and RPM
 
-            linux {
-                iconFile.set(project.file("icons/app.png"))
-                packageName = "myapp"
-                shortcut = true
-                appCategory = "Utility"
-                menuGroup = "Development"
-
-                debMaintainer = "Your Name <dev@example.com>"
-                debDepends = listOf("libfuse2", "libgtk-3-0", "libasound2")
-
-                rpmLicenseType = "MIT"
-                rpmRequires = listOf("gtk3", "libX11", "alsa-lib")
-
-                pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
-            }
-        }
+    linux {
+        iconFile.set(project.file("icons/app.png"))
+        packageName = "myapp"
+        appCategory = "Utility"
+        debMaintainer = "Your Name <dev@example.com>"
+        debDepends = listOf("libgtk-3-0", "libasound2")
+        rpmRequires = listOf("gtk3", "alsa-lib")
+        pacmanDepends = listOf("gtk3", "alsa-lib")
     }
 }
 ```
 
-<Callout type="warn">
-`homepage` is required for DEB and RPM builds. The packaging task fails without it.
-</Callout>
-
-## Build DEB and RPM packages
-
-Each format has its own Gradle task named after the `TargetFormat` constant:
-
-```shell
-./gradlew packageDeb
-./gradlew packageRpm
-```
-
-The plugin writes a `.desktop` entry into each package with the correct
-`Categories=`, `MimeType=`, `StartupWMClass=`, and `Exec=` lines. If your app's
-window class doesn't match what the window manager reports, set `startupWMClass`
-explicitly:
-
-```kotlin title="build.gradle.kts"
-linux {
-    startupWMClass = "com-example-MyApp"
-}
-```
-
-When `startupWMClass` is unset, Nucleus derives it from `mainClass` by replacing
-dots with hyphens.
+Build with `packageDeb`, `packageRpm`, or `packagePacman`. The `StartupWMClass` of the `.desktop`
+entry defaults to `mainClass` with dots replaced by hyphens; set `startupWMClass` if the window
+manager reports another class. Bump `appRelease` to re-release the same `packageVersion`.
 
 ## Build an AppImage
 
-An AppImage is a single portable executable that runs on most distributions
-without installation:
-
-```shell
-./gradlew packageAppImage
-```
-
-The build host needs `libfuse2`:
-
-```shell
-sudo apt-get install -y libfuse2
-```
-
-Configure the desktop metadata in the `appImage { }` sub-block:
+An AppImage is one executable that runs on most distributions without installation. Build it with
+`packageAppImage`.
 
 ```kotlin title="build.gradle.kts"
 linux {
     appImage {
         category = AppImageCategory.Utility
         genericName = "My Application"
-        synopsis = "A short description"
-        desktopEntries = mapOf("Keywords" to "editor;text;")
+        compressionLevel = CompressionLevel.Normal
     }
 }
 ```
 
-Output size and build time depend on `nativeDistributions.compressionLevel`:
-
-| `CompressionLevel` | Output | Build time |
-|--------------------|--------|------------|
-| `Store`            | Largest | Fastest |
-| `Normal` (default) | Balanced | Moderate |
-| `Maximum`          | Small | Slow |
-| `Ultra`            | Smallest | Slowest |
-
-`Ultra` additionally rebuilds the `.deb` at maximum xz effort (`xz -9e`), roughly 25% smaller
-than `Maximum`. RPM and pacman already use xz -9 and are unaffected.
-
-Prefer `Normal` or `Store` for AppImage: `Maximum` / `Ultra` map to electron-builder
-`maximum` and make cold starts very slow (squashfs/FUSE decompression). From 2.3.1 you can
-override only the AppImage while leaving DEB/DMG on a higher global level:
-
-```kotlin title="build.gradle.kts"
-nativeDistributions {
-    compressionLevel = CompressionLevel.Ultra
-    linux {
-        appImage {
-            // Snappy FUSE cold start; DEB still uses Ultra above.
-            compressionLevel = CompressionLevel.Normal
-        }
-    }
-}
-```
-
-## Package for Arch Linux
-
-`TargetFormat.Pacman` produces a pacman archive for Arch Linux and derivatives:
-
-```shell
-./gradlew packagePacman
-```
-
-Set Arch-specific dependencies and, if needed, an independent version string:
-
-```kotlin title="build.gradle.kts"
-linux {
-    pacmanDepends = listOf("gtk3", "libx11", "alsa-lib")
-    pacmanPackageVersion = "2.0.0"
-}
-```
+`Maximum` and `Ultra` compression slow every AppImage launch, so keep `Normal` for the AppImage
+even when `nativeDistributions.compressionLevel` is higher. `Ultra` also recompresses the DEB.
 
 ## Add install and remove scripts
 
-Deb, Rpm, and Pacman packages run maintainer scripts as root. Point `linux { }` at your
-own files; Nucleus concatenates the after-scripts after its own template (desktop
-integration, AppArmor, optional polkit silent-update helper) and passes the before-scripts
-raw to fpm. GraalVM native-image packages honor the same properties.
+DEB, RPM, and Pacman run maintainer scripts as root. AppImage, Snap, and Flatpak do not.
 
 ```kotlin title="build.gradle.kts"
 linux {
@@ -170,89 +61,45 @@ linux {
     afterRemove.set(project.file("packaging/linux/after-remove.sh"))
     beforeInstall.set(project.file("packaging/linux/before-install.sh"))
     beforeRemove.set(project.file("packaging/linux/before-remove.sh"))
-    // Pacman only: the install/remove scripts do not run on an upgrade
+    // Pacman only: an upgrade runs these instead of the install and remove scripts
     afterUpgrade.set(project.file("packaging/linux/after-upgrade.sh"))
     beforeUpgrade.set(project.file("packaging/linux/before-upgrade.sh"))
 }
 ```
 
-| Property | When it runs | How it is wired |
-|----------|--------------|-----------------|
-| `afterInstall` | After the payload is unpacked | Concatenated after Nucleus's template, then electron-builder |
-| `afterRemove` | After the payload is deleted | Concatenated after Nucleus's template, then electron-builder |
-| `beforeInstall` | Before the payload is unpacked | Passed raw to fpm (`--before-install`) |
-| `beforeRemove` | Before the payload is deleted | Passed raw to fpm (`--before-remove`) |
-| `afterUpgrade` | After a Pacman upgrade swaps the payload | Passed raw to fpm (`--after-upgrade`) |
-| `beforeUpgrade` | Before a Pacman upgrade swaps the payload | Passed raw to fpm (`--before-upgrade`) |
+The payload lives under `/opt/<packageName>`, a path with no spaces. To ship a systemd unit, enable
+it in `afterInstall`, stop it in `beforeInstall`, and disable it in `afterRemove`.
 
-Typical use: install a systemd unit that ships under `appResourcesRootDir`, then enable it
-from `afterInstall`. Stop the unit in `beforeInstall` so binaries under `/opt` can be
-replaced, and disable it in `afterRemove`.
-
-The payload is installed under `/opt/<packageName>` (`linux.packageName`, falling back to
-`packageName`), never under the display `appName`, so the path contains no spaces and is
-safe in unquoted `ExecStart=` lines.
-
-electron-builder substitutes `${sanitizedProductName}` and `${executable}` in
-`afterInstall` / `afterRemove` **only when the token is single-quoted**:
+In `afterInstall` and `afterRemove`, `${executable}` and `${sanitizedProductName}` expand only
+inside single quotes. A double-quoted `"${executable}"` stays literal and fails silently. The other
+four scripts get no substitution: write names out in full.
 
 ```shell title="packaging/linux/after-install.sh"
 systemctl enable '${executable}-daemon.service'
-systemctl start '${executable}-daemon.service'
 ```
 
-A double-quoted `"${executable}"` is left as literal text, so
-`systemctl enable "${executable}.service"` silently no-ops instead of failing. `beforeInstall`,
-`beforeRemove`, `afterUpgrade`, and `beforeUpgrade` get no macro substitution at all —
-hardcode unit and path names there.
-
 <Callout type="warn">
-When Pacman replaces an installed package with a newer version, its `.INSTALL` calls only
-`pre_upgrade` / `post_upgrade`. None of `afterInstall`, `afterRemove`, `beforeInstall`, or
-`beforeRemove` run, and there is no fallback to them. Stop the unit in `beforeUpgrade` and
-re-enable or restart it in `afterUpgrade`, or an upgrade leaves the service dead. Deb and
-Rpm ignore both upgrade properties: their install scriptlets already fire on upgrades.
+A Pacman upgrade runs only `beforeUpgrade` and `afterUpgrade`. Stop the service in the first and
+restart it in the second, or the upgrade leaves it stopped. DEB and RPM ignore the upgrade
+properties.
 </Callout>
 
-AppImage, Snap, and Flatpak do not run these scripts. AppImage is not installed; Snap and
-Flatpak have their own hook surfaces.
-
 ## Publish to the Snap Store
-
-Snap targets the [Snap Store](https://snapcraft.io/). The default `plugs` cover
-desktop integration, X11 and Wayland, networking, audio playback, and OpenGL.
-Override `confinement` when your app needs filesystem access beyond `home`:
 
 ```kotlin title="build.gradle.kts"
 linux {
     snap {
         confinement = SnapConfinement.Strict
-        grade = SnapGrade.Stable
         base = "core22"
-        plugs = listOf(
-            SnapPlug.Desktop,
-            SnapPlug.Home,
-            SnapPlug.Wayland,
-            SnapPlug.Network,
-            SnapPlug.AudioPlayback,
-        )
-        compression = SnapCompression.Xz
+        plugs = listOf(SnapPlug.Desktop, SnapPlug.Home, SnapPlug.Wayland, SnapPlug.Network)
     }
 }
 ```
 
-```shell
-./gradlew packageSnap
-```
-
-The build host needs `snapd` and `snapcraft --classic`.
+Build with `packageSnap`; the host needs no `snapcraft`. Setting `plugs` replaces the default list.
+Snap packaging skips arm64 hosts.
 
 ## Publish to Flathub with Flatpak
-
-Flatpak is sandboxed. Declare the permissions your app needs through `finishArgs`.
-The defaults are `--share=ipc`, `--socket=x11`, `--socket=wayland`,
-`--socket=pulseaudio`, and `--device=dri`; setting `finishArgs` replaces them, so
-include everything you need:
 
 ```kotlin title="build.gradle.kts"
 linux {
@@ -260,73 +107,39 @@ linux {
         runtime = "org.freedesktop.Platform"
         runtimeVersion = "23.08"
         sdk = "org.freedesktop.Sdk"
-
-        finishArgs = listOf(
-            "--share=ipc",
-            "--socket=wayland",
-            "--socket=pulseaudio",
-            "--device=dri",
-            "--filesystem=home",
-            "--share=network",
-        )
+        finishArgs = listOf("--share=ipc", "--socket=wayland", "--device=dri", "--share=network")
     }
 }
 ```
 
-```shell
-./gradlew packageFlatpak
-```
-
-Flatpak is a store format and runs through the
-[sandboxed pipeline](/docs/packaging/sandboxing): native libraries are
-pre-extracted and JVM arguments are redirected. If `flatpak-builder` or the
-runtime isn't installed, the task is skipped rather than failed.
+Build with `packageFlatpak`. `finishArgs` declares the sandbox permissions and replaces the
+defaults (`--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`,
+`--device=dri`). Without `flatpak` on the host, the task skips the format.
 
 ## Register deep links and file associations
 
-Top-level `protocol(...)` and `fileAssociation(...)` entries are merged into the
-generated `.desktop` file as `MimeType=` values:
+The plugin adds `protocol(...)` and `fileAssociation(...)` to the `.desktop` file's `MimeType=`:
 
 ```kotlin title="build.gradle.kts"
 nativeDistributions {
     protocol("MyApp URL", "myapp")
-    fileAssociation(
-        mimeType = "application/x-myapp",
-        extension = "myapp",
-        description = "MyApp Document",
-    )
+    fileAssociation(mimeType = "application/x-myapp", extension = "myapp", description = "MyApp Document")
 }
 ```
 
-This produces:
+<Accordions>
+<Accordion title="Under the hood">
 
-```ini
-MimeType=x-scheme-handler/myapp;application/x-myapp;
-```
+- `afterInstall` and `afterRemove` are appended to Nucleus's template (desktop integration,
+  AppArmor, polkit policy for passwordless updates). The other four go raw to fpm.
+- `Ultra` rebuilds the DEB with `xz -9e`. RPM and Pacman already use xz.
+- electron-builder builds the snap from its own template, which has no arm64 build.
 
-No manual `desktopEntries` override is needed.
-
-## Configuration reference
-
-`linux { }` exposes `iconFile`, `packageVersion`, `shortcut`, `startupWMClass`,
-`packageName`, `appRelease`, `appCategory`, `menuGroup`, `debMaintainer`,
-`debPackageVersion`, `debDepends`, `rpmLicenseType`, `rpmPackageVersion`,
-`rpmRequires`, `pacmanPackageVersion`, `pacmanDepends`, `afterInstall`,
-`afterRemove`, `beforeInstall`, `beforeRemove`, `afterUpgrade`, and `beforeUpgrade`. Sub-blocks are
-`appImage { }`, `snap { }`, `flatpak { }`, and `signing { }`.
-
-`appRelease` sets the package release number — the digit after the `-` in DEB and
-RPM versions. Bump it when you re-release without changing `packageVersion`. See
-the full [Gradle DSL reference](/docs/reference/gradle-dsl).
-
-<Callout type="info">
-Snap and Flatpak layer their own desktop files into the user environment and
-ignore the traditional `.desktop` install paths used by DEB and RPM.
-</Callout>
+</Accordion>
+</Accordions>
 
 ## What's next
 
-- [Code signing](/docs/packaging/code-signing) — sign DEB and RPM packages with GPG.
-- [Sandboxing](/docs/packaging/sandboxing) — how the Flatpak pipeline repackages your app.
-- [Publishing](/docs/packaging/publishing) — release built artifacts to GitHub, S3, or a generic server.
-- [Gradle DSL reference](/docs/reference/gradle-dsl) — every `linux { }` property.
+- [Code signing](/docs/packaging/code-signing#sign-on-linux): GPG-sign DEB and RPM packages.
+- [Auto-update](/docs/packaging/auto-update#set-up-passwordless-updates-on-linux): passwordless DEB and RPM updates.
+- [Gradle DSL reference](/docs/reference/gradle-dsl): every `linux { }` property.

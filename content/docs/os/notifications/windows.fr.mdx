@@ -1,0 +1,133 @@
+---
+title: Notifications sous Windows
+description: Envoyez des toasts Windows depuis Kotlin avec texte adaptatif, images, boutons, champs de saisie, en-têtes et barres de progression.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-windows` envoie des toasts Windows 10 et 11 depuis Kotlin, avec texte adaptatif,
+images, barres de progression, champs de saisie et en-têtes. Il fonctionne pour les applications
+MSIX comme pour les installations EXE et MSI non empaquetées. Ajoutez
+`dev.nucleusframework:nucleus.notification-windows`.
+
+## Envoyer un toast
+
+```kotlin
+WindowsNotificationCenter.initialize()
+
+WindowsNotificationCenter.show(
+    toast {
+        visual {
+            text("Build finished")
+            text("artifact.zip uploaded")
+            heroImage("file:///C:/Users/me/hero.png")
+        }
+        actions {
+            button("Open", arguments = "open")
+            button("Cancel", arguments = "cancel", activationType = ActivationType.BACKGROUND)
+        }
+        scenario = ToastScenario.REMINDER
+    },
+)
+
+WindowsNotificationCenter.addListener(object : ToastNotificationListener {
+    override fun onActivated(
+        tag: String, group: String, arguments: String, userInputs: Map<String, String>,
+    ) { handle(arguments, userInputs) }
+    override fun onDismissed(tag: String, group: String, reason: DismissalReason) {}
+    override fun onFailed(tag: String, group: String, errorCode: Int) {}
+})
+```
+
+Hors Windows, chaque méthode est sans effet. `arguments` porte la chaîne `launch` ou les
+`arguments` du bouton cliqué ; `userInputs` associe chaque identifiant de champ à sa valeur. Les
+callbacks des listeners s'exécutent sur le thread UI.
+
+<Callout type="warn" title="Modifié en 3.0">
+En 2.x, les callbacks de `ToastNotificationListener` s'exécutaient sur l'event dispatch thread
+AWT. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Définir l'identité de l'application
+
+Windows identifie l'émetteur par son AUMID. Les applications MSIX utilisent l'identité du
+package ; les applications non empaquetées utilisent `NucleusApp.aumid`, que le plugin Gradle
+définit. Passez `initialize(aumid = "Vendor.App")` pour le surcharger.
+
+Une application non empaquetée a aussi besoin d'un raccourci dans le menu Démarrer avec le même
+AUMID, sinon les toasts peuvent ne pas s'afficher ou disparaître du Centre de notifications. Les
+installeurs Windows le créent : installez l'application une fois pour voir les toasts depuis une
+exécution en dev. `shortcutPolicy` détermine ce que fait `initialize` de ce raccourci :
+
+| `ShortcutPolicy` | Comportement |
+| --- | --- |
+| `REQUIRE_CREATE` | Crée ou met à jour le raccourci. Valeur par défaut pour les applications installées. |
+| `REQUIRE_NO_CREATE` | Exige un raccourci existant et n'y touche jamais. Valeur par défaut en dev, avec un avertissement dans les logs. |
+| `IGNORE` | Ignore la gestion du raccourci. |
+
+## Mettre à jour un toast sur place
+
+Affichez le toast avec un `tag`, un `group`, des espaces réservés `{key}` et `initialData`, puis
+envoyez de nouvelles valeurs :
+
+```kotlin
+WindowsNotificationCenter.show(
+    toast { visual { progressBar(status = "{status}", value = 0.0) } },
+    tag = "upload",
+    group = "transfers",
+    initialData = ToastNotificationData(sequenceNumber = 1, values = mapOf("status" to "Starting")),
+)
+
+WindowsNotificationCenter.update(
+    tag = "upload",
+    group = "transfers",
+    data = ToastNotificationData(sequenceNumber = 2, values = mapOf("status" to "Almost done")),
+)
+```
+
+Augmentez `sequenceNumber` à chaque mise à jour pour que Windows écarte les anciennes. Pour lier
+la valeur de la barre, construisez un `AdaptiveProgressBar(valueBind = "progressValue", status = …)`
+et envoyez `"progressValue"` dans `values`.
+
+## Notes
+
+- Gardez un seul AUMID entre le raccourci, votre configuration Gradle et l'exécution. Une
+  incohérence produit un toast qui s'affiche une fois, puis plus jamais.
+- `tag` et `group` contiennent 16 caractères au plus.
+- Les applications non empaquetées peuvent charger des images `http(s)://` quand le serveur
+  répond vite. Hors ligne, livrez un fichier local et utilisez `file:///` (non empaquetée) ou
+  `ms-appx:///` (MSIX).
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le module encapsule l'API WinRT `ToastNotificationManager`.
+- Pour une application non empaquetée, `initialize` enregistre l'AUMID sur le processus.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `toast { visual { } }` | `text`, `image`, `appLogo`, `heroImage`, `attribution`, `progressBar`, `group` (colonnes) |
+| `toast { actions { } }` | `textBox`, `selectionBox`, `button`, `contextMenuItem` |
+| `audio(source, customSource, loop, silent)` / `silentAudio()` | Son |
+| `header(id, title, arguments)` | Regrouper des toasts dans le Centre de notifications |
+| `launch`, `activationType`, `scenario`, `duration`, `displayTimestamp` | Propriétés du toast |
+| `ToastScenario` | `DEFAULT`, `REMINDER`, `ALARM`, `INCOMING_CALL`, `URGENT` |
+| `ToastDuration` | `DEFAULT`, `SHORT`, `LONG` |
+| `DismissalReason` | `USER_CANCELED`, `APPLICATION_HIDDEN`, `TIMED_OUT` |
+| `showSimple(title, body, body2)` / `showFromXml` | Toast texte seul / XML de toast brut |
+| `getHistory { entries, error -> }` | Entrées du Centre de notifications |
+| `remove(tag, group)` / `removeGroup(group)` / `clearAll()` | Retirer des toasts |
+| `removeListener(listener)` / `uninitialize()` | Retirer un listener / libérer les ressources natives à l'arrêt |
+
+## Et ensuite
+
+- [Notifications cross-plateforme](/docs/os/notifications) : le DSL de notifications partagé.
+- [Notifications sur macOS](/docs/os/notifications/macos) : `UNUserNotificationCenter` depuis Kotlin.
+- [Notifications sous Linux](/docs/os/notifications/linux) : les notifications freedesktop via D-Bus.
+- [Empaquetage Windows](/docs/packaging/windows) : les installeurs qui créent le raccourci du menu Démarrer.

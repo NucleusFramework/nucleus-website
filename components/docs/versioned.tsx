@@ -6,6 +6,7 @@ import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { DOC_VERSIONS, getDocVersion } from '@/lib/source';
 import { SITE } from '@/lib/site';
+import { LATEST_DOC_REDIRECTS } from '@/lib/doc-redirects';
 import { i18n } from '@/lib/i18n';
 import { baseOptionsFor } from '@/app/layout.config';
 import { Version } from '@/components/docs/Version';
@@ -71,7 +72,11 @@ export async function renderDocsPage(versionId: string, props: { params: Promise
   const { source, baseUrl, latest } = getDocVersion(versionId);
   const { lang, slug } = await props.params;
   const page = source.getPage(slug, lang);
-  if (!page) notFound();
+  if (!page) {
+    const target = latest ? LATEST_DOC_REDIRECTS[(slug ?? []).join('/')] : undefined;
+    if (target) return <MovedPage href={`/${lang}${baseUrl}/${target}`} />;
+    notFound();
+  }
 
   const MDX = page.data.body;
 
@@ -98,6 +103,23 @@ export async function renderDocsPage(versionId: string, props: { params: Promise
             Version: (p: { module: string }) => <Version {...p} lang={lang} />,
           }}
         />
+      </DocsBody>
+    </DocsPage>
+  );
+}
+
+// Static export has no server redirects: React hoists the meta refresh into
+// <head>, so browsers and crawlers follow it without JavaScript.
+function MovedPage({ href }: { href: string }) {
+  return (
+    <DocsPage>
+      <meta httpEquiv="refresh" content={`0; url=${href}`} />
+      <link rel="canonical" href={href} />
+      <DocsTitle>This page has moved</DocsTitle>
+      <DocsBody>
+        <p>
+          <a href={href}>{href}</a>
+        </p>
       </DocsBody>
     </DocsPage>
   );
@@ -139,14 +161,24 @@ async function DocsLayoutForVersion({
 }
 
 export function docsStaticParams(versionId: string) {
-  return getDocVersion(versionId).source.generateParams();
+  const { source, latest } = getDocVersion(versionId);
+  const params = source.generateParams();
+  if (!latest) return params;
+  // Prerender the moved slugs too, so old links land on a redirect page.
+  const moved = i18n.languages.flatMap((lang) =>
+    Object.keys(LATEST_DOC_REDIRECTS).map((old) => ({ lang, slug: old.split('/') })),
+  );
+  return [...params, ...moved];
 }
 
 export async function docsMetadata(versionId: string, props: { params: Promise<Params> }): Promise<Metadata> {
   const { source, latest } = getDocVersion(versionId);
   const { lang, slug } = await props.params;
   const page = source.getPage(slug, lang);
-  if (!page) return {};
+  if (!page) {
+    // Moved latest slugs render a redirect stub: keep it out of the index.
+    return latest && LATEST_DOC_REDIRECTS[(slug ?? []).join('/')] ? { robots: { index: false, follow: true } } : {};
+  }
 
   const url = `${SITE.url}${page.url}`;
   const title = page.data.title;

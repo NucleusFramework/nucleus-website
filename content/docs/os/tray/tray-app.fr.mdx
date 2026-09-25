@@ -1,0 +1,135 @@
+---
+title: Applications de zone de notification
+description: TrayApp ouvre une fenêtre popup Compose à côté d'une icône de la zone de notification, pour des utilitaires de barre des menus écrits en Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TrayApp` ancre une popup Compose à une icône de la zone de notification. Un clic gauche sur
+l'icône ouvre la popup à côté, un clic droit ouvre son menu, et un clic ailleurs ferme la popup.
+Ajoutez `dev.nucleusframework:composenativetray-app` ; il apporte
+[`composenativetray`](/docs/os/tray).
+
+<Version module="tray" />
+
+<Callout type="warn" title="Modifié en 3.0">
+Les builds de `composenativetray-app` pour Nucleus 2.x appellent
+`NucleusApplicationScope.backend`, que Nucleus 3.0 supprime. Utilisez une version compilée pour
+Nucleus 3.0. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Créer une application de zone de notification
+
+Appelez `TrayApp` dans `nucleusApplication { }`. Gardez un `TrayAppState` pour afficher, masquer
+ou redimensionner la popup depuis le code :
+
+```kotlin
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import dev.nucleusframework.composenativetray.trayapp.rememberTrayAppState
+
+fun main() = nucleusApplication {
+    val state = rememberTrayAppState(
+        initialWindowSize = DpSize(300.dp, 400.dp),
+        initialDismissMode = TrayWindowDismissMode.AUTO,
+    )
+
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Quick dashboard",
+        state = state,
+        menu = {
+            Item(label = "Settings") { openSettings() }
+            Divider()
+            Item(label = "Quit") { exitApplication() }
+        },
+    ) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("CPU: 42%")
+            Button(onClick = { state.hide() }) { Text("Close") }
+        }
+    }
+}
+```
+
+`menu` reçoit les fonctions du [DSL de menu](/docs/os/tray/menu), sans `@Composable`.
+
+## Masquer l'icône du Dock sur macOS
+
+Passez `dockIconFollowsWindows = true` à `nucleusApplication` au lieu de définir `LSUIElement`
+dans `Info.plist` :
+
+```kotlin
+fun main() = nucleusApplication(dockIconFollowsWindows = true) {
+    TrayApp(icon = Icons.Default.Dashboard, tooltip = "Dashboard") { Text("Popup content") }
+}
+```
+
+Une tuile apparaît dans le Dock seulement tant qu'une `DecoratedWindow` avec
+`hiddenFromDock = false` est visible. Les popups `TrayApp` ne comptent jamais : une application
+limitée à la zone de notification reste hors du Dock. Les autres systèmes ignorent l'option. Voir
+[Masquer une fenêtre de la barre des tâches ou du Dock](/docs/windows#masquer-une-fenêtre-de-la-barre-des-tâches-ou-du-dock).
+
+## Notes
+
+- La popup n'a pas de barre de titre et n'apparaît ni dans la barre des tâches, ni dans le Dock,
+  ni dans Alt+Tab.
+- En mode de fermeture `AUTO`, la popup se masque quand elle perd le focus. Les clics sur l'icône
+  et sur son menu ne comptent pas comme des clics extérieurs. En `MANUAL`, seuls `hide()` ou un
+  clic sur l'icône la ferment.
+- Sur macOS, la popup rejoint tous les Spaces et reste en place quand vous cliquez sur le fond
+  d'écran.
+- La popup garde sa composition quand elle est masquée : son état survit à un masquage suivi d'un
+  affichage.
+- Sous Linux, la popup a besoin de X11 ou de XWayland. Une session Wayland sans XWayland obtient à
+  la place une fenêtre opaque sans décoration : les paramètres « fenêtre de repli uniquement »
+  ci-dessous s'y appliquent.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- La popup est un panneau natif transparent qui ne prend pas l'activation, pas une
+  `DecoratedWindow`.
+- La bibliothèque lit la position de l'icône à l'écran et place la popup à côté, avec un décalage
+  ajusté pour chaque OS et chaque bureau Linux.
+- Environ 1,5 s après le masquage de la popup, la bibliothèque demande un garbage collection pour
+  réduire le tas.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+### Paramètres de TrayApp
+
+| Paramètre | Défaut | Notes |
+| --- | --- | --- |
+| `icon` / `windowsIcon` + `macLinuxIcon` | obligatoire | `ImageVector`, `Painter` ou `DrawableResource`, comme dans `Tray`. |
+| `tooltip` | obligatoire | Infobulle de l'icône. |
+| `state` | `null` | Un `TrayAppState` ; sans lui, `TrayApp` gère le sien. |
+| `windowSize` | `null` | Taille initiale ; à défaut, la taille de l'état, `DpSize(300.dp, 200.dp)` par défaut. |
+| `visibleOnStart` | `false` | Afficher la popup au lancement. |
+| `enterTransition` / `exitTransition` | fondu | Animations de la popup. |
+| `undecorated`, `resizable`, `windowsTitle`, `windowIcon` | `true`, `false`, `""`, `null` | Fenêtre de repli uniquement. |
+| `horizontalOffset` / `verticalOffset` | `0` / selon l'OS | Décaler la popup par rapport à l'icône, en pixels. |
+| `onPreviewKeyEvent` / `onKeyEvent` | `{ false }` | Gestionnaires de touches de la popup. |
+| `menu` | `null` | Menu du clic droit. |
+
+### TrayAppState
+
+| Membre | Description |
+| --- | --- |
+| `isVisible`, `windowSize`, `dismissMode` | `StateFlow` des valeurs courantes. |
+| `show()`, `hide()`, `toggle()` | Changer la visibilité. |
+| `setWindowSize(size)`, `setWindowSize(width, height)` | Redimensionner la popup. |
+| `setDismissMode(mode)` | `AUTO` ou `MANUAL`. |
+| `onVisibilityChanged(callback)` | Observer les changements de visibilité. |
+
+`getTrayPosition()` renvoie la `TrayPosition` (`TOP_LEFT`, `TOP_RIGHT`, `BOTTOM_LEFT`,
+`BOTTOM_RIGHT`) du coin de l'écran qui contient la zone de notification.
+
+## Et ensuite
+
+- [Zone de notification](/docs/os/tray) : l'API `Tray` sur laquelle repose `TrayApp`.
+- [DSL de menu](/docs/os/tray/menu) : les fonctions du menu du clic droit.
+- [Instance unique](/docs/lifecycle/single-instance) : garder une seule copie de l'application en cours d'exécution.

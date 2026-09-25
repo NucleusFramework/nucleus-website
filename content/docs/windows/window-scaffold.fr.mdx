@@ -1,0 +1,154 @@
+---
+title: Scaffold de fenêtre et chrome
+description: Construisez des mises en page plein fenêtre et des barres de titre personnalisées avec WindowScaffold, les zones de drag, WindowControls et les matériaux macOS et Windows 11.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`WindowScaffold` dispose une barre de titre personnalisée et le contenu de la fenêtre, tout en
+préservant les zones de légende natives, l'ordre des boutons et le déplacement. Il est fourni avec
+`nucleus-application`. Utilisez-le quand le contenu passe sous la barre de titre ou qu'un design
+system dessine son propre chrome ; un `DecoratedWindow` avec `TitleBar` continue de fonctionner.
+
+## Construire une barre de titre personnalisée
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+    MaterialTheme {
+        WindowBackground(MaterialTheme.colorScheme.background)
+        WindowScaffold(
+            titleBar = {
+                Box(Modifier.fillMaxWidth().height(48.dp).windowDragArea().padding(horizontal = 12.dp)) {
+                    Text("MyApp", Modifier.align(Alignment.CenterStart))
+                    WindowControls(Modifier.align(Alignment.CenterEnd))
+                }
+            },
+            titleBarPlacement = TitleBarPlacement.Overlay(),
+        ) { contentPadding ->
+            Box(Modifier.fillMaxSize().padding(contentPadding)) { /* content */ }
+        }
+    }
+}
+```
+
+Faites de `WindowScaffold` l'unique enfant du contenu de la fenêtre. Il ne rend rien déplaçable :
+marquez la surface de déplacement avec `windowDragArea`.
+
+## Placer la barre de titre
+
+| `TitleBarPlacement` | Mise en page |
+| --- | --- |
+| `Docked` | Par défaut. La barre prend sa hauteur et le contenu remplit le reste. |
+| `Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | Le contenu remplit la fenêtre, la barre flotte au-dessus et le contenu reçoit sa hauteur en padding haut. |
+
+- `autoHideInFullscreen` retire la barre en plein écran, et les insets de chrome passent à zéro.
+- `passThroughToContent` teste aussi les appuis sur la barre contre le contenu situé dessous.
+  Activez-le pour des contrôles placés dans la bande de la barre, comme une barre d'onglets.
+  Laissez-le désactivé quand le contenu défile derrière une barre opaque.
+- `controlButtonsDirection` : `Auto` suit la plateforme, `Rtl` place les boutons système en début
+  de ligne et inverse les feux de signalisation macOS.
+
+## Ajouter des zones de drag
+
+```kotlin
+Modifier.windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+VerticalScrollbar(adapter, Modifier.noWindowDrag())
+```
+
+Les boutons et les champs de texte s'excluent d'eux-mêmes. Enveloppez les barres de défilement,
+curseurs et poignées de redimensionnement dans `noWindowDrag()`. Un double-clic agrandit ou
+restaure la fenêtre quand elle est `resizable` et `maximizable` ou déjà agrandie, sauf en plein
+écran. `WindowDoubleClickAction.None` désactive le geste.
+
+## Placer les contrôles de fenêtre
+
+```kotlin
+WindowControls(direction = ControlButtonsDirection.Auto, renderer = WindowControlsRenderer.Platform)
+```
+
+Les boutons suivent l'état de la fenêtre et ses drapeaux `resizable`, `maximizable` et
+`minimizable`. La fermeture appelle `onCloseRequest`. Sous Linux, `Auto` suit aussi la disposition
+des boutons du bureau. Voir
+[Régler le chrome de la fenêtre](/docs/windows#régler-le-chrome-de-la-fenêtre).
+
+`Platform` dessine les boutons Fluent sous Windows et les boutons GNOME ou KDE sous Linux. Sous
+macOS, il ne dessine rien et réserve la place des feux de signalisation. Pour dessiner vos propres
+boutons, implémentez `WindowControlsRenderer.Control(type, state, onClick)`.
+
+## Accorder la fenêtre au thème de l'app
+
+```kotlin
+WindowBackground(MaterialTheme.colorScheme.background)
+WindowAppearance(if (dark) WindowAppearanceMode.Dark else WindowAppearanceMode.Light)
+val insets = LocalWindowChromeInsets.current
+```
+
+- `WindowBackground` apparaît pendant le redimensionnement et partout où Compose ne peint rien. Sans
+  lui, une app sombre peut clignoter en blanc pendant un redimensionnement.
+- `WindowAppearance` fait suivre le thème de l'app au verre, aux feux de signalisation, aux menus et
+  aux glyphes de légende. `System` suit l'OS. Sans effet sous Linux.
+- `insets.controlsInsets` est l'espace réservé aux contrôles système et `titleBarHeight` la hauteur
+  de la barre. Les deux valent zéro hors d'un `WindowScaffold`. Espacez avec ces insets ou avec
+  `WindowControls`, pas les deux.
+
+## Ajouter une région de verre macOS
+
+```kotlin
+Modifier.windowGlassRegion(WindowGlassRegionKind.Sidebar, cornerRadius = 12.dp)
+```
+
+La région affiche le matériau teinté par le fond d'écran de Réglages Système. Ne peignez pas son
+fond. Les types sont `Sidebar`, `ContentList` et `Inspector` (macOS 14+, sinon `ContentList`). Il
+n'existe pas de verre plein fenêtre. Sans effet sur les autres plateformes.
+
+## Ajouter un backdrop Windows 11
+
+```kotlin
+WindowsBackdrop(
+    style = WindowsBackdropStyle.Mica, // Acrylic, MicaAlt, Default, None
+    tint = Color.Unspecified,
+    tier = WindowsBackdropTier.Auto,   // Modern, LegacyMica, Windows10Acrylic
+)
+```
+
+Le matériau apparaît partout où l'app ne peint rien, et `WindowBackground` est suspendu pendant ce
+temps. Un `tint` non spécifié laisse Mica sans teinte et donne à Acrylic le fond de la fenêtre en
+opacité modérée. Les anciennes versions de Windows se rabattent sur le matériau le plus proche. Sans
+effet sous macOS et Linux.
+
+<Callout type="info">
+Les fenêtres avec un backdrop ou `transparent = true` affichent un texte en niveaux de gris au lieu
+de ClearType.
+</Callout>
+
+## Créer une fenêtre transparente sans bordure
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, undecorated = true, transparent = true) { /* ... */ }
+```
+
+`transparent` se fixe à la création. Les pixels laissés à alpha 0 montrent le bureau, et les fonds
+opaques de `WindowBackground` et de la barre de titre deviennent transparents. Les fenêtres Material
+et Jewel acceptent le même drapeau. Pour les fenêtres click-through, voir
+[Fenêtres overlay](/docs/windows/overlay-windows).
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le scaffold transmet la hauteur mesurée du slot `titleBar` à la couche native, qui centre les feux
+  de signalisation macOS et dimensionne la zone de légende Windows.
+- `windowDragArea()` lit `LocalTaoWindow`. Passez `window = taoWindow` quand les composition locals
+  du parent atteignent la scène d'une fenêtre enfant.
+- La région de verre est un volet `NSSplitViewController` sous la surface Compose.
+- Windows 11 avant 22H2 utilise l'attribut Mica unique pour les deux styles Mica ; Windows 10 se
+  rabat sur l'acrylique quand il est disponible.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : les paramètres de `DecoratedWindow` et les drapeaux de chrome.
+- [Toolkits](/docs/toolkits) : barres de titre prêtes pour Material, Jewel, Fluent, Yaru et macOS.
+- [Accessibilité](/docs/input/accessibility) : la sémantique Compose exposée à VoiceOver, Narrateur et Orca.

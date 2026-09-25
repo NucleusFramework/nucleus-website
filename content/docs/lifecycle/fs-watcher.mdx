@@ -1,44 +1,23 @@
 ---
 title: Filesystem watcher
-description: Watch files and directories for changes from Kotlin and receive create, modify, remove, and move events as a coroutine Flow.
+description: Watch files and directories from Kotlin and collect create, modify, remove, and move events as a coroutine Flow.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-The fs-watcher module lets you watch files and directories for changes from Kotlin. You create
-a watcher, register the paths you care about, and collect create, modify, remove, and move
-events from a coroutine `Flow`. The watcher is backed by a native bridge on macOS, Windows, and
-Linux, with an optional polling fallback.
-
-## Add the dependency
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.fs-watcher:<version>")
-}
-```
-
-The module exposes `kotlinx-coroutines-core` transitively, so `Flow` and its operators are on
-the classpath without adding coroutines yourself.
+`fs-watcher` watches files and directories on macOS, Windows and Linux and delivers create,
+modify, remove and move events as a coroutine `Flow`. Add
+`dev.nucleusframework:nucleus.fs-watcher`; it exposes `kotlinx-coroutines-core`.
 
 ## Watch a directory
 
-Check support, create a watcher, start collecting, then register a path. `FsWatchers` and the
-event types live in `dev.nucleusframework.fswatcher`.
-
 ```kotlin
-import dev.nucleusframework.fswatcher.FsWatchEvent
-import dev.nucleusframework.fswatcher.FsWatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import java.nio.file.Path
-
 suspend fun watchDownloads() = coroutineScope {
     if (!FsWatchers.isSupported()) return@coroutineScope
-
     val watcher = FsWatchers.create()
 
-    // Start collecting before you register, so no early events are missed.
+    // Collect before registering so no early event is lost.
     launch {
         watcher.events.collect { event ->
             when (event) {
@@ -52,128 +31,67 @@ suspend fun watchDownloads() = coroutineScope {
         }
     }
 
-    val home = Path.of(System.getProperty("user.home"))
-    watcher.watch(home.resolve("Downloads"), recursive = true)
+    watcher.watch(Path.of(System.getProperty("user.home"), "Downloads"), recursive = true)
 }
 ```
 
-`watch` returns an `FsWatchRegistration` you can close to stop watching one path. Closing the
-`FsWatcher` closes every registration and releases the native watcher.
+- `events` and `errors` are hot flows without replay: collect before you call `watch`.
+- `watch` returns an `FsWatchRegistration`; close it to stop watching that path. Closing the
+  `FsWatcher` closes every registration.
+- On `Overflow`, events were dropped: re-list the tree instead of trusting the stream.
+- Events come back under the path you registered, even when it goes through a symlink.
 
-<Callout type="info">
-`events` and `errors` are hot flows with no replay. Collect them before calling `watch`, or you
-may miss changes that happen between registration and the first collector subscribing.
+## Handle renames
+
+In the default `Debounced` mode, a rename arrives as `FsWatchEvent.Moved(from, to)` when the OS
+lets Nucleus pair both halves, and as `Removed(old)` then `Created(new)` otherwise.
+`FsWatchDeliveryMode.Raw` never emits `Moved`.
+
+<Callout type="warn" title="Changed in 3.0">
+On macOS, a rename used to arrive as a bare `Created` for the new path, and a delete of an older
+file as `Modified`. `Debounced` delivery now reports `Moved`, or `Removed` + `Created`, and
+`Removed` for deletes.
 </Callout>
 
-## How it works
+<Accordions>
+<Accordion title="Under the hood">
 
-Each `FsWatcher` owns one native watcher handle. macOS uses FSEvents, Windows uses
-`ReadDirectoryChangesW`, and Linux uses inotify, all reached through a single JNI bridge.
-Polling is opt-in via `FsWatchBackendStrategy.Polling` and runs inside that same native library.
-There is no JVM-side fallback: when the native library is unavailable, `isSupported()` returns
-`false` and `create()` throws `FsWatchException` for every strategy.
+- Each `FsWatcher` owns one native watcher (inotify, FSEvents, `ReadDirectoryChangesW`) shared by
+  its registrations. It starts on the first `watch()` and stops after the last registration closes.
+- Registering one directory under two spellings creates two independent registrations.
+- On macOS, `Raw` mode delivers the FSEvents flags as they come, historical ones included.
+- Polling runs in the same native library. Without it, `isSupported()` returns `false` and
+  `create()` throws `FsWatchException` for every strategy.
 
-Registrations are coalesced. If you watch a directory recursively and then watch a file already
-inside it, both share one native watch; events are still routed to each logical registration and
-reported against its `FsWatchSource`. Paths are reported relative to the root you registered, so
-a symlinked or resolved root still surfaces the path you asked for.
-
-On macOS, FSEvents always reports **canonical** paths. From 2.3, a root reached *through* a
-symlink (for example `Files.createTempDirectory()` under `/var` → `/private/var`) is treated as
-the same directory for event routing — matching no longer depends on `followSymlinks`. Without
-that, watches on temp dirs silently never fired.
-
-Events flow through a bounded buffer (`eventBufferCapacity`, default 64) and errors through a
-separate one (`errorBufferCapacity`, default 32). When a buffer fills — or the native backend
-reports it dropped notifications — the watcher emits `FsWatchEvent.Overflow` with
-`needsRescan = true`, your cue to re-list the affected tree instead of trusting the stream.
-By default events are debounced over a 150 ms window; switch to `FsWatchDeliveryMode.Raw` to
-receive every native notification unmerged.
+</Accordion>
+</Accordions>
 
 ## API reference
 
-### Create a watcher
+| Member | Description |
+|---|---|
+| `FsWatchers.create(config = FsWatcherConfig())` | Builds a watcher. Throws `FsWatchException` when no backend fits. |
+| `FsWatchers.isSupported(config)` | Whether a backend is available for `config`. |
+| `FsWatcher.events` / `errors` | Hot `Flow<FsWatchEvent>` / `Flow<FsWatchError>` across all registrations. |
+| `FsWatcher.registrations` | `Set<FsWatchSource>` of the registered roots. |
+| `FsWatcher.watch(path, recursive = true, name = null)` | Returns an `FsWatchRegistration` (`source`, `active`, `close()`). `name` tells registrations of the same root apart. |
 
-`FsWatchers` is the entry point.
+`FsWatcherConfig` fields:
 
-| Member | Returns | Description |
+| Field | Default | Description |
 |---|---|---|
-| `create(config)` | `FsWatcher` | Builds a watcher. `config` defaults to `FsWatcherConfig()`. Throws `FsWatchException` if no backend is available for the config. |
-| `isSupported(config)` | `Boolean` | Whether a backend is available for the given config. Call this before `create`. |
+| `followSymlinks` | `false` | Descend into symlinks inside a watched tree. |
+| `backend` | `Auto` | `Auto` or `NativeOnly` (native, no polling fallback), or `Polling(interval = 2 s, compareContents = false)`. |
+| `eventBufferCapacity` | `64` | Event buffer size. A full buffer emits `Overflow`. |
+| `errorBufferCapacity` | `32` | Error buffer size. |
+| `deliveryMode` | `Debounced(window = 150 ms)` | Merges bursts per path and pairs renames. `Raw` delivers every event as it comes. |
 
-### Watch and collect
-
-`FsWatcher : AutoCloseable` is the watcher itself.
-
-| Member | Type | Description |
-|---|---|---|
-| `events` | `Flow<FsWatchEvent>` | Hot flow of filesystem events across all registrations. |
-| `errors` | `Flow<FsWatchError>` | Hot flow of backend errors, watcher- or path-scoped. |
-| `registrations` | `Set<FsWatchSource>` | The paths currently registered. |
-| `watch(path, recursive, name)` | `FsWatchRegistration` | Registers `path`. `recursive` defaults to `true`; `name` is an optional label. |
-| `close()` | `Unit` | Closes all registrations and the native watcher. |
-
-`FsWatchRegistration : AutoCloseable` represents one registered path. It exposes `source:
-FsWatchSource`, `active: Boolean`, and `close()` to stop watching that path alone.
-
-### Configure the watcher
-
-`FsWatcherConfig` is a data class; every field has a default.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `followSymlinks` | `Boolean` | `false` | Also match events under a root's resolved (real) path. |
-| `backend` | `FsWatchBackendStrategy` | `Auto` | Backend selection (see below). |
-| `eventBufferCapacity` | `Int` | `64` | Event buffer size; must be `> 0`. |
-| `errorBufferCapacity` | `Int` | `32` | Error buffer size; must be `> 0`. |
-| `deliveryMode` | `FsWatchDeliveryMode` | `Debounced(150 ms)` | How events are coalesced. |
-
-`FsWatchBackendStrategy` is a sealed interface:
-
-- `FsWatchBackendStrategy.Auto` — the native backend. Currently identical to `NativeOnly`; neither degrades to polling.
-- `FsWatchBackendStrategy.NativeOnly` — require the native backend.
-- `FsWatchBackendStrategy.Polling(interval, compareContents)` — poll on an interval
-  (default 2 s); set `compareContents = true` to detect changes by content rather than metadata.
-
-`FsWatchDeliveryMode` is a sealed interface:
-
-- `FsWatchDeliveryMode.Raw` — deliver every native notification unmerged.
-- `FsWatchDeliveryMode.Debounced(window)` — merge bursts within `window` (default 150 ms).
-
-### Handle events
-
-`FsWatchEvent` is a sealed interface. Every variant carries `source: FsWatchSource?` (the
-registration it belongs to) and `needsRescan: Boolean`.
-
-| Variant | Fields | Meaning |
-|---|---|---|
-| `Created` | `path`, `isDirectory` | A file or directory was created. |
-| `Modified` | `path`, `isDirectory` | Contents or metadata changed. |
-| `Removed` | `path`, `isDirectory` | A file or directory was removed. |
-| `Moved` | `from`, `to`, `isDirectory` | An entry was renamed or moved. |
-| `Overflow` | — | Events were dropped; re-list the tree. `needsRescan` is `true`. |
-| `Other` | `paths`, `isDirectory` | A backend event that doesn't map to the above. |
-
-`isDirectory` is `Boolean?` — `null` when the backend didn't report it.
-
-### Inspect errors
-
-`FsWatchError` is a data class with `message: String`, `source: FsWatchSource?` (null for
-watcher-level errors), `recoverable: Boolean`, and `cause: Throwable?`. `FsWatchException`
-extends `RuntimeException` and is thrown by `FsWatchers.create` and by `watch` when a
-registration fails.
-
-## Notes
-
-- `events` and `errors` have no replay. A late collector sees only events emitted after it
-  subscribes, so start collecting before you register paths.
-- Treat `FsWatchEvent.Overflow` as a signal to re-scan the affected directory; the stream is not
-  a guaranteed-complete log.
-- `FsWatcher` and `FsWatchRegistration` are `AutoCloseable`. Close registrations you no longer
-  need, and close the watcher on shutdown to release the native handle.
+Every `FsWatchEvent` carries `source` and `needsRescan`. `Created`, `Modified` and `Removed` have
+`path`, `Moved` has `from` and `to`, `Other` has `paths`; all but `Overflow` have `isDirectory: Boolean?`.
+`FsWatchError` has `message`, `source` (`null` for watcher-wide errors), `recoverable` and `cause`.
 
 ## What's next
 
-- [System info](/docs/os/system-info) — query platform and hardware state from the same runtime.
-- [Single instance](/docs/lifecycle/single-instance) — coordinate a single running copy of your app.
-- [Scheduler](/docs/lifecycle/scheduler) — run background tasks on a schedule, even when the app is closed.
+- [Scheduler](/docs/lifecycle/background/scheduler): background tasks that run even when the app is closed.
+- [System info](/docs/os/system-info): platform and hardware state from the same runtime.
+- [Executable type](/docs/lifecycle/executable-type): where a packaged app may write.

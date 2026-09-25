@@ -1,0 +1,74 @@
+---
+title: Multi-window
+description: The two multi-window archetypes of Nucleus, satellite palettes that dock and Chrome-like tabs, and the workspace model they share.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus ships two multi-window archetypes, declared from `nucleusApplication` and included in
+`nucleus-application`: satellite palettes that float beside a document or dock into it, and
+Chrome-like tabs that tear off into windows of their own.
+
+<Callout type="warn">
+Every API in this section is `@ExperimentalNucleusApi` at level `ERROR`. Add
+`@OptIn(ExperimentalNucleusApi::class)`, or opt the module in with
+`optIn.add("dev.nucleusframework.window.ExperimentalNucleusApi")` in `kotlin.compilerOptions`.
+</Callout>
+
+## Pick an archetype
+
+| | Satellites | Tabs |
+| --- | --- | --- |
+| What the user sees | Tool palettes, inspectors, panes around a document | Documents as tabs in a strip at the top of each window |
+| Who opens windows | You open the document windows; palettes follow the focused one | The workspace: one window per group of tabs |
+| Moves | Float ↔ dock, dock ↔ dock, between document windows | Reorder, tear off, merge into another window |
+| Declaration | `Satellite(workspace, id, title) { … }` | `Tab(workspace, id, title) { … }` |
+| Page | [Satellites](/docs/multi-window/satellites), [Docking](/docs/multi-window/docking) | [Tabs](/docs/multi-window/tabs) |
+
+The two compose: a tab window can host its own `DockLayout`. See
+[Compose tabs with satellites](/docs/multi-window/tabs#compose-tabs-with-satellites).
+`Satellite`, `SatelliteWindow`, `Tab` and `TabWindows` live in `dev.nucleusframework.application`,
+the rest in `dev.nucleusframework.window.tao`.
+
+## Shared ideas
+
+- **The workspace owns placement.** Declare each satellite or tab once, at application scope. The
+  workspace picks the host window and moves it on drag. `initialPlacement`, `initiallyOpen` and
+  `group` apply on the first declaration of an `id` only.
+- **Entries outlive composition.** A satellite or tab declared again resumes where it was.
+  `snapshot()` and `restore()` persist the layout.
+- **State follows the content.** `rememberSaveable` survives every move between windows. Plain
+  `remember` does not: hoist it or make it saveable.
+
+### Two ways to carry a drag
+
+`SatelliteWorkspace.dragKind` and `TabWorkspace.dragKind` hold the `WorkspaceDragKind` of the drag
+in flight, or `null`.
+
+| Value | When | What follows the pointer |
+| --- | --- | --- |
+| `Window` | Windows, macOS, X11, XWayland | A real window, or a ghost window |
+| `Transfer` | `TaoWindow.canPlaceOnScreen == false` (native Wayland) | The compositor's drag icon; `dragGhost` stays `null` |
+
+Branch Wayland-sensitive chrome on `TaoWindow.canPlaceOnScreen`, or
+`SatelliteScope.isCompositorPlaced`, never on the compositor name.
+`NUCLEUS_TAO_LINUX_RENDERER=x11` runs the app on XWayland and restores window-following drags.
+
+## Run the demos
+
+Run one with `./gradlew :examples:<name>:run`.
+
+| Demo | What it shows |
+| --- | --- |
+| [`satellite-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/satellite-demo) | Shared palettes, owner follows focus or a pin, drag to dock, layout snapshots |
+| [`tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tabs-demo) | Tear-off, merge, reorder, hover cards with thumbnails |
+| [`jewel-tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/jewel-tabs-demo) | The tab workspace drawn with Jewel's `TabStrip` |
+| [`tab-satellites-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tab-satellites-demo) | One `SatelliteWorkspace` per tab window |
+| [`reader-dock-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/reader-dock-demo) | Right-to-left reader: layered sides, custom splitters and headers, fixed panes |
+
+## What's next
+
+- [Satellites](/docs/multi-window/satellites): declare palettes and let them follow the focused document.
+- [Docking](/docs/multi-window/docking): lay docked panels out around your content.
+- [Tabs](/docs/multi-window/tabs): turn documents into tabs that tear off into windows.
+- [Linux and Wayland](/docs/windows/linux-wayland): what a compositor-placed window changes.

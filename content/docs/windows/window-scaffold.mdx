@@ -1,0 +1,149 @@
+---
+title: Window scaffold and chrome
+description: Build full-window layouts and custom title bars with WindowScaffold, drag areas, WindowControls, and the macOS and Windows 11 materials.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`WindowScaffold` lays out a custom title bar and the window content, and keeps the native caption
+zones, button order and drag behavior working. It comes with `nucleus-application`. Use it when
+content reaches under the title bar or a design system draws its own chrome; a plain
+`DecoratedWindow` with `TitleBar` keeps working.
+
+## Build a custom title bar
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+    MaterialTheme {
+        WindowBackground(MaterialTheme.colorScheme.background)
+        WindowScaffold(
+            titleBar = {
+                Box(Modifier.fillMaxWidth().height(48.dp).windowDragArea().padding(horizontal = 12.dp)) {
+                    Text("MyApp", Modifier.align(Alignment.CenterStart))
+                    WindowControls(Modifier.align(Alignment.CenterEnd))
+                }
+            },
+            titleBarPlacement = TitleBarPlacement.Overlay(),
+        ) { contentPadding ->
+            Box(Modifier.fillMaxSize().padding(contentPadding)) { /* content */ }
+        }
+    }
+}
+```
+
+Make `WindowScaffold` the only child of the window content. It makes nothing draggable: mark the
+move surface with `windowDragArea`.
+
+## Place the title bar
+
+| `TitleBarPlacement` | Layout |
+| --- | --- |
+| `Docked` | Default. The bar takes its height and the content fills the rest. |
+| `Overlay(autoHideInFullscreen = true, passThroughToContent = false)` | The content fills the window, the bar floats on top, and the content gets the bar height as top padding. |
+
+- `autoHideInFullscreen` removes the bar in fullscreen, and the chrome insets drop to zero.
+- `passThroughToContent` also hit-tests presses on the bar against the content below. Turn it on
+  for controls in the title-bar band, such as a tab strip. Leave it off when content scrolls behind
+  an opaque bar.
+- `controlButtonsDirection`: `Auto` follows the platform, `Rtl` moves the system buttons to the
+  leading edge and flips the macOS traffic lights.
+
+## Add drag areas
+
+```kotlin
+Modifier.windowDragArea(doubleClickAction = WindowDoubleClickAction.ToggleMaximize)
+VerticalScrollbar(adapter, Modifier.noWindowDrag())
+```
+
+Buttons and text fields opt out on their own. Wrap scrollbars, sliders and resize handles in
+`noWindowDrag()`. A double-click toggles maximize when the window is `resizable` and `maximizable`
+or already maximized, except in fullscreen. `WindowDoubleClickAction.None` turns it off.
+
+## Place the window controls
+
+```kotlin
+WindowControls(direction = ControlButtonsDirection.Auto, renderer = WindowControlsRenderer.Platform)
+```
+
+The buttons follow the window state and its `resizable`, `maximizable` and `minimizable` flags.
+Close calls `onCloseRequest`. On Linux, `Auto` also follows the desktop's button layout. See
+[Set the window chrome](/docs/windows#set-the-window-chrome).
+
+`Platform` draws Fluent buttons on Windows and GNOME or KDE buttons on Linux. On macOS it draws
+nothing and reserves the traffic-light space. To draw your own buttons, implement
+`WindowControlsRenderer.Control(type, state, onClick)`.
+
+## Match the window to the app theme
+
+```kotlin
+WindowBackground(MaterialTheme.colorScheme.background)
+WindowAppearance(if (dark) WindowAppearanceMode.Dark else WindowAppearanceMode.Light)
+val insets = LocalWindowChromeInsets.current
+```
+
+- `WindowBackground` shows during live resize and wherever Compose paints nothing. Without it, a
+  dark app can flash white while the user resizes.
+- `WindowAppearance` makes glass, traffic lights, menus and caption glyphs follow the app theme.
+  `System` follows the OS. No effect on Linux.
+- `insets.controlsInsets` is the space reserved for system controls and `titleBarHeight` the bar
+  height. Both are zero outside a `WindowScaffold`. Pad with these insets or with `WindowControls`,
+  not both.
+
+## Add a macOS glass region
+
+```kotlin
+Modifier.windowGlassRegion(WindowGlassRegionKind.Sidebar, cornerRadius = 12.dp)
+```
+
+The region shows the wallpaper-tinted material of System Settings. Leave its background unpainted.
+Kinds are `Sidebar`, `ContentList` and `Inspector` (macOS 14+, falls back to `ContentList`). There
+is no full-window glass. No effect on other platforms.
+
+## Add a Windows 11 backdrop
+
+```kotlin
+WindowsBackdrop(
+    style = WindowsBackdropStyle.Mica, // Acrylic, MicaAlt, Default, None
+    tint = Color.Unspecified,
+    tier = WindowsBackdropTier.Auto,   // Modern, LegacyMica, Windows10Acrylic
+)
+```
+
+The material shows wherever the app paints nothing, and `WindowBackground` is suspended meanwhile.
+An unspecified `tint` leaves Mica untinted and gives Acrylic the window background at moderate
+opacity. Older Windows versions degrade to the closest material. No effect on macOS and Linux.
+
+<Callout type="info">
+Windows with a backdrop or `transparent = true` render grayscale text instead of ClearType.
+</Callout>
+
+## Make a transparent, borderless window
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, undecorated = true, transparent = true) { /* ... */ }
+```
+
+`transparent` is a creation-time flag. Pixels left at alpha 0 show the desktop, and opaque
+`WindowBackground` and title-bar clears become transparent. The Material and Jewel windows take the
+same flag. For click-through windows, see [Overlay windows](/docs/windows/overlay-windows).
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The scaffold sends the measured `titleBar` height to the native layer, which centres the macOS
+  traffic lights and sizes the Windows caption zone.
+- `windowDragArea()` reads `LocalTaoWindow`. Pass `window = taoWindow` when parent composition
+  locals reach a child window's scene.
+- The glass region is an `NSSplitViewController` pane under the Compose surface.
+- Windows 11 before 22H2 maps both Mica styles to the single Mica attribute; Windows 10 falls back
+  to acrylic when available.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Windows](/docs/windows): `DecoratedWindow` parameters and the window chrome flags.
+- [Toolkits](/docs/toolkits): prebuilt title bars for Material, Jewel, Fluent, Yaru, and macOS.
+- [Accessibility](/docs/input/accessibility): Compose semantics exposed to VoiceOver, Narrator, and Orca.

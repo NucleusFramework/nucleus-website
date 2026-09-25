@@ -1,0 +1,166 @@
+---
+title: TextureView
+description: Affichez dans la scène Compose une texture GPU issue d'un producteur externe, sans copie de frame par le CPU.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TextureView` dessine dans la scène Compose une texture GPU produite par un autre composant : un
+décodeur vidéo, un pipeline de caméra ou un moteur de jeu. Aucune frame ne passe par le CPU, et
+l'ordre z, le clipping, `graphicsLayer` et le défilement s'appliquent comme pour n'importe quel
+composable. `TextureView` est inclus dans `nucleus-application` et ne gère aucune entrée :
+utilisez [`NativeView`](/docs/native-content/native-views) pour des widgets interactifs, ou
+[`TaoGpuRenderContext`](/docs/native-content/gpu-render-context) pour dessiner sur le device de la
+scène.
+
+## Afficher une texture
+
+Enveloppez le handle de plateforme du producteur dans une `TextureViewSource`, placez une
+`TextureView` et appelez `controller.markFrameAvailable()` après chaque frame terminée :
+
+```kotlin
+@Composable
+fun VideoPane(source: TextureViewSource?) {
+    val controller = rememberTextureViewController()
+    DisposableEffect(source) {
+        // Démarrez le producteur ; il appelle controller.markFrameAvailable() après chaque frame.
+        onDispose { /* arrêtez le producteur */ }
+    }
+    TextureView(
+        source = source,
+        controller = controller,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+    )
+}
+```
+
+`markFrameAvailable()` s'appelle depuis n'importe quel thread et ne relance que la passe de
+dessin. Il ne cadence pas votre producteur : limitez-le vous-même au rythme de l'écran.
+`contentScale`, `alignment` et `filterQuality` se comportent comme sur `Image`. Quand `source`
+vaut `null`, appartient à une autre plateforme ou échoue à l'import, `TextureView` affiche une
+`Box(modifier)` vide.
+
+## Sources par plateforme
+
+<Tabs items={['Windows', 'macOS', 'Linux']}>
+<Tab value="Windows">
+
+```kotlin
+val source = nucleusD3D11SharedTextureSource(
+    sharedHandle = dxgiSharedHandle, // IDXGIResource::GetSharedHandle
+    widthPx = width,
+    heightPx = height,
+)
+```
+
+- Passez un handle legacy issu de `GetSharedHandle`. Les handles NT
+  (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`) ne s'importent pas.
+- Utilisez `R8G8B8A8_UNORM` ou un format RGBA8 compatible, en alpha prémultiplié, à `widthPx` ×
+  `heightPx`.
+- Avec `D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX` (recommandé), encadrez les écritures du producteur
+  par `AcquireSync(0)` / `ReleaseSync(0)` ; les frames ne se déchirent jamais. Avec
+  `D3D11_RESOURCE_MISC_SHARED` seul, il n'y a aucune copie, mais appelez `Flush()` après chaque
+  frame.
+
+Voir le [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/mediafoundation-demo).
+
+</Tab>
+<Tab value="macOS">
+
+```kotlin
+// Buffer partageable, depuis n'importe quel device ou processus
+val surfaceSource = nucleusIOSurfaceTextureSource(ioSurface = ioSurfaceRef, widthPx = width, heightPx = height)
+
+// Texture Metal du même processus
+val metalSource = nucleusMetalTextureSource(metalTexture = mtlTexture, widthPx = width, heightPx = height)
+```
+
+- Utilisez du `BGRA` ou `RGBA` 32 bits (sRGB compris) en alpha prémultiplié, à `widthPx` ×
+  `heightPx`.
+- Terminez les écritures du producteur (`commit` et `waitUntilCompleted`, ou double buffering)
+  avant `markFrameAvailable()`.
+- La source retient l'`IOSurface` : votre producteur peut relâcher sa propre référence.
+- Une texture Metal doit pouvoir servir de render target sur le device de la fenêtre, ou reposer
+  sur une `IOSurface` ; sinon, passez une source `IOSurface`.
+- Sur un Mac doté uniquement d'un GPU Intel dédié, l'import échoue et vous obtenez une boîte vide.
+
+Voir l'[avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/avfoundation-demo).
+
+</Tab>
+<Tab value="Linux">
+
+```kotlin
+// DMA-BUF RGB 32 bits compact
+val rgb = nucleusDmaBufTextureSource(
+    fd = dmaBufFd, widthPx = width, heightPx = height, stride = stride,
+    fourcc = NucleusDrmFormat.ARGB8888,
+)
+
+// YUV trois plans issu d'un décodeur matériel
+val yuv = nucleusYuvDmaBufTextureSource(
+    widthPx = width,
+    heightPx = height,
+    format = NucleusYuvFormat.I420,
+    planes = listOf(
+        NucleusDmaBufPlane(fd = yFd, stride = yStride),
+        NucleusDmaBufPlane(fd = uFd, stride = uStride),
+        NucleusDmaBufPlane(fd = vFd, stride = vStride),
+    ),
+    colorSpace = NucleusYuvColorSpace.BT709_LIMITED,
+)
+```
+
+- FourCC RGB : `ARGB8888`, `XRGB8888`, `ABGR8888` ou `XBGR8888`. Vous restez propriétaire de `fd`.
+- Le YUV prend en charge `I420` et `YV12`. NV12 et NV21 ne sont pas pris en charge.
+- `NucleusYuvColorSpace` : `BT601_LIMITED`, `BT601_FULL`, `BT709_LIMITED`, `BT709_FULL`. Une
+  valeur erronée donne des couleurs délavées ou sursaturées.
+- `controller.markFrameAvailable(acquireFenceFd)` transmet une fence `sync_file` au lieu de
+  terminer côté CPU. Cela exige `EGL_ANDROID_native_fence_sync`.
+
+Voir le [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/gstreamer-demo).
+
+</Tab>
+</Tabs>
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Nucleus importe l'allocation du producteur sur le GPU de la fenêtre et l'échantillonne pendant
+  la passe de dessin. Les `TextureView` qui partagent une `TextureViewSource` partagent un seul
+  import.
+- Le chemin keyed mutex de Windows copie chaque frame une fois sur le GPU ; macOS copie toujours
+  une fois.
+- NV12 et NV21 échouent car la version de Skia livrée avec Compose ne sait pas échantillonner un
+  plan de chrominance entrelacé. EGL prend sa propre référence sur un `fd` DMA-BUF à l'import.
+- `rememberTextureViewController()` libère une fence en attente quand la composition disparaît.
+  Les autres plateformes ignorent le fd d'une fence et vous le laissent.
+- `D3D11TestTextureProducer`, `MetalTestTextureProducer` et `DmaBufTestTextureProducer` produisent
+  des frames de test pour les démos et la CI.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+`TextureView(source, modifier, controller = null, filterQuality = FilterQuality.Low,
+contentScale = ContentScale.FillBounds, alignment = Alignment.Center)`
+
+| Factory | Plateforme | Handle |
+| --- | --- | --- |
+| `nucleusD3D11SharedTextureSource(sharedHandle, widthPx, heightPx)` | Windows | Handle DXGI partagé legacy |
+| `nucleusIOSurfaceTextureSource(ioSurface, widthPx, heightPx)` | macOS | `IOSurfaceRef` |
+| `nucleusMetalTextureSource(metalTexture, widthPx, heightPx)` | macOS | `id<MTLTexture>` |
+| `nucleusDmaBufTextureSource(fd, widthPx, heightPx, stride, fourcc, offset, modifier)` | Linux | DMA-BUF à un plan |
+| `nucleusEglImageTextureSource(eglImage, widthPx, heightPx)` | Linux | `EGLImageKHR` |
+| `nucleusYuvDmaBufTextureSource(widthPx, heightPx, format, planes, colorSpace)` | Linux | DMA-BUF YUV planaire |
+
+Les handles sont des pointeurs bruts passés en `Long`. Un échec d'import ne se voit que par une
+boîte vide : vérifiez d'abord formats et dimensions. `TextureViewController.NO_FENCE` vaut `-1`.
+
+## Et ensuite
+
+- [Contexte de rendu GPU](/docs/native-content/gpu-render-context) : dessiner sur le device de la scène.
+- [Vues natives](/docs/native-content/native-views) : intégrer du contenu `NSView`, `HWND` ou `GtkWidget` interactif.
+- [Fenêtres](/docs/windows) : ouvrir la fenêtre qui héberge la texture.

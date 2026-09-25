@@ -1,0 +1,159 @@
+---
+title: Menus contextuels
+description: Remplacez les menus contextuels dessinés par Compose par le menu de la plateforme, NSMenu sur macOS et un flyout Fluent, Adwaita ou Breeze sur Windows et Linux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Nucleus remplace les menus contextuels de Compose par le menu de la plateforme : un `NSMenu` sur
+macOS, et un flyout au style Fluent sur Windows, Adwaita sur les bureaux GTK ou Breeze sur les
+bureaux Qt. Il est fourni avec `nucleus-application`.
+
+## Activer le menu natif
+
+```kotlin
+fun main() = nucleusApplication {
+    DecoratedWindow(
+        onCloseRequest = ::exitApplication,
+        title = "MyApp",
+        nativeContextMenu = true,
+    ) {
+        // Text fields now show the platform Cut/Copy/Paste menu
+    }
+}
+```
+
+Le paramètre couvre `ContextMenuArea`, le menu Couper/Copier/Coller des champs de texte et les
+[suggestions du correcteur orthographique](/docs/os/spell-check). `HostedWindow` et les fenêtres
+Material et Jewel acceptent le même paramètre. Le style suit la plateforme et, sous Linux, le
+toolkit de la session.
+
+## Ajouter vos propres entrées
+
+`NucleusContextMenuItem` étend le `ContextMenuItem` de Compose avec une icône et un libellé de
+raccourci :
+
+```kotlin
+ContextMenuArea(
+    items = {
+        listOf(
+            NucleusContextMenuItem(
+                label = "Reveal in Finder",
+                icon = ContextMenuIcon.Folder,
+                onClick = { revealInFileManager(path) },
+            ),
+            NucleusContextMenuDivider,
+            NucleusContextMenuItem(
+                label = "Delete",
+                icon = ContextMenuIcon.Delete,
+                shortcut = "Del",
+                onClick = { delete(path) },
+            ),
+        )
+    },
+) {
+    FileRow(path)
+}
+```
+
+`NucleusContextMenuSubmenu` imbrique un groupe. Sa lambda `items` s'exécute à l'ouverture du menu,
+ce qui lui permet d'afficher des données qui changent :
+
+```kotlin
+NucleusContextMenuSubmenu(label = "Open recent") { recentFiles.map { fileItem(it) } }
+```
+
+Les icônes varient selon la plateforme : Adwaita n'en affiche aucune, et `ContextMenuIcon.SfSymbol`
+ne s'applique qu'à macOS.
+
+## Afficher les raccourcis clavier
+
+Une entrée dotée d'une icône d'édition standard reçoit d'elle-même le libellé de la plateforme :
+`⌘C` sur macOS, `Ctrl+C` ailleurs. Passez `shortcut` pour le remplacer, ou `shortcut = ""` pour le
+masquer. Le `NSMenu` de macOS n'affiche pas les libellés de raccourci.
+
+## Comportement du flyout à l'écran
+
+<Callout type="info" title="Modifié en 3.0">
+Sous Windows et Linux, le flyout s'ouvre dans sa propre surface de popup native, même si la
+fenêtre garde `nativePopupLayers = false`. Vos autres popups suivent toujours ce paramètre.
+</Callout>
+
+Le flyout peut sortir de sa fenêtre et reste dans la zone de travail de son écran. Un second clic
+droit pendant que le menu est ouvert le déplace au nouvel endroit. Le flyout se ferme quand sa
+fenêtre perd le focus.
+
+Pour appliquer le même traitement à l'une de vos popups, enveloppez-la :
+
+```kotlin
+NativePopupLayers {
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) { /* … */ }
+}
+```
+
+Voir [Dialogues et popups](/docs/windows/dialogs-popups) pour le modèle complet des couches de
+popup.
+
+## Détecter le toolkit Linux
+
+Lisez la valeur que Nucleus utilise pour choisir le style Linux, par exemple pour accorder un
+autre widget :
+
+```kotlin
+when (LinuxUiToolkit.Current) {
+    LinuxUiToolkit.Qt -> // KDE Plasma, LXQt, Deepin, …
+    LinuxUiToolkit.Gtk -> // GNOME, Xfce, Cinnamon, MATE, …
+}
+```
+
+Les bureaux inconnus et les gestionnaires de fenêtres en mosaïque nus renvoient `Gtk`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- macOS affiche le menu via [`menu-macos`](/docs/os/menus/menu-bar). Si sa bibliothèque native ne se
+  charge pas, `isNativeContextMenuSupported` vaut `false` et les menus Compose restent.
+- Sous Wayland natif, le flyout est un `xdg_popup` : le compositeur le retourne ou le décale pour
+  le garder à l'écran.
+- Nucleus retire les séparateurs en tête, en fin et en double, et une liste vide ferme le menu.
+- `LinuxUiToolkit.Current` lit `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION` et `XDG_SESSION_DESKTOP`,
+  puis `KDE_FULL_SESSION` et `QT_QPA_PLATFORMTHEME`.
+- Le flyout Fluent peint la couleur de repli de l'acrylique et ne floute pas ce qui se trouve
+  derrière.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+Package `dev.nucleusframework.application.contextmenu`.
+
+| Symbole | Description |
+|---|---|
+| `NucleusContextMenuItem(label, enabled, icon, shortcut, onClick)` | Entrée avec icône et libellé de raccourci facultatifs. |
+| `NucleusContextMenuDivider` | Séparateur. |
+| `NucleusContextMenuSubmenu(label) { items }` | Groupe imbriqué. `items` s'exécute à l'ouverture du menu. |
+| `ContextMenuIcon` | `Cut`, `Copy`, `Paste`, `SelectAll`, `Delete`, `Folder`, `SfSymbol(name)`. |
+| `ContextMenuIcon.stockShortcut()` | Libellé de raccourci de la plateforme pour les icônes d'édition, sinon `null`. |
+| `NativeContextMenuProvider(enabled) { }` | Installe le menu natif pour un sous-arbre sans le paramètre de fenêtre. |
+| `isNativeContextMenuSupported` | Indique si la plateforme peut l'afficher. |
+| `LocalContextMenuDivider` | Le séparateur dessiné par le moteur actif, ou `null`. |
+| `LocalContextMenuItemInterpreter` | Remplace la correspondance entre entrées Compose et `ContextMenuEntry` pour un sous-arbre. |
+| `NativePopupLayers { }` | Package `dev.nucleusframework.window.tao`. Ouvre les popups d'un sous-arbre dans des surfaces natives. |
+
+Pour afficher vous-même un `NSMenu`, `menu-macos` fournit `popUpNativeMenu(items)` avec des entrées
+`NativePopupMenuItem`. L'appel bloque jusqu'à la fermeture du menu.
+
+<Callout type="warn">
+Appelez `popUpNativeMenu` hors du thread UI. Depuis un callback du thread UI, il bloque les
+frames, les animations, `Dispatchers.Main` et `delay` jusqu'à la fermeture du menu.
+</Callout>
+
+## Et ensuite
+
+- [Correcteur orthographique](/docs/os/spell-check) : les suggestions dans ces menus.
+- [Dialogues et popups](/docs/windows/dialogs-popups) : les couches de popup natives pour vos
+  autres popups.
+- [Barre de menus macOS](/docs/os/menus/menu-bar) : le menu de l'application, sur la même couche
+  native.

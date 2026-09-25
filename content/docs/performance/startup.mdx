@@ -1,0 +1,68 @@
+---
+title: Startup optimization
+description: Turn on the nucleusOptimization pack to shorten JVM startup and lower idle memory, and package the app with the current OpenJDK through lastJdk.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusOptimization` is a set of JVM packaging defaults tuned for desktop apps. It is off by
+default, and your source code stays the same when you turn it on.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization = true
+    nucleusOptimization { idleGc = false } // optional: force one knob on or off
+}
+```
+
+Each knob is a `Boolean?`: `null` follows the master switch, `true` or `false` forces it. You can
+also leave the pack off and turn on a single knob.
+
+## Knobs
+
+| Knob | Effect when on |
+|------|----------------|
+| `serialGc` | Uses the Serial collector when `garbageCollector` is unset. |
+| `compactHeap` | Adds `-Xms32m` and `-XX:MaxRAMPercentage=25`, each one only if `jvmArgs` does not already set it. |
+| `singleJar` | Flattens the runtime JARs into one JAR. With ProGuard, it sets `joinOutputJars` instead. |
+| `idleGc` | Collects garbage while the app sits unused. See [Idle GC](#idle-gc). |
+| `lastJdk` | Packages and runs the app with OpenJDK 27. See [Package with the latest JDK](#package-with-the-latest-jdk). |
+
+The pack never replaces a value you set (`garbageCollector`, `javaHome`, `-Xms`,
+`-XX:MaxRAMPercentage`), and it does not enable the [AOT cache](/docs/performance/aot-cache) or
+ProGuard. In a GraalVM native image only `idleGc` applies.
+
+## Package with the latest JDK
+
+With `lastJdk` on, the plugin downloads OpenJDK 27 GA (BellSoft Liberica JDK 27 on Intel macOS
+and Windows on ARM) the first time a packaging or `run` task needs it. The app ships with that
+runtime; your `jvmToolchain(...)` stays as it is.
+
+- Set `NUCLEUS_JDK_HOME` to a local JDK 27 to skip the download.
+- An explicit `javaHome` disables `lastJdk`.
+
+## Idle GC
+
+Idle GC runs `System.gc()` right away when a window is minimized, or 3 s after every window has
+lost focus. Startup never triggers one. It covers the windows `nucleusApplication` opens and works
+in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off for one run.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- `serialGc` and `compactHeap` also apply to the `run` task.
+- `lastJdk` pins build 35 from [jdk.java.net/27](https://jdk.java.net/27/) and caches it under
+  `<gradle-user-home>/nucleus/jdk`. The fallback uses the full Liberica JDK, since Lite has no
+  `jmods` for `jlink`. A `NUCLEUS_JDK_HOME` that is not JDK 27 or has no `bin/java` is ignored
+  with a warning.
+- A native image reads idle GC from `nucleus/nucleus-app.properties`, since it has no launcher `.cfg`.
+- A native image takes its collector and heap from `graalvm { garbageCollector; maxHeapSizePercent }`.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [AOT cache](/docs/performance/aot-cache): skip JVM warmup with a Project Leyden cache.
+- [GraalVM Native Image](/docs/performance/graalvm): compile the app to a native binary.
+- [Gradle DSL reference](/docs/reference/gradle-dsl): every property of `nucleus.application`.

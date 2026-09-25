@@ -1,0 +1,127 @@
+---
+title: Tray-anchored apps
+description: TrayApp opens a Compose popup window next to a system tray icon, for menu bar and tray utilities written in Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TrayApp` anchors a Compose popup to a system tray icon. A left click on the icon opens the popup
+next to it, a right click opens its menu, and a click elsewhere closes the popup. Add
+`dev.nucleusframework:composenativetray-app`; it brings [`composenativetray`](/docs/os/tray).
+
+<Version module="tray" />
+
+<Callout type="warn" title="Changed in 3.0">
+`composenativetray-app` builds for Nucleus 2.x call `NucleusApplicationScope.backend`, which
+Nucleus 3.0 removes. Use a release built against Nucleus 3.0. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Create a tray app
+
+Call `TrayApp` inside `nucleusApplication { }`. Hold a `TrayAppState` to show, hide, or resize
+the popup from code:
+
+```kotlin
+import dev.nucleusframework.composenativetray.trayapp.TrayApp
+import dev.nucleusframework.composenativetray.trayapp.rememberTrayAppState
+
+fun main() = nucleusApplication {
+    val state = rememberTrayAppState(
+        initialWindowSize = DpSize(300.dp, 400.dp),
+        initialDismissMode = TrayWindowDismissMode.AUTO,
+    )
+
+    TrayApp(
+        icon = Icons.Default.Dashboard,
+        tooltip = "Quick dashboard",
+        state = state,
+        menu = {
+            Item(label = "Settings") { openSettings() }
+            Divider()
+            Item(label = "Quit") { exitApplication() }
+        },
+    ) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("CPU: 42%")
+            Button(onClick = { state.hide() }) { Text("Close") }
+        }
+    }
+}
+```
+
+`menu` takes the functions of the [tray menu DSL](/docs/os/tray/menu), without
+`@Composable`.
+
+## Hide the Dock icon on macOS
+
+Pass `dockIconFollowsWindows = true` to `nucleusApplication` instead of setting `LSUIElement` in
+`Info.plist`:
+
+```kotlin
+fun main() = nucleusApplication(dockIconFollowsWindows = true) {
+    TrayApp(icon = Icons.Default.Dashboard, tooltip = "Dashboard") { Text("Popup content") }
+}
+```
+
+A Dock tile appears only while a `DecoratedWindow` with `hiddenFromDock = false` is visible.
+`TrayApp` popups never count, so a tray-only app stays out of the Dock. Other systems ignore the
+flag. See [Hide a window from the taskbar or Dock](/docs/windows#hide-a-window-from-the-taskbar-or-dock).
+
+## Notes
+
+- The popup has no title bar and does not appear in the taskbar, the Dock, or Alt+Tab.
+- In `AUTO` dismiss mode, the popup hides when it loses focus. Clicks on the tray icon and its
+  menu do not count as outside clicks. In `MANUAL`, only `hide()` or a click on the icon closes it.
+- On macOS the popup joins every Space and stays when you click the wallpaper.
+- The popup keeps its composition while hidden, so its state survives a hide and show.
+- On Linux the popup needs X11 or XWayland. A Wayland session without XWayland gets an opaque
+  undecorated window instead: the "fallback window only" parameters below apply to it.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The popup is a transparent, non-activating native panel, not a `DecoratedWindow`.
+- The library reads the tray icon's screen position and places the popup beside it, with an
+  offset tuned for each OS and Linux desktop.
+- About 1.5 s after the popup hides, the library requests a garbage collection to trim the heap.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+### TrayApp parameters
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `icon` / `windowsIcon` + `macLinuxIcon` | required | `ImageVector`, `Painter`, or `DrawableResource`, as in `Tray`. |
+| `tooltip` | required | Tray icon tooltip. |
+| `state` | `null` | A `TrayAppState`; without it `TrayApp` keeps its own. |
+| `windowSize` | `null` | Initial size; falls back to the state's size, `DpSize(300.dp, 200.dp)` by default. |
+| `visibleOnStart` | `false` | Show the popup at launch. |
+| `enterTransition` / `exitTransition` | fade | Popup animations. |
+| `undecorated`, `resizable`, `windowsTitle`, `windowIcon` | `true`, `false`, `""`, `null` | Fallback window only. |
+| `horizontalOffset` / `verticalOffset` | `0` / per OS | Nudge the popup away from the tray anchor, in pixels. |
+| `onPreviewKeyEvent` / `onKeyEvent` | `{ false }` | Key handlers for the popup. |
+| `menu` | `null` | Right-click menu. |
+
+### TrayAppState
+
+| Member | Description |
+| --- | --- |
+| `isVisible`, `windowSize`, `dismissMode` | `StateFlow`s of the current values. |
+| `show()`, `hide()`, `toggle()` | Change visibility. |
+| `setWindowSize(size)`, `setWindowSize(width, height)` | Resize the popup. |
+| `setDismissMode(mode)` | `AUTO` or `MANUAL`. |
+| `onVisibilityChanged(callback)` | Observe visibility changes. |
+
+`getTrayPosition()` returns the `TrayPosition` (`TOP_LEFT`, `TOP_RIGHT`, `BOTTOM_LEFT`,
+`BOTTOM_RIGHT`) of the screen corner that holds the tray.
+
+## What's next
+
+- [System tray](/docs/os/tray): the `Tray` API that `TrayApp` builds on.
+- [Tray menu DSL](/docs/os/tray/menu): the right-click menu functions.
+- [Single instance](/docs/lifecycle/single-instance): keep one running copy of a tray app.

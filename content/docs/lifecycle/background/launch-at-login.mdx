@@ -1,0 +1,108 @@
+---
+title: Launch at login
+description: Enable, disable, and query launch at login from Kotlin with one API that picks the backend for the current packaging format.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+The `autolaunch` module enables, disables, and queries launch at login with one API on Windows
+(MSIX and Win32), macOS 13+, Linux and Flatpak. It respects choices the user made outside your app.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.autolaunch:<version>")
+}
+```
+
+For MSIX, set `appx { addAutoLaunchExtension = true }`. Without it, the API returns `UNSUPPORTED`.
+
+## Check and toggle auto-launch
+
+```kotlin
+when (AutoLaunch.state()) {
+    AutoLaunchState.ENABLED          -> {}
+    AutoLaunchState.DISABLED         -> AutoLaunch.enable()
+    AutoLaunchState.DISABLED_BY_USER -> AutoLaunch.openSystemSettings()
+    AutoLaunchState.UNSUPPORTED      -> { /* macOS < 13, unsupported Linux setup */ }
+    else -> {}
+}
+```
+
+<Callout type="warn">
+Do not retry on `BLOCKED_BY_USER`. After the user turns the app off in Task Manager or System
+Settings, `enable()` returns `BLOCKED_BY_USER` until they turn it back on there. Send them to
+`openSystemSettings()`.
+</Callout>
+
+## Detect a login launch
+
+`wasStartedAtLogin(args)` reports whether login started the process, for example to start hidden.
+`nucleusApplication` caches the answer at startup, so later calls can pass an empty array:
+
+```kotlin
+LaunchedEffect(Unit) {
+    startedAtLogin = AutoLaunch.wasStartedAtLogin(emptyArray())
+}
+```
+
+On macOS, a call made before `nucleusApplication` returns `false`. It returns `false` in dev runs.
+
+## Notes
+
+- On MSIX, Task Manager's Startup apps tab refreshes only after the next login. The stored state
+  is already correct.
+- The Linux unit starts after `graphical-session.target` and
+  `gnome-session-x11-services-ready.target`. systemd ignores the second target outside GNOME.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+| Packaging | Backend | Login detection |
+|---|---|---|
+| MSIX | `StartupTask` | A `sihost.exe` ancestor |
+| Win32 (MSI, NSIS) | `HKCU\...\CurrentVersion\Run` | `--nucleus-autostart` |
+| macOS (13+) | `SMAppService.mainApp` | The login Apple Event |
+| Linux (deb, rpm, AppImage) | systemd user service in `~/.config/systemd/user/` | `INVOCATION_ID` |
+| Flatpak | Background portal | `--nucleus-autostart` |
+
+- Win32 reads `StartupApproved\Run` to detect a user disable, and updates keep the state.
+- `wasStartedAtLogin` caches positive results, so polling it is safe.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| `AutoLaunch` | Returns | Notes |
+|---|---|---|
+| `state()` | `AutoLaunchState` | Current state. |
+| `enable()` / `disable()` | `AutoLaunchResult` | Turns auto-launch on or off. |
+| `openSystemSettings()` | `Boolean` | Opens Startup apps (Windows) or Login Items (macOS). |
+| `wasStartedAtLogin(args)` | `Boolean` | Whether login started this process. |
+| `isEnabled()` | `Boolean` | `ENABLED` or `ENABLED_BY_POLICY`. |
+| `isUserLocked()` | `Boolean` | `DISABLED_BY_USER`. |
+| `diagnostic()` | `String` | Backend trace for support tickets. |
+| `preload()` | `Unit` | Call off the UI thread to avoid a first-call stall on macOS. |
+
+- `AutoLaunchState`: `ENABLED`, `DISABLED`, `DISABLED_BY_USER`, `DISABLED_BY_POLICY`,
+  `ENABLED_BY_POLICY` (read-only, MSIX Group Policy), `UNSUPPORTED`.
+- `AutoLaunchResult`: `OK`, `UNCHANGED`, `BLOCKED_BY_USER`, `BLOCKED_BY_POLICY`, `UNSUPPORTED`, `ERROR`.
+
+`AutoLaunchConfig`, set before the first `AutoLaunch` call:
+
+| Property | Default | Affects |
+|---|---|---|
+| `taskId` | `NucleusApp.startupTaskId`, then `appId` | MSIX `<uap5:StartupTask TaskId>` |
+| `executablePath` | The running executable | Win32 `Run` command |
+| `autostartArgument` | `"--nucleus-autostart"` | Login marker; `null` omits it |
+| `registryValueName` | `NucleusApp.appName`, then `appId` | Win32 `Run` value name |
+| `backgroundReason` | `null` | Flatpak portal prompt |
+
+## What's next
+
+- [Service management](/docs/lifecycle/background/service-management): agents and daemons on macOS.
+- [Application entry point](/docs/lifecycle/application): what `nucleusApplication` primes at startup.
+- [Scheduler](/docs/lifecycle/background/scheduler): background work after a login launch.

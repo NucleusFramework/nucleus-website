@@ -1,82 +1,40 @@
 ---
 title: Chargeur de bibliothèques natives
-description: Comment Nucleus charge les bibliothèques partagées JNI depuis les JARs des modules — chemin système d'abord, puis cache adressé par contenu sous le répertoire de cache de l'OS.
+description: Comment les modules Nucleus chargent leurs bibliothèques JNI, depuis le dossier de l'application empaquetée, le chemin des bibliothèques ou un cache adressé par contenu que vous pouvez déplacer.
 ---
 
-La plupart des modules runtime Nucleus embarquent une petite bibliothèque partagée JNI à côté
-de leur code Kotlin (mode sombre, couleur système, notifications, progression barre des tâches,
-auto-launch, etc.). `NativeLibraryLoader` est le chargeur unique utilisé par ces modules. Il
-vit dans `core-runtime` et arrive via `nucleus-application`.
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-Vous l'appelez rarement vous-même. Cette page sert si vous écrivez un bridge JNI custom qui
-doit se comporter comme le reste de Nucleus, ou si vous déboguez une bibliothèque qui n'a pas
-chargé ou un cache bloqué.
-
-## D'où il vient
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    // Via le module ombrelle :
-    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
-
-    // Ou directement :
-    implementation("dev.nucleusframework:nucleus.core-runtime:<version>")
-}
-```
-
-```kotlin
-import dev.nucleusframework.core.runtime.NativeLibraryLoader
-```
+`NativeLibraryLoader` charge les bibliothèques JNI des modules Nucleus, et celles de votre propre
+pont JNI, dans une application empaquetée, un fat JAR ou une exécution depuis l'IDE. Il se trouve
+dans `core-runtime`, fourni avec `nucleus-application`.
 
 ## Charger une bibliothèque
 
 ```kotlin
-private const val LIBRARY_NAME = "nucleus_systemcolor"
+import dev.nucleusframework.core.runtime.NativeLibraryLoader
 
-private val loaded = NativeLibraryLoader.load(
-    LIBRARY_NAME,
+private val loaded: Boolean = NativeLibraryLoader.load(
+    "nucleus_systemcolor",
     NativeWindowsSystemColorBridge::class.java,
 )
-
-val isAvailable: Boolean get() = loaded
 ```
 
-`load` renvoie `true` quand la bibliothèque est dans le processus, `false` quand elle est
-absente pour cette plateforme ou que l'extraction a échoué. Il ne lève pas d'exception pour un
-binaire manquant : les modules traitent ça comme « non disponible » et font un repli ou un
-no-op.
+`load` renvoie `true` une fois la bibliothèque chargée dans le processus, et `false` quand aucun
+binaire n'existe pour cette plateforme ou que le chargement a échoué. Il ne lève pas d'exception :
+traitez `false` comme « indisponible ». Un second appel avec le même nom renvoie `true` sans
+recharger.
 
 | Paramètre | Défaut | Rôle |
 |-----------|--------|------|
-| `libraryName` | (requis) | Nom de base sans `lib` / extension, ex. `"nucleus_systemcolor"` |
-| `callerClass` | (requis) | Une classe du même JAR que la ressource native, pour la localiser |
-| `resourcePrefix` | `"/nucleus/native"` | Racine du chemin dans le JAR |
-| `sidecarFiles` | `emptyList()` | Fichiers extraits à côté de la lib principale avant le chargement |
+| `libraryName` | requis | Nom de base sans `lib` ni extension, par exemple `"nucleus_systemcolor"` |
+| `callerClass` | requis | Une classe du JAR qui contient la bibliothèque |
+| `resourcePrefix` | `"/nucleus/native"` | Dossier racine dans le JAR |
+| `sidecarFiles` | `emptyList()` | Fichiers annexes extraits à côté de la bibliothèque avant son chargement |
 
-Un second appel avec le même `libraryName` est un no-op et renvoie `true` si le premier a
-réussi.
-
-## Fonctionnement
-
-Deux étapes, dans l'ordre :
-
-1. **Chemin système** — `System.loadLibrary(libraryName)`. C'est le chemin d'une app packagée
-   dont l'installateur a placé le `.so` / `.dylib` / `.dll` sur `java.library.path`.
-2. **Extraction depuis le JAR** — si l'étape 1 échoue, le chargeur cherche
-   `{resourcePrefix}/{os}-{arch}/{nomMappé}` dans le JAR de l'appelant, l'extrait dans un
-   cache persistant, puis appelle `System.load` sur le chemin absolu.
-
-### Disposition dans le JAR
-
-Le dossier plateforme et le nom de fichier sont dérivés de l'OS et de l'architecture :
-
-| OS | Arch | Répertoire ressource | Fichier pour `foo` |
-|----|------|----------------------|--------------------|
-| macOS | x64 / aarch64 | `darwin-x64` / `darwin-aarch64` | `libfoo.dylib` |
-| Linux | x64 / aarch64 | `linux-x64` / `linux-aarch64` | `libfoo.so` |
-| Windows | x64 / aarch64 | `win32-x64` / `win32-aarch64` | `foo.dll` |
-
-Chemin complet dans le JAR (préfixe par défaut) :
+Placez les binaires dans le JAR sous `{resourcePrefix}/{os}-{arch}/`, avec `os` parmi `darwin`,
+`linux`, `win32` et `arch` parmi `x64`, `aarch64` :
 
 ```text
 /nucleus/native/darwin-aarch64/libnucleus_systemcolor.dylib
@@ -84,51 +42,17 @@ Chemin complet dans le JAR (préfixe par défaut) :
 /nucleus/native/win32-x64/nucleus_systemcolor.dll
 ```
 
-Si la ressource est absente, le chargeur logue en `FINE` et renvoie `false`. C'est ainsi qu'un
-module réservé à macOS reste silencieux sous Linux.
+<Callout type="warn" title="Modifié en 3.0">
+Les applications empaquetées ne portent plus les bibliothèques JNI de Nucleus dans leurs JAR : le
+plugin les livre à côté de l'application. Le code qui les lisait comme ressources du classpath dans
+une application empaquetée doit passer par `NativeLibraryLoader`. Voir
+[Migrer depuis la 2.x](/docs/migrate/from-2.x).
+</Callout>
 
-### Répertoire de cache
+## Fichiers annexes
 
-Les bibliothèques extraites vont sous le cache utilisateur de l'OS, pas dans un temp effacé
-à chaque lancement :
-
-| Plateforme | Chemin |
-|------------|--------|
-| macOS | `~/Library/Caches/nucleus/native/` |
-| Linux | `$XDG_CACHE_HOME/nucleus/native/` ou `~/.cache/nucleus/native/` |
-| Windows | `%LOCALAPPDATA%\nucleus\native\` (repli : `%USERPROFILE%\AppData\Local\nucleus\native\`) |
-
-Disposition sous cette racine :
-
-```text
-<racine-cache-os>/nucleus/native/<os>-<arch>/<fingerprint>/<fichier bibliothèque>
-```
-
-### Empreintes adressées par contenu
-
-L'empreinte est construite à partir du CRC-32 et de la taille de l'entrée JAR (lus dans les
-en-têtes ZIP, sans I/O de flux). Pour les URL `file:` en mode IDE, taille et last-modified
-sont utilisés à la place. Les sidecars entrent dans la même chaîne d'empreinte : la lib
-principale et ses helpers partagent un répertoire et une clé de cache.
-
-Comme des versions différentes produisent des empreintes différentes, deux processus qui
-utilisent deux versions du même artefact ne partagent jamais le même chemin d'extraction. Ça
-évite une course où un processus pourrait remplacer un fichier qu'un autre allait
-`System.load` (issue #304). Si le fichier cible existe déjà, l'extraction est sautée — le
-contenu est supposé correct pour cette empreinte.
-
-L'extraction écrit un fichier temporaire dans le même répertoire, puis le renomme (move
-atomique quand le système de fichiers le permet). Les extracteurs concurrents qui perdent la
-course de rename réutilisent le fichier du gagnant ou, en dernier recours, chargent depuis
-leur propre copie temporaire.
-
-## Fichiers sidecar
-
-Certains codes natifs ont besoin de DLL d'aide à côté de la lib principale pour que le
-linker dynamique les résolve (`LoadLibrary` sous Windows, `$ORIGIN` sous Linux,
-`@loader_path` sous macOS). Passez ces noms de fichiers tels qu'ils apparaissent dans le
-répertoire ressource du JAR (noms bruts sous Windows, noms complets pour les libs style
-Unix) :
+Passez les DLL annexes dont la bibliothèque a besoin à côté d'elle, nommées comme dans le dossier
+de ressources du JAR :
 
 ```kotlin
 NativeLibraryLoader.load(
@@ -138,43 +62,81 @@ NativeLibraryLoader.load(
 )
 ```
 
-Les sidecars sont extraits dans le même répertoire adressé par contenu avant le chargement de
-la lib principale. Le bridge GLES de Tao utilise le même schéma pour `libGLESv2.dll` sous
-Windows.
+## Déplacer le cache
 
-## GraalVM
+Les fat JAR, les exécutions depuis l'IDE et les distributions construites sans le plugin extraient
+les bibliothèques dans un cache par utilisateur : `~/Library/Caches/nucleus/native/` sur macOS,
+`$XDG_CACHE_HOME/nucleus/native/` (ou `~/.cache/…`) sur Linux, `%LOCALAPPDATA%\nucleus\native\`
+sur Windows. Les applications empaquetées par le plugin n'extraient rien.
 
-Les bibliothèques partagées sous `nucleus/native/…` sont couvertes par le motif d'inclusion
-de ressources `nucleus/.*` livré dans `graalvm-runtime`. Voir
-[Accès natif](/docs/performance/native-access). Vous n'avez pas à enregistrer chaque `.so` /
-`.dylib` / `.dll` à la main pour un module Nucleus normal.
+Pour déplacer la racine, définissez `nucleus.native.cacheDir` dans `jvmArgs`. La propriété couvre
+les bibliothèques chargées avant votre code :
 
-Sous une image native, préférez livrer la bibliothèque sur le chemin de libs de l'image pour
-que `System.loadLibrary` réussisse à l'étape 1 ; le chemin d'extraction JAR fonctionne encore
-quand les ressources sont incluses.
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    jvmArgs("-Dnucleus.native.cacheDir=/var/lib/myapp/native")
+}
+```
+
+La JVM n'y développe pas `${user.home}`. Pour un chemin calculé à l'exécution, définissez-le depuis
+le code avant le premier chargement natif :
+
+```kotlin
+fun main(args: Array<String>) {
+    NativeLibraryLoader.cacheDirectory = Path(System.getProperty("user.home"), ".myapp", "native")
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+La propriété système l'emporte sur `cacheDirectory`. Une affectation tardive est ignorée avec un
+avertissement. Ne pointez pas le cache vers le dossier d'installation ni dans un `.app` macOS : un
+utilisateur standard ne peut pas y écrire, et une écriture dans le bundle casse sa signature.
+
+## Exceptions JNI dans les logs
+
+Quand un listener Kotlin lève une exception dans un callback natif, Nucleus la journalise en
+`WARNING` sur le logger `dev.nucleusframework.core.runtime.JniExceptionReporter`, même quand
+`allowNucleusRuntimeLogging` est désactivé. Avant la 3.0, ces exceptions disparaissaient.
 
 ## Débogage
 
 | Situation | À vérifier |
 |-----------|------------|
-| Le module rapporte `isAvailable == false` | Y a-t-il un binaire pour cet `os-arch` sous `/nucleus/native/` dans le JAR de la dépendance ? |
-| Échec de chargement après une montée de version | Videz `…/nucleus/native/` et relancez ; une extraction partielle corrompue est rare mais possible |
-| L'app packagée marche, le run IDE échoue | Vérifiez que le module qui embarque la ressource native est sur le classpath runtime |
-| Ligne de log `Failed to load … native library` | Activez le logging fin pour `NativeLibraryLoader` (`java.util.logging` du JDK) |
+| Un module indique `isAvailable == false` | Le JAR de la dépendance contient-il `/nucleus/native/<os>-<arch>/` pour votre plateforme, ou le dossier de l'application empaquetée contient-il la bibliothèque ? |
+| Le chargement échoue après une mise à jour, en IDE ou en fat JAR | Supprimez la racine du cache et relancez. |
+| Un avertissement signale un dossier de cache inutilisable | Le dossier configuré n'accepte pas l'écriture. Le chargeur est passé au candidat suivant. |
+| `Failed to load … native library` | Activez les logs `FINE` pour `dev.nucleusframework.core.runtime.NativeLibraryLoader`. |
 
-Les modules qui encapsulent le chargeur exposent en général `isAvailable` ou un flag
-équivalent. Préférez ça à un appel direct à `NativeLibraryLoader` depuis le code applicatif.
+Dans le code de l'application, testez l'indicateur `isAvailable` d'un module plutôt que d'appeler
+`NativeLibraryLoader`.
 
-## Chargeurs liés
+<Accordions>
+<Accordion title="En coulisses">
 
-[Du code natif en Kotlin](/docs/performance/native-code) (NucleusNativeAccess) utilise une
-stratégie à trois niveaux similaire, mais une autre racine de cache (`~/.cache/kne/…`) et un
-autre préfixe de ressources (`kne/native/…`). Les deux chargeurs sont indépendants.
+- Ordre de chargement : le dossier `nucleus.native.libraryPath` (défini par le lanceur du plugin),
+  puis `System.loadLibrary` sur `java.library.path` (builds sandboxés pour les stores, images
+  natives GraalVM), puis l'extraction depuis le JAR.
+- Les builds jpackage placent les bibliothèques dans `$APPDIR` à côté de Skiko ; les images natives
+  à côté de l'exécutable (`Contents/MacOS/` sur macOS). Seules les bibliothèques listées dans le
+  manifeste `META-INF/nucleus/native-libraries/` d'un module Nucleus sont déplacées ; les vôtres
+  restent dans leurs JAR.
+- Une ressource absente est journalisée en `FINE` et renvoie `false` : un module réservé à macOS
+  reste silencieux sous Linux.
+- Organisation du cache : `<root>/<os>-<arch>/<fingerprint>/<file>`. L'empreinte vient du CRC-32
+  et de la taille de l'entrée du JAR (taille et date de modification pour les URL `file:`) ; les
+  fichiers annexes la partagent. L'extraction écrit un fichier temporaire puis le renomme.
+- Ordre de la racine du cache : `nucleus.native.cacheDir`, puis `cacheDirectory`, puis la valeur par
+  défaut de la plateforme. Le chargeur teste chacune par une vraie écriture et passe à la suivante
+  en cas d'échec. Un `XDG_CACHE_HOME` ou `LOCALAPPDATA` vide ou relatif est ignoré.
+- Le message d'exception JNI est `Native JNI callback cleared a pending Kotlin exception`, émis via
+  `java.util.logging` avec le throwable joint.
+- [Du code natif en Kotlin](/docs/performance/native-code) a son propre chargeur, indépendant
+  (`~/.cache/kne/`, `kne/native/`).
+
+</Accordion>
+</Accordions>
 
 ## Et ensuite
 
-- [Modules](/docs/concepts/modules) — `core-runtime` et la carte des modules.
-- [Accès natif](/docs/performance/native-access) — métadonnées GraalVM ressources et JNI.
-- [Du code natif en Kotlin](/docs/performance/native-code) — écrire le côté natif en
-  Kotlin/Native plutôt qu'en JNI à la main.
-- [Dépannage](/docs/reference/troubleshooting) — échecs de packaging et de runtime.
+- [Modules](/docs/concepts/modules) : `core-runtime` et le reste de la carte des modules.
+- [Dépannage](/docs/reference/troubleshooting) : échecs d'empaquetage et d'exécution.

@@ -1,0 +1,101 @@
+---
+title: Material 2 et 3
+description: Habillez une fenêtre Nucleus depuis un MaterialTheme Compose avec l'adaptateur Material 2 ou Material 3.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les adaptateurs Material habillent un `DecoratedWindow` Nucleus depuis un `MaterialTheme` Compose :
+la barre de titre et les contrôles de fenêtre suivent les couleurs de votre application.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    // Material 3
+    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
+    implementation("org.jetbrains.compose.material3:material3:<material3-version>")
+    // Ou Material 2
+    // implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
+    // implementation("org.jetbrains.compose.material:material:1.12.0")
+}
+```
+
+Les adaptateurs n'exposent pas `nucleus-application` : déclarez-le vous-même.
+
+| Adaptateur | Package Kotlin |
+| --- | --- |
+| Material 3 | `dev.nucleusframework.window.material` (sans `3`) |
+| Material 2 | `dev.nucleusframework.window.material2` |
+
+## Créer une fenêtre Material
+
+Appelez `MaterialDecoratedWindow` dans un `MaterialTheme`. `MaterialTitleBar` dessine une barre de
+titre assortie.
+
+```kotlin
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.material.MaterialDecoratedWindow
+import dev.nucleusframework.window.material.MaterialTitleBar
+
+fun main() = nucleusApplication {
+    MaterialTheme(colorScheme = lightColorScheme()) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 3") {
+            MaterialTitleBar { Text("Material 3") }
+            Surface(Modifier.fillMaxSize()) { /* contenu */ }
+        }
+    }
+}
+```
+
+Pour Material 2, importez depuis `androidx.compose.material` et
+`dev.nucleusframework.window.material2`, et passez `colors = lightColors()`.
+
+Le chrome suit les changements de palette. Pour suivre le système, pilotez les couleurs avec
+`isSystemInDarkMode()`, fourni avec `nucleus-application`.
+
+## Ouvrir un dialogue Material
+
+```kotlin
+if (showAbout) {
+    MaterialDecoratedDialog(onCloseRequest = { showAbout = false }, title = "About") {
+        MaterialDialogTitleBar { Text("About") }
+        AboutContent()
+    }
+}
+```
+
+Appelez-le depuis `nucleusApplication { }`, comme la fenêtre.
+
+<Callout type="warn" title="Modifié en 3.0">
+Les fenêtres et dialogues Material n'existent plus que comme extensions de
+`NucleusApplicationScope`, dans les deux adaptateurs. Les surcharges AWT sur l'`ApplicationScope`
+de Compose ont disparu, et le dialogue Material 2 est lui aussi une extension de
+`NucleusApplicationScope`. Voir [Migrer depuis Nucleus 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Référence de l'API
+
+Les deux adaptateurs exposent les mêmes fonctions, sauf mention contraire.
+
+| Symbole | Notes |
+| --- | --- |
+| `NucleusApplicationScope.MaterialDecoratedWindow(...)` | Les paramètres de fenêtre habituels, plus `nativePopupLayers`, `nativeContextMenu`, `hiddenFromDock`, `titleBarStyle`, `undecorated`, `transparent`, `clickThrough`, `visibleOnAllWorkspaces`, `forceX11` |
+| `NucleusApplicationScope.MaterialDecoratedDialog(...)` | Variante dialogue |
+| `DecoratedWindowScope.MaterialTitleBar(...)` | Barre de titre d'une fenêtre |
+| `DecoratedDialogScope.MaterialDialogTitleBar(...)` | Barre de titre d'un dialogue |
+| `rememberMaterialWindowStyle(colorScheme)` | Material 3 uniquement : style de fenêtre dérivé d'un `ColorScheme` |
+| `rememberMaterialTitleBarStyle(colorScheme)` | Material 3 uniquement : style de barre de titre ; passez-en un à `titleBarStyle` pour remplacer le style dérivé |
+
+Les fenêtres Material n'ont pas de paramètre `minimizable` ni `maximizable`. Pour retirer ces
+boutons, ouvrez un `DecoratedWindow` dans `NucleusDecoratedWindowTheme` avec les styles Material.
+
+## Et ensuite
+
+- [Toolkits](/docs/toolkits) : comparer Material aux looks natifs.
+- [Jewel](/docs/toolkits/jewel) : le chrome de l'IntelliJ Platform.
+- [Dialogues et popups](/docs/windows/dialogs-popups) : dialogues, popups et couches popup natives.

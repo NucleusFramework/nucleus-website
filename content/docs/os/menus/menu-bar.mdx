@@ -1,0 +1,122 @@
+---
+title: macOS menu bar
+description: Build the native macOS menu bar from Compose, with items, shortcuts, icons, badges, and submenus that follow your state.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`menu-macos` builds the native macOS menu bar from Compose. You declare menus and items as a tree,
+and the bar updates when the state it reads changes. `NativeMenuBar` does nothing on Windows and
+Linux, so the call can stay in shared code.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.menu-macos:<version>")
+}
+```
+
+It brings [`sf-symbols`](/docs/os/icons/sf-symbols) for typed icon names.
+
+## Build a menu bar
+
+```kotlin
+fun main() = nucleusApplication {
+    NativeMenuBar {
+        Menu("MyApp") {
+            Item("About MyApp") { showAbout() }
+            Separator()
+            Item("Quit MyApp", shortcut = NativeKeyShortcut("q")) { exitApplication() }
+        }
+        Menu("File") {
+            Item(
+                "New",
+                shortcut = NativeKeyShortcut("n"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.DOCUMENT_BADGE_PLUS),
+            ) { newDocument() }
+            Menu("Recent") {
+                Item("notes.md") { open("notes.md") }
+            }
+        }
+        MenuWindow("Window")
+        MenuHelp("Help") {
+            Item("Documentation") { openDocs() }
+        }
+    }
+
+    // Windows
+}
+```
+
+- The first `Menu` becomes the application menu, the bold entry named after your app. A `Menu`
+  inside a `Menu` is a submenu.
+- Keep `NativeMenuBar` outside any window's content, so the bar stays while windows open and
+  close.
+- macOS fills `MenuWindow` (window list, Bring All to Front) and `MenuHelp` (search field); their
+  content is optional.
+- Click handlers run on the UI thread and can change Compose state.
+
+## Add checkboxes and radio buttons
+
+You hold the state; the item shows the checkmark:
+
+```kotlin
+var darkMode by remember { mutableStateOf(false) }
+
+Menu("View") {
+    CheckboxItem("Dark mode", checked = darkMode, onCheckedChange = { darkMode = it })
+    Separator()
+    RadioButtonItem("Light", selected = !darkMode, onClick = { darkMode = false })
+    RadioButtonItem("Dark", selected = darkMode, onClick = { darkMode = true })
+}
+```
+
+## Add search and section headers
+
+```kotlin
+Menu("History") {
+    SearchField(placeholder = "Search history")
+    SectionHeader("Today")
+    Item("nucleusframework.dev") { open(url) }
+}
+```
+
+`SearchField` filters the menu's items by title as the user types. `SectionHeader` needs macOS 14
+and falls back to a disabled item on older systems.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- On first composition, `NativeMenuBar` saves the current menu bar and installs an `NSMenu` built
+  from your tree. It restores the saved bar when it leaves the composition.
+- `MenuWindow` and `MenuHelp` become AppKit's Window and Help menus.
+- AppKit fires actions on its main thread; Nucleus posts them to `Dispatchers.Main`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+`Item(text) { onClick }` parameters:
+
+| Parameter | Effect |
+| --- | --- |
+| `enabled` | Grey the item out when `false` |
+| `shortcut` | `NativeKeyShortcut(key)`: Command by default; add `shift`, `option`, `control`, `function`, or `command = false`. `NativeKey` holds `ESCAPE`, `RETURN`, `TAB`, `DELETE`, `BACKSPACE`, arrow keys and more |
+| `icon` | `NsMenuItemImage.SystemSymbol` (an `SFSymbol` or raw name, macOS 11+), `Named` (AppKit or bundle image), or `File` |
+| `state` | `NsMenuItemState.OFF`, `ON`, or `MIXED` |
+| `badge` | `NsMenuItemBadge.Count`, `Text`, or the localized `Alerts`, `NewItems`, `Updates` (macOS 14+) |
+| `subtitle` | Second line under the title (macOS 14.4+) |
+| `toolTip` / `tag` / `indentationLevel` | Hover text / integer tag / indentation |
+| `isAlternate` | Show in place of the previous item while its modifier is held |
+| `isHidden` | Hide the item but keep its key equivalent |
+| `onStateImage`, `offStateImage`, `mixedStateImage` | Replace the checkmark per state |
+
+`Menu` also accepts an `icon`.
+
+## What's next
+
+- [SF Symbols](/docs/os/icons/sf-symbols): typed names for `SystemSymbol` icons.
+- [Context menus](/docs/os/menus/context-menu): native right-click menus inside your windows.
+- [Application entry point](/docs/lifecycle/application): how Cmd+Q and Dock > Quit reach your windows.

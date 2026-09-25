@@ -1,0 +1,97 @@
+---
+title: Zone de notification
+description: Dessinez une icône de zone de notification et son menu natif depuis Compose sur macOS, Windows et Linux, sans AWT.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`Tray` dessine une icône de zone de notification et son menu natif depuis Compose sur macOS,
+Windows et Linux. L'icône et le menu se mettent à jour quand l'état qu'ils lisent change.
+
+<Callout type="info" title="Dépôt séparé">
+La zone de notification est publiée depuis [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray)
+avec sa propre version. Ajoutez `dev.nucleusframework:composenativetray` pour `Tray` et le DSL
+du menu, et `dev.nucleusframework:composenativetray-app` pour les
+[applications de zone de notification](/docs/os/tray/tray-app).
+
+<Version module="tray" />
+</Callout>
+
+## Ajouter une icône
+
+```kotlin
+import dev.nucleusframework.composenativetray.tray.api.Tray
+
+fun main() = nucleusApplication {
+    Tray(
+        icon = Icons.Default.Favorite,
+        tooltip = "My App",
+        primaryAction = { showWindow() },
+        onMenuOpened = { refreshStatus() },
+    ) {
+        Item(label = "Show window") { showWindow() }
+        Divider()
+        Item(label = "Quit") { exitApplication() }
+    }
+}
+```
+
+L'icône reste affichée tant que `Tray` fait partie de la composition : entourez l'appel d'un `if`
+pour la masquer. Passez `menuContent = null` pour une icône sans menu.
+
+<Callout type="warn" title="Modifié en 3.0">
+Le `androidx.compose.ui.window.Tray` de Compose Desktop repose sur AWT et ne fonctionne pas sous
+`nucleusApplication`. Utilisez `dev.nucleusframework.composenativetray.tray.api.Tray`. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Gérer les clics
+
+`primaryAction` s'exécute sur un clic gauche sur macOS et Windows. Sous Linux, KDE le déclenche
+sur un simple clic et GNOME sur un double clic. Sans `primaryAction`, un clic ouvre le menu.
+`onMenuOpened` s'exécute à chaque ouverture du menu : vous pouvez rafraîchir les données avant.
+
+## Définir l'icône
+
+`icon` accepte un `ImageVector` (avec un `tint` facultatif), un `Painter` ou un
+`DrawableResource`. `iconContent` accepte n'importe quel composable, comme un badge :
+
+```kotlin
+Tray(
+    iconContent = {
+        Box(Modifier.size(24.dp).background(Color.Red, CircleShape)) {
+            Text("3", color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
+    },
+    tooltip = "3 notifications",
+) { /* … */ }
+```
+
+- Sans `tint`, un `ImageVector` s'affiche en blanc sur une zone sombre et en noir sur une zone
+  claire.
+- Pour un `.ico` dessiné à la main sous Windows, passez `windowsIcon` et `macLinuxIcon` à la
+  place de `icon`.
+- `iconRenderProperties` définit les tailles de rendu. La valeur par défaut vise 44 px sur macOS,
+  32 px sous Windows et 24 px sous Linux.
+- GNOME standard n'affiche l'icône qu'avec l'extension AppIndicator. KDE Plasma et Ubuntu
+  l'affichent par défaut.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Compose rend l'icône hors écran quand son état change et transmet les pixels à l'API native de
+  la zone de notification. La bibliothèque enregistre les éléments du menu pendant la composition
+  et reconstruit le menu natif quand ils changent. Elle n'utilise pas AWT.
+- macOS utilise un `NSStatusItem`, avec les variantes claire et sombre d'un vecteur sans teinte
+  rendues à l'avance. Windows utilise `Shell_NotifyIcon`. Linux utilise un StatusNotifierItem avec
+  un menu DBusMenu.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [DSL du menu de la zone de notification](/docs/os/tray/menu) : éléments, éléments à cocher, sous-menus, raccourcis et menus réactifs.
+- [Applications de zone de notification](/docs/os/tray/tray-app) : ouvrir une popup Compose depuis l'icône.
+- [Point d'entrée de l'application](/docs/lifecycle/application) : `nucleusApplication` et `exitApplication`.

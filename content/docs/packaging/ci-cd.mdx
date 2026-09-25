@@ -1,56 +1,18 @@
 ---
 title: CI/CD
-description: Build, sign, and publish a Nucleus desktop app across macOS, Windows, and Linux with the composite GitHub Actions shipped in the Nucleus repository.
+description: Build, sign, and publish a Nucleus desktop app for macOS, Windows, and Linux on GitHub Actions with the composite actions in the Nucleus repository.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-In this tutorial, you'll set up a GitHub Actions release pipeline for a Nucleus desktop app.
-You'll build installers on a per-OS, per-architecture matrix, merge the macOS builds into a
-universal binary, bundle the Windows builds for the Microsoft Store, generate auto-update
-metadata, and publish everything to a GitHub Release.
-
-Nucleus ships seven composite actions in the [`NucleusFramework/Nucleus`](https://github.com/NucleusFramework/Nucleus)
-repository. You reference them by path from your own workflow — there is nothing to copy into
-your project.
-
-## Before you start
-
-- Your project is hosted on GitHub and applies the Nucleus Gradle plugin. See
-  [Quickstart](/docs/start/quickstart).
-- The release workflow needs `permissions: contents: write` to create releases and upload assets.
-- Installers are not cross-compiled. Each OS/architecture must be built on a matching runner.
-
-<Callout type="info">
-The composite actions are addressed as `NucleusFramework/Nucleus/.github/actions/<name>@<ref>`.
-Use `@main` while experimenting and pin to a tag such as `@v2.5.18` for production runs.
-</Callout>
-
-## Reference an action
-
-Add a step that points at an action in the Nucleus repository:
-
-```yaml
-- uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
-```
-
-The seven actions are:
-
-| Action | What it does |
-|--------|--------------|
-| `setup-nucleus` | Installs a JDK (Microsoft Build of OpenJDK on Windows, Temurin elsewhere), Linux packaging tools, Gradle, and Node. |
-| `setup-macos-signing` | Creates a temporary keychain and imports a `.p12` certificate for `codesign`. |
-| `build-macos-universal` | Merges arm64 and x64 `.app` bundles with `lipo`, re-signs, and repackages as ZIP, DMG, and PKG. |
-| `build-windows-appxbundle` | Combines amd64 and arm64 `.appx` files into a `.msixbundle` and signs it. |
-| `generate-update-yml` | Computes SHA-512 hashes and emits the `latest-*.yml` metadata the auto-updater reads. |
-| `publish-release` | Creates the GitHub Release with `gh release create` and uploads the installers and YAML. |
-| `validate-release-ref` | Checks that a release tag was cut from the branch that owns it. |
+In this tutorial, you'll set up a GitHub Actions pipeline that builds, signs, and publishes your
+installers. The [`NucleusFramework/Nucleus`](https://github.com/NucleusFramework/Nucleus)
+repository ships the composite actions: reference them as
+`NucleusFramework/Nucleus/.github/actions/<name>@<ref>`, with `<ref>` pinned to a release tag in
+production. Installers do not cross-compile, so you need one runner per OS and architecture.
 
 ## Build on every platform
-
-Create `.github/workflows/release.yaml`. Trigger on version tags, run a matrix across the six
-runners, set up the environment with `setup-nucleus`, package for the current OS, and upload the
-result as an artifact:
 
 ```yaml title=".github/workflows/release.yaml"
 name: Release
@@ -67,8 +29,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,    arch: amd64 }
-          - { os: ubuntu-24.04-arm, arch: arm64 }
+          - { os: ubuntu-22.04,     arch: amd64 }
+          - { os: ubuntu-22.04-arm, arch: arm64 }
           - { os: windows-latest,   arch: amd64 }
           - { os: windows-11-arm,   arch: arm64 }
           - { os: macos-latest,     arch: arm64 }
@@ -79,52 +41,34 @@ jobs:
       - uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@main
         with:
           java-version: '25'
-          packaging-tools: 'true'
           flatpak: 'true'
           snap: 'true'
       - run: ./gradlew packageReleaseDistributionForCurrentOS --stacktrace --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: release-assets-${{ runner.os }}-${{ matrix.arch }}
-          path: build/compose/binaries/main/**/*
+          path: build/compose/binaries/**/*
 ```
 
-Later jobs download these artifacts by their `release-assets-<os>-<arch>` names, so keep that
-naming scheme.
-
-## Set up the build environment
-
-`setup-nucleus` provisions the whole toolchain in one step. On Linux with `packaging-tools: 'true'`
-it installs `xvfb`, `rpm`, `fakeroot`, `libarchive-tools`, `libdbus-1-dev`, `libglib2.0-dev`,
-`libx11-dev`, `libgtk-3-dev`, and `patchelf`, and starts a virtual display. It also sets up
-Gradle with caching and installs Node for electron-builder.
-
-Inputs:
+Later jobs find the artifacts by their `release-assets-<os>-<arch>` names, so keep that scheme.
+`setup-nucleus` installs a JDK, the Linux packaging tools, and Gradle:
 
 | Input | Default | Purpose |
 |-------|---------|---------|
-| `java-version` | `25` | JDK used to run Gradle and bundled by jpackage. A bare LTS major resolves to the latest per-OS build. |
-| `java-package` | `jdk` | JDK package variant (`jdk`, `jre`). |
-| `packaging-tools` | `true` | Install the Linux packaging tools (Linux only). |
-| `flatpak` | `false` | Install Flatpak and the Freedesktop Platform/SDK 24.08 (Linux only). |
-| `snap` | `false` | Install snapd and Snapcraft (Linux only). |
-| `graalvm` | `false` | Prepare a native-image build: native build tools (Xcode/MSVC) and the toolchain cache. |
-| `graalvm-version` | `25i3` | Toolchain version — cache-key component only. Keep in sync with `graalvm { toolchain { } }`. |
-| `graalvm-distribution` | `community` | Toolchain distribution — cache-key component only (`community` or `oracle`). |
-| `setup-gradle` | `true` | Set up Gradle via `gradle/actions/setup-gradle`. |
-| `setup-node` | `true` | Set up Node.js. |
-| `node-version` | `24` | Node.js version. |
+| `java-version` | `25` | JDK that runs Gradle and that jpackage bundles. |
+| `packaging-tools` | `true` | Install the Linux packaging tools. |
+| `flatpak` / `snap` | `false` | Install Flatpak (Freedesktop 24.08) or Snapcraft. |
+| `graalvm` | `false` | Prepare a native-image build: Xcode 26 on macOS, MSVC on Windows. |
+| `graalvm-version` | `25i4` | Keep it equal to `graalvm { toolchain { version } }`. |
+| `node-version` | `22` | Keep it equal to `nodejs { version }`. |
 
-The Nucleus plugin downloads and caches the GraalVM JDK itself, so `graalvm: 'true'` never
-installs a JDK. It only prepares what the plugin cannot: it selects Xcode 26 on macOS, sets up
-MSVC on Windows via `ilammy/msvc-dev-cmd@v1`, and caches the toolchain directory. The two
-`graalvm-*` inputs feed the cache key only — keep them in sync with your
-`graalvm { toolchain { } }` block so switching distribution does not restore the wrong cache.
+<Callout type="warn" title="Changed in 3.0">
+`setup-nucleus` no longer runs `actions/setup-node`, and the `setup-node` input is gone. Remove
+`actions/setup-node` from your jobs and cache `~/.gradle/nucleus/nodejs` instead. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
 
 ## Sign macOS builds
-
-`setup-macos-signing` decodes a base64 `.p12`, imports it into a temporary keychain, and unlocks
-it for `codesign`. It exposes the keychain path as an output that `build-macos-universal` consumes:
 
 ```yaml
 - uses: NucleusFramework/Nucleus/.github/actions/setup-macos-signing@main
@@ -134,33 +78,29 @@ it for `codesign`. It exposes the keychain path as an output that `build-macos-u
     certificate-password: ${{ secrets.MAC_CERTIFICATES_PASSWORD }}
 ```
 
-End-to-end macOS signing and notarization use these repository secrets:
-
 | Secret | Purpose |
 |--------|---------|
-| `MAC_CERTIFICATES_P12` | Base64-encoded `.p12` bundle. |
-| `MAC_CERTIFICATES_PASSWORD` | `.p12` password. |
-| `MAC_DEVELOPER_ID_APPLICATION` | Developer ID Application identity (DMG/ZIP). |
-| `MAC_APP_STORE_APPLICATION` | 3rd Party Mac Developer Application identity (sandboxed PKG). |
-| `MAC_APP_STORE_INSTALLER` | 3rd Party Mac Developer Installer identity (PKG). |
-| `MAC_PROVISIONING_PROFILE` | Base64 provisioning profile for the sandboxed app. |
-| `MAC_RUNTIME_PROVISIONING_PROFILE` | Base64 provisioning profile for the JVM runtime. |
+| `MAC_CERTIFICATES_P12`, `MAC_CERTIFICATES_PASSWORD` | Base64 `.p12` bundle and its password. |
+| `MAC_DEVELOPER_ID_APPLICATION` | Developer ID Application identity (DMG, ZIP). |
+| `MAC_APP_STORE_APPLICATION`, `MAC_APP_STORE_INSTALLER` | 3rd Party Mac Developer identities (App Store PKG). |
+| `MAC_PROVISIONING_PROFILE`, `MAC_RUNTIME_PROVISIONING_PROFILE` | Base64 profiles for the app and the JVM runtime. |
 | `MAC_NOTARIZATION_APPLE_ID`, `MAC_NOTARIZATION_PASSWORD`, `MAC_NOTARIZATION_TEAM_ID` | `notarytool` credentials. |
 
-<Callout type="info">
-Without the `MAC_*` secrets the pipeline falls back to ad-hoc signing — the same result as an
-unsigned local build. See [Code signing](/docs/packaging/code-signing) for how to produce and
-store each secret.
-</Callout>
+Without the `MAC_*` secrets, the pipeline signs ad hoc. See
+[Code signing](/docs/packaging/code-signing#manage-signing-secrets-in-ci).
 
 ## Merge the universal macOS binary
 
-`build-macos-universal` takes the per-architecture `.app` bundles, merges every Mach-O binary
-with `lipo`, re-signs the result inside-out (`.dylib` and `.jnilib` files first with runtime
-entitlements, then executables, then the runtime, then the bundle), and repackages a universal
-ZIP, DMG, and PKG:
+`build-macos-universal` merges the arm64 and x64 builds and repackages a signed universal ZIP, DMG,
+and PKG. Check out the Nucleus repository first, at the ref that matches your plugin version:
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    repository: NucleusFramework/Nucleus
+    ref: main
+    path: nucleus
+    sparse-checkout: plugin-build/plugin/src/main/resources/nucleus/electron-builder
 - uses: NucleusFramework/Nucleus/.github/actions/build-macos-universal@main
   with:
     arm64-path: artifacts/release-assets-macOS-arm64
@@ -170,24 +110,14 @@ ZIP, DMG, and PKG:
     app-store-identity: ${{ secrets.MAC_APP_STORE_APPLICATION }}
     installer-identity: ${{ secrets.MAC_APP_STORE_INSTALLER }}
     keychain-path: ${{ steps.signing.outputs.keychain-path }}
+    electron-builder-toolchain-dir: nucleus/plugin-build/plugin/src/main/resources/nucleus/electron-builder
 ```
 
-Notarization runs as separate workflow steps with `xcrun notarytool submit --wait`. The DMG is
-stapled; the ZIP is notarized but not stapled, so re-zipping never invalidates the blockmap the
-[auto-updater](/docs/packaging/auto-update) relies on.
-
-<Callout type="warn">
-On **private** repositories, macOS runners bill at a 10× minute multiplier against your monthly
-quota, and `--wait` keeps the runner active while it polls Apple's notarization service — you pay
-for that idle time at the macOS rate. Public repositories are free. To cut costs on a private
-repo, run the signing and notarization steps on a self-hosted macOS runner, which GitHub does not
-bill for minutes.
-</Callout>
+Notarize with `xcrun notarytool submit --wait`. Staple the DMG and leave the ZIP unstapled, so the
+[updater](/docs/packaging/auto-update)'s block map stays valid. On private repositories, macOS
+minutes count ten times against your quota; a self-hosted macOS runner avoids that cost.
 
 ## Bundle Windows for the Microsoft Store
-
-`build-windows-appxbundle` combines the amd64 and arm64 `.appx` files into a single
-`.msixbundle` with `MakeAppx`, then signs it with SignTool — one artifact for Store submission:
 
 ```yaml
 - uses: NucleusFramework/Nucleus/.github/actions/build-windows-appxbundle@main
@@ -197,60 +127,45 @@ bill for minutes.
     output-path: artifacts/release-assets-Windows-bundle
 ```
 
-## Generate auto-update metadata
+## Publish the release
 
-`generate-update-yml` walks every downloaded installer, computes its SHA-512, and writes one YAML
-file per platform. The channel determines the filename prefix — `latest`, `beta`, or `alpha` —
-producing `<channel>-mac.yml`, `<channel>.yml` (Windows), and `<channel>-linux.yml`:
+`generate-update-yml` writes `<channel>-mac.yml`, `<channel>.yml`, and `<channel>-linux.yml`.
+`publish-release` creates the GitHub Release and uploads everything:
 
 ```yaml
 - uses: NucleusFramework/Nucleus/.github/actions/generate-update-yml@main
   with:
     artifacts-path: artifacts
     version: ${{ env.VERSION }}
-    channel: ${{ env.CHANNEL }}
-```
-
-## Publish the release
-
-`publish-release` runs `gh release create` with the tag, uploads the installers and YAML, and
-applies the release type. Pass `prerelease` to mark the release as a pre-release:
-
-```yaml
+    channel: ${{ env.CHANNEL }} # latest, beta, or alpha
 - uses: NucleusFramework/Nucleus/.github/actions/publish-release@main
   with:
     artifacts-path: artifacts
     tag: ${{ env.TAG }}
-    release-type: ${{ env.RELEASE_TYPE }}
+    release-type: ${{ env.RELEASE_TYPE }} # release, draft, or prerelease
 ```
 
-## Use the reference workflow
+The reference [`release-desktop.yaml`](https://github.com/NucleusFramework/Nucleus/blob/main/.github/workflows/release-desktop.yaml)
+wires all these jobs together. It derives the version and channel from the tag with
+`release-tag-info`, and `validate-release-ref` rejects an `-alpha`, `-beta`, or `-rc` tag that does
+not point to a commit on a `nucleus-*` release branch.
 
-The Nucleus repository ships a complete pipeline that wires all six actions together, at
-[`.github/workflows/release-desktop.yaml`](https://github.com/NucleusFramework/Nucleus/blob/main/.github/workflows/release-desktop.yaml).
-It builds the matrix, then fans out into a universal-macOS job and a Windows-bundle job before
-publishing:
+<Accordions>
+<Accordion title="Under the hood">
 
-```mermaid
-flowchart TB
-    tag["Tag push v1.0.0"] --> build
-    subgraph build ["Build (6 parallel runners)"]
-      ubuntu["Ubuntu amd64 / arm64"]
-      windows["Windows amd64 / arm64"]
-      macos["macOS arm64 / x64"]
-    end
-    build --> macos_sign["Universal macOS + sign + notarize"]
-    build --> msix["Windows MSIX bundle"]
-    macos_sign --> publish["GitHub Release + update YML"]
-    msix --> publish
-```
+- `setup-nucleus` installs Microsoft Build of OpenJDK on Windows and Temurin elsewhere. On Linux it
+  installs `rpm`, `fakeroot`, `libarchive-tools`, `patchelf`, the GTK, GLib, D-Bus and X11
+  headers, and starts a virtual display with `xvfb`.
+- The Nucleus plugin downloads Node.js and the GraalVM JDK itself; `setup-nucleus` only caches
+  `~/.gradle/nucleus/nodejs` and `~/.gradle/nucleus/graalvm`.
+- `build-macos-universal` runs `lipo` on every Mach-O file, re-signs inside-out, and runs
+  electron-builder outside Gradle, installed with `npm ci` from `electron-builder-toolchain-dir`.
 
-That workflow marks a release as a pre-release when the version contains `-alpha` or `-beta`, and
-selects the matching update channel. A separate `validate-release-ref` step enforces that
-`v2.x.y-alpha`, `-beta`, and `-rc` tags point to a commit on the `nucleus-2.0` branch.
+</Accordion>
+</Accordions>
 
 ## What's next
 
-- [Code signing](/docs/packaging/code-signing) — produce and store the macOS, Windows, and Linux signing secrets.
-- [Publishing](/docs/packaging/publishing) — the `publish { }` DSL that drives GitHub, S3, and generic targets.
-- [Auto-update](/docs/packaging/auto-update) — how the client consumes the generated `latest-*.yml` metadata.
+- [Code signing](/docs/packaging/code-signing): produce and store the signing secrets.
+- [Publishing](/docs/packaging/publishing): the `publish { }` DSL.
+- [Auto-update](/docs/packaging/auto-update): how the app reads the generated YAML.

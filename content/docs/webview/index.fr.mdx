@@ -7,10 +7,10 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 La bibliothèque WebView intègre le moteur web natif de chaque plateforme dans Compose. Vous écrivez une fois contre `WebView`, `WebViewState` et `WebViewNavigator` ; la bibliothèque se lie en dessous à Android WebView, WKWebView, WebView2, WebKit2GTK ou une iframe.
 
-L'API publique et les implémentations Android/iOS suivent [compose-webview-multiplatform](https://github.com/KevinnZou/compose-webview-multiplatform). ComposeNativeWebView ajoute une cible WasmJs et un chemin desktop sur la pile Tao [`NativeView`](/docs/tao/native-views).
+L'API publique et les implémentations Android/iOS suivent [compose-webview-multiplatform](https://github.com/KevinnZou/compose-webview-multiplatform). ComposeNativeWebView ajoute une cible WasmJs et un chemin desktop construit sur [`NativeView`](/docs/native-content/native-views).
 
 <Callout type="info" title="Dépôt séparé — versionné indépendamment">
-WebView est livré depuis [`NucleusFramework/ComposeNativeWebview`](https://github.com/NucleusFramework/ComposeNativeWebview) avec son propre cycle de release, comme la [system tray](/docs/os/system-tray) et le [lecteur PDF](/docs/pdf). Son numéro de version est **indépendant de Nucleus** — épinglez-le séparément. L'artefact est `dev.nucleusframework:composewebview`, publié sur Maven Central.
+WebView est livré depuis [`NucleusFramework/ComposeNativeWebview`](https://github.com/NucleusFramework/ComposeNativeWebview) avec son propre cycle de release, comme la [system tray](/docs/os/tray) et le [lecteur PDF](/docs/pdf). Son numéro de version est **indépendant de Nucleus** — épinglez-le séparément. L'artefact est `dev.nucleusframework:composewebview`, publié sur Maven Central.
 <Version module="webview" />
 </Callout>
 
@@ -21,9 +21,9 @@ WebView est livré depuis [`NucleusFramework/ComposeNativeWebview`](https://gith
 | Android    | `android.webkit.WebView` |
 | iOS        | WKWebView |
 | WasmJs     | `HTMLIFrameElement` |
-| Desktop (Linux) | WebKit2GTK via Tao `NativeView` |
-| Desktop (macOS) | WKWebView via Tao `NativeView` |
-| Desktop (Windows) | WebView2 CompositionController via Tao `NativeView` |
+| Desktop (Linux) | WebKit2GTK via `NativeView` |
+| Desktop (macOS) | WKWebView via `NativeView` |
+| Desktop (Windows) | WebView2 CompositionController via `NativeView` |
 
 Sans couche partagée, une app multiplateforme intègre et maintient chaque moteur séparément. ComposeNativeWebView les remplace par une seule surface Compose et le même modèle de navigation, de cookies et de JavaScript sur chaque cible.
 
@@ -61,18 +61,18 @@ fun HelloWeb() {
 }
 ```
 
-La lambda `content` en trailing dessine de l'UI Compose par-dessus le moteur embarqué — le même rôle que le slot de contenu de [`NativeView`](/docs/tao/native-views) sur Tao.
+La lambda `content` en trailing dessine de l'UI Compose par-dessus le moteur embarqué — le même rôle que le slot de contenu de [`NativeView`](/docs/native-content/native-views).
 
 ## Cibles prises en charge
 
-| Cible   | Backend |
+| Cible   | Moteur |
 | ------- | ------- |
 | Android | `android.webkit.WebView` |
 | iOS     | WKWebView |
 | WasmJs  | IFrame |
-| JVM desktop | Tao + bibliothèque native de plateforme |
+| JVM desktop | Moteur de la plateforme via `NativeView` |
 
-Le desktop exige une fenêtre Nucleus Tao (`nucleusApplication` et `decorated-window-tao`). Windows nécessite aussi le [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (ou Edge). Les bibliothèques natives sont livrées dans l'artefact sous `nucleus/native/…`.
+Le desktop exige une fenêtre Nucleus (`nucleusApplication` et `DecoratedWindow`). Windows nécessite aussi le [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (ou Edge). Les bibliothèques natives sont livrées dans l'artefact sous `nucleus/native/…`.
 
 ## Ce que couvre la bibliothèque
 
@@ -86,7 +86,7 @@ Le desktop exige une fenêtre Nucleus Tao (`nucleusApplication` et `decorated-wi
 ## Limitations
 
 - `RequestInterceptor` n'intercepte pas les sous-ressources (images, XHR, scripts).
-- **Desktop** a besoin du backend Tao ; la bibliothèque n'embarque pas de navigateur sur le chemin AWT.
+- **Desktop** a besoin d'une fenêtre Nucleus. La bibliothèque n'embarque pas de navigateur dans une `Window` de Compose Desktop.
 - **WasmJs** : l'historique arrière/avant n'est pas disponible dans l'iframe ; le CORS doit autoriser l'embedding ; le JavaScript ne s'exécute que sur la même origine ; les cookies ne s'appliquent que si la destination de l'iframe correspond à l'origine parente.
 
 ## Et ensuite
@@ -94,4 +94,4 @@ Le desktop exige une fenêtre Nucleus Tao (`nucleusApplication` et `decorated-wi
 - [Premiers pas](/docs/webview/getting-started) — chargez des URL et du HTML, naviguez, évaluez du JS, interceptez des requêtes.
 - [Référence de l'API](/docs/webview/api-reference) — chaque type public, ses paramètres et ses valeurs par défaut.
 - [Lecteur PDF](/docs/pdf) — un autre composant Nucleus livré depuis son propre dépôt.
-- [Vues natives sur Tao](/docs/tao/native-views) — la primitive d'embedding desktop utilisée en dessous.
+- [Vues natives](/docs/native-content/native-views) — la primitive d'embedding desktop utilisée en dessous.

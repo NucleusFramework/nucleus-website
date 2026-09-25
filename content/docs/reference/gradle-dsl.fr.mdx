@@ -1,312 +1,576 @@
 ---
-title: Référence Gradle DSL
-description: Chaque propriété et sous-bloc de l'extension Gradle nucleus { }, vérifié sur les sources du plugin.
+title: Référence du DSL Gradle
+description: Chaque propriété et sous-bloc de l'extension Gradle nucleus { }, vérifiés sur les sources du plugin.
 ---
 
-Le plugin Gradle Nucleus (`id("dev.nucleusframework")`) expose une seule extension top-level, `nucleus`, pour configurer l'empaquetage, la signature, la publication et les builds natifs GraalVM depuis Kotlin. Elle s'appuie sur le DSL Compose Desktop de JetBrains et ajoute les formats, surfaces de signature et paramètres GraalVM propres à Nucleus. Cette page liste chaque propriété dans l'ordre où elle apparaît dans les sources du plugin.
+Le plugin Gradle Nucleus (`id("dev.nucleusframework")`) ajoute une extension, `nucleus { }`, qui configure la tâche `run`, l'empaquetage, la signature, la publication et les images natives GraalVM. Cette page liste ses propriétés bloc par bloc, dans l'ordre des sources ; [Configuration](/docs/start/configuration) les montre dans un script de build complet.
 
-## Top-level : `nucleus { }`
+Tous les types du DSL se trouvent dans `dev.nucleusframework.desktop.application.dsl`.
+
+## `nucleus { }` [#nucleus]
 
 `dev.nucleusframework.NucleusExtension` :
 
-- `val application: JvmApplication` — configuration de l'app JVM (`nucleus { application { … } }`).
-- `val nativeApplication: NativeApplication` — cibles macOS Kotlin/Native.
-- `val dependencies: NucleusPlugin.Dependencies` — coordonnées et notations des modules runtime.
+| Membre | Type | Notes |
+| --- | --- | --- |
+| `application { }` | `JvmApplication` | Application JVM : tâche `run`, empaquetage, GraalVM |
+| `nativeApplication { }` | `NativeApplication` | Application Kotlin/Native macOS |
+| `dependencies` | `NucleusPlugin.Dependencies` | Coordonnées des modules runtime |
 
-## `application { }` — `JvmApplication`
+## `application { }` [#application----jvmapplication]
 
-- `from(SourceSet)` / `from(KotlinTarget)`
-- `disableDefaultConfiguration()`
-- `dependsOn(vararg tasks: Task | String)`
-- `fromFiles(vararg files: Any)`
-- `var mainClass: String?`
-- `val mainJar: RegularFileProperty`
-- `var javaHome: String`
-- `val args: MutableList<String>` / `args(vararg args: String)`
-- `val jvmArgs: MutableList<String>` / `jvmArgs(vararg jvmArgs: String)` — Nucleus ajoute `--enable-native-access=ALL-UNNAMED` aux défauts (tâche run et launcher empaqueté) pour JDK 24+ (JEP 472)
-- `var garbageCollector: GarbageCollector?` — collecteur HotSpot pour la distribution JVM (`SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`). Non défini : ergonomie du JDK. Les flags sont préfixés pour qu'un `-XX:+Use…GC` explicite dans `jvmArgs` l'emporte encore.
-- `val nativeDistributions: JvmApplicationDistributions` — voir ci-dessous
-- `val buildTypes: JvmApplicationBuildTypes`
-- `val graalvm: GraalvmSettings` — voir [GraalVM](#graalvm--graalvmsettings)
+`JvmApplication` :
 
-## `nativeDistributions { }` — `JvmApplicationDistributions`
+| Membre | Type | Notes |
+| --- | --- | --- |
+| `from(SourceSet)`, `from(KotlinTarget)` | | Origine des classes de l'application |
+| `disableDefaultConfiguration()` | | Désactive le câblage des sources par défaut |
+| `dependsOn(vararg Task)`, `dependsOn(vararg String)` | | Dépendances de tâches supplémentaires |
+| `fromFiles(vararg Any)` | | Fichiers supplémentaires sur le classpath |
+| `mainClass` | `String?` | Point d'entrée |
+| `mainJar` | `RegularFileProperty` | JAR d'entrée |
+| `javaHome` | `String` | JDK utilisé pour lancer et empaqueter. Prime toujours sur `lastJdk` |
+| `args`, `args(vararg)` | `MutableList<String>` | Arguments de l'application |
+| `jvmArgs`, `jvmArgs(vararg)` | `MutableList<String>` | Arguments JVM. Les valeurs par défaut contiennent déjà `--enable-native-access=ALL-UNNAMED` (JEP 472) |
+| `garbageCollector` | `GarbageCollector?` | Collecteur HotSpot : `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`. Non défini, l'ergonomie du JDK s'applique. Un `-XX:+Use…GC` explicite dans `jvmArgs` l'emporte |
+| `nucleusOptimization` | `Boolean` (`false`) | Pack de démarrage. Voir [plus bas](#nucleusoptimization) |
+| `nucleusOptimization { }` | `NucleusOptimizationSettings` | Surcharges option par option |
+| `nativeDistributions { }` | `JvmApplicationDistributions` | Voir [`nativeDistributions { }`](#nativedistributions) |
+| `buildTypes { }` | `JvmApplicationBuildTypes` | Voir [`buildTypes { }`](#buildtypes) |
+| `graalvm { }` | `GraalvmSettings` | Voir [`graalvm { }`](#graalvm--graalvmsettings) |
+| `additionalLaunchers { }` | `NamedDomainObjectContainer<AdditionalLauncher>` | Voir [`additionalLaunchers { }`](#additionallaunchers) |
+
+### `nucleusOptimization { }` [#nucleusoptimization]
+
+`nucleusOptimization = true` active cinq options de démarrage d'un coup. Chaque option du bloc est un `Boolean?` : `null` suit l'interrupteur principal, `true` ou `false` force l'option quelles que soient les autres.
+
+```kotlin
+nucleus.application {
+    nucleusOptimization = true
+    nucleusOptimization { idleGc = false }
+}
+```
+
+| Option | Effet |
+| --- | --- |
+| `serialGc` | Serial GC quand `garbageCollector` n'est pas défini. Un collecteur explicite l'emporte |
+| `compactHeap` | Ajoute `-Xms32m` et `-XX:MaxRAMPercentage=25`, sauf si `jvmArgs` les définit déjà |
+| `singleJar` | Aplatit les JAR du runtime (ou active `joinOutputJars` quand ProGuard est actif) pour que l'image jpackage ne contienne qu'un JAR |
+| `idleGc` | Demande un GC 3 s après la perte du focus par la dernière fenêtre, ou tout de suite quand une fenêtre est réduite. Aussi intégré aux images GraalVM |
+| `lastJdk` | Empaquette et lance avec OpenJDK 27, téléchargé dans `<gradle-user-home>/nucleus/jdk` (BellSoft Liberica JDK 27 sur macOS Intel et Windows ARM). `javaHome` l'emporte. Le JDK de compilation Gradle ne change pas |
+
+Le pack ne touche ni à `enableAotCache` ni à ProGuard. Voir [Optimisation du démarrage](/docs/performance/startup).
+
+### `additionalLaunchers { }` [#additionallaunchers]
+
+Chaque `AdditionalLauncher` nommé ajoute un second exécutable à l'image jpackage. Le nom dans le conteneur devient le nom du lanceur.
+
+| Propriété | Type |
+| --- | --- |
+| `appVersion` | `String?` |
+| `module` | `String?` (module JPMS) |
+| `mainClass` | `String?` |
+| `mainJar` | `String?` |
+| `jvmArgs`, `jvmArgs(vararg)` | `MutableList<String>?` |
+| `args`, `args(vararg)` | `MutableList<String>?` |
+| `icon` | `RegularFileProperty` |
+| `winConsole` | `Boolean?` (Windows uniquement) |
+
+### `buildTypes { }` [#buildtypes]
+
+`buildTypes { release { proguard { } } }` configure `ProguardSettings` pour les tâches release :
+
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `version` | `Property<String>` | `"7.10.0"` |
+| `maxHeapSize` | `Property<String>` | non défini |
+| `configurationFiles` | `ConfigurableFileCollection` | vide |
+| `isEnabled` | `Property<Boolean>` | `false` |
+| `obfuscate` | `Property<Boolean>` | `false` |
+| `optimize` | `Property<Boolean>` | `true` |
+| `joinOutputJars` | `Property<Boolean>` | `false` |
+
+## `nativeDistributions { }` [#nativedistributions]
+
+`JvmApplicationDistributions`, qui étend `AbstractDistributions`.
+
+### Métadonnées communes [#shared-metadata]
+
+Héritées d'`AbstractDistributions`, également disponibles sous `nativeApplication { distributions { } }` :
 
 | Propriété | Type | Notes |
-|-----------|------|-------|
-| `modules: ArrayList<String>` | — | Défauts : `java.base, java.desktop, java.logging, java.net.http, jdk.accessibility, jdk.crypto.ec` |
-| `var includeAllModules: Boolean` | — | Embarquer chaque module JDK |
-| `var cleanupNativeLibs: Boolean` | — | Stripper les libs natives hors cible |
-| `var splashImage: String?` | — | Chemin de l'image splash |
-| `var enableAotCache: Boolean` | — | Cache AOT JDK 25+ |
-| `var artifactName: String` | défaut `"${name}-${version}-${os}-${arch}.${ext}"` | Template de sortie |
-| `var compressionLevel: CompressionLevel?` | — | Défaut pour les paquets electron-builder : `Store`, `Normal`, `Maximum`, `Ultra`. Surchargé par format via `linux.appImage.compressionLevel` et `windows.portable.compressionLevel` lorsqu'ils sont définis. Préférez `Normal`/`Store` pour AppImage. |
-| `val trustedCertificates: ConfigurableFileCollection` | — | Certificats CA → `cacerts` du JDK livré (voir [certificats de confiance](/docs/packaging/trusted-certificates)) |
-| `val protocols: MutableList<UrlProtocol>` | — | Protocoles de deep link |
-| `targetFormats: …` | hérité | Les 18 [formats cibles](#targetformat-enum) |
-| `val linux: LinuxPlatformSettings` | — | Voir [Linux](#linux--linuxplatformsettings) |
-| `val macOS: JvmMacOSPlatformSettings` | — | Voir [macOS](#macos--jvmmacosplatformsettings) |
-| `val windows: WindowsPlatformSettings` | — | Voir [Windows](#windows--windowsplatformsettings) |
-| `val publish: PublishSettings` | — | Voir [publish](#publish--publishsettings) |
-| `val aotCache: AotCacheSettings` | — | Réglages du cache AOT JVM ; aussi `aotCache { }` |
-| `val sandboxing: SandboxingSettings` | — | Réglages de sandbox comme `keepNativeLibsInJars` ; aussi `sandboxing { }` |
-| `fun signing(Action<UnifiedSigningSettings>)` | — | Un bloc unique qui configure la signature pour les trois OS |
+| --- | --- | --- |
+| `outputBaseDir` | `DirectoryProperty` | Par défaut `build/compose/binaries` |
+| `appName`, `packageName`, `packageVersion` | `String?` | |
+| `copyright`, `description`, `vendor`, `homepage` | `String?` | |
+| `appResourcesRootDir` | `DirectoryProperty` | Ressources par OS copiées dans l'application |
+| `licenseFile` | `RegularFileProperty` | |
+| `targetFormats`, `targetFormats(vararg)` | `Set<TargetFormat>` | Voir [`TargetFormat`](#targetformat) |
 
-Méthodes :
+### Image runtime et empaquetage [#runtime-image]
 
-- `fun fileAssociation(mimeType, extension, description, linuxIconFile?, windowsIconFile?, macOSIconFile?)`
-- `fun protocol(name, vararg schemes)`
-- Communes (de `AbstractPlatformSettings`) : `iconFile`, `packageVersion`, `fileAssociation(...)`
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `modules`, `modules(vararg)` | `ArrayList<String>` | `java.base`, `java.desktop`, `java.logging`, `java.net.http`, `jdk.accessibility`, `jdk.crypto.ec`, `jdk.unsupported` | Modules JDK passés à jlink |
+| `includeAllModules` | `Boolean` | `false` | Tous les modules listés par le JDK, sauf `jdk.jlink` |
+| `stripJreFonts` | `Boolean` | `true` | Retire `java.desktop/lib/fonts` de l'image runtime |
+| `cleanupNativeLibs` | `Boolean` | `false` | Supprime les bibliothèques natives des autres plateformes |
+| `splashImage` | `String?` | | Image de l'écran de démarrage |
+| `enableAotCache` | `Boolean` | `false` | Raccourci pour `aotCache.enabled` |
+| `aotCache { }` | `AotCacheSettings` | | Voir [plus bas](#aotcache) |
+| `compressionLevel` | `CompressionLevel?` | | `Store`, `Normal`, `Maximum`, `Ultra`. `linux.appImage.compressionLevel` et `windows.portable.compressionLevel` le remplacent pour leur format |
+| `artifactName` | `String` | `"${name}-${version}-${os}-${arch}.${ext}"` | Modèle du nom de fichier produit |
+| `trustedCertificates` | `ConfigurableFileCollection` | | Certificats d'autorité ajoutés au `cacerts` embarqué. Voir [Certificats d'autorité de confiance](/docs/packaging/trusted-certificates) |
+| `protocols`, `protocol(name, vararg schemes)` | `MutableList<UrlProtocol>` | | Schémas d'URL des deep links |
+| `fileAssociation(mimeType, extension, description, linuxIconFile?, windowsIconFile?, macOSIconFile?)` | | | Enregistre l'association sur les trois OS |
+| `sandboxing { }` | `SandboxingSettings` | | `keepNativeLibsInJars(vararg)` : fragments de noms de JAR dont les bibliothèques natives restent intactes dans les builds sandboxés |
+| `signing { }` | `UnifiedSigningSettings` | | `macOS { }`, `windows { }`, `linux { }` au même endroit. Mêmes objets que les blocs `signing` de chaque OS |
+| `nodejs { }` | `NodeJsSettings` | | Voir [`nodejs { }`](#nodejs) |
+| `publish { }` | `PublishSettings` | | Voir [`publish { }`](#publish) |
+| `macOS { }`, `windows { }`, `linux { }` | | | Voir [macOS](#macos), [Windows](#windows), [Linux](#linux) |
 
-### Enum `TargetFormat`
+<Callout type="warn" title="Modifié en 3.0">
+`stripJreFonts` vaut `true` par défaut : les images jlink partent sans les polices du JRE. Compose dessine avec ses propres polices. Une application qui affiche du texte via AWT ou Swing définit `stripJreFonts = false`. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+### `aotCache { }` [#aotcache]
+
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `enabled` | `Boolean` | `false` | Cache AOT du JDK 25+ |
+| `compatibility` | `AotCacheCompatibility` | `COMPATIBILITY` | `COMPATIBILITY` ne stocke que les métadonnées de classes et tourne sur tout CPU de l'architecture. `NATIVE` met aussi en cache du code machine pour le CPU de la machine de build |
+| `extraTrainingJvmArgs`, `extraTrainingJvmArgs(vararg)` | `MutableList<String>` | vide | Arguments JVM du seul run d'entraînement |
+
+Voir [Cache AOT](/docs/performance/aot-cache).
+
+### `nodejs { }` [#nodejs]
+
+`NodeJsSettings` règle le Node.js qui exécute electron-builder, dont tous les formats sauf `RawAppImage` ont besoin.
+
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `autoDownload` | `Property<Boolean>` | `true` | Télécharge depuis `nodejs.org` et met en cache. `false` utilise `node` et `npm` du `PATH` |
+| `version` | `Property<String>` | `"22"` | Une ligne majeure (`"22"`), `"lts"`, ou une release figée (`"22.11.0"`) |
+| `installDir` | `DirectoryProperty` | `<gradle-user-home>/nucleus/nodejs` | Cache des téléchargements |
+
+Le plugin cherche Node.js dans cet ordre : la propriété Gradle `compose.electronBuilder.nodePath`, la variable d'environnement `NUCLEUS_NODE_HOME`, ce bloc, puis le `PATH` (également utilisé si le téléchargement échoue). Une version flottante reste figée une fois téléchargée ; supprimez son répertoire sous `installDir` pour récupérer une release plus récente. Voir [Provisionner Node.js](/docs/packaging#provisionner-nodejs).
+
+### `TargetFormat` [#targetformat]
 
 18 formats, dans l'ordre des sources :
 
 `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
 
-`RawAppImage` est l'app-image jpackage intermédiaire ; tous les autres formats sont produits par electron-builder. `Pkg`, `AppX` et `Flatpak` sont des formats store et exigent le sandboxing.
+jpackage construit `RawAppImage`, l'image d'application brute. electron-builder produit tous les autres formats à partir d'elle. `AppX` et `Flatpak` passent toujours par le pipeline sandboxé ; `Pkg` seulement avec `macOS { pkg { appStore = true } }`, la valeur par défaut.
 
-## `macOS { }` — `JvmMacOSPlatformSettings`
+<Callout type="warn" title="Modifié en 3.0">
+`TargetFormat.isStoreFormat` est déprécié au niveau `ERROR` et ne compile plus. Un PKG n'est un format store que si `pkg.appStore` vaut `true` : testez donc la valeur du DSL. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
 
-Étend `AbstractMacOSPlatformSettings`. Identification :
+## `macOS { }` [#macos]
 
-- `packageName: String?`, `bundleName: String?`, `packageVersion`, `packageBuildVersion`
-  — `bundleName` nomme le répertoire `.app` pour DMG/ZIP/PKG/app-image/GraalVM, avec pour défaut `appName` puis `packageName`
-- `dmgPackageVersion`, `dmgPackageBuildVersion`, `pkgPackageVersion`, `pkgPackageBuildVersion`
-- `dockName: String?`, `setDockNameSameAsPackageName: Boolean = true`
-- `bundleID: String?`, `appCategory: String?`, `minimumSystemVersion: String?`
-- `installationPath: String? = null` — emplacement d'installation macOS ; quand il est absent, le build retombe sur `/Applications`
-- `iconFile`, `layeredIconDir` (répertoire `.icon` macOS 26+)
+`JvmMacOSPlatformSettings`, qui étend `AbstractMacOSPlatformSettings`. Les procédures se trouvent dans [Construire pour macOS](/docs/packaging/macos).
 
-Signature et sandbox :
+| Propriété | Type | Notes |
+| --- | --- | --- |
+| `iconFile` | `RegularFileProperty` | `.icns` |
+| `layeredIconDir` | `DirectoryProperty` | Répertoire `.icon` de macOS 26 |
+| `packageName`, `packageVersion`, `packageBuildVersion` | `String?` | |
+| `bundleName` | `String?` | Nom du `.app` dans tous les formats macOS. Par défaut `appName`, puis `packageName` |
+| `dmgPackageVersion`, `dmgPackageBuildVersion` | `String?` | Surcharges propres au DMG |
+| `pkgPackageVersion`, `pkgPackageBuildVersion` | `String?` | Surcharges propres au PKG |
+| `bundleID`, `appCategory`, `minimumSystemVersion` | `String?` | |
+| `installationPath` | `String?` | Non défini, l'installation se fait dans `/Applications` |
+| `dockName` | `String?` | |
+| `setDockNameSameAsPackageName` | `Boolean` | Par défaut `true` |
+| `entitlementsFile`, `runtimeEntitlementsFile` | `RegularFileProperty` | Entitlements de l'application et du runtime JVM |
+| `provisioningProfile`, `runtimeProvisioningProfile` | `RegularFileProperty` | |
+| `macOsSdkVersion` | `String?` | Par défaut `"26.0"`. `vtool` l'écrit dans le `LC_BUILD_VERSION` du lanceur, ce qui conditionne Liquid Glass |
+| `fileAssociation(mimeType, extension, description, iconFile?)` | | |
+| `signing { }`, `notarization { }`, `dmg { }` | | Voir plus bas |
+| `pkg { }` | `PkgSettings` | Voir [`pkg { }`](#macos-pkg) |
+| `appExtensions { }` | `MacAppExtensionSettings` | Voir [`appExtensions { }`](#macos-app-extensions) |
+| `launchAgents { }` | `LaunchAgentSettings` | Voir [`launchAgents { }`](#macos-launch-agents) |
+| `infoPlist { extraKeysRawXml }` | `InfoPlistSettings` | Clés supplémentaires, en XML brut, ajoutées à `Info.plist` |
 
-- `entitlementsFile: RegularFileProperty`, `runtimeEntitlementsFile`
-- `provisioningProfile: RegularFileProperty`, `runtimeProvisioningProfile`
-- `signing { … }` — voir [Signature](#macos--signing--macossigningsettings)
-- `notarization { … }` — voir [Notarisation](#macos--notarization--macosnotarizationsettings)
+<Callout type="warn" title="Modifié en 3.0">
+`macOS.appStore` est déprécié au niveau `ERROR` et ne compile plus. En 2.x, la propriété était ignorée (le PKG ciblait toujours l'App Store) : elle n'a donc pas été convertie en alias. Choisissez d'abord le canal voulu, puis définissez `macOS { pkg { appStore = … } }`. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
 
-macOS 26 :
+### `pkg { }` [#macos-pkg]
 
-- `macOsSdkVersion: String? = "26.0"` — `vtool` patche le `LC_BUILD_VERSION` du launcher Mach-O pour activer Liquid Glass au SDK 26.
+`PkgSettings` choisit le canal de distribution du PKG.
 
-Composition :
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `appStore` | `Boolean` | `true` | `true` : build Mac App Store, sandboxé, re-signé avec `productsign`, non notarisé. `false` : build Developer ID, même pipeline que le DMG, installeur signé avec le certificat Developer ID Installer et notarisé par `notarizePkg` |
+| `preInstall` | `RegularFileProperty` | non défini | Script lancé en root avant la copie du contenu. Shebang obligatoire |
+| `postInstall` | `RegularFileProperty` | non défini | Script lancé en root après la copie du contenu |
 
-- `launchAgents { agent(plistName) { bundleProgram; arguments; startInterval } }`
-- `infoPlist { extraKeysRawXml }`
-- `dmg { … }` — voir [DMG](#macos--dmg--dmgsettings)
+L'App Store refuse les paquets qui contiennent des scripts d'installation : le plugin échoue dès la configuration si `preInstall` ou `postInstall` est défini avec `appStore = true`. Chaque script s'exécute une seule fois par installation.
 
-### `macOS.signing { }` — `MacOSSigningSettings`
-- `sign: Property<Boolean>` (défaut `false`)
-- `identity: Property<String>`
-- `keychain: Property<String>`
-- `prefix: Property<String>`
+```kotlin
+macOS {
+    pkg {
+        appStore = false
+        preInstall.set(file("packaging/macos/preinstall"))
+        postInstall.set(file("packaging/macos/postinstall"))
+    }
+}
+```
 
-### `macOS.notarization { }` — `MacOSNotarizationSettings`
-Trois modes mutuellement exclusifs :
+Voir [Choisir un canal PKG](/docs/packaging/macos#choisir-un-canal-pkg).
+
+### `appExtensions { }` [#macos-app-extensions]
+
+`MacAppExtensionSettings` intègre des bundles `.appex` déjà compilés dans `Contents/PlugIns/`. Nucleus les copie et les signe, sans les construire.
+
+| Membre | Notes |
+| --- | --- |
+| `extension(name) { }` | Déclare une `MacAppExtension`. `name` sert uniquement aux diagnostics |
+| `appex(File)` | Le bundle `.appex` à intégrer |
+| `entitlements(File)` | Entitlements de l'extension, distincts de ceux de l'application |
+| `provisioningProfile(File)` | Facultatif, intégré comme `Contents/embedded.provisionprofile` dans l'extension |
+
+```kotlin
+macOS {
+    appExtensions {
+        extension("NetworkFilter") {
+            appex(file("build/appex/NetworkFilter.appex"))
+            entitlements(file("packaging/extension/NetworkExtension.entitlements"))
+            provisioningProfile(file("packaging/NetworkFilter.provisionprofile"))
+        }
+    }
+}
+```
+
+Chaque extension est signée avec ses propres entitlements, puis l'application est scellée sans `--deep`. L'extension n'existe que dans un `.app` signé : utilisez `runDistributable`, pas `run`. Voir [Intégrer des extensions d'application](/docs/packaging/macos#intégrer-des-extensions-dapplication).
+
+### `signing { }` [#macos-signing]
+
+`MacOSSigningSettings` : `sign: Property<Boolean>` (par défaut `false`), `identity`, `keychain`, `prefix` (tous `Property<String>`).
+
+### `notarization { }` [#macos-notarization]
+
+`MacOSNotarizationSettings` accepte l'un de trois jeux d'identifiants, tous `Property<String>` :
 
 - Apple ID : `appleID`, `password`, `teamID`
-- Profil keychain `notarytool` : `keychainProfile`, optionnel `keychainPath`
-- Clé API App Store Connect : `apiKey`, `apiKeyId`, `apiIssuer`
+- Profil de trousseau `notarytool` : `keychainProfile`, `keychainPath` facultatif
+- Clé d'API App Store Connect : `apiKey`, `apiKeyId`, `apiIssuer`
 
-### `macOS.dmg { }` — `DmgSettings`
-- `title: String?`, `iconSize: Int?`, `iconTextSize: Int?`
-- `format: DmgFormat?` (`UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO`)
-- `size: String?`, `shrink: Boolean?`, `sign: Boolean`
-- `background: RegularFileProperty`, `backgroundColor: String?`
-- `icon: RegularFileProperty`, `badgeIcon: RegularFileProperty`
-- `window { x; y; width; height }`
-- `content(x, y, type: DmgContentType?, name: String?, path: String?)` — `DmgContentType` : `File`, `Link`, `Dir`
+`ascProvider` est déprécié au niveau `ERROR` ; utilisez `teamID`.
 
-## `windows { }` — `WindowsPlatformSettings`
+### `dmg { }` [#macos-dmg]
 
-- `iconFile`, `packageName`
-- `console: Boolean`, `dirChooser: Boolean`
-- `perUserInstall: Boolean` — **déprécié** ; sens inversé par rapport à electron-builder (`true` ≡ per-user). Préférez `msi { perMachine }` / `nsis { perMachine }`. Toujours appliqué tant que `msi.perMachine` n'est pas défini.
-- `shortcut`, `menu`, `menuGroup`
-- `upgradeUuid: String?`, `msiPackageVersion`, `exePackageVersion`
-- `nsis { … }` — voir [NSIS](#windows--nsis--nsissettings)
-- `msi { … }` — voir [MSI](#windows--msi--msisettings)
-- `appx { … }` — voir [AppX](#windows--appx--appxsettings)
-- `portable { … }` — voir [Portable](#windows--portable--portablesettings)
-- `signing { … }` — voir [Signature](#windows--signing--windowssigningsettings)
+`DmgSettings` :
 
-### `windows.portable { }` — `PortableSettings`
-- `compressionLevel: CompressionLevel?` — surcharge le `nativeDistributions.compressionLevel` racine pour l'EXE portable uniquement
+| Propriété | Type |
+| --- | --- |
+| `title` | `String?` |
+| `iconSize`, `iconTextSize` | `Int?` |
+| `format` | `DmgFormat?` : `UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO` |
+| `size` | `String?` |
+| `shrink` | `Boolean?` |
+| `sign` | `Boolean` (par défaut `false`) |
+| `background`, `icon`, `badgeIcon` | `RegularFileProperty` |
+| `backgroundColor` | `String?` |
+| `window { x; y; width; height }` | `Int?` chacun |
+| `content(x, y, type?, name?, path?)` | `type` est un `DmgContentType` : `Link`, `File`, `Dir` |
 
-### `windows.msi { }` — `MsiSettings`
-- `perMachine: Boolean` — install per-machine (Program Files, tous les utilisateurs). Défaut `true`. Mappe 1:1 sur electron-builder `msi.perMachine`.
-- `oneClick: Boolean` — passe le wizard. Défaut `true`. Passez `false` pour un installateur assisté.
-- `runAfterFinish: Boolean` — lance l'app à la fin de l'installation. Défaut `true`.
-- `createDesktopShortcut: Boolean` — défaut `true`.
-- `createStartMenuShortcut: Boolean` — défaut `true`.
-- `menuCategory: String?` — sous-menu du menu Démarrer (et sous-dossier Program Files). Défaut `null` ; si non défini, `windows.menuGroup` est utilisé.
-- `shortcutName: String?` — libellé du raccourci. Défaut : le nom de l'application.
+### `launchAgents { }` [#macos-launch-agents]
 
-### `windows.nsis { }` — `NsisSettings`
-- `oneClick: Boolean`
-- `allowElevation: Boolean`, `perMachine: Boolean`
-- `allowToChangeInstallationDirectory: Boolean`
-- `createDesktopShortcut: Boolean`, `createStartMenuShortcut: Boolean`
-- `menuCategory: String?` — sous-menu du menu Démarrer (et sous-dossier Program Files). Défaut `null` ; si non défini, `windows.menuGroup` est utilisé.
-- `shortcutName: String?` — libellé du raccourci. Défaut : le nom de l'application.
-- `runAfterFinish: Boolean`, `deleteAppDataOnUninstall: Boolean`
-- `multiLanguageInstaller: Boolean`, `installerLanguages: List<String>`
-- `installerIcon`, `uninstallerIcon`, `installerHeader`, `installerSidebar`
-- `license`, `script`, `includeScript`
+`agent(label) { }` déclare une `LaunchAgentDefinition`, écrite dans `<label>.plist` :
 
-### `windows.appx { }` — `AppXSettings`
-- `applicationId`, `publisherDisplayName`, `displayName`, `publisher`, `identityName`
-- `languages: List<String>`
-- `backgroundColor: String?`, `showNameOnTiles: Boolean`
-- `storeLogo`, `square44x44Logo`, `square150x150Logo`, `wide310x150Logo`
-- `minVersion: String?`, `maxVersionTested: String?`
-- `addAutoLaunchExtension: Boolean`, `setBuildNumber: Boolean`
+| Membre | Notes |
+| --- | --- |
+| `bundleProgram(path)` | Exécutable dans le bundle |
+| `arguments(vararg)` | |
+| `startInterval(seconds)` | |
+| `runAtLoad(enabled = true)` | Lance l'agent quand launchd le charge |
+| `keepAlive(enabled = true)` | Relance l'agent s'il s'arrête |
+| `processType(type)` | `Background` (défaut), `Standard`, `Adaptive` |
+| `calendar { month; day; weekday; hour; minute }` | `CalendarInterval`, `Int?` chacun |
 
-### `windows.signing { }` — `WindowsSigningSettings`
-- `enabled: Boolean`
-- `certificateFile`, `certificatePassword`, `certificateSha1`, `certificateSubjectName`
-- `algorithm: SigningAlgorithm` (`Sha1`, `Sha256`, `Sha512`)
-- `timestampServer: String?`
-- Azure Artifact Signing : `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName`
+## `windows { }` [#windows]
 
-## `linux { }` — `LinuxPlatformSettings`
+`WindowsPlatformSettings`. Voir [Construire pour Windows](/docs/packaging/windows).
 
-- `iconFile`, `shortcut: Boolean`, `packageName`, `packageVersion`
-- `appRelease: String?`, `appCategory: String?`, `menuGroup: String?`
-- `startupWMClass: String?`
-- `debMaintainer: String?`, `debPackageVersion`, `debDepends: List<String>`
-- `rpmLicenseType: String?`, `rpmPackageVersion`, `rpmRequires: List<String>`
-- `pacmanPackageVersion: String?`, `pacmanDepends: List<String>` — pour la cible `Pacman` (Arch Linux)
-- `afterInstall: RegularFileProperty`, `afterRemove: RegularFileProperty` — concaténés après le template Nucleus, puis electron-builder. Les macros (`${executable}`, `${sanitizedProductName}`) ne se substituent **que entre simples quotes**. Deb / Rpm / Pacman uniquement. Voir [scripts d'installation et de désinstallation](/docs/packaging/linux#ajouter-des-scripts-dinstallation-et-de-désinstallation)
-- `beforeInstall: RegularFileProperty`, `beforeRemove: RegularFileProperty` — passés bruts à fpm (`--before-install` / `--before-remove`) ; aucune substitution de macro electron-builder. Non appelés lors d'une mise à jour Pacman — utilisez `afterUpgrade` / `beforeUpgrade`
-- `afterUpgrade: RegularFileProperty`, `beforeUpgrade: RegularFileProperty` — passés bruts à fpm (`--after-upgrade` / `--before-upgrade`) ; aucune substitution de macro. Pacman uniquement : les seuls hooks exécutés quand Pacman met à jour un paquet installé. Deb / Rpm les ignorent
-- `appImage { … }` — voir [AppImage](#linux--appimage--appimagesettings)
-- `snap { … }` — voir [Snap](#linux--snap--snapsettings)
-- `flatpak { … }` — voir [Flatpak](#linux--flatpak--flatpaksettings)
-- `signing { … }` — voir [Signature](#linux--signing--linuxsigningsettings)
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `iconFile` | `RegularFileProperty` | | `.ico` |
+| `packageName`, `packageVersion` | `String?` | | |
+| `msiPackageVersion`, `exePackageVersion` | `String?` | | Surcharges de version par format |
+| `console` | `Boolean` | `false` | Ouvre une fenêtre de console |
+| `dirChooser` | `Boolean` | `true` | |
+| `shortcut`, `menu` | `Boolean` | `false` | `menu` vaut aussi `true` quand `menuGroup` est défini |
+| `menuGroup` | `String?` | | |
+| `upgradeUuid` | `String?` | | |
+| `perUserInstall` | `Boolean` | `false` | Déprécié. Sens inversé : `true` équivaut à `msi { perMachine = false }`. Appliqué seulement tant que `msi.perMachine` n'est pas défini |
+| `fileAssociation(...)` | | | |
+| `nsis { }`, `msi { }`, `appx { }`, `portable { }`, `signing { }` | | | Voir plus bas |
 
-### `linux.signing { }` — `LinuxSigningSettings`
-Signe en GPG les DEB/RPM pour la distribution hors store. Voir [Signature de code](/docs/packaging/code-signing#signer-sur-linux).
-- `enabled: Property<Boolean>` (défaut `false`)
-- `keyId: Property<String>` — id de clé GPG, empreinte ou email
-- `keyFile: RegularFileProperty` — clé privée ASCII-armored, importée dans un trousseau jetable (optionnel si la clé est déjà dans le trousseau de signature)
-- `passphrase: Property<String>`
-- `debMethod: DebSignMethod` (défaut `Detached` ; aussi `DpkgSig`, `Debsig`)
-- `silentUpdate: Property<Boolean>` (défaut `false`) — auto-update sans mot de passe avec vérification de signature ; nécessite `enabled`. Voir [mises à jour sans mot de passe](/docs/packaging/auto-update#mettre-en-place-les-mises-à-jour-sans-mot-de-passe-sur-linux).
+### `msi { }` [#windows-msi]
 
-Les valeurs par défaut sont lues depuis `compose.desktop.linux.sign` et `compose.desktop.linux.signing.{keyId,keyFile,passphrase,silentUpdate}`.
+`MsiSettings` :
 
-### `linux.appImage { }` — `AppImageSettings`
-- `category: AppImageCategory?` (`AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility`)
-- `genericName: String?`, `synopsis: String?`
-- `desktopEntries: Map<String, String>`
-- `compressionLevel: CompressionLevel?` — surcharge le `nativeDistributions.compressionLevel` racine pour AppImage uniquement ; préférez `Normal` ou `Store` (cold start FUSE)
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `perMachine` | `Boolean` | `true` | Installe dans Program Files pour tous les utilisateurs |
+| `oneClick` | `Boolean` | `true` | `false` affiche l'assistant |
+| `runAfterFinish` | `Boolean` | `true` | |
+| `createDesktopShortcut`, `createStartMenuShortcut` | `Boolean` | `true` | |
+| `menuCategory` | `String?` | | Dossier du menu Démarrer et sous-dossier de Program Files. À défaut, `windows.menuGroup` |
+| `shortcutName` | `String?` | | Par défaut le nom de l'application |
 
-### `linux.snap { }` — `SnapSettings`
-- `confinement: SnapConfinement` (défaut `Strict` ; aussi `Classic`, `Devmode`)
-- `grade: SnapGrade` (défaut `Stable` ; aussi `Devel`)
-- `summary: String?`, `base: String?`
-- `plugs: List<SnapPlug>` — 11 par défaut
-- `autoStart: Boolean`
-- `compression: SnapCompression?` (`Xz`, `Lzo`)
+### `nsis { }` [#windows-nsis]
 
-`SnapPlug` : `Desktop`, `DesktopLegacy`, `Home`, `X11`, `Wayland`, `Unity7`, `BrowserSupport`, `Network`, `NetworkBind`, `Gsettings`, `AudioPlayback`, `AudioRecord`, `Opengl`, `RemovableMedia`, `Cups`.
+`NsisSettings` :
 
-### `linux.flatpak { }` — `FlatpakSettings`
-- `runtime: String = "org.freedesktop.Platform"`
-- `runtimeVersion: String = "23.08"` — note : l’action CI `setup-nucleus` installe la Freedesktop Platform/SDK **24.08** ; définissez `runtimeVersion = "24.08"` pour les builds Flatpak en CI
-- `sdk: String = "org.freedesktop.Sdk"`
-- `branch: String = "master"`
-- `finishArgs: List<String>` — défauts : `--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`, `--device=dri`
-- `license: RegularFileProperty`
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `oneClick` | `Boolean` | `true` |
+| `allowElevation` | `Boolean` | `false` |
+| `perMachine` | `Boolean` | `false` |
+| `allowToChangeInstallationDirectory` | `Boolean` | `false` |
+| `createDesktopShortcut`, `createStartMenuShortcut` | `Boolean` | `true` |
+| `menuCategory` | `String?` | à défaut `windows.menuGroup` |
+| `shortcutName` | `String?` | nom de l'application |
+| `runAfterFinish` | `Boolean` | `true` |
+| `deleteAppDataOnUninstall` | `Boolean` | `false`. Supprime `%APPDATA%\<appId>` |
+| `multiLanguageInstaller` | `Boolean` | `false` |
+| `installerLanguages` | `List<String>` | vide |
+| `installerIcon`, `uninstallerIcon`, `installerHeader`, `installerSidebar` | `RegularFileProperty` | |
+| `license`, `script`, `includeScript` | `RegularFileProperty` | |
 
-## `publish { }` — `PublishSettings`
+### `appx { }` [#windows-appx]
 
-- `publishMode: PublishMode` (`Never`, `Auto`, `Always`)
-- `github { enabled, owner, repo, token, channel, releaseType }`
-- `s3 { enabled, bucket, region, path, acl }`
-- `generic { enabled, url, channel, useMultipleRangeRequest }`
+`AppXSettings` :
 
-`ReleaseChannel` : `Latest`, `Beta`, `Alpha`.
-`ReleaseType` : `Release`, `Draft`, `Prerelease`.
+| Propriété | Type | Notes |
+| --- | --- | --- |
+| `applicationId`, `publisherDisplayName`, `displayName`, `publisher`, `identityName` | `String?` | Identité dans le Store |
+| `languages` | `List<String>?` | |
+| `capabilities` | `List<String>?` | Par exemple `runFullTrust` |
+| `addAutoLaunchExtension` | `Boolean` (`false`) | Enregistre une tâche de démarrage |
+| `startupTaskId` | `String?` | Change seulement l'id recherché par le runtime, pas le manifeste généré |
+| `backgroundColor` | `String?` | |
+| `showNameOnTiles`, `setBuildNumber` | `Boolean` (`false`) | |
+| `minVersion`, `maxVersionTested` | `String?` | |
+| `storeLogo`, `square44x44Logo`, `square150x150Logo`, `wide310x150Logo` | `RegularFileProperty` | |
 
-## GraalVM — `GraalvmSettings`
+### `portable { }` [#windows-portable]
 
-- `isEnabled: Property<Boolean>` (défaut `false`)
-- `headless: Property<Boolean>` (défaut `false`) — daemons/CLIs : saute la metadata plateforme L3 AWT/Java2D, les packs L1 GUI toujours inclus et les libs natives GUI compagnons ; inscrit `-Djava.awt.headless=true`. Voir [Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless)
-- `imageName: Property<String>`
-- `march: Property<NativeImageMarch>` — `NATIVE` / `COMPATIBILITY` ; non défini, retombe sur un défaut par plateforme (`COMPATIBILITY`, ou `NATIVE` sous macOS Apple Silicon)
-- `optimization: Property<NativeImageOptimization>` — `QUICK_BUILD`, `NONE`, `LEVEL_1`..`LEVEL_3`, `SIZE` ; non défini, conserve `-O2`
-- `allCharsets: Property<Boolean>` (défaut `false`)
-- `mlProfileInference: Property<Boolean>` (défaut `true`) — `false` n'émet `-H:-MLProfileInference` que sur les toolchains Oracle ; Community ignore avec un warning
-- `advancedObfuscation: Property<Boolean>` (défaut `false`) — Oracle GraalVM uniquement
-- `autoIncludeResources: Property<Boolean>` (défaut `true`) — inclut les ressources propres au projet dans l'image
-- `maxHeapSizePercent: Property<Int>` (défaut `25`) — suit le collecteur choisi (`MaximumHeapSizePercent` ou `MaxRAMPercentage` sous G1)
-- `maxHeapSize: Property<String>` — tas max absolu (ex. `"2g"`) ; prioritaire sur le pourcentage
-- `garbageCollector: Property<NativeImageGarbageCollector>` — `SERIAL` / `G1` / `EPSILON` ; non défini : Serial. `G1` est Oracle GraalVM + Linux uniquement
-- `exactReachabilityMetadata: Property<ExactReachabilityMetadata>` (défaut `APP_PACKAGES`) — `--exact-reachability-metadata` sur `runGraalvmNative` uniquement ; `OFF` / `APP_PACKAGES` / `packages(...)`
-- `detectOrphanProjectClasses: Property<Boolean>` (défaut `true`) — enregistre un `<init>` public sans argument pour les types réflexifs par convention de nom
-- `reflectionForProjectClasses: Property<Boolean>` (défaut `false`) — opt-in : toute classe projet avec un constructeur public sans argument
-- `buildArgs: ListProperty<String>` — SLF4J n'est **pas** forcé en init build-time ; ajoutez `--initialize-at-build-time=org.slf4j` vous-même si besoin
-- `javaLanguageVersion: Property<Int>` (défaut `25`) — uniquement quand `toolchain.autoDownload = false`
-- `jvmVendor: Property<JvmVendorSpec>` — uniquement quand `toolchain.autoDownload = false`
-- `nativeImageConfigBaseDir: DirectoryProperty`
-- `val toolchain: GraalvmToolchainSettings` :
-  - `autoDownload: Property<Boolean> = true`
-  - `distribution: Property<GraalvmDistribution> = COMMUNITY` — `COMMUNITY` / `ORACLE` ; `ORACLE` déclenche un warning de licence GFTC
-  - `channel: Property<GraalvmChannel> = INNOVATION` — `INNOVATION` (défaut `25i3` / GraalVM 25.3 depuis 2.5.1) / `LTS`
-  - `version: Property<String>` — remplace `channel` (`"25i3"`, `"25"`, `"25.0.1"`, …)
-  - `macosIntelFallback: Property<Boolean> = true`
-  - `installDir: DirectoryProperty` — défaut `<gradle-user-home>/nucleus/graalvm`
-- `val pgo: GraalvmPgoSettings` — Oracle GraalVM uniquement ; `runWithPgoInstrument` n'est pas enregistrée sous `COMMUNITY` :
-  - `enabled: Property<Boolean> = true`
-  - `profile: RegularFileProperty` — défaut `graalvm/pgo/default.iprof`
-- `val macOS: GraalvmMacOSSettings` — `cStubsSrc`, `minimumSystemVersion = "12.0"`, `macOsSdkVersion = "26.0"`
-- `val windows: GraalvmWindowsSettings` :
-  - `bundleCRuntime: Property<Boolean> = true` — copie les DLL du runtime MSVC à côté du `.exe` natif
-  - `dlls: ListProperty<String>` — défauts : `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`
-  - `sourceDir: DirectoryProperty` — répertoire d'où les DLL sont copiées (par défaut le `bin` de la toolchain GraalVM)
-- `val metadataRepository: MetadataRepositorySettings` :
-  - `enabled: Boolean = true`
-  - `version: String = "1.1.4"`
-  - `excludedModules: SetProperty<String>`
-  - `moduleToConfigVersion: MapProperty<String, String>`
+`PortableSettings` : `compressionLevel: CompressionLevel?` remplace `nativeDistributions.compressionLevel` pour l'EXE portable.
 
-## App native — `NativeApplication`
+### `signing { }` [#windows-signing]
 
-Pour l'instant macOS Kotlin/Native uniquement.
+`WindowsSigningSettings` :
 
-- `targets(vararg targets: KotlinTarget)` — doivent être `KotlinNativeTarget` sur `Family.OSX`
-- `val distributions: NativeApplicationDistributions`
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `enabled` | `Boolean` | `false` |
+| `certificateFile` | `RegularFileProperty` | |
+| `certificatePassword`, `certificateSha1`, `certificateSubjectName` | `String?` | |
+| `algorithm` | `SigningAlgorithm` : `Sha1`, `Sha256`, `Sha512` | `Sha256` |
+| `timestampServer` | `String?` | |
+| `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName` | `String?` | Azure Artifact Signing |
 
-## Annotations
+Voir [Signature du code](/docs/packaging/code-signing).
 
-- `@ExperimentalNucleusLibrary` — marqueur opt-in pour la surface instable du DSL.
+## `linux { }` [#linux]
 
-## Autres types
-- `class FileAssociation(mimeType, extension, description, iconFile?)`
-- `class UrlProtocol(name, schemes: List<String>)`
-- `class LaunchAgentSettings`
-- `class JvmApplicationBuildTypes`
-- `class ProguardSettings`
-- `enum class CompressionLevel` — `Store`, `Normal`, `Maximum`, `Ultra`
-- `enum class GraalvmChannel` — `INNOVATION` (`25i3`), `LTS`
-- `enum class GraalvmDistribution` — `COMMUNITY`, `ORACLE`
-- `class ExactReachabilityMetadata` — `OFF`, `APP_PACKAGES`, `packages(...)`
-- `enum class NativeImageMarch` — `NATIVE`, `COMPATIBILITY`
-- `enum class NativeImageOptimization` — `QUICK_BUILD`, `NONE`, `LEVEL_1`, `LEVEL_2`, `LEVEL_3`, `SIZE`
-- `enum class SigningAlgorithm`
-- `enum class ReleaseType`, `enum class ReleaseChannel`, `enum class PublishMode`
-- `enum class SnapGrade`, `enum class SnapConfinement`, `enum class SnapCompression`
-- `enum class AppImageCategory`
-- `enum class DmgFormat`, `enum class DmgContentType`
+`LinuxPlatformSettings`. Voir [Construire pour Linux](/docs/packaging/linux).
 
-## Notes
+| Propriété | Type | Notes |
+| --- | --- | --- |
+| `iconFile` | `RegularFileProperty` | `.png` |
+| `packageName`, `packageVersion` | `String?` | |
+| `shortcut` | `Boolean` | Par défaut `false` |
+| `appRelease`, `appCategory`, `menuGroup` | `String?` | |
+| `startupWMClass` | `String?` | `StartupWMClass` de l'entrée desktop |
+| `debMaintainer`, `debPackageVersion` | `String?` | |
+| `debDepends` | `List<String>` | |
+| `rpmLicenseType`, `rpmPackageVersion` | `String?` | |
+| `rpmRequires` | `List<String>` | |
+| `pacmanPackageVersion` | `String?` | |
+| `pacmanDepends` | `List<String>` | |
+| `afterInstall`, `afterRemove` | `RegularFileProperty` | Ajoutés après le modèle Nucleus. Deb, Rpm et Pacman. Les macros electron-builder comme `${executable}` ne sont remplacées qu'entre apostrophes |
+| `beforeInstall`, `beforeRemove` | `RegularFileProperty` | Transmis tels quels à fpm. Pacman ne les lance pas lors d'une mise à niveau |
+| `afterUpgrade`, `beforeUpgrade` | `RegularFileProperty` | Transmis tels quels à fpm. Pacman uniquement |
+| `fileAssociation(...)` | | |
+| `appImage { }`, `snap { }`, `flatpak { }`, `signing { }` | | Voir plus bas |
 
-Le plugin injecte une ressource `nucleus/nucleus-app.properties` dans l'app empaquetée, contenant `app.id`, `app.version`, `app.vendor`, `app.aumid`, `startup.task.id` et d'autres clés du même genre. L'objet `NucleusApp` les lit au démarrage : c'est ainsi que la configuration du DSL parvient à la bibliothèque runtime.
+Voir [Ajouter des scripts d'installation et de désinstallation](/docs/packaging/linux#ajouter-des-scripts-dinstallation-et-de-désinstallation).
+
+### `signing { }` [#linux-signing]
+
+`LinuxSigningSettings` signe les paquets DEB et RPM avec GPG.
+
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `enabled` | `Property<Boolean>` | `false` | |
+| `keyId` | `Property<String>` | | Id de clé, empreinte ou e-mail |
+| `keyFile` | `RegularFileProperty` | | Clé privée ASCII-armored, importée dans un trousseau jetable |
+| `passphrase` | `Property<String>` | | |
+| `debMethod` | `DebSignMethod` | `Detached` | Aussi `DpkgSig`, `Debsig` |
+| `silentUpdate` | `Property<Boolean>` | `false` | Mise à jour sans mot de passe, vérifiée par signature. Nécessite `enabled`. Voir [mises à jour sans mot de passe](/docs/packaging/auto-update#mettre-en-place-les-mises-à-jour-sans-mot-de-passe-sur-linux) |
+
+Les valeurs par défaut viennent des propriétés Gradle `compose.desktop.linux.sign` et `compose.desktop.linux.signing.{keyId,keyFile,passphrase,silentUpdate}`.
+
+### `appImage { }` [#linux-appimage]
+
+`AppImageSettings` :
+
+| Propriété | Type | Notes |
+| --- | --- | --- |
+| `category` | `AppImageCategory?` | `AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility` |
+| `genericName`, `synopsis` | `String?` | |
+| `desktopEntries` | `Map<String, String>` | Clés supplémentaires de l'entrée desktop |
+| `compressionLevel` | `CompressionLevel?` | Remplace la valeur racine. `Normal` ou `Store` démarrent plus vite sous FUSE |
+
+### `snap { }` [#linux-snap]
+
+`SnapSettings` :
+
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `name` | `String?` | `packageName`. Renomme aussi la commande du lanceur et l'entrée desktop |
+| `confinement` | `SnapConfinement` : `Strict`, `Classic`, `Devmode` | `Strict` |
+| `grade` | `SnapGrade` : `Stable`, `Devel` | `Stable` |
+| `summary`, `base` | `String?` | |
+| `plugs` | `List<SnapPlug>` | `Desktop`, `DesktopLegacy`, `Home`, `X11`, `Wayland`, `Unity7`, `BrowserSupport`, `Network`, `Gsettings`, `AudioPlayback`, `Opengl` |
+| `autoStart` | `Boolean` | `false` |
+| `compression` | `SnapCompression?` : `Xz`, `Lzo` | |
+
+`SnapPlug` propose aussi `NetworkBind`, `AudioRecord`, `RemovableMedia` et `Cups`.
+
+### `flatpak { }` [#linux-flatpak]
+
+`FlatpakSettings` :
+
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `runtime` | `String` | `"org.freedesktop.Platform"` |
+| `runtimeVersion` | `String` | `"23.08"` |
+| `sdk` | `String` | `"org.freedesktop.Sdk"` |
+| `branch` | `String` | `"master"` |
+| `finishArgs` | `List<String>` | `--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`, `--device=dri` |
+| `license` | `RegularFileProperty` | |
+
+L'action CI `setup-nucleus` installe Freedesktop Platform et SDK 24.08. Définissez `runtimeVersion = "24.08"` pour construire des Flatpaks avec elle.
+
+## `publish { }` [#publish]
+
+`PublishSettings` :
+
+| Membre | Notes |
+| --- | --- |
+| `publishMode` | `PublishMode` : `Never` (défaut), `Auto` (sur tag), `Always` |
+| `github { enabled; owner; repo; token; channel; releaseType }` | `channel` vaut `Latest` par défaut, `releaseType` vaut `Release` |
+| `s3 { enabled; bucket; region; path; acl }` | |
+| `generic { enabled; url; channel; useMultipleRangeRequest }` | `useMultipleRangeRequest` vaut `true` par défaut |
+
+`ReleaseChannel` : `Latest`, `Beta`, `Alpha`. `ReleaseType` : `Release`, `Draft`, `Prerelease`. Voir [Publication](/docs/packaging/publishing).
+
+## `graalvm { }` [#graalvm--graalvmsettings]
+
+`GraalvmSettings`, sous `application { graalvm { } }`. Les procédures se trouvent dans [Configuration de GraalVM](/docs/performance/graalvm/configuration).
+
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `isEnabled` | `Property<Boolean>` | `false` | |
+| `headless` | `Property<Boolean>` | `false` | Pour les démons et les CLI : ignore les métadonnées AWT, Java2D et Skiko et leurs bibliothèques natives, intègre `-Djava.awt.headless=true`. Voir [Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless) |
+| `imageName` | `Property<String>` | | |
+| `march` | `Property<NativeImageMarch>` | selon la plateforme | `COMPATIBILITY`, ou `NATIVE` sur macOS Apple Silicon |
+| `optimization` | `Property<NativeImageOptimization>` | `-O2` | `QUICK_BUILD`, `NONE`, `LEVEL_1`, `LEVEL_2`, `LEVEL_3`, `SIZE`. Un `-O*` dans `buildArgs` l'emporte |
+| `allCharsets` | `Property<Boolean>` | `false` | |
+| `mlProfileInference` | `Property<Boolean>` | `true` | `false` émet `-H:-MLProfileInference` sur les toolchains Oracle ; Community l'ignore avec un avertissement |
+| `autoIncludeResources` | `Property<Boolean>` | `true` | Inclut les ressources du projet |
+| `advancedObfuscation` | `Property<Boolean>` | `false` | Oracle GraalVM uniquement |
+| `maxHeapSize` | `Property<String>` | | Plafond absolu, par exemple `"2g"`. Prime sur le pourcentage |
+| `maxHeapSizePercent` | `Property<Int>` | `25` | Intégré comme `MaximumHeapSizePercent`, ou `MaxRAMPercentage` sous G1 |
+| `garbageCollector` | `Property<NativeImageGarbageCollector>` | Serial | `SERIAL`, `G1`, `EPSILON`. `G1` exige Oracle GraalVM, et GraalVM 25.4+ hors Linux. Une combinaison non prise en charge émet un avertissement et garde Serial |
+| `exactReachabilityMetadata` | `Property<ExactReachabilityMetadata>` | `APP_PACKAGES` | `runGraalvmNative` uniquement. `OFF`, `APP_PACKAGES`, `packages(...)` |
+| `detectOrphanProjectClasses` | `Property<Boolean>` | `true` | Enregistre le constructeur public sans argument des classes du projet repérées par convention de nommage |
+| `reflectionForProjectClasses` | `Property<Boolean>` | `false` | Enregistre toutes les classes du projet dotées d'un constructeur public sans argument |
+| `buildArgs` | `ListProperty<String>` | vide | Ajoutés après les arguments dérivés. SLF4J reste initialisé au run time ; ajoutez `--initialize-at-build-time=org.slf4j` pour changer cela |
+| `javaLanguageVersion` | `Property<Int>` | `25` | Seulement avec `toolchain.autoDownload = false` |
+| `jvmVendor` | `Property<JvmVendorSpec>` | | Seulement avec `toolchain.autoDownload = false` |
+| `nativeImageConfigBaseDir` | `DirectoryProperty` | | |
+
+### `toolchain { }` [#graalvm-toolchain]
+
+`GraalvmToolchainSettings` :
+
+| Propriété | Type | Défaut | Notes |
+| --- | --- | --- | --- |
+| `autoDownload` | `Property<Boolean>` | `true` | |
+| `distribution` | `Property<GraalvmDistribution>` | `COMMUNITY` | `COMMUNITY` ou `ORACLE`. `ORACLE` affiche un avertissement sur la licence GFTC |
+| `channel` | `Property<GraalvmChannel>` | `INNOVATION` | `INNOVATION` correspond à `25i4`, `LTS` à `25` |
+| `version` | `Property<String>` | | Remplace `channel` : `"25i4"`, `"25"`, `"25.0.1"` |
+| `macosIntelFallback` | `Property<Boolean>` | `true` | Liberica NIK sur macOS Intel |
+| `installDir` | `DirectoryProperty` | `<gradle-user-home>/nucleus/graalvm` | |
+
+<Callout type="warn" title="Modifié en 3.0">
+Le canal `INNOVATION` correspond désormais à `25i4` (GraalVM 25.4, JDK 25.0.4) au lieu de `25i3`. Pour rester sur l'ancienne release, figez `graalvm { toolchain { version = "25i3" } }`. Voir [Revenir à GraalVM 25.3](/docs/performance/graalvm/configuration#revenir-à-graalvm-253).
+</Callout>
+
+### `pgo { }` [#graalvm-pgo]
+
+`GraalvmPgoSettings`. `--pgo` exige Oracle GraalVM : les toolchains Community ignorent un profil enregistré avec un avertissement, et l'instrumentation échoue.
+
+| Propriété | Type | Défaut |
+| --- | --- | --- |
+| `enabled` | `Property<Boolean>` | `true` (applique `profile` si le fichier existe) |
+| `profile` | `RegularFileProperty` | `graalvm/pgo/default.iprof` |
+
+### `macOS { }`, `windows { }`, `metadataRepository { }` [#graalvm-platforms]
+
+| Bloc | Propriété | Type | Défaut |
+| --- | --- | --- | --- |
+| `macOS` | `cStubsSrc` | `RegularFileProperty` | |
+| `macOS` | `minimumSystemVersion` | `Property<String>` | `"12.0"` |
+| `macOS` | `macOsSdkVersion` | `Property<String>` | `"26.0"` |
+| `windows` | `bundleCRuntime` | `Property<Boolean>` | `true` : copie les DLL du runtime MSVC à côté du `.exe` |
+| `windows` | `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` |
+| `windows` | `sourceDir` | `DirectoryProperty` | `bin` de la toolchain |
+| `metadataRepository` | `enabled` | `Property<Boolean>` | `true` |
+| `metadataRepository` | `version` | `Property<String>` | `"1.1.4"` |
+| `metadataRepository` | `excludedModules` | `SetProperty<String>` | entrées `group:artifact` |
+| `metadataRepository` | `moduleToConfigVersion` | `MapProperty<String, String>` | `group:artifact` vers version de métadonnées |
+
+## `nativeApplication { }` [#native-application]
+
+`NativeApplication` empaquette une application Kotlin/Native. Seules les cibles macOS sont prises en charge.
+
+- `targets(vararg KotlinTarget)` : chaque cible doit être un `KotlinNativeTarget` de `Family.OSX`.
+- `distributions { }` : `NativeApplicationDistributions`, avec les [métadonnées communes](#shared-metadata) et un bloc `macOS { }` limité aux membres d'`AbstractMacOSPlatformSettings` (ni `pkg`, ni `appExtensions`, ni `launchAgents`, ni entitlements).
+
+## Autres types [#other-types]
+
+| Type | Valeurs |
+| --- | --- |
+| `CompressionLevel` | `Store`, `Normal`, `Maximum`, `Ultra` |
+| `GarbageCollector` | `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON` |
+| `NativeImageGarbageCollector` | `SERIAL`, `G1`, `EPSILON` |
+| `NativeImageMarch` | `NATIVE`, `COMPATIBILITY` |
+| `NativeImageOptimization` | `QUICK_BUILD`, `NONE`, `LEVEL_1`, `LEVEL_2`, `LEVEL_3`, `SIZE` |
+| `GraalvmChannel` | `INNOVATION` (`25i4`), `LTS` (`25`) |
+| `GraalvmDistribution` | `COMMUNITY`, `ORACLE` |
+| `ExactReachabilityMetadata` | `OFF`, `APP_PACKAGES`, `packages(...)` |
+| `AotCacheCompatibility` | `COMPATIBILITY`, `NATIVE` |
+| `PackagingBackend` | `JPACKAGE`, `ELECTRON_BUILDER` (`TargetFormat.backend`) |
+| `UrlProtocol` | `data class UrlProtocol(name, schemes: List<String>)` |
+
+`@ExperimentalNucleusLibrary` marque les membres instables de `nucleus.dependencies`.
+
+## Propriétés générées de l'application [#app-properties]
+
+Le plugin écrit `nucleus/nucleus-app.properties` dans les ressources de l'application. L'objet runtime `NucleusApp` le lit au démarrage : c'est ainsi que les valeurs du DSL parviennent aux bibliothèques runtime. Clés : `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, et `optimization.idleGc` quand l'option `idleGc` est active.
 
 ## Et ensuite
 
-- [Configuration](/docs/start/configuration) — le DSL `nucleus { }` dans un script de build concret.
-- [Formats d'empaquetage](/docs/packaging) — ce que produit chaque `TargetFormat`.
-- [Signature de code](/docs/packaging/code-signing) — les blocs de signature macOS, Windows et Linux.
-- [Publication](/docs/packaging/publishing) — le bloc `publish { }` et les canaux de release.
+- [Configuration](/docs/start/configuration) : le DSL dans un script de build complet.
+- [Optimisation du démarrage](/docs/performance/startup) : ce que change chaque option de `nucleusOptimization`.
+- [Construire pour macOS](/docs/packaging/macos) : canaux PKG et extensions d'application.
+- [Vue d'ensemble de l'empaquetage](/docs/packaging) : ce que produit chaque `TargetFormat`.

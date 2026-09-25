@@ -1,99 +1,106 @@
 ---
-title: Un DSL, dix-huit installateurs
-description: Déclarez dans le DSL du plugin Gradle les formats de distribution desktop dont vous avez besoin et construisez chacun de ceux que l'OS hôte prend en charge.
+title: Vue d'ensemble de l'empaquetage
+description: Déclarez dans le DSL Gradle de Nucleus les formats d'installateur de votre application et construisez chacun de ceux que l'OS hôte prend en charge.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-Nucleus déclare chaque format de distribution desktop dans un seul bloc Gradle `nucleus { }`. Vous
-choisissez les formats avec `targetFormats(...)`, et une seule tâche construit chacun de ceux que l'OS
-hôte peut produire. `TargetFormat` définit 18 formats, couvrant les installateurs directs, les
-paquets pour store et les archives.
+Le plugin Gradle Nucleus construit les installateurs desktop à partir d'un seul bloc
+`nativeDistributions { }`. Le DSL d'empaquetage est fourni avec le plugin : vous n'ajoutez aucune
+dépendance.
 
 ## Déclarer les formats
 
-Le DSL de packaging est fourni avec le plugin Gradle : aucune dépendance séparée à ajouter.
-
 ```kotlin title="build.gradle.kts"
-plugins {
-    id("dev.nucleusframework") version "<version>"
-}
-```
-
-Listez les formats voulus dans `nativeDistributions` :
-
-```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        mainClass = "com.example.MainKt"
-
-        nativeDistributions {
-            targetFormats(
-                TargetFormat.Dmg, TargetFormat.Pkg,
-                TargetFormat.Exe, TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
-                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman,
-                TargetFormat.Snap, TargetFormat.Flatpak,
-                TargetFormat.Zip,
-            )
-            packageName = "MyApp"
-            packageVersion = "1.0.0"
-        }
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb, TargetFormat.AppImage)
     }
 }
 ```
-
-## Construire les installateurs
 
 ```shell
 ./gradlew packageDistributionForCurrentOS
 ```
 
-Chaque format demandé pour l'OS hôte est écrit sous `build/compose/binaries/`.
-
-<Callout type="info">
-Les formats que l'OS hôte ne peut pas produire sont ignorés silencieusement. Le même script de build
-tourne tel quel sur macOS, Windows et Linux, ce qui convient à une CI matricielle.
-</Callout>
+La tâche construit chaque format que l'hôte prend en charge et ignore les autres : un même script
+tourne sur les trois OS. Les fichiers arrivent dans `build/compose/binaries/main/<format>/`. Chaque
+format a aussi sa tâche (`packageDmg`, `packageNsis`), et `packageReleaseDistributionForCurrentOS`
+lance ProGuard avant.
 
 ## Formats pris en charge
 
-`TargetFormat` définit 18 constantes. Le tableau les regroupe selon la façon dont vous distribuez
-chaque build :
-
 | OS | Distribution directe | Store | Archives |
 |----|----------------------|-------|----------|
-| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7z |
-| Windows | Exe, NSIS, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
+| macOS | DMG, PKG (Developer ID) | PKG (Mac App Store) | ZIP, TAR, 7z |
+| Windows | Exe, NSIS, NSIS Web, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
 | Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
 
-L'ensemble des constantes de l'enum est `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`,
-`Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar` et
-`SevenZ`. Passez-les à `targetFormats(...)`. Le type déclarant est
-`dev.nucleusframework.desktop.application.dsl.TargetFormat`.
+`TargetFormat.RawAppImage` construit l'image d'application brute, sans installateur. Les formats
+pour store utilisent une [disposition sandboxée](/docs/packaging/sandboxing).
 
-## Comment ça marche
+## Provisionner Node.js
 
-Nucleus appelle jpackage pour produire un `app-image` natif, puis confie cette image au mode
-`--prepackaged` d'electron-builder pour piloter chaque installateur. L'approche hybride garde le
-réglage du runtime JVM de jpackage tout en s'appuyant sur electron-builder pour les formats que
-jpackage ne gère pas, comme NSIS, AppX, Snap, Flatpak et AppImage.
+Le plugin télécharge Node.js à la première utilisation et le met en cache dans
+`~/.gradle/nucleus/nodejs`. Vous n'installez rien, et la CI n'a plus besoin de
+`actions/setup-node`.
 
-Quand vous mélangez des formats directs et des formats store, Nucleus exécute deux pipelines : un
-`createDistributable` classique pour des formats comme DMG, NSIS et DEB, et un
-`createSandboxedDistributable` pour les formats store PKG, AppX et Flatpak. Le pipeline sandboxé
-extrait les bibliothèques natives à l'avance, injecte les arguments JVM adaptés au sandbox et
-applique les entitlements correspondants. Voir [Sandboxing](/docs/packaging/sandboxing).
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    nodejs {
+        version = "22"        // défaut : une ligne majeure, "lts", ou une release précise comme "22.11.0"
+        autoDownload = true   // false : utiliser node et npm du PATH
+    }
+}
+```
 
-## Configurer chaque plateforme
+La propriété Gradle `compose.electronBuilder.nodePath` et la variable d'environnement
+`NUCLEUS_NODE_HOME` passent avant le téléchargement. Une version flottante reste sur la release
+téléchargée la première fois : supprimez son répertoire de cache pour la mettre à jour.
 
-Les réglages par OS vivent sous `nativeDistributions.macOS { }`, `windows { }` et `linux { }` :
+## Bibliothèques natives à côté de l'application
 
-- [Construire pour macOS](/docs/packaging/macos) — DMG, PKG, binaires universels et icônes en couches.
-- [Construire pour Windows](/docs/packaging/windows) — Exe, NSIS, MSI, AppX et Portable.
-- [Construire pour Linux](/docs/packaging/linux) — DEB, RPM, AppImage, Pacman, Snap et Flatpak.
+Le plugin place les bibliothèques JNI des modules Nucleus à côté de l'application : l'application
+empaquetée n'extrait rien au démarrage. Pour les fat JAR et l'IDE, voir
+[Chargeur de bibliothèques natives](/docs/performance/native-library-loader).
+
+<Callout type="warn" title="Modifié en 3.0">
+Les applications empaquetées ne portent plus les bibliothèques JNI de Nucleus dans leurs JAR. Le
+code qui les lisait comme ressources du classpath doit les charger via `NativeLibraryLoader`. Voir
+[Migrer depuis la 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Alléger l'image runtime
+
+<Callout type="warn" title="Modifié en 3.0">
+`stripJreFonts` vaut `true` par défaut : l'image runtime perd les polices du JRE, puisque Compose
+dessine le texte avec les siennes. Une application qui dessine du texte avec AWT ou Swing doit
+régler `stripJreFonts = false`. Voir [Migrer depuis la 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Avec `includeAllModules = true`, le plugin écarte `jdk.jlink`, que les JDK construits sans
+`jmods/` (comme Temurin 24+) refusent de lier.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- jpackage construit l'image d'application. electron-builder 26.16.1 l'emballe dans chaque format
+  sauf `RawAppImage`.
+- Ordre de résolution de Node.js : `nodePath`, `NUCLEUS_NODE_HOME`, le téléchargement `nodejs { }`
+  (vérifié avec `SHASUMS256.txt`), puis `node` sur le `PATH`.
+- Les applications empaquetées reçoivent `-Dnucleus.native.libraryPath=$APPDIR`. Les images
+  GraalVM gardent les bibliothèques à côté de l'exécutable.
+
+</Accordion>
+</Accordions>
 
 ## Et ensuite
 
-- [Signature de code](/docs/packaging/code-signing) — signez et notarisez les builds pour chaque plateforme.
-- [Publication](/docs/packaging/publishing) — publiez les installateurs sur GitHub Releases, S3 ou un hôte générique.
-- [Référence du DSL Gradle](/docs/reference/gradle-dsl) — le DSL `nucleus { }` complet.
+- [macOS](/docs/packaging/macos), [Windows](/docs/packaging/windows), [Linux](/docs/packaging/linux) : réglages par OS.
+- [Signature du code](/docs/packaging/code-signing) : signer et notariser les builds de chaque plateforme.
+- [Mise à jour automatique](/docs/packaging/auto-update) : livrer des mises à jour aux installations existantes.
+- [CI/CD](/docs/packaging/ci-cd) : construire chaque format sur GitHub Actions.

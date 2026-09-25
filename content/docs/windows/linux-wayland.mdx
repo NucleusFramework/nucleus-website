@@ -1,0 +1,113 @@
+---
+title: Linux and Wayland
+description: How Nucleus windows run on native Wayland and X11, what the compositor controls, and how to branch on screen placement.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+On Linux, Nucleus windows run as native Wayland surfaces in a Wayland session and as X11 windows
+elsewhere, with no code change and no dependency beyond `nucleus-application`. On native Wayland
+the compositor owns window positions.
+
+## Detect the session
+
+Read the session type for diagnostics, or to gate features that differ per session, such as
+taskbar progress and global hotkeys:
+
+```kotlin
+val onWayland = Platform.isWayland
+val desktopEnv = if (Platform.Current == Platform.Linux) LinuxDesktopEnvironment.Current else null
+```
+
+`Platform.isWayland` describes the session, not a window: a window opened with `forceX11` runs on
+XWayland inside a Wayland session. For a per-window answer, read
+`TaoWindow.isNativeWaylandSurface` once the window is ready.
+
+## Branch on screen placement
+
+On native Wayland, the app can neither read nor set a window's screen position. Check
+`TaoWindow.canPlaceOnScreen` before you read a window origin, move a window, or place one window
+against another:
+
+```kotlin
+fun savedPosition(window: TaoWindow): IntOffset? {
+    // Native Wayland: the compositor owns placement, so the origin is meaningless
+    if (!window.canPlaceOnScreen) return null
+    val (x, y) = window.outerBoundsPx() ?: return null
+    return IntOffset(x.toInt(), y.toInt())
+}
+```
+
+`canPlaceOnScreen` is `false` only on a native Wayland surface. The size from `outerBoundsPx()`
+stays valid everywhere. Branch on this property, not on the compositor name or
+`LinuxDesktopEnvironment`.
+
+Where it is `false`:
+
+- `WindowPosition` and `WindowPosition.Aligned` have no effect. Persist the window size, not its
+  position.
+- Start window moves from a `Modifier.windowDragArea` region.
+- In cross-window drags (tearing off a tab, docking a satellite), a snapshot follows the pointer
+  instead of the window. See [Multi-window](/docs/multi-window). Satellite chrome reads the same
+  answer through `SatelliteScope.isCompositorPlaced`, see
+  [Floating satellites on Wayland](/docs/multi-window/satellites#floating-satellites-on-wayland).
+
+## Run on XWayland
+
+Set `NUCLEUS_TAO_LINUX_RENDERER=x11` (or `GDK_BACKEND=x11`) before launch to put the whole process
+on XWayland, where every window can read and set its position:
+
+```shell
+NUCLEUS_TAO_LINUX_RENDERER=x11 ./gradlew run
+```
+
+To move a single window, pass `forceX11 = true` to it. See
+[Overlay windows](/docs/windows/overlay-windows#take-an-x11-surface-on-wayland).
+
+## Wayland and X11 differences
+
+| Concern | Native Wayland | X11 / XWayland |
+|---|---|---|
+| Window position | Compositor decides, reported as `(0, 0)` | Read and set |
+| `alwaysOnTop`, `alwaysOnBottom` | No effect | Supported |
+| Workspace stickiness | No effect | Supported |
+| `hiddenFromDock` | No effect | Supported |
+| Trackpad pinch | Delivered | Not delivered |
+| Fractional scaling | Integer render, compositor scales | Integer scale |
+
+## Copy and paste
+
+Use the standard Compose `LocalClipboard` API. Plain text, images and file lists work in both
+directions, and pasted files land in file managers. HTML does not cross, and Nucleus ignores the
+X11 PRIMARY (middle-click) selection.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The `xdg-shell` protocol exposes no window position, so GDK reports every native toplevel at
+  `(0, 0)` and ignores moves. Nucleus logs `WindowPosition` being ignored once per process.
+- When code asks native Wayland for stacking, positioning, stickiness or a screen-space drag,
+  Nucleus logs a `java.util.logging` warning that suggests `NUCLEUS_TAO_LINUX_RENDERER=x11`.
+- GDK's Wayland backend names no primary monitor, so `TaoMonitors.all()` flags the first one.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Description |
+|---|---|
+| `TaoWindow.canPlaceOnScreen` | `false` on a native Wayland surface, where the app can neither read nor set the window position. |
+| `TaoWindow.isNativeWaylandSurface` | Whether this window runs on a native Wayland surface. Read after the window is ready. |
+| `TaoWindow.outerBoundsPx()` | `[x, y, width, height]` in physical pixels, or `null` before the window exists. |
+| `Platform.isWayland` | `true` in a Linux session where `XDG_SESSION_TYPE` is `wayland` or `WAYLAND_DISPLAY` is set. |
+| `LinuxDesktopEnvironment.Current` | `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate`, or `Unknown`. |
+| `NUCLEUS_TAO_LINUX_RENDERER=x11` | Environment variable that puts the process on XWayland. |
+
+Inside window content, reach the `TaoWindow` with `nucleusWindow.unsafe.taoWindow`.
+
+## What's next
+
+- [Multi-window](/docs/multi-window): satellites, docking, and tabs, and how they drag on Wayland.
+- [Overlay windows](/docs/windows/overlay-windows): `forceX11` and the flags Wayland ignores.
+- [HiDPI and text rendering](/docs/windows/hidpi): how scale factors map to Compose density.

@@ -1,0 +1,187 @@
+---
+title: État de fenêtre
+description: Pilotez et observez la taille, la position, le placement et l'écran d'une fenêtre avec le WindowState de Compose ou l'API window v2 sans AWT de dev.nucleusframework.window.tao.v2.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Un objet d'état fixe et rapporte la taille, la position, le placement et l'écran d'une fenêtre.
+`DecoratedWindow` accepte le `WindowState` de Compose (v1, par défaut) et l'API window v2 de
+`dev.nucleusframework.window.tao.v2`, qui déplace aussi les fenêtres d'un écran à l'autre.
+
+## Utiliser l'état v1
+
+```kotlin
+val state = rememberWindowState(
+    size = DpSize(1100.dp, 720.dp),
+    position = WindowPosition.Aligned(Alignment.Center),
+)
+
+DecoratedWindow(onCloseRequest = ::exitApplication, state = state) {
+    Button(onClick = { state.placement = WindowPlacement.Maximized }) { Text("Maximize") }
+}
+```
+
+`size`, `position`, `placement` et `isMinimized` sont mutables : écrivez-les pour piloter la
+fenêtre, lisez-les pour suivre l'utilisateur. Les dialogues prennent `rememberDialogState()` de la
+même façon.
+
+## Adapter la fenêtre à son contenu
+
+Passez un axe à `Dp.Unspecified` : la fenêtre mesure son contenu une fois, puis adopte cette taille.
+
+```kotlin
+val state = rememberWindowState(size = DpSize(Dp.Unspecified, Dp.Unspecified))
+```
+
+Un dialogue doté d'un parent se centre sur lui, un dialogue sans parent se centre sur l'écran. Les
+changements ultérieurs du contenu ne redimensionnent pas la fenêtre.
+
+## Utiliser l'API window v2
+
+L'état v2 remplace les propriétés mutables par des requêtes et ajoute le choix de l'écran :
+
+```kotlin
+import dev.nucleusframework.window.tao.v2.*
+
+@OptIn(ExperimentalComposeUiApi::class)
+fun main() = nucleusApplication {
+    val state = rememberWindowState(
+        initialScreenProvider = WindowScreenProvider.Primary,
+        initialBoundsProvider = WindowBoundsProvider(
+            sizeProvider = WindowSizeProvider.Fixed(1200.dp, 800.dp),
+            positionProvider = WindowPositionProvider.CenteredOnScreen,
+        ),
+    )
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, state = state) {
+        Button(onClick = { state.requestSize(900.dp, 600.dp) }) { Text("Resize") }
+    }
+}
+```
+
+Le package reproduit membre pour membre `androidx.compose.ui.window.v2` de Compose 1.12.
+`DecoratedWindow`, `DecoratedDialog`, `HostedWindow` et `HostedDialog` ont chacun une surcharge v2
+qui remplace `minimumSize` par `minSize` et `maxSize` (tailles intérieures). Les surcharges v2 de
+`Decorated*` exigent `@OptIn(ExperimentalComposeUiApi::class)`.
+
+<Callout type="warn" title="Modifié en 3.0">
+Nucleus n'accepte pas les types `androidx.compose.ui.window.v2` de Compose : ils dépendent d'AWT.
+Changez l'import pour `dev.nucleusframework.window.tao.v2`. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Demander des changements de géométrie
+
+| Requête | Effet |
+| --- | --- |
+| `requestSize(...)` | Redimensionne. |
+| `requestPosition(...)` | Déplace. |
+| `requestBounds(...)` | Redimensionne et déplace en une fois. |
+| `requestPlacement(placement)` | `Floating`, `Maximized` ou `Fullscreen`. |
+| `requestMinimized(value)` | Minimise ou restaure. |
+| `requestScreen(provider)` | Déplace vers un autre écran. |
+
+Les requêtes de taille, de position et de limites acceptent aussi un provider. La fenêtre applique
+les requêtes de façon asynchrone : les requêtes de limites dans l'ordre, et seule la dernière
+requête d'écran, de placement ou de minimisation. Une requête de limites restaure d'abord une
+fenêtre maximisée ou en plein écran.
+
+## Lire l'état observé
+
+La fenêtre réécrit dans l'état `bounds` (décorations comprises), `position`, `size`, `screenId`,
+`placement` et `isMinimized`. Ces propriétés lèvent une exception tant que la fenêtre n'a jamais été
+visible :
+
+```kotlin
+val label = if (state.isInitialized) "${state.size} on ${state.screenId}" else "not shown yet"
+```
+
+`rememberSaveable` restaure le dernier écran, le placement et les limites via `WindowState.Saver`.
+
+## Déplacer une fenêtre vers un autre écran
+
+```kotlin
+state.requestScreen { screens.last() }
+state.requestScreen(WindowScreenProvider.ById(savedScreenId))
+```
+
+Le scope liste `screens`, `defaultScreen` (l'écran actuel) et `primaryScreen`. La fenêtre garde sa
+position relative et reste entièrement visible. `ById` se rabat sur l'écran par défaut tant que
+l'écran visé est débranché. Un `Screen` expose `id`, `name`, `bounds`, `availableBounds` (sans barre
+des tâches, barre de menus ni docks), `insets` et `isPrimary`, en dp.
+
+Pour lister les écrans hors d'un provider, appelez `TaoMonitors.all()`, `primary()`,
+`forWindow(taoWindow)` ou `byId(id)` (`null` si débranché). Leur géométrie est en pixels physiques :
+convertissez-la avec `boundsDp(scale)` en passant l'échelle de la fenêtre que vous placez.
+
+## Dimensionner et placer avec des providers
+
+| `WindowSizeProvider` | Taille |
+| --- | --- |
+| `Default` | 800 × 600 dp. |
+| `Current` | Garde la taille actuelle. |
+| `Fixed(width, height)` | La taille donnée. |
+| `Unconstrained` | Taille du contenu, plafonnée à la taille disponible de l'écran. |
+| `PreferredWidth(height)` / `PreferredHeight(width)` | Taille du contenu sur un axe. |
+
+| `WindowPositionProvider` | Position |
+| --- | --- |
+| `Default` | Le gestionnaire de fenêtres place la fenêtre. |
+| `Current` | Garde la position actuelle. |
+| `CenteredOnScreen` / `CenteredInParentWindow` | Centre de l'écran ou du parent. |
+| `Absolute(x, y)` | Le point donné. |
+| `AlignedToScreen(alignment, offset)` | Aligné dans les limites disponibles. |
+| `AlignedToParentWindow(anchor, alignment, offset, excludeParentInsets)` | Aligné autour du parent. |
+
+Les providers relatifs au parent lèvent une exception quand la fenêtre n'a pas de parent.
+`WindowBoundsProvider(size, position)` combine les deux. Préférez-le à
+`WindowBoundsProvider.Absolute(rect)` quand l'un des deux est `Default` ou dépend du contenu : un
+`DpRect` ne sait pas l'exprimer.
+
+Un provider personnalisé est une lambda qui dispose de `windowMetrics`, `parentWindowMetrics`,
+`contentToWindowSize` et `measureWindowContent` :
+
+```kotlin
+state.requestBounds {
+    val work = windowMetrics.screen.availableBounds
+    DpRect(work.left, work.top, work.left + (work.right - work.left) / 2, work.bottom)
+}
+```
+
+## Utiliser un état de dialogue
+
+`DialogState` offre les requêtes d'écran et de limites de `WindowState`, sans placement ni
+minimisation. Créez-le avec `rememberDialogState(initialScreenProvider, initialBoundsProvider)` ou
+`rememberDialogStateWithBounds(initialPosition, initialSize)`, qui centre le dialogue sur l'écran par
+défaut. `rememberWindowStateWithBounds` en est l'équivalent pour les fenêtres. Voir
+[Dialogues et popups](/docs/windows/dialogs-popups).
+
+## Limites connues
+
+- Les gestionnaires de fenêtres X11 appliquent leur propre politique à la position initiale.
+  Openbox la place en 0,0.
+- Un `NucleusWindowHost` thémé sans surcharge v2 perd `maxSize`. Voir
+  [Ouvrir les fenêtres via un hôte](/docs/windows#ouvrir-les-fenêtres-via-un-hôte).
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le package v2 lit les écrans via `TaoMonitors` et la géométrie depuis la fenêtre native.
+- Tant que la fenêtre n'existe pas, `measureWindowContent` renvoie la taille actuelle du contenu
+  bornée par les contraintes, puis lance une vraie passe de mesure.
+- Sous macOS, Nucleus ne bascule jamais le zoom pour restaurer une fenêtre : fixer le cadre suffit à
+  la dézoomer.
+- Quand la plateforme ne désigne aucun écran principal (GDK sous Wayland), le premier prend
+  `isPrimary`.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : paramètres de `DecoratedWindow` et handle de fenêtre.
+- [Dialogues et popups](/docs/windows/dialogs-popups) : dialogues modaux et leur placement.
+- [HiDPI](/docs/windows/hidpi) : facteurs d'échelle selon les écrans.
+- [Applications multi-fenêtres](/docs/multi-window) : satellites, ancrage et onglets.

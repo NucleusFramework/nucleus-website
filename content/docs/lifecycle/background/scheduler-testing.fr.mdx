@@ -1,0 +1,104 @@
+---
+title: Scheduler testing
+description: Doublures de test pour le scheduler qui exécutent les tâches de fond en mémoire, avec un temps virtuel et des contraintes contrôlables.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`scheduler-testing` exécute les tâches du [scheduler](/docs/lifecycle/background/scheduler) en mémoire, avec
+une horloge virtuelle et des contraintes simulées. Ajoutez
+`testImplementation("dev.nucleusframework:nucleus.scheduler-testing:<version>")` ; l'artefact
+apporte `scheduler`.
+
+## Tester une tâche isolément
+
+`TestTaskRunner.runTask()` appelle `doWork()` avec un `TaskContext` fabriqué et renvoie le
+`TaskResult` :
+
+```kotlin
+@Test
+fun `sync succeeds`() = runTest {
+    val result = TestTaskRunner.runTask(
+        task = SyncTask(),
+        taskId = TaskId("sync"),
+        inputData = TaskData.of(SyncInput(endpoint = "https://test.api")),
+    )
+    assertEquals(TaskResult.Success, result)
+}
+```
+
+`taskId`, `inputData` et `runAttemptCount` sont optionnels. Renseignez `runAttemptCount` pour
+tester la logique de nouvel essai.
+
+## Exécuter les tâches via le scheduler
+
+`TestDesktopTaskScheduler` remplace le backend derrière `DesktopTaskScheduler`. Enveloppez-le dans
+`use { }` pour retrouver le vrai backend après le test :
+
+```kotlin
+TestDesktopTaskScheduler().use { testScheduler ->
+    testScheduler.install()
+    DesktopTaskScheduler.enqueue(TaskRequest.periodic(SyncId, 2.hours))
+
+    // Six heures virtuelles : la tâche toutes les 2 heures s'exécute trois fois.
+    val fired = testScheduler.advanceTimeBy(6.hours, registry)
+    assertEquals(3, fired.size)
+    assertEquals(LastTaskResult.Success, testScheduler.getExecutionHistory(SyncId).last().result)
+}
+```
+
+<Callout type="info">
+`advanceTimeBy()` ne déclenche que les tâches périodiques. Exécutez une tâche calendaire ou au
+démarrage avec `runTask(taskId, registry)`.
+</Callout>
+
+## Simuler des contraintes
+
+Passez un `TestConstraintChecker` au scheduler de test pour que les deux s'installent et se
+désinstallent ensemble :
+
+```kotlin
+val checker = TestConstraintChecker()
+TestDesktopTaskScheduler(constraintChecker = checker).use { testScheduler ->
+    testScheduler.install()
+    checker.networkConnected = false
+
+    // Une tâche qui exige le réseau est enregistrée comme ConstraintsNotMet.
+    assertNull(testScheduler.runTask(SyncId, registry))
+}
+```
+
+## Référence de l'API
+
+### TestDesktopTaskScheduler
+
+`TestDesktopTaskScheduler(constraintChecker: TestConstraintChecker? = null)`, `Closeable`.
+
+| Membre | Comportement |
+|---|---|
+| `install()` / `uninstall()` | Redirige `DesktopTaskScheduler` vers cette instance, ou restaure le backend de la plateforme. `close()` désinstalle. |
+| `runTask(taskId, registry)` | Exécute une tâche en file immédiatement. `null` si ses contraintes échouent ; lève une exception si la tâche n'est pas en file. |
+| `advanceTimeBy(duration, registry)` | Avance le temps virtuel et renvoie les `ExecutionRecord` des tâches périodiques déclenchées. |
+| `currentVirtualTimeMs` | Temps virtuel courant. |
+| `getExecutionHistory(taskId)` / `getAllExecutionHistory()` | Historique des exécutions, du plus ancien au plus récent. |
+| `getEnqueuedRequest(taskId)` / `getEnqueuedRequests()` | Requêtes stockées. |
+
+`ExecutionRecord` contient `taskId`, `result: LastTaskResult`, `runAttemptCount` et `virtualTimeMs`.
+
+### TestConstraintChecker
+
+`Closeable`, avec `install()` et `uninstall()` pour un usage autonome.
+
+| Champ | Défaut | Signification |
+|---|---|---|
+| `networkConnected` | `true` | Un réseau est actif. |
+| `networkUnmetered` | `true` | Le réseau actif n'est pas limité. |
+| `batteryLevel` | `1.0f` | De `0.0` à `1.0` ; `null` signifie pas de batterie. |
+| `isCharging` | `false` | Sur secteur. |
+| `idleTimeSeconds` | `0L` | Temps d'inactivité ; `-1` signifie indisponible. |
+| `availableStorageBytes` | `Long.MAX_VALUE` | Espace disque libre. |
+
+## Et ensuite
+
+- [Scheduler](/docs/lifecycle/background/scheduler) : tâches, requêtes, contraintes et nouveaux essais.
+- [Vue d'ensemble du cycle de vie](/docs/lifecycle) : les autres modules de cycle de vie.

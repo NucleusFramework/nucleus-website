@@ -1,0 +1,83 @@
+---
+title: GPU render context
+description: Give an in-process renderer the scene's Skia DirectContext and GPU device, so it draws without a second device or a per-frame copy.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TaoGpuRenderContext` publishes the GPU context of the enclosing Compose surface: the Skia
+`DirectContext` the scene draws with and the native device behind it. An in-process renderer,
+such as a map engine, a 3D viewport or a charting library, allocates its render targets there,
+and Compose samples them with no shared handle or copy. It comes with `nucleus-application`.
+
+For a producer on its own device or in another process, use
+[`TextureView`](/docs/native-content/texture-view).
+
+## Get the context
+
+Call `rememberTaoGpuRenderContext()` inside a surface that owns a GPU context: `DecoratedWindow`
+content, a native popup layer, a `NativeView` overlay or a tray panel. It returns `null` during
+bring-up and teardown, and when no hardware context exists.
+
+```kotlin
+@Composable
+fun MapViewport() {
+    val renderContext = rememberTaoGpuRenderContext() ?: return
+    // A rebuilt context is a new instance: key renderer state on it.
+    val renderer = remember(renderContext) { MapEngineRenderer(renderContext) }
+    DisposableEffect(renderContext) {
+        onDispose { renderContext.runOnGpuThread { renderer.releaseGpuResources() } }
+    }
+    LaunchedEffect(renderer) {
+        while (true) {
+            withFrameNanos { renderer.renderFrame() }   // GPU work inside the callback
+        }
+    }
+}
+```
+
+## Pick the backend
+
+| Type | Platforms | `backend` | Extra member |
+| --- | --- | --- | --- |
+| `TaoMetalRenderContext` | macOS | `TaoRenderBackend.METAL` | `metalDevicePtr`: the `id<MTLDevice>` |
+| `TaoOpenGlRenderContext` | Linux, Windows | `TaoRenderBackend.OPENGL` | `withContextCurrent { }`: binds the surface's GL context |
+
+Both expose `skiaContext` and `runOnGpuThread { }`. On Windows, `OPENGL` means ANGLE's GLES 3 on
+Direct3D 11: resolve entry points through ANGLE's `eglGetProcAddress`.
+
+## Respect ownership and lifetime
+
+- Every handle is borrowed: never retain, release or free it.
+- The context is rebuilt on window detach, a Wayland hide and show, or popup and tray panel
+  teardown, and `rememberTaoGpuRenderContext()` then returns a new instance or `null`. Key state
+  with `remember(renderContext)` and free GPU resources in a `DisposableEffect(renderContext)`,
+  inside `runOnGpuThread` or `withContextCurrent`.
+- Call every member from the UI thread (the main thread on macOS).
+
+## Pace frames
+
+Issue GPU work inside the `withFrameNanos` callback, or during composition, layout or draw. On
+Linux, code that runs after the `withFrameNanos` suspension gets `null` from `withContextCurrent`
+almost every vsync. `withContextCurrent` is safe to nest.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- On macOS, `runOnGpuThread` hops to the render thread that owns the Metal context and blocks
+  until the action returns. On Linux and Windows it runs inline on the event-loop thread.
+- On Linux the host hands the EGL context to a swap thread for `eglSwapBuffers` right after each
+  frame, hence the pacing rule.
+- `withContextCurrent` restores the previous context and resets Skia's GL state cache, so your GL
+  calls do not corrupt the scene's frame.
+- While a scene has live `TextureView` imports or GPU context consumers, Nucleus keeps VSync on
+  through the Windows modal move and resize loop and Linux resize bursts.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [TextureView](/docs/native-content/texture-view): import GPU frames from an external producer.
+- [Native views](/docs/native-content/native-views): embed interactive native widgets.
+- [Threading](/docs/concepts/threading): the UI thread these calls run on.

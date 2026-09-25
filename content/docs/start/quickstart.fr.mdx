@@ -1,28 +1,24 @@
 ---
-title: Quickstart
-description: Construisez et lancez votre première app desktop Nucleus, puis empaquetez-la en installateur natif.
+title: Démarrage rapide
+description: Construisez et lancez votre première application desktop Nucleus, puis empaquetez-la en installateur natif.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Dans ce tutoriel, vous allez créer une app desktop Nucleus à partir de zéro, la lancer dans une
-fenêtre native Tao, puis l'empaqueter en installateur pour votre système d'exploitation actuel.
-L'app entière tient en deux fichiers : un script de build Gradle et une fonction `main` Kotlin.
-
-## Avant de commencer
-
-Nucleus s'appuie sur Compose Multiplatform et nécessite :
-
-- **JDK 17 ou une version ultérieure** dans votre `PATH`.
-- **Kotlin 2.4.10 ou une version ultérieure** et **Gradle 8.x**.
+Dans ce tutoriel, vous allez créer une application desktop Nucleus en deux fichiers, la lancer dans
+une fenêtre native et l'empaqueter en installateur pour votre système. Il vous faut JDK 17+,
+Kotlin 2.4.10+ et Gradle 9.0+ (voir [Installation](/docs/start/install#compatibilité)).
 
 ## Créer le script de build
 
-Dans un dossier de projet vide, créez `build.gradle.kts` et appliquez le plugin Nucleus :
+Dans un répertoire vide, créez `build.gradle.kts` :
 
 ```kotlin title="build.gradle.kts"
+import dev.nucleusframework.desktop.application.dsl.TargetFormat
+
 plugins {
     kotlin("jvm") version "2.4.10"
+    kotlin("plugin.compose") version "2.4.10"
     id("org.jetbrains.compose") version "1.12.0"
     id("dev.nucleusframework") version "<version>"
 }
@@ -34,10 +30,7 @@ repositories {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    // Le module d'entrée — fournit nucleusApplication et DecoratedWindow
     implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
-    // Active le backend Tao (fenêtrage natif en Rust)
-    implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
 }
 
 nucleus.application {
@@ -51,54 +44,33 @@ nucleus.application {
 }
 ```
 
-Vous avez déjà une app Compose Desktop ? Nucleus étend `org.jetbrains.compose`, donc le passage est un
-simple renommage — retirez le bloc `compose.desktop.application { }` vanilla et pointez-le vers Nucleus :
-
-```diff
--compose.desktop.application {
-+nucleus.application {
-     mainClass = "com.example.MainKt"
-     // nativeDistributions { ... } reste identique
- }
-```
-
-Le point d'entrée dans `main` suit le même échange : `application { Window(...) }` devient
-`nucleusApplication { DecoratedWindow(...) }`. Voir [Migration depuis Compose Desktop](/docs/migrate/from-jb-compose).
+`nucleus-application` est la seule dépendance Nucleus dont l'application a besoin. Vous venez de
+Compose Desktop ? Voir [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose).
 
 ## Écrire l'application
 
 Créez `src/main/kotlin/com/example/Main.kt` :
 
-```kotlin
+```kotlin title="Main.kt"
 package com.example
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.Text
-import androidx.compose.ui.Modifier
 import dev.nucleusframework.application.DecoratedWindow
-import dev.nucleusframework.application.NucleusBackend
 import dev.nucleusframework.application.nucleusApplication
 
-fun main() = nucleusApplication(backend = NucleusBackend.Tao) {
-    DecoratedWindow(
-        onCloseRequest = ::exitApplication,
-        title = "MyApp",
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            Text("Hello from Nucleus")
-        }
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        Text("Hello from Nucleus")
     }
 }
 ```
 
-Le point d'entrée `nucleusApplication` démarre le runtime Nucleus et ouvre une `DecoratedWindow` —
-une fenêtre Compose avec une barre de titre native.
+`DecoratedWindow` ouvre une fenêtre Compose avec une barre de titre native. Transmettez les `args`
+du processus pour que les deep links et les associations de fichiers parviennent à l'application.
 
-<Callout type="info">
-`NucleusBackend.Auto` (la valeur par défaut) choisit Tao quand `decorated-window-tao` est sur
-le classpath, et se rabat sur le backend AWT déprécié sinon. Forcez un backend avec
-`NucleusBackend.Tao`. Voir [Backends](/docs/concepts/backends).
+<Callout type="warn" title="Modifié en 3.0">
+`nucleusApplication` n'a plus de paramètre `backend`, et les `Window`, `Dialog` et `Tray` de
+Compose Desktop n'y fonctionnent pas. Voir [Migrer depuis Nucleus 2.x](/docs/migrate/from-2.x).
 </Callout>
 
 ## Lancer l'application
@@ -107,8 +79,9 @@ le classpath, et se rabat sur le backend AWT déprécié sinon. Forcez un backen
 ./gradlew run
 ```
 
-Une fenêtre native s'ouvre avec une barre de titre personnalisée — dessinée par Tao sous Linux
-et Windows, et par le système sur macOS.
+Pour Compose Hot Reload, appliquez `org.jetbrains.compose.hot-reload` et lancez `./gradlew hotRun`.
+Sous macOS, déclarez aussi `dev.nucleusframework:nucleus.decorated-window-tao:<version>` dans le
+module, sans quoi la fenêtre du hot reload ne s'ouvre pas.
 
 ## Empaqueter l'application
 
@@ -116,12 +89,12 @@ et Windows, et par le système sur macOS.
 ./gradlew packageDistributionForCurrentOS
 ```
 
-L'installateur est écrit dans `build/compose/binaries/main/<format>/` : un `.dmg` sur macOS, un
-`.msi` sur Windows et un `.deb` sur Linux. Ajoutez des formats en étendant `targetFormats(...)`.
-Voir [Configuration](/docs/start/configuration).
+L'installateur arrive dans `build/compose/binaries/main/<format>/`. Voir
+[Configuration](/docs/start/configuration#sélectionner-les-formats-de-packaging) pour ajouter des
+formats.
 
 ## Et ensuite
 
-- [Project setup](/docs/start/project-setup) — organisation multi-module, propriétés Gradle et config JDK.
-- [Configuration](/docs/start/configuration) — le DSL `nucleus { }` complet.
-- [Architecture](/docs/concepts/architecture) — ce qui tourne sous votre fonction `main`.
+- [Fenêtres](/docs/windows) : `DecoratedWindow`, barres de titre et dialogues.
+- [Configuration](/docs/start/configuration) : le DSL `nucleus { }`.
+- [Architecture](/docs/concepts/architecture) : ce qui tourne sous votre fonction `main`.

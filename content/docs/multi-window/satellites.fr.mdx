@@ -1,0 +1,206 @@
+---
+title: Satellites
+description: Déclarez une seule fois palettes d'outils et inspecteurs, laissez-les suivre la fenêtre de document active, ancrez-les et enregistrez leur disposition.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Un satellite est une fenêtre native qui appartient à une autre fenêtre : il suit son parent,
+reste au-dessus de lui, se masque avec lui et n'apparaît pas dans la barre des tâches.
+L'utilisateur peut le laisser flotter ou l'ancrer dans le document. Les satellites sont
+`@ExperimentalNucleusApi` (voir [Multi-fenêtre](/docs/multi-window)).
+
+## Déclarer un workspace
+
+Les fenêtres de document rejoignent un `SatelliteWorkspace` avec `JoinSatelliteWorkspace`.
+Déclarez les satellites au niveau de l'application, à côté des fenêtres :
+
+```kotlin title="Main.kt"
+fun main() = nucleusApplication {
+    val workspace = rememberSatelliteWorkspace()
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Document") {
+        JoinSatelliteWorkspace(workspace)
+        WindowScaffold(titleBar = { TitleBar { Text("Document") } }) { padding ->
+            DockLayout(workspace, Modifier.padding(padding)) { Document() }
+        }
+    }
+
+    Satellite(workspace, id = "tools", title = "Tools") { ToolsPanel() }
+    Satellite(
+        workspace,
+        id = "colors",
+        title = "Colors",
+        initialPlacement = SatellitePlacement.Docked(DockSide.Right),
+    ) { ColorPanel() }
+}
+```
+
+`Tools` s'ouvre en fenêtre flottante, `Colors` en panneau ancré. Chacun reçoit un en-tête avec
+les actions Dock, Float et Close ; le faire glisser déplace le satellite d'un hôte à l'autre.
+
+## Paramètres de Satellite
+
+| Paramètre | Défaut | Rôle |
+| --- | --- | --- |
+| `workspace`, `id`, `title` | requis | Workspace, identité stable, titre de l'en-tête et de la fenêtre |
+| `initialPlacement` | `SatellitePlacement.Floating()` | Position à la première déclaration |
+| `initiallyOpen` | `true` | Affiché ou non à la première déclaration |
+| `dockSides` | les quatre `DockSide` | Côtés d'ancrage autorisés. Vide : palette uniquement flottante |
+| `floatable` | `true` | `false` crée un panneau fixe. Exige un `initialPlacement` ancré |
+| `reorderable` | `true` | `false` fige son rang sur son côté. Exige un `initialPlacement` ancré |
+| `resizable` | `true` | L'utilisateur peut redimensionner la fenêtre flottante |
+| `hideWhileOwnerFullscreenOrMaximized` | `true` | Masque la fenêtre flottante quand le propriétaire remplit l'écran |
+| `nativeContextMenu` | `true` | Menu contextuel natif pour les champs de texte de la fenêtre flottante |
+| `header` | `{ DefaultSatelliteHeader() }` | Chrome dans la barre de titre flottante et au-dessus du panneau ancré |
+| `floatingCaption` | `{}` | Voir [Satellites flottants sous Wayland](#satellites-flottants-sous-wayland) |
+| `content` | requis | Le corps, avec `SatelliteScope` en receveur |
+
+De `initialPlacement` à `reorderable`, les paramètres s'appliquent à la première déclaration d'un
+`id`, sauf si `restore` l'a déjà placé. Des valeurs contradictoires lèvent une exception. Les
+options d'ancrage sont dans [Ancrage](/docs/multi-window/docking).
+
+## Choisir la position de départ
+
+`SatellitePlacement.Docked(side, order = 0, extent = null, weight = 1f)` le place dans le
+`DockLayout` du propriétaire. Voir
+[Dimensionner un panneau ancré](/docs/multi-window/docking#dimensionner-un-panneau-ancré).
+`SatellitePlacement.Floating` place une fenêtre par rapport au propriétaire :
+
+```kotlin
+SatellitePlacement.Floating(
+    positioner = WindowPositioner(
+        parentAnchor = WindowAnchor.Right,
+        childAnchor = WindowAnchor.Left,
+        offset = DpOffset(12.dp, 0.dp),
+        constraintAdjustment = WindowConstraintAdjustment.FlipAndSlide,
+    ),
+    size = DpSize(300.dp, 400.dp), // défaut 320 × 240 dp
+)
+```
+
+Le positioner par défaut place la fenêtre au coin supérieur droit du propriétaire, à 12 dp.
+`anchorRect` ancre sur un rectangle du propriétaire plutôt que sur son cadre.
+`constraintAdjustment` garde la fenêtre sur le moniteur : `None`, `Slide`, `Flip`,
+`FlipAndSlide` (défaut) ou `All` (réduit aussi la fenêtre).
+
+Le placement ne s'exécute qu'une fois. Pour appliquer une nouvelle règle, modifiez
+`entry.windowState.positioner` puis appelez `entry.windowState.reanchor()`.
+
+## Choisir le propriétaire
+
+Les satellites flottants suivent le `owner` du workspace : le dernier membre qui a eu le focus
+avec `followFocus = true` (défaut), sinon le membre épinglé ou le premier à avoir rejoint.
+`workspace.pinTo(window)` impose un propriétaire ; `pinTo(null)` annule l'épinglage.
+
+## Piloter les satellites depuis le code
+
+| Appel | Effet |
+| --- | --- |
+| `open(id)` / `close(id)` / `toggle(id)` | Affiche ou masque ; placement et état sont conservés |
+| `dock(id, side, order = null, host = null)` | Ancre sur `side` de `host`, sinon de l'hôte d'ancrage courant, sinon du propriétaire |
+| `undock(id, placement = null)` | Le fait flotter au-dessus de son panneau, ou à `placement` |
+| `visible` | `false` masque tous les satellites sans en fermer aucun |
+| `owner`, `pinnedOwner`, `members`, `satellites`, `satellite(id)` | État snapshot à lire |
+
+Appelez le workspace depuis des effets et des callbacks UI, jamais pendant la composition.
+
+## Écrire un en-tête
+
+`header` et `content` s'exécutent avec `SatelliteScope` : `workspace`, `satellite` (l'entrée),
+`isDocked`, `isCompositorPlaced`, ainsi que `dock(side)`, `undock()` et `close()`.
+
+Un en-tête personnalisé pose `Modifier.satelliteDragHandle(scope)` sur la bande ancrée
+seulement. La barre de titre flottante porte déjà la poignée, et une seconde lancerait deux
+glissements. Un appui sans mouvement ne fait rien : des boutons peuvent se trouver dans la
+poignée.
+
+```kotlin
+@Composable
+fun SatelliteScope.PaneHeader() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .then(if (isDocked) Modifier.satelliteDragHandle(this) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(satellite.title, Modifier.weight(1f))
+        if (isDocked) {
+            if (satellite.isFloatable) IconButton(onClick = { undock() }) { Text("↗") }
+        } else {
+            IconButton(onClick = { dock() }) { Text("↙") }
+        }
+        IconButton(onClick = { close() }) { Text("—") }
+    }
+}
+```
+
+## Enregistrer et restaurer la disposition
+
+```kotlin
+val saved = workspace.snapshot()   // SatelliteLayoutSnapshot
+workspace.restore(saved)
+```
+
+`SatelliteLayoutSnapshot` contient le `placement` et `isOpen` de chaque satellite, ainsi que
+l'épaisseur des côtés. C'est une simple data class, que vous sérialisez. `restore` s'applique
+aussi aux satellites déclarés plus tard et ignore ceux que l'instantané ne nomme pas.
+
+## Satellites flottants sous Wayland
+
+Sur une fenêtre placée par le compositeur, seul le compositeur peut déplacer la fenêtre. La barre
+de titre flottante s'y divise : l'en-tête ancre le satellite, et une bande de 56 dp
+(`SatelliteCaptionStripWidth`) à côté des contrôles de fenêtre la déplace. Nucleus compose
+`floatingCaption` dans cette bande, uniquement quand `isCompositorPlaced` vaut `true`. Placez-y
+un symbole de déplacement, pas un contrôle.
+
+## Ouvrir une fenêtre satellite autonome
+
+`SatelliteWindow` attache une palette à une fenêtre, sans workspace ni ancrage :
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    var inspector by remember { mutableStateOf(true) }
+    if (inspector) {
+        SatelliteWindow(
+            onCloseRequest = { inspector = false },
+            state = rememberSatelliteWindowState(
+                size = DpSize(260.dp, 420.dp),
+                positioner = WindowPositioner(WindowAnchor.TopRight, WindowAnchor.TopLeft),
+            ),
+            title = "Inspector",
+        ) { InspectorPanel() }
+    }
+}
+```
+
+`onCloseRequest` est aussi appelé quand le parent est détruit. `parent` vaut par défaut la
+fenêtre englobante, et le positioner par défaut centre le satellite sur elle. Les autres
+paramètres sont ceux de `DecoratedWindow`, plus `hideWhileParentFullscreenOrMaximized` et
+`nativeContextMenu`. L'état publie `offsetFromParent` (`null` sous Wayland natif),
+`isHiddenByParent` et `isActive`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Un satellite conserve son décalage par rapport au coin supérieur gauche du parent, y compris
+  celui choisi par l'utilisateur. Sa position est résolue avant l'affichage : il n'apparaît
+  jamais ailleurs d'abord.
+- Quand un satellite qui a le focus se ferme ou s'ancre, Nucleus rend le focus à son parent, pour
+  que Windows n'active pas la fenêtre d'une autre application.
+- Les fenêtres satellites ne peuvent pas être maximisées, ce qui casserait l'ancrage et la
+  détection des zones d'ancrage.
+- Sous Wayland natif, le compositeur place une `SatelliteWindow` et elle ne suit pas le parent.
+- Sous Windows, le positioner utilise le moniteur du parent ; macOS et Linux, le moniteur
+  principal.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Ancrage](/docs/multi-window/docking) : ordre des côtés, côtés divisés et empilés, panneaux fixes.
+- [Onglets](/docs/multi-window/tabs) : donner à chaque fenêtre d'onglets ses propres satellites.
+- [Linux et Wayland](/docs/windows/linux-wayland) : fenêtres placées par le compositeur.

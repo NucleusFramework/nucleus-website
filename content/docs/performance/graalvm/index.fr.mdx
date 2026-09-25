@@ -1,79 +1,63 @@
 ---
 title: GraalVM Native Image
-description: GraalVM Native Image compile une application Nucleus en amont vers un binaire natif autonome, avec la metadata de réflexion, de ressources et de JNI générée pour chaque module Nucleus.
+description: Compilez une application Nucleus à l'avance en binaire natif autonome. Le plugin fournit GraalVM et génère les métadonnées d'accessibilité à votre place.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-GraalVM Native Image compile en amont (ahead-of-time) une application Compose Desktop vers un binaire autonome unique qui s'exécute sans JVM. Le compromis, c'est l'hypothèse du monde fermé : pas de chargement dynamique de classes, pas d'agents, et chaque appel par réflexion déclaré au moment du build. Nucleus génère cette metadata pour vous, si bien que la même source qui produit une application JVM produit aussi une image native.
-
-## Quand utiliser GraalVM Native Image
-
-- Services en arrière-plan, applications de barre de menu et outils de barre système qui restent inactifs mais doivent rester réactifs. Les daemons et CLIs peuvent mettre `graalvm { headless = true }` pour retirer AWT/Skiko de l'image — voir [Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless).
-- Utilitaires et lanceurs où le temps de démarrage compte.
-- Distribution sur les stores (App Store, MSIX, Snap) et petits installateurs autonomes qui n'embarquent pas de JRE séparé.
-- Environnements à mémoire contrainte, comme les bacs à sable et le matériel bas de gamme.
-
-## Compromis
-
-- **Pas de JIT.** Une image native exécute du code compilé en amont, sans optimisation à la volée : les charges de travail intensives en CPU sur la durée sont donc plus lentes que sur la JVM. Pour ces cas, utilisez plutôt le [cache AOT](/docs/performance/aot-cache).
-- **Monde fermé.** Pas de `Class.forName` piloté par des valeurs dynamiques à l'exécution, pas de classloaders personnalisés, pas de moteurs de script, pas de génération de bytecode à l'exécution. Les bibliothèques qui reposent sur ces mécanismes — Spring, Groovy, le mocking basé sur ByteBuddy, un usage intensif de JNA — ne sont pas compatibles ; livrez-les avec le cache AOT.
-- **Builds par plateforme.** Une image native doit être compilée sur chaque OS cible : produire des binaires pour macOS, Windows et Linux demande donc une matrice CI.
-
-La plupart des bibliothèques Kotlin idiomatiques — Ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose, SLF4J — fonctionnent sans configuration supplémentaire.
-
-## Pré-requis
-
-### Toolchain GraalVM
-
-Nucleus télécharge et met en cache **GraalVM Community Edition** automatiquement au premier
-build natif — vous n'installez plus de toolchain vous-même. Une variable d'environnement
-`GRAALVM_HOME` est prioritaire si vous voulez pointer vers la vôtre. Voir [Provisionner la toolchain](/docs/performance/graalvm/configuration#provisionner-la-toolchain).
-
-<Callout type="info" title="Community Edition par défaut, Oracle GraalVM sur demande">
-GraalVM CE est le défaut car il est sous licence GPLv2 avec Classpath Exception, qui n'impose
-aucune restriction sur la distribution au sein d'une application payante. Basculez sur Oracle
-GraalVM avec `toolchain { distribution = GraalvmDistribution.ORACLE }` si vous avez besoin de
-ses optimisations exclusives — Profile-Guided Optimization, `-O3`, profils inférés par ML et
-obfuscation avancée. Oracle GraalVM est gratuit pour un usage en production selon les GraalVM
-Free Terms and Conditions, mais les GFTC interdisent de facturer des frais associés à sa
-redistribution : relisez-les avant de distribuer une app payante. Le **backend AWT, déprécié**,
-nécessite encore une installation locale de BellSoft Liberica NIK pour le support AWT/Swing en
-image native.
-</Callout>
-
-### Toolchains par plateforme
-
-| Plateforme | Requis |
-|------------|--------|
-| **macOS** | Xcode Command Line Tools |
-| **Windows** | MSVC (Visual Studio Build Tools) |
-| **Linux** | GCC, `patchelf` et `xvfb` pour la compilation headless |
-
-## Comment Nucleus construit l'image native
-
-Trois modules coopèrent pour produire une image native à partir de la même source qu'un build JVM :
-
-- **`nucleus.graalvm-runtime`** — la bibliothèque de support runtime. Elle fournit des substitutions SVM `@TargetClass` pour les parties internes d'AWT qui ne fonctionnent pas telles quelles sous native-image (les gestionnaires de polices Fontconfig et Win32, la création de polices, le splash screen et le WMClass du toolkit X11), enregistre les ressources de l'application et expose `GraalVmInitializer`.
-- **Le plugin Gradle Nucleus** — génère la reachability metadata (réflexion, ressources, JNI) pour vos dépendances et câble le graphe de tâches `packageGraalvmNative`.
-- **`nucleus.nucleus-application`** — appelle `GraalVmInitializer.initialize()` pour vous et expose la même API `DecoratedWindow` / `NucleusWindow` que le chemin JVM, si bien qu'une seule arborescence de sources produit les deux artefacts.
+GraalVM Native Image compile une application Compose Desktop en un binaire qui s'exécute sans
+JVM. Le plugin Nucleus télécharge GraalVM et génère les métadonnées de réflexion : le code qui
+produit votre application JVM produit aussi l'image native.
 
 ```kotlin title="build.gradle.kts"
 nucleus.application {
     mainClass = "com.example.MainKt"
     graalvm {
         isEnabled = true
-        imageName = "my-app"
+        imageName = "myapp"
     }
 }
 ```
 
+Lancez-la avec `./gradlew runGraalvmNative`. Pour l'empaquetage, voir
+[Tâches et CI](/docs/performance/graalvm/tasks-ci).
+
+## Connaître les limites
+
+[Runtimes et performance](/docs/performance#comparer-les-runtimes) vous aide à choisir entre
+l'image native et l'image JDK. Côté natif :
+
+- **Monde fermé.** Pas de `Class.forName` sur des valeurs calculées à l'exécution, pas de class
+  loaders personnalisés, pas de moteurs de script, pas de génération de bytecode. Spring, Groovy,
+  les mocks ByteBuddy et un usage intensif de JNA ne conviennent pas.
+- **Pas de JIT.** Un calcul lourd et soutenu tourne moins vite que sur HotSpot. La PGO d'Oracle
+  GraalVM comble l'essentiel de l'écart.
+- **Un build par OS.** Vous compilez sur chaque OS cible : une release demande une matrice CI.
+
+Ktor, kotlinx.serialization, Coil, SQLite, Jewel, Compose et SLF4J fonctionnent sans
+configuration supplémentaire. Pour un démon ou une CLI, voir
+[Construire une image headless](/docs/performance/graalvm/configuration#construire-une-image-headless).
+
+## Prérequis
+
+| Plateforme | Requis |
+|------------|--------|
+| **macOS** | Xcode Command Line Tools |
+| **Windows** | MSVC (Visual Studio Build Tools) |
+| **Linux** | GCC, `patchelf`, et `xvfb` pour les builds headless |
+
+Le plugin télécharge GraalVM Community Edition (25.4 par défaut) au premier build natif. CE est
+sous GPLv2 avec la Classpath Exception : vous pouvez l'embarquer dans une application payante.
+Pour choisir une autre version ou Oracle GraalVM, voir
+[Fournir la toolchain](/docs/performance/graalvm/configuration#fournir-la-toolchain).
+
 <Callout type="info">
-`nucleusApplication` appelle `GraalVmInitializer.initialize()` au démarrage. Si vous écrivez votre propre `main()` sans lui, appelez `GraalVmInitializer.initialize()` vous-même avant tout code AWT ou Compose.
+Si votre `main()` ne passe pas par `nucleusApplication`, ajoutez `nucleus.graalvm-runtime` et
+appelez `GraalVmInitializer.initialize()` avant tout code AWT ou Compose.
 </Callout>
 
 ## Et ensuite
 
-- [Configuration](/docs/performance/graalvm/configuration) — le DSL `graalvm { }` complet et les arguments de build recommandés.
-- [Metadata automatique](/docs/performance/graalvm/automatic-metadata) — comment la réflexion, les ressources et le JNI sont résolus pour vous.
-- [Tâches et CI](/docs/performance/graalvm/tasks-ci) — tâches Gradle, emplacements de sortie et matrice GitHub Actions.
+- [Configuration](/docs/performance/graalvm/configuration) : le DSL `graalvm { }`, la toolchain, le garbage collector et la PGO.
+- [Métadonnées automatiques](/docs/performance/graalvm/automatic-metadata) : ce que le plugin enregistre et comment combler les manques.
+- [Tâches et CI](/docs/performance/graalvm/tasks-ci) : tâches Gradle, organisation de la sortie et matrice GitHub Actions.

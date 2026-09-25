@@ -1,0 +1,196 @@
+---
+title: Satellites
+description: Declare tool palettes and inspectors once, let them follow the focused document window, dock them, and save the layout.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+A satellite is a native window that belongs to another window: it follows its parent, stays
+above it, hides with it, and keeps out of the taskbar. The user can float it or dock it into the
+document. Satellites are `@ExperimentalNucleusApi` (see [Multi-window](/docs/multi-window)).
+
+## Declare a workspace
+
+Document windows join a `SatelliteWorkspace` with `JoinSatelliteWorkspace`. Declare satellites at
+application scope, next to the windows:
+
+```kotlin title="Main.kt"
+fun main() = nucleusApplication {
+    val workspace = rememberSatelliteWorkspace()
+
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "Document") {
+        JoinSatelliteWorkspace(workspace)
+        WindowScaffold(titleBar = { TitleBar { Text("Document") } }) { padding ->
+            DockLayout(workspace, Modifier.padding(padding)) { Document() }
+        }
+    }
+
+    Satellite(workspace, id = "tools", title = "Tools") { ToolsPanel() }
+    Satellite(
+        workspace,
+        id = "colors",
+        title = "Colors",
+        initialPlacement = SatellitePlacement.Docked(DockSide.Right),
+    ) { ColorPanel() }
+}
+```
+
+`Tools` opens as a floating window, `Colors` as a docked panel. Each gets a header with Dock,
+Float and Close actions; dragging it moves the satellite between the two hosts.
+
+## Satellite parameters
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `workspace`, `id`, `title` | required | Workspace, stable identity, header and window title |
+| `initialPlacement` | `SatellitePlacement.Floating()` | Where it starts on first declaration |
+| `initiallyOpen` | `true` | Whether it is shown on first declaration |
+| `dockSides` | all four `DockSide`s | Sides it may dock on. Empty makes a floating-only palette |
+| `floatable` | `true` | `false` makes a fixed panel. Requires a docked `initialPlacement` |
+| `reorderable` | `true` | `false` pins its rank on its side. Requires a docked `initialPlacement` |
+| `resizable` | `true` | Whether the user can resize the floating window |
+| `hideWhileOwnerFullscreenOrMaximized` | `true` | Hide the floating window while the owner fills the screen |
+| `nativeContextMenu` | `true` | Native context menu for text fields in the floating window |
+| `header` | `{ DefaultSatelliteHeader() }` | Chrome in the floating title bar and above the docked panel |
+| `floatingCaption` | `{}` | See [Floating satellites on Wayland](#floating-satellites-on-wayland) |
+| `content` | required | The body, with `SatelliteScope` as receiver |
+
+`initialPlacement` through `reorderable` apply the first time an `id` is declared, unless `restore`
+placed it. Contradicting values throw. Docking options are on [Docking](/docs/multi-window/docking).
+
+## Choose where a satellite starts
+
+`SatellitePlacement.Docked(side, order = 0, extent = null, weight = 1f)` puts it in the owner's
+`DockLayout`. See [Size a docked panel](/docs/multi-window/docking#size-a-docked-panel).
+`SatellitePlacement.Floating` places a window relative to the owner:
+
+```kotlin
+SatellitePlacement.Floating(
+    positioner = WindowPositioner(
+        parentAnchor = WindowAnchor.Right,
+        childAnchor = WindowAnchor.Left,
+        offset = DpOffset(12.dp, 0.dp),
+        constraintAdjustment = WindowConstraintAdjustment.FlipAndSlide,
+    ),
+    size = DpSize(300.dp, 400.dp), // default 320 × 240 dp
+)
+```
+
+The default positioner puts it at the owner's top-right corner with a 12 dp gap. `anchorRect`
+anchors to a rectangle of the owner instead of its frame. `constraintAdjustment` keeps the window
+on the monitor: `None`, `Slide`, `Flip`, `FlipAndSlide` (default) or `All` (also shrinks).
+
+Placement runs once. To apply a new rule later, set `entry.windowState.positioner` and call
+`entry.windowState.reanchor()`.
+
+## Choose the owner
+
+Floating satellites follow the workspace's `owner`: the member focused last with
+`followFocus = true` (the default), else the pinned member or the first to join.
+`workspace.pinTo(window)` forces an owner; `pinTo(null)` undoes it.
+
+## Drive satellites from code
+
+| Call | Effect |
+| --- | --- |
+| `open(id)` / `close(id)` / `toggle(id)` | Show or hide; placement and state are kept |
+| `dock(id, side, order = null, host = null)` | Dock on `side` of `host`, else the current dock host, else the owner |
+| `undock(id, placement = null)` | Float it over its panel, or at `placement` |
+| `visible` | `false` hides every satellite without closing any |
+| `owner`, `pinnedOwner`, `members`, `satellites`, `satellite(id)` | Snapshot state to read |
+
+Call the workspace from effects and UI callbacks, not during composition.
+
+## Write a header
+
+`header` and `content` run with `SatelliteScope`: `workspace`, `satellite` (the entry),
+`isDocked`, `isCompositorPlaced`, and `dock(side)`, `undock()`, `close()`.
+
+A custom header puts `Modifier.satelliteDragHandle(scope)` on the docked strip only. The floating
+title bar already carries the handle, and a second one would start two drags. A press without
+movement does nothing, so buttons can sit inside the handle.
+
+```kotlin
+@Composable
+fun SatelliteScope.PaneHeader() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .then(if (isDocked) Modifier.satelliteDragHandle(this) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(satellite.title, Modifier.weight(1f))
+        if (isDocked) {
+            if (satellite.isFloatable) IconButton(onClick = { undock() }) { Text("↗") }
+        } else {
+            IconButton(onClick = { dock() }) { Text("↙") }
+        }
+        IconButton(onClick = { close() }) { Text("—") }
+    }
+}
+```
+
+## Save and restore the layout
+
+```kotlin
+val saved = workspace.snapshot()   // SatelliteLayoutSnapshot
+workspace.restore(saved)
+```
+
+`SatelliteLayoutSnapshot` holds each satellite's `placement` and `isOpen`, plus the side
+extents. It is a plain data class; you serialize it. `restore` also applies to satellites
+declared later and leaves unnamed ones alone.
+
+## Floating satellites on Wayland
+
+On a compositor-placed window only the compositor can move the window. The floating title bar
+splits there: the header docks the satellite, and a 56 dp strip (`SatelliteCaptionStripWidth`)
+beside the window controls moves the window. Nucleus composes `floatingCaption` in that strip,
+only when `isCompositorPlaced` is `true`. Put a "move" glyph there, not a control.
+
+## Open a standalone satellite window
+
+`SatelliteWindow` attaches one palette to one window, without a workspace or docking:
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    var inspector by remember { mutableStateOf(true) }
+    if (inspector) {
+        SatelliteWindow(
+            onCloseRequest = { inspector = false },
+            state = rememberSatelliteWindowState(
+                size = DpSize(260.dp, 420.dp),
+                positioner = WindowPositioner(WindowAnchor.TopRight, WindowAnchor.TopLeft),
+            ),
+            title = "Inspector",
+        ) { InspectorPanel() }
+    }
+}
+```
+
+`onCloseRequest` also fires when the parent is destroyed. `parent` defaults to the enclosing
+window, and the default positioner centers the satellite on it. The other parameters match
+`DecoratedWindow`, plus `hideWhileParentFullscreenOrMaximized` and `nativeContextMenu`. The state
+publishes `offsetFromParent` (`null` on native Wayland), `isHiddenByParent` and `isActive`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- A satellite keeps its offset from the parent's top-left corner, including one the user set by
+  dragging. Its position is resolved before the window is shown, so it never flashes elsewhere.
+- When a focused satellite closes or docks, Nucleus focuses its parent, so Windows does not
+  activate another application's window.
+- Satellite windows cannot maximize, which would break anchoring and the dock hit-test.
+- On native Wayland the compositor places a `SatelliteWindow` and it does not follow the parent.
+- On Windows the positioner uses the parent's monitor; macOS and Linux use the primary monitor.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Docking](/docs/multi-window/docking): side order, split and layered sides, fixed panels.
+- [Tabs](/docs/multi-window/tabs): give each tab window its own satellites.
+- [Linux and Wayland](/docs/windows/linux-wayland): compositor-placed windows.

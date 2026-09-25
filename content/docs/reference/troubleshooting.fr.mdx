@@ -3,9 +3,11 @@ title: Troubleshooting
 description: Les problèmes courants de build, packaging, signature et exécution dans Nucleus, avec leur cause et leur solution.
 ---
 
-Cette page recense les problèmes récurrents lors du build, du packaging, de la signature
-et de la distribution d'une application Nucleus. Les entrées sont regroupées par domaine,
-et chacune indique le symptôme, la cause et la solution.
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Cette page recense les problèmes récurrents quand vous compilez, empaquetez, signez et lancez
+une application Nucleus. Les entrées sont regroupées par domaine, et chacune donne le
+symptôme, la cause et la solution.
 
 ## Signature et notarisation macOS
 
@@ -49,7 +51,7 @@ trouvent gardaient aussi leur signature ad hoc.
 **Solution.** Passez à 2.5.17 ou plus récent. Le marqueur et `fontconfig.bfc` vivent
 maintenant dans `Contents/Resources/`, et chaque dylib sous `Contents/MacOS/` est re-signée
 avec votre Developer ID. Les fichiers ajoutés via `appResourcesRootDir` atterrissent
-toujours dans `Contents/MacOS/` sous macOS — n'y livrez que des binaires Mach-O, sinon
+toujours dans `Contents/MacOS/` sous macOS. N'y livrez que des binaires Mach-O, sinon
 Gatekeeper rejette le bundle notarisé de la même façon.
 
 ## Microsoft Store
@@ -153,6 +155,37 @@ code :
 
 Pour les bibliothèques non prises en charge, voir
 [configuration GraalVM](/docs/performance/graalvm/configuration).
+
+## Packaging
+
+### Le téléchargement de Node.js échoue pendant le packaging
+
+**Symptôme.** Une tâche `package*` logue `Could not provision Node.js (…) — falling back to the
+one on PATH`, puis échoue avec `node not found. Node.js 18+ is required for electron-builder
+packaging`.
+
+**Cause.** electron-builder tourne sur Node.js, que le plugin télécharge depuis `nodejs.org` au
+premier usage. La machine de build est hors ligne ou un proxy bloque le téléchargement, et aucun
+`node` ne se trouve non plus sur le `PATH`. Le plugin choisit Node.js dans cet ordre :
+
+1. La propriété Gradle `compose.electronBuilder.nodePath` (le binaire `node` ou son dossier).
+2. La variable d'environnement `NUCLEUS_NODE_HOME`.
+3. L'installation que le plugin provisionne depuis `nativeDistributions { nodejs { } }`.
+4. `node` sur le `PATH`, utilisé quand `autoDownload` vaut `false` ou quand le téléchargement
+   échoue.
+
+**Solution.** Indiquez une installation locale avec la propriété Gradle ou `NUCLEUS_NODE_HOME`.
+Pour utiliser le `node` du `PATH` sans tenter de téléchargement, désactivez le provisionnement :
+
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    nodejs {
+        autoDownload = false
+    }
+}
+```
+
+Voir [Provisionner Node.js](/docs/packaging#provisionner-nodejs).
 
 ## Packaging Linux
 
@@ -265,82 +298,190 @@ et demandent glibc 2.35 ou plus récent. Vérifiez la version de votre système 
 
 ## Rendu
 
-### Wayland sur NVIDIA : fenêtre noire ou rendu corrompu
-
-**Symptôme.** L'interface Compose s'affiche incorrectement sous Wayland avec les pilotes
-NVIDIA.
-
-**Cause.** La prise en charge GBM et EGLStream de NVIDIA pour Wayland est irrégulière, et
-Compose Desktop sur le backend AWT/JBR ne la gère pas de façon fiable.
-
-**Solution.** Passez au [backend Tao](/docs/tao). `decorated-window-tao` fait le rendu via
-des surfaces Skia natives sur Wayland sans passer par AWT. Pour rester sur AWT, définissez
-`WLR_NO_HARDWARE_CURSORS=1` ou lancez l'application sous XWayland.
-
 ### Crash au lancement sur un GPU Linux ancien
 
-**Symptôme.** Une fenêtre Tao abort à l'ouverture sous Linux. stderr mentionne un contexte
-GL 3.3 refusé, ou le process quitte depuis `TaoComposeSceneHostLinux` sur un `require()`
-en échec.
+**Symptôme.** Une fenêtre abandonne à l'ouverture sous Linux. stderr signale un contexte GL 3.3
+refusé, ou le processus quitte depuis `TaoComposeSceneHostLinux` sur un `require()` en échec.
 
-**Cause.** L'attach EGL Linux ne demandait qu'un profil GL 3.3 **compatibility**. Certains
-drivers (Mesa r600 sur AMD RV610, par exemple) plafonnent le profil compat à 3.0 alors que
-le profil **core** atteint 3.3, donc la requête ne pouvait jamais réussir et la fenêtre
-abortait.
+**Cause.** Avant 2.5.16, l'attach EGL sous Linux ne demandait qu'un profil GL 3.3
+**compatibility**. Certains drivers (Mesa r600 sur AMD RV610, par exemple) plafonnent le profil
+compat à 3.0 alors que le profil **core** atteint 3.3. La requête ne pouvait jamais aboutir, et
+la fenêtre abandonnait.
 
-**Solution.** Passez à 2.5.16 ou plus récent. L'attach essaie maintenant 3.3 compat, puis
-3.3 core, puis Mesa llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, une seule fois, sauté si vous
-avez déjà défini cette variable). Les deux replis loguent une ligne sur stderr. Le
-matériel qui accepte déjà la requête compat n'est pas touché. Forcez le rendu logiciel
-vous-même avec `LIBGL_ALWAYS_SOFTWARE=1` si vous voulez llvmpipe sans attendre le repli.
+**Solution.** Passez à 2.5.16 ou plus récent. L'attach essaie 3.3 compat, puis 3.3 core, puis
+Mesa llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, une seule fois, ignoré si vous avez déjà défini cette
+variable). Chaque repli écrit une ligne sur stderr. Le matériel qui accepte la requête compat se
+comporte comme avant. Définissez vous-même `LIBGL_ALWAYS_SOFTWARE=1` pour forcer llvmpipe dès le
+départ.
 
-## Migration vers 2.0
+## Boucle d'événements
+
+### Une fenêtre se fige et le log contient un thread dump
+
+**Symptôme.** Sous Windows, une fenêtre passe en « Ne répond pas », et le log contient une
+entrée `SEVERE` : `Tao event loop has not pumped messages for at least <n> ms — the UI is
+frozen. Thread dump follows.`
+
+**Cause.** Le thread UI est bloqué. Un deadlock ou un long travail synchrone empêche la boucle
+d'événements de traiter ses messages. Le watchdog de la boucle le détecte et dumpe tous les
+threads, celui de la boucle en premier.
+
+**Solution.** Lisez la pile du thread de la boucle, en tête du dump, et sortez l'appel bloquant
+du thread UI. Pour un travail qui doit y rester, entourez-le de `expectUnresponsive { }` : le
+watchdog l'ignore. Enregistrez `onUnresponsive` pour remonter les blocages en production. Voir
+[Détecter une boucle d'événements bloquée](/docs/concepts/threading#détecter-une-boucle-dévénements-bloquée).
+
+## Saisie
+
+### Un gestionnaire de scroll ignore le trackpad macOS
+
+**Symptôme.** Sous macOS, un gestionnaire `pointerInput` qui réagit à `PointerEventType.Scroll`
+fonctionne avec une molette, mais pas avec un balayage à deux doigts sur le trackpad.
+`LazyColumn` et `Modifier.scrollable` défilent toujours.
+
+<Callout type="warn" title="Modifié en 3.0">
+Un balayage au trackpad sous macOS arrive désormais en `PanStart`, `PanMove` et `PanEnd`. En 2.x,
+il arrivait en `Scroll`. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** Votre gestionnaire n'écoute que `Scroll` et ne voit donc jamais les événements de pan.
+
+**Solution.** Traitez `PointerEventType.PanMove` et lisez `change.panOffset` à côté de votre
+branche `Scroll`. Pour recevoir de nouveau chaque pas du trackpad en `Scroll`, lancez la JVM avec
+`-Dnucleus.tao.trackpadPanEvents=false`. Voir
+[Défiler au trackpad sur macOS](/docs/input/trackpad-gestures#défiler).
+
+### Le pincement n'atteint plus detectTransformGestures
+
+**Symptôme.** Un pincement sur le trackpad ne zoome plus un contenu qui utilise
+`detectTransformGestures`.
+
+<Callout type="warn" title="Modifié en 3.0">
+Un pincement arrive désormais dans Compose en `ScaleStart`, `ScaleChange` et `ScaleEnd`. En 2.x,
+c'étaient deux pointeurs tactiles synthétiques. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** `detectTransformGestures` suit des pointeurs tactiles et ne voit pas les événements
+Scale.
+
+**Solution.** Déplacez la gestion du pincement vers `Modifier.transformable` ou vers un listener
+des événements `Scale*`. Voir [Zoomer par pincement](/docs/input/trackpad-gestures#zoomer-par-pincement).
+
+## Cycle de vie de l'application
+
+### Cmd+Q ne quitte plus l'application
+
+**Symptôme.** Sous macOS, Cmd+Q, Dock → Quitter ou une déconnexion laisse l'application tourner.
+
+<Callout type="warn" title="Modifié en 3.0">
+Un quit système sous macOS appelle désormais `onCloseRequest` sur chaque fenêtre ouverte. En 2.x,
+il terminait l'application sans rien demander. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** L'une de vos fenêtres a un `onCloseRequest` qui n'appelle pas `exitApplication()` et
+ne ferme pas la fenêtre, par exemple un gestionnaire qui la cache dans le tray. Une fenêtre qui
+reste ouverte oppose son veto au quit.
+
+**Solution.** Laissez passer un vrai quit. Testez `isQuitting` sur le scope de l'application :
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = {
+        if (isQuitting) exitApplication() else visible = false
+    },
+    visible = visible,
+) { /* ... */ }
+```
+
+Voir [Gérer un quit système](/docs/lifecycle/application#gérer-un-quit-système).
+
+### La seconde instance n'est pas transmise en dev
+
+**Symptôme.** Sous `./gradlew run` ou un lancement depuis l'IDE, une seconde copie ouvre sa
+propre fenêtre au lieu de passer ses arguments à la première.
+
+<Callout type="warn" title="Modifié en 3.0">
+`enableSingleInstance` vaut désormais `!ExecutableRuntime.isDev()` par défaut. En 2.x, il était
+aussi actif en dev. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+**Cause.** Le verrou d'instance unique est désactivé en dev, pour qu'une copie de debug puisse
+démarrer à côté d'une copie packagée.
+
+**Solution.** Passez `enableSingleInstance = true` à `nucleusApplication` le temps de tester la
+transmission. Voir [L'activer en dev](/docs/lifecycle/single-instance#lactiver-en-dev).
+
+## Développement
+
+### La fenêtre Hot Reload ne s'ouvre pas sous macOS
+
+**Symptôme.** Sous macOS, un lancement Compose Hot Reload démarre le processus, mais aucune
+fenêtre n'apparaît. `./gradlew run` fonctionne.
+
+**Cause.** La boucle d'événements des fenêtres doit tourner sur le thread 0 de macOS, et la tâche
+`JavaExec` de Hot Reload ne passe pas `-XstartOnFirstThread`. Le plugin Nucleus ajoute ce flag,
+mais seulement quand le projet déclare lui-même `nucleus.decorated-window-tao`. Une application
+qui le reçoit via `nucleus-application` ne l'a qu'en dépendance transitive, et le plugin n'ajoute
+pas le flag.
+
+**Solution.** Déclarez la dépendance explicitement :
+
+```kotlin title="build.gradle.kts"
+implementation("dev.nucleusframework:nucleus.decorated-window-tao:<version>")
+```
+
+## Migration
+
+### Unresolved reference: NucleusBackend
+
+**Symptôme.** Après le passage à 3.0, la compilation échoue sur `NucleusBackend`,
+`LocalNucleusBackend` ou l'argument `backend =` de `nucleusApplication`.
+
+**Cause.** 3.0 n'a plus qu'un seul backend de fenêtres. Les modules de fenêtres AWT, JBR et JNI
+sont supprimés, et l'API de sélection du backend avec eux.
+
+**Solution.** Retirez l'import de `NucleusBackend`, l'argument `backend` et la dépendance
+`decorated-window-awt`, `-jbr` ou `-jni`. Voir
+[Supprimer la sélection du backend](/docs/migrate/from-2.x#supprimer-la-sélection-du-backend).
 
 ### Unresolved reference 'JewelDecoratedWindow'
 
 **Symptôme.** L'import est correct et l'IDE résout la fonction, mais la compilation échoue.
 
-**Cause.** En 2.0, le composable est une extension sur `NucleusApplicationScope`. Un
-wrapper composable écrit pour la 1.x ne propage pas le receiver.
+**Cause.** `JewelDecoratedWindow` est une extension de `NucleusApplicationScope`. Un composable
+wrapper sans ce receiver ne peut pas l'appeler.
 
-**Solution.** Faites aussi de votre wrapper une extension :
+**Solution.** Faites de votre wrapper une extension, lui aussi :
 
 ```kotlin
+@Composable
 fun NucleusApplicationScope.MyOnboardingWindow() {
-    JewelDecoratedWindow(/* ... */) { /* contenu */ }
+    JewelDecoratedWindow(/* ... */) { /* content */ }
 }
 ```
 
-Voir [migrer depuis 1.x](/docs/migrate/from-1.x).
+Voir [Migrer depuis 1.x](/docs/migrate/from-1.x).
 
-### NoClassDefFoundError: DecoratedDialogKt sur Tao
+### La dépendance Jewel ne se résout pas avec un JDK ancien
 
-**Symptôme.** Le dialogue plante sur Tao mais fonctionne sur AWT.
+**Symptôme.** Gradle refuse l'artefact `nucleus.decorated-window-jewel` avec un message sur une
+version de Java incompatible.
 
-**Cause.** Le code appelle le `JewelDecoratedDialog` AWT-only (sans receiver) sous
-`NucleusBackend.Tao`.
+**Cause.** Le toolkit Jewel est compilé pour le JDK 25, et votre build cible une version plus
+ancienne.
 
-**Solution.** Faites du composable hôte une extension sur `NucleusApplicationScope` pour que
-l'appel se résolve vers `NucleusApplicationScope.JewelDecoratedDialog`, qui dispatche selon
-le backend.
-
-### La dépendance exige la version 11 du runtime JVM
-
-**Symptôme.** Gradle n'arrive pas à résoudre l'artefact Jewel, avec un message sur la
-version 11 du runtime JVM.
-
-**Cause.** La toolchain n'est pas réglée sur 25.
-
-**Solution.** Réglez la toolchain JVM de Kotlin :
+**Solution.** Réglez la toolchain JVM de Kotlin sur 25 :
 
 ```kotlin title="build.gradle.kts"
 kotlin { jvmToolchain(25) }
 ```
 
-Voir [migrer depuis 1.x](/docs/migrate/from-1.x).
+Voir [Installation](/docs/start/install).
 
 ## Et ensuite
 
-- [Packaging](/docs/packaging) — packaging par OS, signature et cibles de stores.
-- [Performance](/docs/performance) — détails GraalVM native image et AOT.
-- [Migrer depuis 1.x](/docs/migrate/from-1.x) — changements de namespace et de scope après la mise à niveau.
+- [Migrer depuis 2.x](/docs/migrate/from-2.x) : chaque changement cassant de 3.0 et comment
+  vous adapter.
+- [Threading](/docs/concepts/threading) : le thread UI, les callbacks natifs et le watchdog.
+- [Packaging](/docs/packaging) : packaging par OS, signature et cibles de stores.
+- [Performance](/docs/performance) : détails GraalVM native image et AOT.

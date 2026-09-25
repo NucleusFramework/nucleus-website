@@ -1,0 +1,163 @@
+---
+title: Fenêtres overlay
+description: Construisez des watermarks, des widgets de bureau et des overlays avec des fenêtres transparentes, traversantes, en arrière-plan et visibles sur tous les bureaux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Un overlay sort de la pile habituelle des fenêtres : un watermark qui ignore les clics, un widget
+épinglé sous les autres fenêtres, un badge qui vous suit d'un bureau à l'autre. Vous le construisez
+avec des paramètres de `DecoratedWindow`, fournis par `nucleus-application`.
+
+## Construire un watermark traversant
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(
+        onCloseRequest = { },
+        state = rememberWindowState(
+            position = WindowPosition.Aligned(Alignment.BottomEnd),
+            size = DpSize(360.dp, 160.dp),
+        ),
+        title = "Watermark",
+        resizable = false,
+        undecorated = true,
+        transparent = true,
+        alwaysOnTop = true,
+        focusable = false,
+        clickThrough = true,
+        hiddenFromDock = true,
+        visibleOnAllWorkspaces = true,
+        forceX11 = true,
+    ) {
+        Watermark()
+    }
+}
+```
+
+Associez `clickThrough = true` à `focusable = false` : une fenêtre qu'on ne peut pas cliquer n'a
+pas besoin du focus clavier.
+
+## Épingler un widget sous les autres fenêtres
+
+Un widget de bureau remplace `alwaysOnTop` par `alwaysOnBottom` et garde les clics :
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    title = "Nucleus widget",
+    undecorated = true,
+    transparent = true,
+    hiddenFromDock = true,
+    nativeContextMenu = true,
+    visibleOnAllWorkspaces = true,
+    forceX11 = true,
+    alwaysOnBottom = true,
+) {
+    WidgetSurface()
+}
+```
+
+`alwaysOnTop` et `alwaysOnBottom` s'excluent : le dernier défini l'emporte.
+
+<Callout type="warn">
+La fenêtre reste visible dans la barre des tâches et dans Alt+Tab, sauf si vous définissez
+`hiddenFromDock`. Wayland natif ne permet pas de coller une surface au fond d'écran.
+</Callout>
+
+## Basculer les paramètres à l'exécution
+
+`clickThrough`, `alwaysOnBottom` et `visibleOnAllWorkspaces` sont réactifs. Pour un contrôle
+impératif, appelez les setters de `nucleusWindow.unsafe.taoWindow` :
+
+```kotlin
+fun applyOverlayMode(window: TaoWindow, passive: Boolean) {
+    window.setIgnoreCursorEvents(passive)
+    window.setAlwaysOnBottom(passive)
+    window.setVisibleOnAllWorkspaces(passive)
+}
+```
+
+`transparent` et `forceX11` s'appliquent uniquement à la création.
+
+## Obtenir une surface X11 sous Wayland
+
+Les paramètres d'empilement, de position et de bureau n'ont aucun effet sur une surface Wayland
+native. `forceX11 = true` donne à une fenêtre une surface XWayland et laisse le reste de
+l'application sous Wayland. Pour basculer tout le processus, définissez
+`NUCLEUS_TAO_LINUX_RENDERER=x11` (ou `GDK_BACKEND=x11`) avant le lancement.
+
+`TaoWindow.isNativeWaylandSurface` indique la surface reçue par une fenêtre, une fois celle-ci
+prête. Pour savoir si vous pouvez positionner une fenêtre, testez plutôt `canPlaceOnScreen`. Voir
+[Linux et Wayland](/docs/windows/linux-wayland#tester-le-placement-à-lécran).
+
+Si `forceX11` ne trouve aucun serveur X, la fenêtre reste sous Wayland. Nucleus journalise un
+avertissement pour chaque paramètre ignoré par une surface Wayland native.
+
+## Comportement par plateforme
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+Une fenêtre transparente garde une ombre qui suit le contenu dessiné. Flotter au-dessus du Space
+plein écran d'une autre application n'est pas pris en charge.
+</Tab>
+<Tab value="Windows">
+`visibleOnAllWorkspaces` est sans effet. Une fenêtre avec `hiddenFromDock = true` apparaît déjà
+sur tous les bureaux virtuels. Une fenêtre entièrement transparente perd l'ombre et la bordure
+système.
+</Tab>
+<Tab value="Linux">
+La transparence fonctionne sous X11 et Wayland. `alwaysOnBottom`, `visibleOnAllWorkspaces` et le
+positionnement exigent X11 : utilisez `forceX11` par fenêtre ou `NUCLEUS_TAO_LINUX_RENDERER=x11`
+pour le processus.
+</Tab>
+</Tabs>
+
+Une fenêtre en grande partie transparente se lit mieux avec `undecorated = true` et une chrome
+personnalisée qu'avec la `TitleBar` standard.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- macOS : `clickThrough` définit `NSWindow.ignoresMouseEvents`, `visibleOnAllWorkspaces` utilise
+  `NSWindowCollectionBehaviorCanJoinAllSpaces`.
+- Windows : `clickThrough` applique `WS_EX_TRANSPARENT | WS_EX_LAYERED`, `alwaysOnBottom` utilise
+  `HWND_BOTTOM`.
+- Linux : `clickThrough` installe une région d'entrée GDK vide, `alwaysOnBottom` correspond à
+  `_NET_WM_STATE_BELOW`, `visibleOnAllWorkspaces` à `gtk_window_stick()`.
+- Nucleus marque la scène Compose comme transparente : les voiles de dialogue et les popups se
+  fondent dans le fond alpha.
+- Wayland natif ignore `WindowPosition.Aligned` ; Nucleus le journalise une fois par processus.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Paramètre | Défaut | Réactif | Description |
+|---|---|---|---|
+| `transparent` | `false` | Non | Surface native avec canal alpha. |
+| `clickThrough` | `false` | Oui | Les événements pointeur passent à ce qui se trouve derrière. |
+| `alwaysOnBottom` | `false` | Oui | Garde la fenêtre sous les fenêtres normales. Efface `alwaysOnTop`. |
+| `visibleOnAllWorkspaces` | `false` | Oui | Affiche la fenêtre sur chaque bureau ou Space. |
+| `forceX11` | `false` | Non | Linux uniquement : surface XWayland pour cette fenêtre. |
+
+`HostedWindow` accepte `alwaysOnBottom`. Les wrappers Material et Jewel acceptent `transparent`,
+`clickThrough`, `visibleOnAllWorkspaces` et `forceX11`.
+
+| Membre de `TaoWindow` | Description |
+|---|---|
+| `setIgnoreCursorEvents(ignore)` | `clickThrough` impératif. |
+| `setAlwaysOnBottom(alwaysOnBottom)` | `alwaysOnBottom` impératif. |
+| `setVisibleOnAllWorkspaces(visible)` | `visibleOnAllWorkspaces` impératif. |
+| `isNativeWaylandSurface` | La fenêtre tourne sur une surface Wayland native. |
+| `canPlaceOnScreen` | L'application peut lire et définir la position de la fenêtre. |
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : les autres paramètres de `DecoratedWindow`.
+- [Linux et Wayland](/docs/windows/linux-wayland) : détection de session, placement à l'écran et
+  repli X11.
+- [Menus contextuels](/docs/os/menus/context-menu) : le menu dont un widget interactif a besoin.

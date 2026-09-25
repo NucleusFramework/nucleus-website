@@ -1,0 +1,70 @@
+---
+title: Accessibility
+description: Expose your Compose semantics to VoiceOver, Narrator, Orca and UI automation tools.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Nucleus exposes your Compose semantics to VoiceOver on macOS, Narrator on Windows and Orca on
+Linux. You write standard Compose semantics and screen readers read them. Every `DecoratedWindow`
+comes with the bridge, part of `nucleus-application`.
+
+## Make your UI accessible
+
+Attach Compose semantics to your composables. You never build accessibility nodes by hand:
+
+```kotlin
+Button(onClick = { count++ }, modifier = Modifier.testTag("increment")) {
+    Text("Increment")
+}
+
+Image(
+    painter = painterResource("logo.png"),
+    contentDescription = "Company logo",
+)
+
+Text(
+    "Loading",
+    modifier = Modifier.semantics { contentDescription = "Loading, please wait" },
+)
+```
+
+A screen reader sees the `Button` as a button it can activate and the `Image` as an image labeled
+"Company logo". Nodes marked `InvisibleToUser` or `HideFromAccessibility` stay out of the OS tree.
+
+When a screen reader activates, increments or edits an element, Nucleus runs the matching Compose
+`SemanticsActions` handler on the UI thread. A read-only text field does not offer text editing to the screen reader.
+
+## Find elements from UI automation
+
+`Modifier.testTag(...)` becomes a stable identifier that UI automation tools can query instead of
+the visible label:
+
+| Platform | Attribute |
+| --- | --- |
+| macOS | `AXIdentifier` |
+| Windows | `UIA_AutomationIdPropertyId` |
+| Linux | AccessKit author id |
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Nucleus maps the semantics tree to NSAccessibility on macOS, and through AccessKit to UI
+  Automation on Windows and AT-SPI on Linux.
+- Nucleus walks the tree only while an assistive technology is attached. Until then, scrolling and
+  animation pay nothing for the bridge.
+- On Windows and Linux, updates carry only the changed nodes. macOS rebuilds the full tree on each
+  update.
+- A window move does not trigger a new push: node frames use window-local coordinates.
+- `TaoA11yRole`, `TaoA11yFlag` and `TaoA11yAction` in `dev.nucleusframework.window.tao` list the
+  roles, states and actions a screen reader can see. Your app does not construct or read them.
+  `MULTI_SELECTABLE`, `EXPANDED_TRUE` and `EXPANDED_FALSE` reach Linux only.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Windows](/docs/windows): the `DecoratedWindow` that installs the bridge.
+- [Linux and Wayland](/docs/windows/linux-wayland): Linux windowing, where AT-SPI goes through AccessKit.
+- [Pen and touch input](/docs/input/pen-stylus): touchscreen and pen contacts.

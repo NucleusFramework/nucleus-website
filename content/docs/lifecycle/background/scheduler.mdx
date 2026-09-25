@@ -1,0 +1,150 @@
+---
+title: Scheduler
+description: Run periodic, calendar, and on-boot background tasks from Kotlin that the OS fires on schedule, even when your app is closed.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+The `scheduler` module runs background tasks on a schedule, even when your app is closed. You
+register a task once and the OS fires it. Add
+`implementation("dev.nucleusframework:nucleus.scheduler:<version>")`; it exposes
+`kotlinx-serialization-json`, so apply `kotlin("plugin.serialization")` for `@Serializable` task
+input.
+
+## Schedule a task
+
+Implement `DesktopTask`, register it under a `TaskId`, and hand scheduler launches to
+`DesktopBootReceiver` at the top of `main()`:
+
+```kotlin
+val SyncId = TaskId("sync")
+
+class SyncTask : DesktopTask {
+    override suspend fun doWork(context: TaskContext): TaskResult {
+        performSync()
+        return TaskResult.Success
+    }
+}
+
+val registry = TaskRegistry.Builder().register(SyncId) { SyncTask() }.build()
+
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args = args, registry = registry)
+        return
+    }
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+<Callout type="warn">
+Run this check before `nucleusApplication`. Otherwise each scheduled run opens a window.
+</Callout>
+
+Then enqueue a request. Enqueuing the same id twice is a no-op by default (see
+[`TaskRequest`](#taskrequest)).
+
+```kotlin
+val scheduler = DesktopTaskScheduler.getInstance()
+scheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours)) // counted from enqueue time
+scheduler.enqueue(TaskRequest.calendar(ReportId, CronExpression.everyDayAt(LocalTime.of(9, 0))))
+scheduler.enqueue(TaskRequest.onBoot(StartupCheckId)) // at login
+```
+
+## Check the macOS sandbox
+
+On macOS, `enqueue` returns `false` when `ExecutableRuntime.isSandboxed()` is `true`. Fall back to
+[Service management](/docs/lifecycle/background/service-management):
+
+```kotlin
+if (ExecutableRuntime.isSandboxed()) {
+    AppServiceManager.register(AppService.Agent("com.example.myapp.sync"))
+} else {
+    DesktopTaskScheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours))
+}
+```
+
+A Developer ID PKG (`appStore = false`) is unsandboxed and can schedule tasks; the App Store PKG
+cannot. See [Executable type](/docs/lifecycle/executable-type#detect-a-sandbox).
+
+## Notes
+
+- `inputData` is stored as plain JSON on disk. Store a reference, not a secret.
+- `CronExpression.everyHour()` fires at the top of each wall-clock hour, unlike `periodic(id, 1.hours)`.
+- On macOS, an uninstall leaves the entries in place. Call `cancelAll()` from your sign-out or
+  reset flow.
+- To test tasks without the OS, see [Scheduler testing](/docs/lifecycle/background/scheduler-testing).
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- The OS runs your binary with `--nucleus-scheduler-run <taskId>`. The receiver loads the stored
+  `TaskContext`, checks the constraints, calls `doWork`, and records the result.
+- Entries: `~/Library/LaunchAgents/dev.nucleusframework.<appId>.<taskId>.plist` (macOS),
+  `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` (Linux),
+  `\Nucleus\<appId>\<taskId>` in Task Scheduler (Windows).
+- On Linux and Windows a wrapper script unregisters the task once your binary is gone.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+### DesktopTaskScheduler
+
+`isAvailable()`, `enqueue(request)`, `cancel(taskId)`, `cancelAll()`, `isScheduled(taskId)`,
+`getTaskInfo(taskId): TaskInfo?` (state, last and next run, run count, last result), and
+`getAllTasks()`. `enqueue` returns `true` when scheduled or already present.
+
+### TaskRequest
+
+`periodic(taskId, interval)` (15 minutes minimum, shorter throws), `calendar(taskId, expression)`,
+or `onBoot(taskId)`, each with an optional builder:
+
+```kotlin
+TaskRequest.periodic(SyncId, 1.hours) {
+    inputData(SyncInput(endpoint = "https://api.example.com"))
+    runImmediately() // also run once at registration (periodic only)
+    constraints { requiredNetworkType = NetworkType.UNMETERED }
+    existingTaskPolicy(ExistingTaskPolicy.REPLACE) // KEEP (default), UPDATE_DATA, REPLACE
+}
+```
+
+`retryPolicy(RetryPolicy.Linear | ExponentialBackoff)` is stored but not applied yet.
+
+`CronExpression`: `everyDayAt(time)`, `everyWeekdayAt(time)` (Monday to Friday),
+`everyWeekdayAt(day, time)`, `everyHour()`.
+
+`TaskResult`: `Success`, `Failure(message)` (no retry), `Retry(message)` (one re-run about
+5 minutes later).
+
+### Constraints
+
+Checked when the task fires. An unmet periodic run waits for the next trigger; an unmet calendar
+or on-boot run retries once about 5 minutes later.
+
+| Property | Description |
+|---|---|
+| `requiredNetworkType` | `NOT_REQUIRED`, `CONNECTED`, or `UNMETERED`. |
+| `requiresBatteryNotLow` | Battery above 15 %. No battery passes. |
+| `requiresCharging` | Plugged in. |
+| `requiresDeviceIdle` | No user input for at least 5 minutes. |
+| `minimumStorageBytes` | Minimum free space on the app partition. |
+
+### SchedulerConfig
+
+If your app starts through a custom launcher, point the scheduler at it before the first
+`enqueue`. A later change only affects tasks enqueued afterwards.
+
+```kotlin
+SchedulerConfig.executablePath = "/opt/myapp/myapp-launcher" // absolute; null = current executable
+SchedulerConfig.executableArguments = listOf("--background") // before --nucleus-scheduler-run
+```
+
+## What's next
+
+- [Scheduler testing](/docs/lifecycle/background/scheduler-testing): run tasks in memory with virtual time.
+- [Service management](/docs/lifecycle/background/service-management): background agents for sandboxed macOS builds.
+- [System info](/docs/os/system-info): the signals behind the constraints.
+- [Auto-launch](/docs/lifecycle/background/launch-at-login): start the app itself at login.

@@ -1,0 +1,103 @@
+---
+title: Notifications cross-plateforme
+description: Envoyez des notifications de bureau sur macOS, Windows et Linux depuis une seule API Kotlin.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-common` envoie une notification de bureau avec une seule API sur macOS, Windows et
+Linux : titre, corps, images, jusqu'à cinq boutons et callbacks de cycle de vie. Ajoutez
+`dev.nucleusframework:nucleus.notification-common` ; il apporte les trois modules de plateforme.
+
+## Envoyer une notification
+
+```kotlin
+NotificationManager.initialize() // optional: otherwise setup runs on the first send()
+
+val n = notification(
+    title = "Download complete",
+    message = "report.pdf has been saved",
+    onActivated = { openFile() },
+    onDismissed = { reason -> log.info("dismissed: $reason") },
+) {
+    button("Open") { openFile() }
+    button("Show in folder") { showInFolder() }
+}
+
+when (val result = n.send()) {
+    is NotificationResult.Success -> saveHandle(result.handle) // handle.dismiss() closes it
+    is NotificationResult.Failure -> log.warn(result.reason)
+}
+```
+
+Chaque `send()` affiche une nouvelle notification : vous pouvez envoyer deux fois la même
+instance. Les callbacks s'exécutent sur le thread UI. `onFailed` peut s'exécuter sur le thread
+appelant, car un envoi peut échouer avant d'atteindre l'OS.
+
+<Callout type="warn" title="Modifié en 3.0">
+En 2.x, les callbacks sous Linux et Windows s'exécutaient sur l'event dispatch thread AWT. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Options spécifiques à la plateforme
+
+Les blocs `linux { }`, `macos { }` et `windows { }` ne s'appliquent que sur l'OS concerné : vous
+pouvez les garder dans le code partagé.
+
+```kotlin
+notification(title = "Build failed", message = "See the logs") {
+    linux { urgency = Urgency.CRITICAL; transient = true; category = "device.error" }
+    macos { interruptionLevel = InterruptionLevel.TIME_SENSITIVE; subtitle = "CI" }
+    windows { scenario = ToastScenario.URGENT; duration = ToastDuration.LONG }
+}
+```
+
+| Bloc | Propriétés |
+| --- | --- |
+| `linux { }` | `urgency`, `category`, `transient`, `resident`, `expireTimeout` (ms ; `0` n'expire jamais, non défini ou `-1` utilise la valeur du serveur) |
+| `macos { }` | `interruptionLevel`, `relevanceScore` (`0.0..1.0`), `subtitle` |
+| `windows { }` | `scenario` (`ToastScenario`), `duration` (`ToastDuration`) |
+
+- Sur macOS, `TIME_SENSITIVE` et `CRITICAL` exigent l'entitlement Apple correspondant, sinon le
+  système se rabat sur `ACTIVE`.
+- `ToastScenario.URGENT` passe outre l'Assistant de concentration sous Windows 11 et versions
+  ultérieures.
+
+## Configuration sur macOS
+
+macOS ne livre les notifications qu'à une application empaquetée que l'utilisateur a autorisée.
+Demandez l'autorisation avec `NotificationCenter.requestAuthorization` et testez avec
+`./gradlew runDistributable`. N'appelez pas `NotificationCenter.setDelegate` : la couche commune
+installe son propre délégué.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- `NotificationManager` choisit le module de plateforme de l'OS hôte à la première utilisation.
+  Seul ce module est chargé.
+- Sous Windows, `initialize()` appelle `WindowsNotificationCenter.initialize()`.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Paramètre | Type | Rôle |
+| --- | --- | --- |
+| `title` | `String` | Titre obligatoire. |
+| `message` | `String` | Corps du texte. Vaut `""` par défaut. |
+| `largeImage` | `String?` | URI d'image : image héros sous Windows, indication d'image sous Linux, pièce jointe sur macOS. |
+| `smallIcon` | `String?` | URI d'icône : logo de l'application sous Windows, icône d'application sous Linux, ignorée sur macOS. |
+| `onActivated` | `(() -> Unit)?` | L'utilisateur a cliqué sur le corps. |
+| `onDismissed` | `((DismissReason) -> Unit)?` | `USER_DISMISSED`, `TIMED_OUT`, `APPLICATION` ou `UNKNOWN`. |
+| `onFailed` | `(() -> Unit)?` | La notification n'a pas pu s'afficher. |
+
+Un sixième `button(...)` lève une exception. `NotificationManager.isAvailable()` renvoie `false`
+quand l'OS n'a pas de backend de notifications ou que la bibliothèque native ne s'est pas chargée.
+
+## Et ensuite
+
+- [Notifications sur macOS](/docs/os/notifications/macos) : autorisation, planification, catégories et pièces jointes.
+- [Notifications sous Windows](/docs/os/notifications/windows) : mises en page de toasts, barres de progression et historique.
+- [Notifications sous Linux](/docs/os/notifications/linux) : urgence, actions et capacités du serveur.

@@ -1,0 +1,155 @@
+---
+title: Getting started
+description: Load PDF bytes, react to loading state, and enable text selection, links, thumbnails, and zoom.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+In this tutorial, you'll open a PDF from a file picker, react to its loading state, and turn on text selection, links, a thumbnail sidebar, and zoom. Every snippet drops into a Compose Multiplatform `commonMain` source set.
+
+## Before you start
+
+Add the dependency described in the [PDF reader overview](/docs/pdf):
+
+```kotlin title="build.gradle.kts"
+commonMain.dependencies {
+    implementation("dev.nucleusframework:pdfium:<version>")
+}
+```
+
+## Load the PDF bytes
+
+`PdfReaderState.open` takes a `ByteArray` — how you obtain it is up to you. To pick a file with a native dialog, use [FileKit](/docs/ecosystem/file-dialog):
+
+```kotlin
+@Composable
+fun PdfPicker() {
+    val reader = rememberPdfReaderState()
+    val scope = rememberCoroutineScope()
+    val picker = rememberFilePickerLauncher(
+        type = FileKitType.File(extensions = listOf("pdf")),
+    ) { file ->
+        if (file != null) scope.launch { reader.open(file.readBytes()) }
+    }
+    Column(Modifier.fillMaxSize()) {
+        Button(onClick = { picker.launch() }) { Text("Open PDF…") }
+        if (reader.pageCount > 0) {
+            PdfReader(state = reader, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+```
+
+To load from a URL, pass the bytes from any HTTP client:
+
+```kotlin
+val client = remember { HttpClient() }
+LaunchedEffect(url) { reader.open(client.get(url).readRawBytes()) }
+```
+
+## React to loading state and errors
+
+`PdfReaderState` exposes snapshot state you can read in any composable — `isLoading`, `error`, `metadata`, and `pageCount`:
+
+```kotlin
+Box(Modifier.fillMaxSize()) {
+    when {
+        reader.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+        reader.error is PdfError.PasswordRequired -> PasswordPrompt { password ->
+            scope.launch { reader.open(bytes, password) }
+        }
+        reader.error is PdfError.InvalidFormat -> Text("Not a valid PDF")
+        reader.error != null -> Text("Couldn't open: ${reader.error?.message}")
+
+        reader.pageCount > 0 -> {
+            Column {
+                Text(reader.metadata.title ?: "Untitled")
+                PdfReader(state = reader, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+```
+
+## Enable text selection
+
+Set `selectableText = true` on `PdfPage`. Drag on desktop, long-press on mobile, and copy with Ctrl/Cmd+C:
+
+```kotlin
+PdfPage(
+    state = reader,
+    pageIndex = pageIndex,
+    modifier = Modifier.fillMaxWidth(),
+    selectableText = true,
+)
+```
+
+Hit-testing uses PDFium's per-character boxes (`FPDFText_GetCharBox`), so selection tracks the rendered glyphs rather than Compose's own font metrics.
+
+## Handle links
+
+Links are enabled by default on `PdfPage` and `PdfReader`. Link annotations and URLs or e-mail addresses detected in the page text become clickable regions. External URIs open through `LocalUriHandler`; inside `PdfReader`, internal GoTo links scroll to the destination page.
+
+Intercept clicks with `onLinkClick` — return `true` to consume the click and skip the default handling:
+
+```kotlin
+PdfReader(
+    state = reader,
+    onLinkClick = { link ->
+        if (link.uri?.startsWith("mailto:") == true) {
+            openCustomComposer(link.uri)
+            true
+        } else {
+            false
+        }
+    },
+)
+```
+
+## Add a thumbnail sidebar
+
+`PdfThumbnail` renders at `RenderQuality.PREVIEW` and keeps its own LRU, so scrolling a long strip never evicts the reader's full-quality bitmaps:
+
+```kotlin
+Row(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.width(160.dp).fillMaxHeight()) {
+        items(reader.pageCount) { i ->
+            PdfThumbnail(state = reader, pageIndex = i, modifier = Modifier.clickable { /* jumpToPage(i) */ })
+        }
+    }
+    PdfReader(state = reader, modifier = Modifier.weight(1f).fillMaxHeight())
+}
+```
+
+## Zoom and fit-to-width
+
+`PdfReaderState.renderScale` is a plain `Float` that every `PdfPage` observes. `1.0` is fit-to-width; change it to re-render the visible pages at the new size:
+
+```kotlin
+var scale by remember { mutableStateOf(1f) }
+LaunchedEffect(scale) { reader.renderScale = scale }
+
+Slider(value = scale, onValueChange = { scale = it }, valueRange = 0.5f..3f)
+```
+
+## Extract text programmatically
+
+`pageText` returns the Unicode of a single page; `pageTextLayout` returns line-level rectangles for search and highlighting:
+
+```kotlin
+scope.launch {
+    val text = reader.pageText(pageIndex = 0)
+    println(text)
+}
+```
+
+<Callout type="info">
+The library's sample app wires a picker, sidebar, zoom, and selection into a full reader screen. See the repository's `:example` module for a complete reference.
+</Callout>
+
+## What's next
+
+- [API reference](/docs/pdf/api-reference) — every public type, its parameters, and defaults.
+- [PDF reader overview](/docs/pdf) — supported targets and how the render path works.
+- [Native file dialogs](/docs/ecosystem/file-dialog) — the FileKit picker used above.

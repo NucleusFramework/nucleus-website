@@ -7,6 +7,136 @@ Cette page liste les changements de chaque version de Nucleus, la plus récente 
 Chaque entrée recense les nouveaux modules, les fonctionnalités, les corrections de bugs et
 les changements incompatibles de la version.
 
+## v3.0.0
+
+**Sortie : à venir**
+
+Nucleus 3.0 ne garde qu'un backend de fenêtrage, Tao, et supprime les modules de fenêtre AWT,
+JBR et JNI. La version majeure signale des ruptures d'API : lisez le
+[guide de migration](/docs/migrate/from-2.x) avant de mettre à jour, et suivez sa checklist.
+
+### Changements incompatibles
+
+- **Tao est le seul backend de fenêtrage** (#593). `decorated-window-awt`, `decorated-window-jbr`
+  et `decorated-window-jni` disparaissent, avec `NucleusBackend`, `LocalNucleusBackend`,
+  `nucleusApplication(backend = …)` et `NucleusApplicationScope.backend`.
+  `nucleus-application` apporte désormais `decorated-window-tao` lui-même. Voir
+  [Supprimer la sélection du backend](/docs/migrate/from-2.x#supprimer-la-sélection-du-backend).
+- **Plus de fenêtres AWT** (#593). `Window`, `Dialog` et `Tray` de Compose Desktop ne sont plus
+  pris en charge, `NucleusWindowUnsafe.awtWindow` / `awtDialog` sont supprimés, tout comme les
+  surcharges AWT sans receiver de `MaterialDecoratedWindow`, `MaterialDecoratedDialog`,
+  `JewelDecoratedWindow` et `JewelDecoratedDialog`. Voir
+  [Remplacer les fenêtres, dialogues et tray de Compose Desktop](/docs/migrate/from-2.x#remplacer-les-fenêtres-dialogues-et-tray-de-compose-desktop)
+  et [les fenêtres de toolkit](/docs/toolkits#ouvrir-une-fenêtre-de-toolkit).
+- **L'API window v2 passe dans un package Nucleus** (#634). Importez
+  `dev.nucleusframework.window.tao.v2` au lieu de `androidx.compose.ui.window.v2` ; Nucleus
+  n'accepte aucun type v2 de Compose. Voir
+  [État de fenêtre](/docs/windows/window-state#utiliser-lapi-window-v2).
+- **`NucleusWindowHost.Window` prend `minimizable` et `maximizable`** (#680, #684). Les hôtes
+  personnalisés doivent ajouter les deux paramètres. Voir
+  [Mettre à jour les hôtes de fenêtre personnalisés](/docs/migrate/from-2.x#mettre-à-jour-les-hôtes-de-fenêtre-personnalisés).
+- **Les options store du PKG ne compilent plus** (#688). `macOS.appStore` et
+  `TargetFormat.isStoreFormat` sont dépréciés au niveau ERROR. Choisissez le canal avec
+  `macOS { pkg { appStore = … } }` et détectez le sandbox avec `ExecutableRuntime.isSandboxed()`.
+  Voir [Choisir un canal PKG](/docs/packaging/macos#choisir-un-canal-pkg).
+
+### Changements de comportement
+
+- **Cmd+Q et Dock → Quitter appellent `onCloseRequest`** (#696). Chaque fenêtre ouverte reçoit
+  la demande : un gestionnaire qui ne quitte jamais bloque la fermeture. Voir
+  [Gérer un quit système](/docs/lifecycle/application#gérer-un-quit-système).
+- **Les callbacks natifs s'exécutent sur le thread UI de l'hôte** (#687). Notifications,
+  contrôles média et launchers passent par le nouveau `NucleusUiThread` au lieu de l'EDT AWT.
+  Voir [Les callbacks natifs sur le thread UI](/docs/concepts/threading#les-callbacks-natifs-sur-le-thread-ui).
+- **Le pincement arrive en événements Compose `Scale`** (#662). `detectTransformGestures` ne le
+  voit plus ; utilisez `Modifier.transformable` ou un listener `PointerEventType.Scale*`. Voir
+  [Zoomer par pincement](/docs/input/trackpad-gestures#zoomer-par-pincement).
+- **L'instance unique est désactivée en développement** (#717). `enableSingleInstance` vaut
+  `!ExecutableRuntime.isDev()` par défaut. Voir
+  [L'activer en dev](/docs/lifecycle/single-instance#lactiver-en-dev).
+- **FileKit est initialisé pour vous** (#718) avec `NucleusApp.appId` quand il est sur le
+  classpath. Désactivez-le avec `initializeFileKit = false`. Voir
+  [Initialiser FileKit](/docs/lifecycle/application#initialiser-filekit).
+- **Texte LCD / ClearType sous Windows** (#626). Les fenêtres opaques affichent le texte en
+  sous-pixel par défaut. Voir
+  [Afficher du texte ClearType sous Windows](/docs/windows/hidpi#afficher-du-texte-cleartype-sous-windows).
+- **Les polices du JRE sont retirées de l'image runtime** (#694). Une app qui dessine du texte
+  via AWT ou Swing règle `stripJreFonts = false`. Voir
+  [Alléger l'image runtime](/docs/packaging#alléger-limage-runtime).
+- **Les bibliothèques JNI de Nucleus sont livrées à côté de l'app** (#712), plus dans ses JAR,
+  et une app empaquetée n'extrait plus rien au premier lancement. Voir
+  [Bibliothèques natives à côté de l'application](/docs/packaging#bibliothèques-natives-à-côté-de-lapplication).
+- **Plus de sondage du thème système** (#716). `nucleusApplication` coupe le sondage de Compose
+  (une fois par seconde) et fournit `LocalSystemTheme` depuis son propre détecteur. Voir
+  [Mode sombre](/docs/os/theme/dark-mode#thème-fourni-par-nucleusapplication).
+
+### Nouvelles fonctionnalités
+
+- **Fenêtres satellites et docking** (#635, #663, #695, `@ExperimentalNucleusApi`). Les palettes
+  suivent le document actif, s'ancrent dans un `DockLayout` et en ressortent. Côtés partagés ou
+  empilés, tailles par panneau, `dockSides`, `floatable`, `reorderable` et bornes d'épaisseur.
+  Voir [Satellites](/docs/multi-window/satellites) et [Docking](/docs/multi-window/docking).
+- **Onglets façon Chrome** (#635, #663, #695, `@ExperimentalNucleusApi`). `Tab` et `TabWindows`
+  détachent un onglet dans une nouvelle fenêtre et le rattachent, avec aperçus personnalisables
+  et barres de droite à gauche. Voir [Onglets](/docs/multi-window/tabs).
+- **API window v2** (#634, #647, #674, #675). `WindowState` / `DialogState` avec `requestSize`,
+  `requestScreen`, `TaoMonitors`, et des fenêtres wrap-content centrées une fois mesurées. Voir
+  [État de fenêtre](/docs/windows/window-state).
+- **`minimizable` et `maximizable`** (#680, #684) sur `DecoratedWindow` et `HostedWindow`, pour
+  une fenêtre avec le seul bouton de fermeture. Voir
+  [Régler le chrome de la fenêtre](/docs/windows#régler-le-chrome-de-la-fenêtre).
+- **`exitProcessOnExit`** (#676) sur `nucleusApplication`. Voir
+  [Choisir le comportement à la sortie](/docs/lifecycle/application#choisir-le-comportement-à-la-sortie).
+- **Watchdog de la boucle d'événements sous Windows** (#710). Une boucle bloquée journalise un
+  `SEVERE` avec un thread dump ; branchez `onUnresponsive`, `onResponsive` et
+  `expectUnresponsive`. Voir
+  [Détecter une boucle d'événements bloquée](/docs/concepts/threading#détecter-une-boucle-dévénements-bloquée).
+- **Couches popup placées par rapport à l'écran** (#651) et `NativePopupLayers { }` pour un seul
+  sous-arbre. Voir
+  [Dialogues et popups](/docs/windows/dialogs-popups#comment-les-popups-se-placent-à-lécran).
+- **`TaoPointerIcons`** pour Grab, Move, NotAllowed, Wait et les curseurs de redimensionnement.
+  Voir [Icônes de pointeur](/docs/input/pointer-icons#icônes-disponibles).
+- **Pack de démarrage** (#639, #669, #715). `nucleusOptimization` active le Serial GC, un tas
+  compact, un JAR unique, le GC au repos et `lastJdk` (OpenJDK 27). Voir
+  [Démarrage](/docs/performance/startup).
+- **Provisionnement de Node.js** (#709, #711). Le plugin télécharge Node.js pour
+  electron-builder (désormais 26.16.1) ; la CI n'a plus besoin de `setup-node`. Voir
+  [Provisionner Node.js](/docs/packaging#provisionner-nodejs).
+- **Extensions d'application macOS** (#396). Intégrez et signez des bundles `.appex` déjà
+  compilés. Voir [Intégrer des extensions d'application](/docs/packaging/macos#intégrer-des-extensions-dapplication).
+- **PKG Developer ID avec scripts d'installation** (#688). Voir
+  [Empaqueter un PKG Developer ID](/docs/packaging/macos#empaqueter-un-pkg-developer-id).
+- **Répertoire de cache des bibliothèques natives** (#686). `-Dnucleus.native.cacheDir` ou
+  `NativeLibraryLoader.cacheDirectory`. Voir
+  [le loader de bibliothèques natives](/docs/performance/native-library-loader).
+- **GraalVM 25i4 par défaut** (#698) et **G1 dans les images natives sous Windows et macOS**
+  (#708) à partir de GraalVM 25.4. Voir
+  [Choisir un garbage collector](/docs/performance/graalvm/configuration#choisir-un-garbage-collector).
+- **ANGLE depuis Maven, D3D11 seulement** (#707). Voir
+  [Livrer les bibliothèques ANGLE](/docs/packaging/windows#livrer-les-bibliothèques-angle).
+
+### Corrections de bugs
+
+- **Le PKG App Store n'est plus notarisé** (#681).
+- **`jdk.jlink` est retiré de `includeAllModules`** (#682) sur les JDK JEP 493.
+- **`FsWatcher` partage un seul watcher natif par instance** (#683) et signale les renommages
+  macOS en `Moved`. Voir [Gérer les renommages](/docs/lifecycle/fs-watcher#gérer-les-renommages).
+- **NSIS** (#718) : `deleteAppDataOnUninstall` couvre les noms d'image GraalVM personnalisés, un
+  changement de `packageName` atteint l'installateur, et un nouvel empaquetage n'échoue plus sur
+  le launcher en lecture seule. Voir
+  [Personnaliser l'installateur NSIS](/docs/packaging/windows#personnaliser-linstallateur-nsis).
+- **Redimensionnement sans tremblement** sous macOS, Windows et Linux (#678, #689, #691, #693, #704).
+- **Menus contextuels** (#651) : sous Linux le menu s'affiche en `xdg_popup`, et un second clic
+  droit le déplace. Voir
+  [Menus contextuels](/docs/os/menus/context-menu#comportement-du-flyout-à-lécran).
+- **Les exceptions JNI sont journalisées avant d'être effacées** (#677).
+- **Le contenu des fenêtres reste sur l'applier UI** (#649) quand un composable non UI s'exécute
+  dans le scope `nucleusApplication`.
+- **Corrections d'intégration NativeView et TextureView** (#659) sur les trois OS.
+- **Linux : une fenêtre fermée ne reste plus affichée** après le retour de `nucleusApplication` (#714).
+
+---
+
 ## v2.5.18
 
 **Sortie : 2026-09-23**
@@ -120,7 +250,7 @@ les changements incompatibles de la version.
   `-Dnucleus.tao.trackpadPanEvents=false` pour recevoir des `Scroll` façon AWT pour tout.
   Les vues natives consomment le pan et le transmettent pour que la vue défilante intégrée
   fasse son rubber-band ; les popups partagent le même routeur. Voir
-  [Lire les pans du trackpad depuis Compose](/docs/tao/multi-touch#lire-les-pans-du-trackpad-depuis-compose).
+  [Lire les pans du trackpad depuis Compose](/docs/input/trackpad-gestures#défiler).
 
 ### Corrections de bugs
 
@@ -130,12 +260,12 @@ les changements incompatibles de la version.
   rapport à AWT. AppKit suit déjà la convention `MouseScrollDelta` (comme winit) ; la
   négation X supplémentaire a disparu, et la conversion des popups inverse les deux axes
   d'un coup. Voir
-  [Lire les pans du trackpad depuis Compose](/docs/tao/multi-touch#lire-les-pans-du-trackpad-depuis-compose).
+  [Lire les pans du trackpad depuis Compose](/docs/input/trackpad-gestures#défiler).
 - **Amplitude du scroll trackpad incluant le facteur d'échelle d'affichage** (#653) — Tao
   convertissait les deltas logiques AppKit en pixels physiques avant de diviser par 10, donc
   un swipe de 10 points avançait deux fois plus loin sur un écran 2× que sous AWT (qui
   utilise `scrollingDelta * 0.1` sans scale). Les deltas précis sont maintenant transmis en
-  points logiques. Voir [Fonctionnement](/docs/tao/multi-touch#fonctionnement).
+  points logiques. Voir [Fonctionnement](/docs/input/trackpad-gestures).
 
 ---
 
@@ -158,7 +288,7 @@ les changements incompatibles de la version.
   `DecoratedWindow`/`DecoratedDialog`, `NucleusWindowHost`/`NucleusDialogHost`,
   `HostedWindow`/`HostedDialog`, et les `DecoratedWindow`, `DecoratedDialog` et
   `TaoStandalonePopup` de Tao. Les wrappers Material/Jewel héritent du même schéma par
-  inférence. Voir [Notes](/docs/tao/decorated-window#notes).
+  inférence. Voir [Notes](/docs/windows#notes).
 
 ---
 
@@ -179,7 +309,7 @@ les changements incompatibles de la version.
   est maintenant calculé avant la prise du verrou et passé en paramètre, et le drapeau
   skip-taskbar est lu avant l'appel COM. Rayon d'action plus large que #640 : presque toutes
   les branches IME prenaient ce verrou. Porté de tauri-apps/tao#1215 et #1264. Voir
-  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  [Saisie de texte](/docs/windows#saisie-de-texte).
 - **Gel Windows sur un message imbriqué déclenché au clavier** (#640) — `PeekMessageW` délivre
   en ligne les messages *envoyés* depuis un autre thread : la procédure de fenêtre est
   réentrée avant le retour du peek. Le callback clavier tenait la map globale
@@ -209,7 +339,7 @@ les changements incompatibles de la version.
   aussi le z-order de façon synchrone, et la bande est réaffirmée après les points de perte
   connus — chaque redimensionnement, et les chemins d'application, de démontage et de
   restauration du backdrop. Voir
-  [Comportement par plateforme](/docs/tao/overlay-windows#comportement-par-plateforme).
+  [Comportement par plateforme](/docs/windows/overlay-windows#comportement-par-plateforme).
 - **Entrées affamées avec deux fenêtres ouvertes sous Windows** (#632) — n'importe quelle
   écriture de snapshot dans le processus réveille le `Recomposer` de chaque scène via
   l'observateur global, et l'hôte Windows rendait et présentait ces frames sans condition.
@@ -222,7 +352,7 @@ les changements incompatibles de la version.
   doivent swapper quoi qu'il arrive sont conservées : application d'une taille ou d'une
   échelle, boucle modale de redimensionnement/déplacement de l'OS, changement de couleur
   d'effacement résolue, et premier swap après `show()`. Voir
-  [Comment ça marche](/docs/tao/decorated-window#comment-ça-marche).
+  [Comment ça marche](/docs/windows).
 
 ---
 
@@ -280,7 +410,7 @@ les changements incompatibles de la version.
   `GtkMessageDialog` sous Linux). Les replis compacts (`CFUserNotification` / `MessageBoxW`)
   gardent le résumé `toString()`, plafonné à 2000 caractères pour qu'un dump bytecode
   `VerifyError` ne puisse pas masquer silencieusement la boîte. Voir
-  [Gérer les exceptions non interceptées](/docs/tao/decorated-window#gérer-les-exceptions-non-interceptées).
+  [Gérer les exceptions non interceptées](/docs/windows#gérer-les-exceptions-non-interceptées).
 
 ---
 
@@ -299,7 +429,7 @@ les changements incompatibles de la version.
   code de sortie 1. Le dialogue s'affiche après la sortie de la boucle — une pompe modale
   dans un callback tao provoque un deadlock du thread principal. Désactivez-le avec
   `-Dnucleus.tao.fatalErrorDialog=false` pour les exécutions non supervisées. Voir
-  [Gérer les exceptions non interceptées](/docs/tao/decorated-window#gérer-les-exceptions-non-interceptées).
+  [Gérer les exceptions non interceptées](/docs/windows#gérer-les-exceptions-non-interceptées).
 - **`WindowExceptionHandlerFactory`** (#621 / #625) — miroir Tao de la factory AWT de
   Compose Desktop. Fournissez `LocalWindowExceptionHandlerFactory` pour attraper les pannes
   pendant le layout, le draw, l'entrée, l'IME et l'accessibilité ; un handler qui retourne
@@ -307,7 +437,7 @@ les changements incompatibles de la version.
   composition tue toujours le recomposer (c'est le design de Compose) ; l'avaler journalise
   en `SEVERE` au lieu de laisser une fenêtre qui ne se met plus à jour. La factory par
   défaut relance vers le dialogue fatal. `@ExperimentalComposeUiApi`. Voir
-  [Gérer les exceptions non interceptées](/docs/tao/decorated-window#gérer-les-exceptions-non-interceptées).
+  [Gérer les exceptions non interceptées](/docs/windows#gérer-les-exceptions-non-interceptées).
 
 ---
 
@@ -326,7 +456,7 @@ les changements incompatibles de la version.
   attente non nul. Tous les points d'entrée de scène des hosts standalone — pointer, scroll,
   dispatch clavier et `setContent` — s'exécutent maintenant sous le garde de ré-entrance du pump :
   une frame planifiée en pleine passe est postée sur la file principale Tao. Voir
-  [Notes](/docs/os/tray-app#notes).
+  [Notes](/docs/os/tray/tray-app#notes).
 
 ---
 
@@ -344,13 +474,13 @@ les changements incompatibles de la version.
   les mêmes événements `ImePreedit` / `ImeCommit` que macOS et Windows. Les touches consommées par
   la méthode de saisie n'atteignent plus Compose, y compris les relâchements orphelins que Wayland
   délivre pour une frappe filtrée, et la fenêtre de candidats suit le curseur. Voir
-  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  [Saisie de texte](/docs/windows#saisie-de-texte).
 - **Fenêtre de candidats Linux par-dessus le curseur** (#613) — GTK place ses fenêtres autour
   d'une *zone* de curseur, en pixels logiques et relative au `GdkWindow` toplevel, pas autour d'un
   point en pixels physiques relatif à la zone client : la liste de candidats se posait donc sur la
   composition qu'elle décrivait. Le rectangle du curseur est mis à l'échelle et translaté de
   l'allocation du widget de contenu, la même correction que la sous-surface Wayland applique déjà.
-  Voir [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  Voir [Saisie de texte](/docs/windows#saisie-de-texte).
 - **Dérive de l'état des modificateurs sous Linux** (#613) — `ModifiersChanged` n'était émis que
   si la touche elle-même était un modificateur : Compose suivait donc Ctrl, Shift, Alt et Super
   par comptabilité des appuis et relâchements. Les méthodes de saisie sous X11 ré-injectent les
@@ -367,7 +497,7 @@ les changements incompatibles de la version.
   n'écrit plus le default utilisateur — c'est l'OS qui décide si une lettre maintenue répète ou
   ouvre le sélecteur — et le choix est appliqué à partir du `replacementRange` fourni par AppKit
   avec `insertText:`, en sélectionnant puis en insérant. Voir
-  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  [Saisie de texte](/docs/windows#saisie-de-texte).
 - **Jitter sous-pixel avalant les clics** (#615 / #619) — Tao rapporte les positions du curseur au
   1/1024 de pixel et macOS émet un `CursorMoved` avant chaque `mouseDown` et `mouseUp` : un clic
   dérivant d'une fraction de pixel produisait un vrai delta de mouvement, démarrait un geste de
@@ -375,20 +505,20 @@ les changements incompatibles de la version.
   moins de 1 dp depuis la dernière position dispatchée sont maintenant supprimés, et
   `viewConfiguration.touchSlop` est mis à l'échelle de la densité (18.dp) au lieu de 18 pixels
   bruts, ce qui divisait par deux tous les seuils de drag et de scroll sur les écrans 2x. Voir
-  [Fonctionnement](/docs/tao/multi-touch#fonctionnement).
+  [Fonctionnement](/docs/input/trackpad-gestures).
 - **Scroll des popups tray sous Linux** (#610) — les popups standalone, overlay et owner-based
   passent maintenant leurs événements molette par le même dispatch mis en forme AWT que
   `TaoWindow`, avec la valeur lignes-par-cran Windows issue de `LocalScrollConfig`. Les frames des
   popups standalone sont peintes en ligne quand l'appelant est déjà sur le thread principal, pour
   qu'un flot de molette ne puisse pas affamer `MainEventsCleared`. Voir
-  [Notes](/docs/os/tray-app#notes).
+  [Notes](/docs/os/tray/tray-app#notes).
 - **Démarrage au login en demi-taille sous GNOME** (#614 / #616) — `graphical-session.target` est
   atteint avant que `gsd-xsettings` n'écrive `Xft.dpi` dans la base de ressources X : une app
   HiDPI lancée au login figeait donc `sun.java2d.uiScale` à 1.0, alors qu'un lancement manuel
   était toujours correct. L'unité systemd utilisateur générée est ordonnée après
   `gnome-session-x11-services-ready.target`. systemd ignore l'ordonnancement sur les unités non
   chargées : c'est donc sans effet sur les autres bureaux. Voir
-  [Notes](/docs/lifecycle/auto-launch#notes).
+  [Notes](/docs/lifecycle/background/launch-at-login#notes).
 
 ---
 
@@ -403,12 +533,12 @@ les changements incompatibles de la version.
   suivants faisait donc glisser la popup en Exposé alors que Compose était déjà en train de la
   faire disparaître. Le panneau est maintenant stationnaire, présent sur tous les espaces,
   auxiliaire en plein écran et ignoré par le cyclage de fenêtres, si bien que `TrayApp` la ferme
-  lui-même. Voir [Notes](/docs/os/tray-app#notes).
+  lui-même. Voir [Notes](/docs/os/tray/tray-app#notes).
 - **Popup tray macOS fermée par sa propre icône** (#609) — le moniteur de clic extérieur comptait
   un `mouseDown` sur le `NSStatusItem` et sur son menu contextuel natif comme un clic hors du
   panneau : un clic droit masquait donc la popup avant l'apparition du menu. Ces fenêtres sont
   ignorées pour les panneaux standalone ; le toggle du clic gauche reste géré par le callback du
-  tray. Voir [Notes](/docs/os/tray-app#notes).
+  tray. Voir [Notes](/docs/os/tray/tray-app#notes).
 
 ---
 
@@ -422,12 +552,12 @@ les changements incompatibles de la version.
   est une fenêtre X11 override-redirect, donc GTK `gtk_drag_dest_set` ne peut pas s'y attacher.
   XDND 5 est implémenté sur le thread d'événements du panneau et dispatché via `TaoSceneDnD`,
   comme pour `DecoratedWindow`. Voir
-  [Fonctionnement](/docs/tao/drag-and-drop#fonctionnement).
+  [Fonctionnement](/docs/input/drag-and-drop).
 - **Scroll des popups tray sous macOS** (#608) — les `NSPanel` popup transmettaient le
   `scrollingDelta` AppKit brut. `TaoWindow` le reformate déjà en `preciseWheelRotation` AWT
   (Y inversé, physique /10 pour les deltas précis). Les popups tray et overlay empruntent
   maintenant le même mapping : le signe de la molette et l'amplitude du trackpad correspondent
-  à la fenêtre principale. Voir [Notes](/docs/os/tray-app#notes).
+  à la fenêtre principale. Voir [Notes](/docs/os/tray/tray-app#notes).
 
 ---
 
@@ -441,14 +571,14 @@ les changements incompatibles de la version.
   des panneaux natifs sans owner (`WS_POPUP` / `NSPanel`), pas des `TaoWindow` : elles n'avaient
   donc pas de cible de dépôt. Les fichiers déposés atteignent maintenant `dragAndDropTarget`
   Compose via `TaoSceneDnD`. Les builds native-image Windows incluent les métadonnées JNI de
-  ce chemin. Voir [Fonctionnement](/docs/tao/drag-and-drop#fonctionnement).
+  ce chemin. Voir [Fonctionnement](/docs/input/drag-and-drop).
 - **Pré-édition IME Windows** (#558 / #603) — la composition n'était jamais transmise : l'IME
   peignait sa propre fenêtre flottante près du coin supérieur gauche, et les touches qu'il
   avait consommées (`VK_PROCESSKEY`) arrivaient quand même à Compose : Entrée de conversion
   insérait un saut de ligne, les flèches de candidats déplaçaient le curseur, Retour arrière
   effaçait du texte déjà validé. La pré-édition se dessine maintenant en ligne, la liste de
   candidats suit le curseur, et les touches consommées sont ignorées. Voir
-  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  [Saisie de texte](/docs/windows#saisie-de-texte).
 
 ---
 
@@ -461,7 +591,7 @@ les changements incompatibles de la version.
 - **Scroll des popups tray sous Windows** (#601) — les `WndProc` des popups et overlays
   rapportaient les unités de molette Win32 brutes. `TaoWindow` les inverse déjà vers
   `preciseWheelRotation` AWT ; les couches popup standalone et owned font de même, donc le
-  scroll de `TrayApp` n'est plus inversé. Voir [Notes](/docs/os/tray-app#notes).
+  scroll de `TrayApp` n'est plus inversé. Voir [Notes](/docs/os/tray/tray-app#notes).
 - **Frames GPU d'une popup tray Windows masquée** (#602) — une popup tray standalone masquée
   ne soumet plus de frames GPU.
 - **Encodage UTF-8 de javac/javadoc** (#600) — les tâches compilateur et javadoc épinglent
@@ -477,7 +607,7 @@ les changements incompatibles de la version.
 
 - **Le canal innovation GraalVM pointe sur 25.3** (#598) — `GraalvmChannel.INNOVATION`
   résout `25i3`. Voir
-  [Provisionner la toolchain](/docs/performance/graalvm/configuration#provisionner-la-toolchain).
+  [Provisionner la toolchain](/docs/performance/graalvm/configuration#fournir-la-toolchain).
 
 ### Corrections de bugs
 
@@ -486,14 +616,14 @@ les changements incompatibles de la version.
   Compose, et les échos de resize natif réécrivaient `WindowState.size` à l'envers. La taille
   intérieure est appliquée de façon synchrone, `EVENT_RESIZED` est poussé dans le même tour, et
   les échos programmatiques en vol sont ignorés. Voir
-  [Paramètres de DecoratedWindow](/docs/tao/decorated-window#paramètres-de-decoratedwindow).
+  [Paramètres de DecoratedWindow](/docs/windows#paramètres-de-decoratedwindow).
 - **Pré-édition IME macOS** (#595 / #596 / #599) — la composition CJK était invisible et
   l'Entrée de validation fuitait comme un saut de ligne. `setMarkedText` / `unmarkText` sont
   transmis comme pré-édition, le commit passe par `commitText`, et les touches consommées par
   l'IME sont ignorées. Le sélecteur d'accents PressAndHold reste inhibé tant qu'une composition
   est en cours, pour qu'un commit de segment n'arme pas le sélecteur et ne détourne pas le
   commit suivant (segments dupliqués, tofu U+F7xx). Voir
-  [Saisie de texte](/docs/tao/decorated-window#saisie-de-texte).
+  [Saisie de texte](/docs/windows#saisie-de-texte).
 
 ---
 
@@ -529,23 +659,23 @@ les changements incompatibles de la version.
   Adwaita sur les bureaux GTK et Breeze sur les bureaux Qt. Couvre `ContextMenuArea`, le
   Couper/Copier/Coller des champs de texte et les entrées d'orthographe. Backend Tao uniquement ;
   accepté et ignoré sous AWT. Voir
-  [Menus contextuels](/docs/window/context-menu#activer-le-menu-natif).
+  [Menus contextuels](/docs/os/menus/context-menu#activer-le-menu-natif).
     - `NucleusContextMenuItem`, `NucleusContextMenuDivider` et `NucleusContextMenuSubmenu`
       construisent des entrées avec icônes et sous-menus paresseux. Voir
-      [Ajouter vos propres entrées](/docs/window/context-menu#ajouter-vos-propres-entrées).
+      [Ajouter vos propres entrées](/docs/os/menus/context-menu#ajouter-vos-propres-entrées).
     - Les icônes standard portent le libellé de raccourci de la plateforme (`⌘C` / `Ctrl+C`),
       redéfinissable par entrée. Dessiné par les flyouts Windows et Linux. Voir
-      [Afficher les raccourcis clavier](/docs/window/context-menu#afficher-les-raccourcis-clavier).
+      [Afficher les raccourcis clavier](/docs/os/menus/context-menu#afficher-les-raccourcis-clavier).
     - Le nouveau `LinuxUiToolkit` de `core-runtime` indique si la session est Gtk ou Qt, ce qui
       détermine aussi le style du menu Linux. Voir
-      [Détecter le toolkit Linux](/docs/window/context-menu#détecter-le-toolkit-linux).
+      [Détecter le toolkit Linux](/docs/os/menus/context-menu#détecter-le-toolkit-linux).
     - `menu-macos` gagne les primitives sous-jacentes : `NativePopupMenuItem`, `popUpNativeMenu`,
       `isNativePopupMenuAvailable`.
 - **Fenêtres overlay** (#564, #568) — nouveaux drapeaux de fenêtre pour watermarks, widgets de
   bureau et overlays informatifs : `clickThrough` (les événements pointeur traversent),
   `alwaysOnBottom` (sous les fenêtres normales, exclusif avec `alwaysOnTop`) et
   `visibleOnAllWorkspaces`. Les trois sont réactifs, avec des setters impératifs sur `TaoWindow`.
-  Voir [Fenêtres overlay](/docs/tao/overlay-windows#construire-un-watermark-traversant).
+  Voir [Fenêtres overlay](/docs/windows/overlay-windows#construire-un-watermark-traversant).
     - `transparent` est désormais exposé sur le `DecoratedWindow` agnostique du backend et sur les
       wrappers de fenêtre Material et Jewel, et plus seulement sur le composable Tao. Une fenêtre
       entièrement transparente perd le contour qui épousait la fenêtre rectangulaire au lieu du
@@ -555,20 +685,20 @@ les changements incompatibles de la version.
       Wayland, et `TaoWindow.isNativeWaylandSurface` indique ce qu'elle a réellement obtenu. Les
       drapeaux inopérants sur une surface Wayland native sont signalés une fois par fenêtre, avec
       la raison. Voir
-      [Prendre une surface X11 sous Wayland](/docs/tao/overlay-windows#prendre-une-surface-x11-sous-wayland).
+      [Prendre une surface X11 sous Wayland](/docs/windows/overlay-windows#obtenir-une-surface-x11-sous-wayland).
 - **Compose au-dessus des vues natives** (#587) — l'emplacement `content` de `NativeView` dessine
   maintenant dans la scène Compose de la fenêtre sur les trois plateformes : les composables
   déclarés après la vue et les `Popup` de la scène peignent donc par-dessus, et le contenu
   d'overlay revendique lui-même ses événements pointeur. Linux prend en charge l'emplacement
   `content` pour la première fois (Wayland uniquement).
   `Modifier.consumeOverlayPointerEvents()` est déprécié et devenu inutile. Voir
-  [Superposer du contenu Compose](/docs/tao/native-views#superposer-du-contenu-compose).
+  [Superposer du contenu Compose](/docs/native-content/native-views#superposer-du-contenu-compose).
 - **Presse-papiers Linux via GTK** (#582, #583) — le presse-papiers Tao sous Linux passe par GDK
   et non par AWT : copier-coller fonctionne donc dans une fenêtre Wayland native et dans une
   session sans XWayland. Les images (en PNG) et les listes de fichiers (`text/uri-list` plus la
   cible « copied-files » de GNOME) circulent dans les deux sens, en plus du texte brut. Aucun
   changement d'API : utilisez `LocalClipboard` de Compose. Voir
-  [Copier-coller](/docs/tao/wayland#copier-coller).
+  [Copier-coller](/docs/windows/linux-wayland#copier-coller).
 - **`EnergyManager.acquireAwake`** — renvoie un `AwakeHandle` qui tient une demande d'éveil
   jusqu'à sa fermeture : des fonctionnalités indépendantes peuvent donc garder la machine
   éveillée sans se relâcher mutuellement. `keepAwake` conserve son slot unique où le dernier
@@ -579,14 +709,14 @@ les changements incompatibles de la version.
   `executableArguments` dirigent le scheduler de l'OS vers un launcher maison au lieu de
   l'exécutable courant. Renseignez-les avant le premier `enqueue` ; les valeurs sont figées dans
   le plist, l'unit ou la tâche générés. Voir
-  [SchedulerConfig](/docs/lifecycle/scheduler#schedulerconfig).
+  [SchedulerConfig](/docs/lifecycle/background/scheduler#schedulerconfig).
 - **Compose 1.12** (#354, #550, #551, #555) — `decorated-window-tao` passe à Compose Multiplatform
   1.12, avec des frames pilotées par `SingleComposeSceneRenderingScope` et le nouveau dispatch
   différé de `RectManager` maintenu hors du thread d'événements AWT.
 - **`jdk.unsupported` dans les modules runtime par défaut** — `sun.misc.Unsafe` est requis par JNA,
   Jewel et beaucoup de bibliothèques courantes : le module est donc inclus par défaut plutôt que
   découvert via une erreur à l'exécution. Voir la
-  [référence `nativeDistributions { }`](/docs/start/configuration#référence-nativedistributions--).
+  [référence `nativeDistributions { }`](/docs/reference/gradle-dsl#nativedistributions).
 
 ### Changements incompatibles
 
@@ -647,7 +777,7 @@ les changements incompatibles de la version.
   bouton minimiser est désactivé pour ne plus sembler cliquable ; fermer et zoomer
   restent sur le même chemin au survol. Au repos, les copies peignent les couleurs
   actives standard au lieu du gris inactif. Voir
-  [Contrôles de fenêtre](/docs/tao/window-scaffold#contrôles-de-fenêtre).
+  [Contrôles de fenêtre](/docs/windows/window-scaffold#placer-les-contrôles-de-fenêtre).
 
 ---
 
@@ -661,14 +791,14 @@ les changements incompatibles de la version.
   NaN à la surface native lorsqu'un axe de `WindowState` / `DialogState` vaut
   `Dp.Unspecified`. Les axes wrap-content sont mesurés après la première composition
   puis appliqués, comme dans Compose Desktop. Voir
-  [Paramètres de DecoratedWindow](/docs/tao/decorated-window#paramètres-de-decoratedwindow).
+  [Paramètres de DecoratedWindow](/docs/windows#paramètres-de-decoratedwindow).
 - **Molette souris discrète sous Linux** (#533) — GDK ne remplit `delta_x` / `delta_y`
   que pour les événements lisses (trackpad). Un cran de molette arrivait avec un delta
   nul, donc Compose ne défilait pas. La direction est maintenant mappée sur un delta
   unitaire.
 - **Fade au survol des boutons de caption Win11** (#537) — les boutons de caption
   plateforme utilisent la durée de fade système. Voir
-  [Contrôles de fenêtre](/docs/tao/window-scaffold#contrôles-de-fenêtre).
+  [Contrôles de fenêtre](/docs/windows/window-scaffold#placer-les-contrôles-de-fenêtre).
 
 ---
 
@@ -680,7 +810,7 @@ les changements incompatibles de la version.
 
 - **Coins CSD Win11 clipés** (#527) — le CSD en mode fenêtré dessine le contour
   arrondi 8 px via DWM pour que le cadre Compose ne soit pas clipé aux coins. Voir
-  [Notes de DecoratedWindow](/docs/tao/decorated-window#notes).
+  [Notes de DecoratedWindow](/docs/windows#notes).
 - **Sélecteur d'accents press-and-hold macOS** (#529 / #530) — les répétitions de
   touche atteignent maintenant `interpretKeyEvents:`, donc le menu PressAndHold
   d'AppKit s'ouvre. Choisir un accent remplace la lettre de base déjà commitée
@@ -688,7 +818,7 @@ les changements incompatibles de la version.
 - **DPI des popups multi-écrans Windows** (#528) — les popups et `DecoratedDialog`
   reprennent le DPI et les contraintes de zone de travail du moniteur cible quand
   ils s'ouvrent sur un autre écran que le propriétaire. Voir
-  [Notes HiDPI par moniteur](/docs/tao/hidpi#notes).
+  [Notes HiDPI par moniteur](/docs/windows/hidpi#notes).
 
 ---
 
@@ -701,12 +831,12 @@ les changements incompatibles de la version.
 - **Cadre CSD Windows masqué par DWM** (#523 / #522 / #520) — le CSD en mode fenêtré (sans
   Mica/Acrylic) n'efface que le remplissage de la bordure DWM pour que le trait Compose du
   cadre reste visible, tout en conservant le clip arrondi Win11 8 px et l'ombre portée. Voir
-  [Notes de DecoratedWindow](/docs/tao/decorated-window#notes).
+  [Notes de DecoratedWindow](/docs/windows#notes).
 - **`appResources` absentes des packages natifs GraalVM** (#524) — `prepareAppResources` est
   copié à côté du binaire natif et `compose.application.resources.dir` est défini pour
   `packageGraalvmNative` et `runWithNativeAgent`. Les sidecars tels que `dxil.dll` de Dawn
   se chargent comme avec `run` / jpackage. Voir
-  [Tâches GraalVM — metadata, installateurs et helpers](/docs/performance/graalvm/tasks-ci#metadata-installateurs-et-helpers).
+  [Tâches GraalVM — metadata, installateurs et helpers](/docs/performance/graalvm/tasks-ci#métadonnées-installeurs-et-utilitaires).
 
 ---
 
@@ -720,11 +850,11 @@ les changements incompatibles de la version.
   du chemin de resize lient d'abord le contexte ANGLE de l'hôte, pour qu'un `WM_PAINT` d'une
   fenêtre sœur ne laisse pas un autre contexte non partagé courant et ne détruise pas
   l'atlas de glyphes et les icônes de cette fenêtre. Voir
-  [Notes du contexte de rendu GPU](/docs/tao/gpu-render-context#notes).
+  [Notes du contexte de rendu GPU](/docs/native-content/gpu-render-context).
 - **`nativeLinuxHandles` sous Windows et macOS** (#518) — le point d'entrée JNI Linux-only
   est maintenant protégé par une garde de plateforme. Détacher un onglet dans un popup avec
   `WindowPosition.Absolute` ne lève plus `UnsatisfiedLinkError`. Voir
-  [Paramètres de DecoratedWindow](/docs/tao/decorated-window#paramètres-de-decoratedwindow).
+  [Paramètres de DecoratedWindow](/docs/windows#paramètres-de-decoratedwindow).
 
 ---
 
@@ -751,7 +881,7 @@ les changements incompatibles de la version.
   viewports 3D et charting peuvent allouer leurs cibles de rendu sur le `DirectContext` Skia
   et le device natif de la fenêtre (Metal / ANGLE GLES / EGL natif) sans second GPU, sans
   handle partageable et sans copie inter-device par frame. `TextureView` reste le contrat pour
-  les producteurs externes. Voir [Contexte de rendu GPU](/docs/tao/gpu-render-context).
+  les producteurs externes. Voir [Contexte de rendu GPU](/docs/native-content/gpu-render-context).
 - **`AwakeMode` — garder le système éveillé sans forcer l'écran.**
   `EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)` laisse l'écran de veille et la mise en
   veille de l'écran se comporter normalement pendant un job long. `keepScreenAwake()` reste un
@@ -779,7 +909,7 @@ les changements incompatibles de la version.
   [Auto-update](/docs/packaging/auto-update).
 - **Drag sortant Windows** (#482) — `DoDragDrop` différé hors du dispatch pointeur Compose pour
   peindre les frames de drag sans réentrance. Voir
-  [Drag and drop](/docs/tao/drag-and-drop).
+  [Drag and drop](/docs/input/drag-and-drop).
 
 ### Corrections de bugs
 
@@ -790,12 +920,12 @@ les changements incompatibles de la version.
 - **GPU frame-paced pendant les boucles modales** (#489, #505) — VSync maintenu pendant
   move/resize Windows et les bursts de resize Linux lorsque la scène héberge des imports
   `TextureView` ou des consommateurs `TaoGpuRenderContext`. Voir
-  [Contexte de rendu GPU](/docs/tao/gpu-render-context#frame-pacing).
+  [Contexte de rendu GPU](/docs/native-content/gpu-render-context#cadencer-les-frames).
 - **Fuite du thread de rendu Metal macOS** (#495) — pool d'autorelease autour de chaque tâche
   du thread de rendu.
 - **`LocalComposeSceneContext` sous `DecoratedWindow`** (#499) — Popup / Dialog / DropdownMenu
   / Tooltip dans le contenu d'une fenêtre décorée ne lèvent plus. Voir
-  [DecoratedWindow](/docs/tao/decorated-window).
+  [DecoratedWindow](/docs/windows).
 - **Detach overlay / retain focusable macOS** (#496), **buffer_scale des popups Wayland**
   (#508), **densité de scène depuis l'écran de la fenêtre macOS** (#509), **menu de tiling
   au survol du bouton zoom** (#511), **contraintes de title bar RTL en plein écran** (#512).
@@ -813,7 +943,7 @@ les changements incompatibles de la version.
   Compose Desktop ni un chrome de design system. `nucleusApplication` fournit
   `LocalNucleusWindowHost` / `LocalNucleusDialogHost` (défauts : `DecoratedWindow` /
   `DecoratedDialog`) ; surchargez l'hôte pour injecter Material, Jewel ou le chrome de
-  l'app. Voir [Fenêtres hébergées](/docs/tao/decorated-window#fenêtres-hébergées).
+  l'app. Voir [Fenêtres hébergées](/docs/windows#ouvrir-les-fenêtres-via-un-hôte).
 
 ### Corrections de bugs
 
@@ -823,14 +953,14 @@ les changements incompatibles de la version.
   min/max/fermer ciblent la fenêtre enfant. `BasicTitleBar` utilise
   `Modifier.windowDragArea(window)` pour ne pas dépendre d'un `LocalTaoWindow` parent.
   Voir
-  [Ouvrir une fenêtre depuis la composition](/docs/tao/decorated-window#ouvrir-une-fenêtre-depuis-la-composition)
-  et [Zones de drag](/docs/tao/window-scaffold#zones-de-drag).
+  [Ouvrir une fenêtre depuis la composition](/docs/windows#ouvrir-une-fenêtre-depuis-la-composition)
+  et [Zones de drag](/docs/windows/window-scaffold#ajouter-des-zones-de-drag).
 - **Origine contenu CSD des `popupFor` Wayland** (#474) — `TaoWindow.setOuterPosition`
   ajoute l'origine contenu CSD (title bar masquée) du parent pour les overlays popup en
   Wayland natif, pour que les coordonnées en espace contenu (fantômes d'onglets, HUD) ne
   dérivent plus de la marge d'ombre du thème. Les couches popup in-scene n'appliquent plus
   ce décalage en double. Voir
-  [Paramètres de DecoratedWindow](/docs/tao/decorated-window#paramètres-de-decoratedwindow).
+  [Paramètres de DecoratedWindow](/docs/windows#paramètres-de-decoratedwindow).
 
 ---
 
@@ -844,11 +974,11 @@ les changements incompatibles de la version.
   `x11PortalParent` / `x11WindowId`, et `exportXdgForeignHandle()` / `XdgForeignExport`
   pour que FileKit et les autres clients portal parentent les sélecteurs de fichiers sous
   X11 et Wayland (`x11:<hex>` / `wayland:<token>`). Voir
-  [Dialogues de fichier](/docs/ecosystem/file-dialog#parenter-un-dialogue-à-la-fenêtre-tao).
+  [Dialogues de fichier](/docs/os/file-dialogs#rattacher-le-dialogue-à-une-fenêtre).
 - **`TaoWindow.nsWindowHandle` sur macOS** (#469) — le `NSWindow*` propriétaire pour le
   parenting de sheets / dialogues (`beginSheetModalForWindow:`) ; distinct de
   `nativeHandle`, qui est le `NSView*` hôte Compose. Voir
-  [Dialogues de fichier](/docs/ecosystem/file-dialog#parenter-un-dialogue-à-la-fenêtre-tao).
+  [Dialogues de fichier](/docs/os/file-dialogs#rattacher-le-dialogue-à-une-fenêtre).
 - **Compression par format pour AppImage et portable Windows** (#468) —
   `linux.appImage { compressionLevel }` et `windows.portable { compressionLevel }`
   surchargent le `nativeDistributions.compressionLevel` racine, pour garder DEB/DMG en
@@ -861,7 +991,7 @@ les changements incompatibles de la version.
 - **Expansion de la metadata GraalVM L1** (#470) — ktor enrichi (plugins client, server,
   websockets), pack `androidx-sqlite-bundled`, couverture JDK FFM/VarHandle/Module élargie,
   `AtomicInt` / `AtomicRef` et `kotlin.kotlin_builtins`. Voir
-  [Metadata automatique](/docs/performance/graalvm/automatic-metadata#niveau-1--metadata-par-bibliothèque).
+  [Metadata automatique](/docs/performance/graalvm/automatic-metadata).
 - **Phantoms d'agent Kotlin toujours purgés au cleanup** (#470) — les types mappés par
   l'agent de tracing (`kotlin.Any`, `kotlin.Int`, `FunctionN`, collections) sont retirés
   pendant `cleanupGraalvmMetadata` sans `removeUnresolvable`. Voir
@@ -873,14 +1003,14 @@ les changements incompatibles de la version.
   projet / orphelines utilise les sorties de compilation de la cible application
   (`jvm("desktop")` → `desktopMainClasses`) au lieu de chemins `jvm`/`main` en dur ; les
   arêtes nest-internal ne masquent plus les vraies classes Room `*_Impl`. Voir
-  [Détecter les classes projet orphelines](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-projet-orphelines).
+  [Détecter les classes projet orphelines](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-orphelines-du-projet).
 - **Région opaque Linux sous NativeView** (#471) — efface la région opaque pleine surface
   tant qu'un `NativeView` est attaché pour que GTK (ex. WebKit) réapparaisse à travers le
-  sous-surface EGL après #447. Voir [Vues natives](/docs/tao/native-views).
+  sous-surface EGL après #447. Voir [Vues natives](/docs/native-content/native-views).
 - **Offset des clics d'overlay NativeView sous Linux** (#471) — `consumeOverlayPointerEvents`
   mappe les événements pointeur en coordonnées contenu (bin de la fenêtre), aligné sur la
   normalisation des marges d'ombre CSD. Voir
-  [Superposer du contenu Compose](/docs/tao/native-views#superposer-du-contenu-compose).
+  [Superposer du contenu Compose](/docs/native-content/native-views#superposer-du-contenu-compose).
 
 ---
 
@@ -895,9 +1025,9 @@ les changements incompatibles de la version.
   Windows utilise des handles D3D11 partagés via ANGLE, macOS Metal/`IOSurface`, Linux
   DMA-BUF/`EGLImage` (YUV planaire I420/YV12 inclus). Les mises à jour de frame passent par
   `TextureViewController.markFrameAvailable` (invalidation draw uniquement). Voir
-  [TextureView](/docs/tao/texture-view),
-  [sources par plateforme](/docs/tao/texture-view#sources-par-plateforme) et
-  [fonctionnement](/docs/tao/texture-view#fonctionnement).
+  [TextureView](/docs/native-content/texture-view),
+  [sources par plateforme](/docs/native-content/texture-view#sources-par-plateforme) et
+  [fonctionnement](/docs/native-content/texture-view#sources-par-plateforme).
 - **Options de notification par plateforme sur le DSL commun.** `notification { }` accepte
   les blocs `linux { }`, `macos { }` et `windows { }`, appliqués uniquement sur l'OS
   correspondant (urgence, interruption level, scénario toast, …). Voir
@@ -909,11 +1039,11 @@ les changements incompatibles de la version.
 - **`LocalNucleusApplicationScope` et fenêtres sans receiver.** Ouvrez un
   `DecoratedWindow` / `DecoratedDialog` secondaire depuis le fond de la composition sans
   propager le receiver d'application. Voir
-  [Ouvrir une fenêtre depuis la composition](/docs/tao/decorated-window#ouvrir-une-fenêtre-depuis-la-composition).
+  [Ouvrir une fenêtre depuis la composition](/docs/windows#ouvrir-une-fenêtre-depuis-la-composition).
 - **`isSystemInDarkTheme()` live sous `nucleusApplication`.** Le `LocalSystemTheme` de
   Compose est alimenté par `darkmode-detector`, donc les call sites officiels et bibliothèques
   suivent le thème OS. Voir
-  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/dark-mode#pont-vers-compose-issystemindarktheme).
+  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/theme/dark-mode#thème-fourni-par-nucleusapplication).
 
 ### Nouvelles fonctionnalités
 
@@ -923,7 +1053,7 @@ les changements incompatibles de la version.
   `nucleusMetalTextureSource`, `nucleusDmaBufTextureSource` /
   `nucleusEglImageTextureSource` / `nucleusYuvDmaBufTextureSource`, plus signalement par
   acquire fence sous Linux. Exemples : mediafoundation-demo, avfoundation-demo,
-  gstreamer-demo. Voir [TextureView](/docs/tao/texture-view#afficher-une-texture).
+  gstreamer-demo. Voir [TextureView](/docs/native-content/texture-view#afficher-une-texture).
 - **Blocs plateforme sur `notification { }`** (#436 / #397) — `LinuxNotificationScope`
   (`urgency`, `category`, `transient`, `resident`, `expireTimeout`),
   `MacNotificationScope` (`interruptionLevel`, `relevanceScore`, `subtitle`),
@@ -937,24 +1067,24 @@ les changements incompatibles de la version.
 - **`LocalNucleusApplicationScope`** (#449 / #438) — CompositionLocal fourni par
   `nucleusApplication` sur AWT et Tao ; surcharges `DecoratedWindow` / `DecoratedDialog` sans
   receiver. Voir
-  [Ouvrir une fenêtre depuis la composition](/docs/tao/decorated-window#ouvrir-une-fenêtre-depuis-la-composition).
+  [Ouvrir une fenêtre depuis la composition](/docs/windows#ouvrir-une-fenêtre-depuis-la-composition).
 - **Pont de thème système** (#463) — `ProvideNucleusSystemTheme` relie `isSystemInDarkMode()` à
   `LocalSystemTheme` ; `darkmode-detector` est une dépendance `api` de `nucleus-application`.
   Voir
-  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/dark-mode#pont-vers-compose-issystemindarktheme).
+  [Pont vers Compose `isSystemInDarkTheme`](/docs/os/theme/dark-mode#thème-fourni-par-nucleusapplication).
 - **Exact reachability metadata sur la boucle de dev GraalVM** (#453 / #440) —
   `graalvm { exactReachabilityMetadata = ExactReachabilityMetadata.APP_PACKAGES }` (défaut)
   sur `runGraalvmNative` uniquement ; `-Pnucleus.graalvm.missingRegistration=warn|exit|throw`.
   Voir
-  [Exact reachability sur la boucle de dev](/docs/performance/graalvm/configuration#exact-reachability-sur-la-boucle-de-dev).
+  [Exact reachability sur la boucle de dev](/docs/performance/graalvm/configuration#repérer-les-enregistrements-manquants-pendant-le-développement).
 - **Détection des classes projet orphelines** (#460 / #441) —
   `detectOrphanProjectClasses` (défaut `true`) enregistre les constructeurs publics sans argument
   des types purement réflexifs (Room `*_Impl`, …) ; `reflectionForProjectClasses` en opt-in.
   Voir
-  [Détecter les classes projet orphelines](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-projet-orphelines).
+  [Détecter les classes projet orphelines](/docs/performance/graalvm/automatic-metadata#détecter-les-classes-orphelines-du-projet).
 - **Le canal innovation GraalVM pointe sur 25.2** (#432) — `GraalvmChannel.INNOVATION`
   résout `25i2`. Voir
-  [Provisionner le toolchain](/docs/performance/graalvm/configuration#provisionner-la-toolchain).
+  [Provisionner le toolchain](/docs/performance/graalvm/configuration#fournir-la-toolchain).
 
 ### Améliorations
 
@@ -982,10 +1112,10 @@ les changements incompatibles de la version.
 
 - **Drag OS sortant gèle l'hôte Tao** (#434) — Windows, macOS et Linux maintiennent la boucle
   de rendu pendant `DoDragDrop` / AppKit / GTK via un `DragPump` partagé. Voir
-  [Glisser-déposer](/docs/tao/drag-and-drop).
+  [Glisser-déposer](/docs/input/drag-and-drop).
 - **Flash / décalage au resize Wayland** (#462 / #444) — paint à la dernière taille drawable
   jusqu'à ce que `wl_egl_window_resize` s'applique au present suivant. Voir
-  [Wayland](/docs/tao/wayland).
+  [Wayland](/docs/windows/linux-wayland).
 - **Région opaque de la subsurface Compose sous Linux** (#447 / #446) —
   `wl_surface.set_opaque_region` en préservant les coins transparents pour l'ombre CSD.
 - **SIGSEGV jpackage Linux sur longs classpaths** (#456 / #454) — après `jpackage`, le
@@ -1015,39 +1145,39 @@ les changements incompatibles de la version.
 
 ### Faits marquants
 
-- **Scaffold de fenêtre et primitives de chrome.** Mises en page plein fenêtre sans abandonner le drag natif, les zones de caption ni les insets des feux de circulation. Composez le contenu via `WindowScaffold` avec `TitleBarPlacement.Docked` ou `Overlay`, et reconstruisez le chrome à partir d'API publiques : `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls`, `windowGlassRegion` (macOS), `WindowsBackdrop` Windows 11 (Mica / Acrylic / MicaAlt), `WindowBackground` et `WindowAppearance`. Voir [Scaffold de fenêtre](/docs/tao/window-scaffold), [primitives de chrome](/docs/tao/window-scaffold#primitives-de-chrome) et [matériaux de plateforme](/docs/tao/window-scaffold#matériaux-de-plateforme-et-apparence).
-- **Les tâches GraalVM reflètent le pipeline JVM.** `runGraalvmNative` est la boucle de dev rapide (`-Ob` quick-build) ; l'optimisation configurée vit sur `runGraalvmNativeDistributable`. Les nouvelles tâches `createGraalvmNativeDistributable` et `packageGraalvmNativeDistributionForCurrentOS` correspondent à `createDistributable` / `packageDistributionForCurrentOS`. Le dossier d'app native atterrit sous `compose/binaries/<app>/graalvm-app`. Voir [Tâches & CI — surface publique](/docs/performance/graalvm/tasks-ci#surface-publique-alignée-sur-le-pipeline-jvm) et [emplacements de sortie](/docs/performance/graalvm/tasks-ci#emplacements-de-sortie).
+- **Scaffold de fenêtre et primitives de chrome.** Mises en page plein fenêtre sans abandonner le drag natif, les zones de caption ni les insets des feux de circulation. Composez le contenu via `WindowScaffold` avec `TitleBarPlacement.Docked` ou `Overlay`, et reconstruisez le chrome à partir d'API publiques : `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls`, `windowGlassRegion` (macOS), `WindowsBackdrop` Windows 11 (Mica / Acrylic / MicaAlt), `WindowBackground` et `WindowAppearance`. Voir [Scaffold de fenêtre](/docs/windows/window-scaffold), [primitives de chrome](/docs/windows/window-scaffold#construire-une-barre-de-titre-personnalisée) et [matériaux de plateforme](/docs/windows/window-scaffold#accorder-la-fenêtre-au-thème-de-lapp).
+- **Les tâches GraalVM reflètent le pipeline JVM.** `runGraalvmNative` est la boucle de dev rapide (`-Ob` quick-build) ; l'optimisation configurée vit sur `runGraalvmNativeDistributable`. Les nouvelles tâches `createGraalvmNativeDistributable` et `packageGraalvmNativeDistributionForCurrentOS` correspondent à `createDistributable` / `packageDistributionForCurrentOS`. Le dossier d'app native atterrit sous `compose/binaries/<app>/graalvm-app`. Voir [Tâches & CI — surface publique](/docs/performance/graalvm/tasks-ci#tâches-gradle) et [emplacements de sortie](/docs/performance/graalvm/tasks-ci#organisation-de-la-sortie).
 - **Sélection typée du garbage collector.** `garbageCollector = GarbageCollector.Z` sur le chemin JVM et `graalvm { garbageCollector = NativeImageGarbageCollector.G1 }` pour les images natives. G1 est Oracle GraalVM + Linux uniquement et se dégrade avec un avertissement ailleurs. Les flags de pourcentage de tas suivent le collecteur choisi. Voir [Choisir un garbage collector](/docs/performance/graalvm/configuration#choisir-un-garbage-collector) et le [DSL Gradle](/docs/reference/gradle-dsl#application----jvmapplication).
 
 ### Nouvelles fonctionnalités
 
-- **`WindowScaffold` + `TitleBarPlacement`** (#412, #129) — hôte de chrome indépendant du design system. `Docked` conserve la barre au-dessus du contenu ; `Overlay` remplit le contenu sur toute la hauteur et renvoie la hauteur mesurée de la barre en `PaddingValues` supérieur. Options `autoHideInFullscreen` et `passThroughToContent` sur `Overlay` pour les barres immersives et le hit-test traversant (#423). Voir [placement de la barre de titre](/docs/tao/window-scaffold#placement-de-la-barre-de-titre).
-- **Primitives de chrome pour barres de titre personnalisées** (#412) — `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls` + `WindowControlsRenderer`, `WindowDoubleClickAction`, et `LocalWindowChromeInsets` pour placer le contenu autour des feux de circulation et du padding de bord KDE. Voir [primitives de chrome](/docs/tao/window-scaffold#primitives-de-chrome), [zones de drag](/docs/tao/window-scaffold#zones-de-drag) et [contrôles de fenêtre](/docs/tao/window-scaffold#contrôles-de-fenêtre).
-- **Matériaux de plateforme** (#412) — `Modifier.windowGlassRegion` (panneaux sidebar/content/inspector à la System Settings sous macOS), `WindowsBackdrop` (Mica / Acrylic / MicaAlt DWM avec pin de tier), `WindowBackground` (couleur de clear depuis l'arbre de contenu), `WindowAppearance` (force clair/sombre sur les surfaces natives). Voir [matériaux de plateforme](/docs/tao/window-scaffold#matériaux-de-plateforme-et-apparence), [verre macOS](/docs/tao/window-scaffold#régions-de-verre-macos) et [backdrops Windows 11](/docs/tao/window-scaffold#backdrops-windows-11).
-- **`DecoratedWindow(transparent = true)` sur Tao** (#419) — transparence plein fenêtre pour les overlays « ghost ». À combiner avec `undecorated = true` pour des fenêtres sans cadre. AWT hors périmètre ; appeler le `DecoratedWindow` Tao (par ex. via `taoApplication`). Voir [overlays transparents](/docs/tao/window-scaffold#overlays-transparents-et-sans-cadre) et [DecoratedWindow sur Tao](/docs/tao/decorated-window#scaffold-et-chrome-22).
-- **Ombre portée CSD GTK native** (#422) — les décorations côté client Linux suivent le motif hidden-titlebar pour que l'ombre suive correctement la fenêtre, y compris pendant un déplacement interactif. Voir [Notes DecoratedWindow](/docs/tao/decorated-window#notes).
-- **AccessKit sous Windows** (#420) — l'accessibilité Windows partage désormais le chemin filaire AccessKit avec Linux (provider UIA). Crates AccessKit mises à jour sur les deux plateformes ; les sondes AT-SPI Linux ont la même sévérité que sous Windows. Voir [Accessibilité](/docs/tao/accessibility#fonctionnement).
+- **`WindowScaffold` + `TitleBarPlacement`** (#412, #129) — hôte de chrome indépendant du design system. `Docked` conserve la barre au-dessus du contenu ; `Overlay` remplit le contenu sur toute la hauteur et renvoie la hauteur mesurée de la barre en `PaddingValues` supérieur. Options `autoHideInFullscreen` et `passThroughToContent` sur `Overlay` pour les barres immersives et le hit-test traversant (#423). Voir [placement de la barre de titre](/docs/windows/window-scaffold#placer-la-barre-de-titre).
+- **Primitives de chrome pour barres de titre personnalisées** (#412) — `Modifier.windowDragArea` / `noWindowDrag`, `WindowControls` + `WindowControlsRenderer`, `WindowDoubleClickAction`, et `LocalWindowChromeInsets` pour placer le contenu autour des feux de circulation et du padding de bord KDE. Voir [primitives de chrome](/docs/windows/window-scaffold#construire-une-barre-de-titre-personnalisée), [zones de drag](/docs/windows/window-scaffold#ajouter-des-zones-de-drag) et [contrôles de fenêtre](/docs/windows/window-scaffold#placer-les-contrôles-de-fenêtre).
+- **Matériaux de plateforme** (#412) — `Modifier.windowGlassRegion` (panneaux sidebar/content/inspector à la System Settings sous macOS), `WindowsBackdrop` (Mica / Acrylic / MicaAlt DWM avec pin de tier), `WindowBackground` (couleur de clear depuis l'arbre de contenu), `WindowAppearance` (force clair/sombre sur les surfaces natives). Voir [matériaux de plateforme](/docs/windows/window-scaffold#accorder-la-fenêtre-au-thème-de-lapp), [verre macOS](/docs/windows/window-scaffold#ajouter-une-région-de-verre-macos) et [backdrops Windows 11](/docs/windows/window-scaffold#ajouter-un-backdrop-windows-11).
+- **`DecoratedWindow(transparent = true)` sur Tao** (#419) — transparence plein fenêtre pour les overlays « ghost ». À combiner avec `undecorated = true` pour des fenêtres sans cadre. AWT hors périmètre ; appeler le `DecoratedWindow` Tao (par ex. via `taoApplication`). Voir [overlays transparents](/docs/windows/window-scaffold#créer-une-fenêtre-transparente-sans-bordure) et [DecoratedWindow sur Tao](/docs/windows/window-scaffold).
+- **Ombre portée CSD GTK native** (#422) — les décorations côté client Linux suivent le motif hidden-titlebar pour que l'ombre suive correctement la fenêtre, y compris pendant un déplacement interactif. Voir [Notes DecoratedWindow](/docs/windows#notes).
+- **AccessKit sous Windows** (#420) — l'accessibilité Windows partage désormais le chemin filaire AccessKit avec Linux (provider UIA). Crates AccessKit mises à jour sur les deux plateformes ; les sondes AT-SPI Linux ont la même sévérité que sous Windows. Voir [Accessibilité](/docs/input/accessibility).
 - **`garbageCollector` dans le DSL JVM et native** (#408) — `GarbageCollector` (`SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`) pour HotSpot ; `NativeImageGarbageCollector` (`SERIAL`, `G1`, `EPSILON`) pour `--gc=`. Non défini : ergonomie JVM / Serial de native-image. Voir [Choisir un garbage collector](/docs/performance/graalvm/configuration#choisir-un-garbage-collector) et [DSL Gradle — GraalVM](/docs/reference/gradle-dsl#graalvm--graalvmsettings).
-- **`NucleusApplicationScope` implémente `ApplicationScope` de Compose** (#372) — les bibliothèques scopées au plain `ApplicationScope` (par exemple ComposeNativeTray) se résolvent dans `nucleusApplication { }` sans jeu de surcharges séparé. Voir [Notes DecoratedWindow](/docs/tao/decorated-window#notes).
+- **`NucleusApplicationScope` implémente `ApplicationScope` de Compose** (#372) — les bibliothèques scopées au plain `ApplicationScope` (par exemple ComposeNativeTray) se résolvent dans `nucleusApplication { }` sans jeu de surcharges séparé. Voir [Notes DecoratedWindow](/docs/windows#notes).
 
 ### Écosystème (dépôts séparés)
 
 Publiés autour de la ligne 2.2 ; versionnés indépendamment de Nucleus :
 
-- **[compose-macos-26-ui](https://github.com/NucleusFramework/compose-macos-26-ui)** — design system macOS 26 + `MacosDecoratedWindow`. Doc : [toolkit macOS](/docs/window/toolkit-macos).
-- **[compose-fluent-ui](https://github.com/NucleusFramework/compose-fluent-ui)** — Fluent Design + `FluentDecoratedWindow`. Doc : [toolkit Fluent](/docs/window/toolkit-fluent).
-- **[yaru-compose-ui](https://github.com/NucleusFramework/yaru-compose-ui)** — design system Yaru / GNOME + `YaruDecoratedWindow`. Doc : [toolkit Yaru](/docs/window/toolkit-yaru).
+- **[compose-macos-26-ui](https://github.com/NucleusFramework/compose-macos-26-ui)** — design system macOS 26 + `MacosDecoratedWindow`. Doc : [toolkit macOS](/docs/toolkits/macos).
+- **[compose-fluent-ui](https://github.com/NucleusFramework/compose-fluent-ui)** — Fluent Design + `FluentDecoratedWindow`. Doc : [toolkit Fluent](/docs/toolkits/fluent).
+- **[yaru-compose-ui](https://github.com/NucleusFramework/yaru-compose-ui)** — design system Yaru / GNOME + `YaruDecoratedWindow`. Doc : [toolkit Yaru](/docs/toolkits/yaru).
 
 ### Améliorations
 
 - **Cohérence du nom de bundle `.app` macOS** (#409) — chaque artefact (DMG, ZIP, …) livre le même nom de bundle dérivé de `appName`, si bien que l'auto-update ne supprime plus un chemin pour échouer à en ouvrir un autre quand `appName != packageName`.
 - **Bascule plein écran Windows sans glitch** et parité de rampe de transition plein écran macOS (#412 / #413).
-- **Suivi du facteur de scale d'affichage macOS** quand la fenêtre change d'écran (#412). Voir [HiDPI par moniteur](/docs/tao/hidpi).
+- **Suivi du facteur de scale d'affichage macOS** quand la fenêtre change d'écran (#412). Voir [HiDPI par moniteur](/docs/windows/hidpi).
 
 ### Corrections de bugs
 
-- **`setBounds` / resize de NsView sur les changements de layout** (#421) — les vues natives macOS embarquées mettent à jour leurs frames quand le layout Compose change. Voir [Vues natives](/docs/tao/native-views).
-- **URI de deep link scheme-only** (#425 / #414) — `DeepLinkHandler` accepte les formes opaques du type `myapp:?query=…` (courantes via `xdg-open`), pas seulement les formes `scheme://` avec autorité. Les chemins de lecteur Windows restent rejetés. Voir [Deep links — fonctionnement](/docs/lifecycle/deep-links#fonctionnement).
+- **`setBounds` / resize de NsView sur les changements de layout** (#421) — les vues natives macOS embarquées mettent à jour leurs frames quand le layout Compose change. Voir [Vues natives](/docs/native-content/native-views).
+- **URI de deep link scheme-only** (#425 / #414) — `DeepLinkHandler` accepte les formes opaques du type `myapp:?query=…` (courantes via `xdg-open`), pas seulement les formes `scheme://` avec autorité. Les chemins de lecteur Windows restent rejetés. Voir [Deep links — fonctionnement](/docs/lifecycle/deep-links).
 - **Le gate hot-reload correspond au nom d'artefact Tao publié** (#424 / #415).
 
 ---
@@ -1661,7 +1791,7 @@ nativeDistributions {
 
 ### Nouveaux modules
 
-- **Taskbar Progress** (`nucleus.taskbar-progress`) — Barre de progression de barre des tâches/dock native et demandes d'attention sur toutes les plateformes. Affiche la progression d'un téléchargement, l'état d'un build ou toute opération longue directement dans la barre des tâches de l'OS. Voir [Taskbar Progress](/docs/lifecycle/taskbar-progress).
+- **Taskbar Progress** (`nucleus.taskbar-progress`) — Barre de progression de barre des tâches/dock native et demandes d'attention sur toutes les plateformes. Affiche la progression d'un téléchargement, l'état d'un build ou toute opération longue directement dans la barre des tâches de l'OS. Voir [Taskbar Progress](/docs/os/dock-taskbar/progress).
     - **Windows** : `ITaskbarList3` (valeur/état de progression) + `FlashWindowEx` (attention)
     - **macOS** : `NSDockTile` avec overlay `NSProgressIndicator` personnalisé + `NSApplication.requestUserAttention`
     - **Linux** : D-Bus `com.canonical.Unity.LauncherEntry` (GNOME, KDE Plasma et environnements compatibles)
@@ -1677,7 +1807,7 @@ nativeDistributions {
     - **L2 (Oracle Reachability Metadata Repository)** — Résolution automatique des métadonnées pour toutes les dépendances du classpath runtime depuis le [Oracle GraalVM Reachability Metadata Repository](https://github.com/oracle/graalvm-reachability-metadata). Couvre les bibliothèques populaires comme ktor, kotlinx.serialization, SLF4J, Logback et bien d'autres. Activé par défaut.
     - **L3 (métadonnées de plateforme du plugin)** — Métadonnées AWT/Java2D/police/sécurité spécifiques à la plateforme pour macOS, Windows et Linux, livrées à l'intérieur du plugin Gradle. Écrites dans le répertoire de build à la compilation — aucun bloc `when` par plateforme nécessaire dans votre script de build.
 
-    Vous n'avez plus besoin de copier des milliers d'entrées de réflexion depuis l'application d'exemple. La plupart des applications fonctionneront sans aucune configuration de réflexion manuelle. Voir [Métadonnées de réflexion centralisées](/docs/performance/graalvm/automatic-metadata#fusion-des-sources).
+    Vous n'avez plus besoin de copier des milliers d'entrées de réflexion depuis l'application d'exemple. La plupart des applications fonctionneront sans aucune configuration de réflexion manuelle. Voir [Métadonnées de réflexion centralisées](/docs/performance/graalvm/automatic-metadata).
 
 - **DSL `metadataRepository {}`** — Nouveau bloc de configuration dans `graalvm {}` pour contrôler l'intégration du Oracle Reachability Metadata Repository. Prend en charge `enabled`, `version`, `excludedModules` et `moduleToConfigVersion`. Activé par défaut avec la version `0.10.6`.
 
@@ -1729,7 +1859,7 @@ nativeDistributions {
 
 ### Changements incompatibles
 
-- **Suppression du type de build release pour GraalVM** — Les tâches d'image native GraalVM n'ont plus de variantes `release` (`packageReleaseGraalvmNative`, etc.). ProGuard fait doublon avec l'élimination de code mort à monde clos de native-image, et il est nuisible car il peut renommer des classes référencées dans `reachability-metadata.json`. Voir [Pas de type de build release](/docs/performance/graalvm/configuration#pas-de-variant-release).
+- **Suppression du type de build release pour GraalVM** — Les tâches d'image native GraalVM n'ont plus de variantes `release` (`packageReleaseGraalvmNative`, etc.). ProGuard fait doublon avec l'élimination de code mort à monde clos de native-image, et il est nuisible car il peut renommer des classes référencées dans `reachability-metadata.json`. Voir [Pas de type de build release](/docs/performance/graalvm/configuration#pas-de-variante-release).
 
 ---
 
@@ -1820,7 +1950,7 @@ nativeDistributions {
 ### Nouvelles fonctionnalités
 
 - **Prise en charge automatique de Liquid Glass via `macOsSdkVersion`** — Nucleus patche désormais automatiquement l'en-tête Mach-O `LC_BUILD_VERSION` du launcher de l'application vers le SDK macOS 26.0 avec `vtool`, activant les décorations de fenêtre Liquid Glass (feux de circulation plus grands, coins arrondis). Cela fonctionne avec **n'importe quel JDK** — un JDK compilé avec Xcode 26 n'est plus requis. La tâche `run` utilise une copie patchée mise en cache de la JVM, tandis que les builds distribuables patchent le launcher avant la signature. Contrôlé via `macOS { macOsSdkVersion = "26.0" }` (activé par défaut, mettez `null` pour désactiver). Nécessite les Xcode Command Line Tools. Voir [Apparence de fenêtre macOS 26](/docs/packaging/macos#activer-liquid-glass-sur-le-sdk-26).
-- **`Modifier.clientRegion()` pour le hit testing de la barre de titre JBR** — Nouvelle fonction de modifier qui enregistre des éléments composables comme régions client interactives dans la barre de titre d'une `DecoratedWindow`. Les régions client reçoivent les événements souris (clics, appuis) au lieu de déclencher le drag de la fenêtre. Utilise des listeners souris au niveau AWT avec un hit testing précis basé sur les coordonnées, remplaçant l'ancien `customTitleBarMouseEventHandler` basé sur les pointer events. Voir [Decorated Window](/docs/window).
+- **`Modifier.clientRegion()` pour le hit testing de la barre de titre JBR** — Nouvelle fonction de modifier qui enregistre des éléments composables comme régions client interactives dans la barre de titre d'une `DecoratedWindow`. Les régions client reçoivent les événements souris (clics, appuis) au lieu de déclencher le drag de la fenêtre. Utilise des listeners souris au niveau AWT avec un hit testing précis basé sur les coordonnées, remplaçant l'ancien `customTitleBarMouseEventHandler` basé sur les pointer events. Voir [Decorated Window](/docs/windows).
 - **Module `decorated-window-jewel`** — Nouveau module fournissant l'intégration du thème Jewel pour `DecoratedWindow`. Utilisé par l'application jewel-sample.
 - **Module `decorated-window-material2`** — Nouveau module fournissant le mapping de couleurs du thème Material 2 pour `DecoratedWindow`, complétant le module Material 3 existant.
 - **Module `decorated-window-material3`** — Renommé depuis `decorated-window-material` pour plus de clarté. Fournit le mapping de couleurs Material 3 pour `DecoratedWindow`.
@@ -1954,14 +2084,14 @@ nativeDistributions {
 
 ### Nouvelles fonctionnalités
 
-- **Plein écran natif avec barre de titre coulissante** — Expérience plein écran native à la plateforme : à la Safari sous macOS, à la Edge sous Windows, à la Firefox sous Linux. Quand la fenêtre passe en plein écran, la barre de titre devient un overlay flottant qui glisse vers le bas au survol près du bord supérieur et remonte quand le pointeur s'éloigne. Active avec `Modifier.newFullscreenControls()` sur `TitleBar` / `MaterialTitleBar`. Voir [Decorated Window](/docs/window).
-- **Grand rayon de coin macOS** — Le nouveau modifier `Modifier.macOSLargeCornerRadius()` applique le rayon de coin de fenêtre de 26pt utilisé par Finder et Safari. Installe une `NSToolbar` invisible et repositionne les boutons de feux de circulation pour correspondre à l'inset natif d'Apple. Voir [Decorated Window](/docs/window).
-- **Module System Color** (`nucleus.system-color`) — Détection réactive de la couleur d'accentuation de l'OS et du mode contraste élevé via JNI. Prend en charge macOS (`NSColor.controlAccentColor`), Windows (registre DWM) et Linux (XDG Desktop Portal D-Bus). API composables : `systemAccentColor()`, `isSystemInHighContrast()`. Voir [System Color](/docs/os/system-color).
+- **Plein écran natif avec barre de titre coulissante** — Expérience plein écran native à la plateforme : à la Safari sous macOS, à la Edge sous Windows, à la Firefox sous Linux. Quand la fenêtre passe en plein écran, la barre de titre devient un overlay flottant qui glisse vers le bas au survol près du bord supérieur et remonte quand le pointeur s'éloigne. Active avec `Modifier.newFullscreenControls()` sur `TitleBar` / `MaterialTitleBar`. Voir [Decorated Window](/docs/windows).
+- **Grand rayon de coin macOS** — Le nouveau modifier `Modifier.macOSLargeCornerRadius()` applique le rayon de coin de fenêtre de 26pt utilisé par Finder et Safari. Installe une `NSToolbar` invisible et repositionne les boutons de feux de circulation pour correspondre à l'inset natif d'Apple. Voir [Decorated Window](/docs/windows).
+- **Module System Color** (`nucleus.system-color`) — Détection réactive de la couleur d'accentuation de l'OS et du mode contraste élevé via JNI. Prend en charge macOS (`NSColor.controlAccentColor`), Windows (registre DWM) et Linux (XDG Desktop Portal D-Bus). API composables : `systemAccentColor()`, `isSystemInHighContrast()`. Voir [System Color](/docs/os/theme/accent-color).
 - **Module Energy Manager** (`nucleus.energy-manager`) — Gestion de l'énergie à trois niveaux : mode pleine efficacité (EcoQoS + IDLE_PRIORITY_CLASS sous Windows, `PRIO_DARWIN_BG` + task_policy_set sous macOS, nice +19/ioprio/timerslack sous Linux), mode efficacité légère (dépriorisation CPU seulement, sans throttling I/O) et mode efficacité au niveau thread. Inclut une API de veille écran (caffeine) pour empêcher la mise en veille de l'affichage (IOPMAssertion sous macOS, SetThreadExecutionState sous Windows, D-Bus/X11 sous Linux). Helpers de coroutine : `withEfficiencyMode()`, `withLightEfficiencyMode()`. Voir [Energy Manager](/docs/lifecycle/energy-manager).
-- **Centrage automatique de `DecoratedDialog` sur la fenêtre parente** — Les dialogues sont désormais centrés automatiquement sur leur parent avec un positionnement fiable via l'événement `windowOpened`. Voir [Decorated Window](/docs/window).
-- **Prise en charge des feux de circulation RTL sous macOS** — Positionnement correct des boutons de feux de circulation dans les mises en page de droite à gauche. Voir [Decorated Window](/docs/window).
+- **Centrage automatique de `DecoratedDialog` sur la fenêtre parente** — Les dialogues sont désormais centrés automatiquement sur leur parent avec un positionnement fiable via l'événement `windowOpened`. Voir [Decorated Window](/docs/windows).
+- **Prise en charge des feux de circulation RTL sous macOS** — Positionnement correct des boutons de feux de circulation dans les mises en page de droite à gauche. Voir [Decorated Window](/docs/windows).
 - **Chargement centralisé des bibliothèques natives** — Le nouveau `NativeLibraryLoader` avec cache persistant remplace la logique de chargement par module.
-- **Contrôles de fenêtre conscients du plein écran** — Le bouton d'agrandissement affiche une icône de sortie de plein écran en mode plein écran sous Linux et Windows, avec de nouvelles variantes d'icônes SVG (active/inactive/sombre). Voir [Decorated Window](/docs/window).
+- **Contrôles de fenêtre conscients du plein écran** — Le bouton d'agrandissement affiche une icône de sortie de plein écran en mode plein écran sous Linux et Windows, avec de nouvelles variantes d'icônes SVG (active/inactive/sombre). Voir [Decorated Window](/docs/windows).
 - **Synchronisation du fond de fenêtre AWT sous macOS** — L'application idempotente des propriétés évite les déclenchements redondants de `PropertyChangeEvent`, réduisant le jitter visuel pendant les passes de layout.
 - **Module Sample CMP** (`sample-cmp`) — Nouvel exemple Kotlin Multiplatform Compose avec des targets Android et Desktop.
 - **Galerie de l'application d'exemple** — Vitrine de composants Material 3 avec écrans d'actions, communication, containment, sélection, saisies de texte, typographie, élévation et couleur.
@@ -2152,7 +2282,7 @@ Ces couleurs d'état de bouton spécifiques à la plateforme sont désormais gé
 
 **Aucun autre changement de code requis** — toutes les API composables (`DecoratedWindow`, `DecoratedDialog`, `TitleBar`, `DialogTitleBar`), scopes et types d'état sont identiques. Aucun changement d'import nécessaire — le package reste `dev.nucleusframework.window`.
 
-Voir [Decorated Window](/docs/window) pour tous les détails sur le choix entre JBR et JNI.
+Voir [Decorated Window](/docs/windows) pour tous les détails sur le choix entre JBR et JNI.
 
 ---
 
@@ -2316,9 +2446,9 @@ Voir [Decorated Window](/docs/window) pour tous les détails sur le choix entre 
 
 ### Nouvelles fonctionnalités
 
-- **Module Decorated Window** (`nucleus.decorated-window`) — Décorations de fenêtre personnalisées avec barres de titre natives, boutons de feux de circulation sous macOS, contrôles de fenêtre sous Windows (fermer/réduire/agrandir) et style GNOME/KDE sous Linux. Remplace JNA/Unsafe par un pont JNI Objective-C sous macOS. Voir [Decorated Window](/docs/window).
+- **Module Decorated Window** (`nucleus.decorated-window`) — Décorations de fenêtre personnalisées avec barres de titre natives, boutons de feux de circulation sous macOS, contrôles de fenêtre sous Windows (fermer/réduire/agrandir) et style GNOME/KDE sous Linux. Remplace JNA/Unsafe par un pont JNI Objective-C sous macOS. Voir [Decorated Window](/docs/windows).
 - **Module de thème Material** (`nucleus.decorated-window-material`) — Mapping de couleurs Material 3 automatique pour `DecoratedWindow`.
-- **Module Darkmode Detector** (`nucleus.darkmode-detector`) — Détection réactive du mode sombre de l'OS via JNI sous macOS, Windows et Linux (XDG Desktop Portal). Remplace l'implémentation basée sur JNA par du JNI pur pour des binaires plus petits et aucune dépendance externe. Voir [Darkmode Detector](/docs/os/dark-mode).
+- **Module Darkmode Detector** (`nucleus.darkmode-detector`) — Détection réactive du mode sombre de l'OS via JNI sous macOS, Windows et Linux (XDG Desktop Portal). Remplace l'implémentation basée sur JNA par du JNI pur pour des binaires plus petits et aucune dépendance externe. Voir [Darkmode Detector](/docs/os/theme/dark-mode).
 - **Prise en charge de la mise en page RTL** — La barre de titre respecte le sens de mise en page de droite à gauche avec des icônes de bascule dédiées.
 - **Style de fenêtre KDE Breeze** — Jeu d'icônes dédié, rayon de coin et états survolé/pressé correspondant à KDE Plasma.
 - **Style de fenêtre GNOME** — Coins arrondis, bordure subtile et style de barre de titre inactive correspondant à GNOME/Adwaita.

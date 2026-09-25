@@ -1,0 +1,150 @@
+---
+title: Windows taskbar
+description: Drive the Windows taskbar from Kotlin with overlay icons, jump lists, thumbnail toolbar buttons, and badges.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`launcher-windows` drives four parts of the Windows taskbar: overlay icons, jump lists, thumbnail
+toolbar buttons, and badges. Each part is a separate `object`.
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.launcher-windows:<version>")
+}
+```
+
+## Get the window handle
+
+Overlay icons and thumbnail buttons take the window's `HWND` as a `Long`. It is `0` until the
+native window exists:
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    val hwnd = nucleusWindow.unsafe.taoWindow?.nativeHandle ?: 0L
+}
+```
+
+<Callout type="warn" title="Changed in 3.0">
+2.x snippets passed an AWT `Window`. A `nucleusApplication` app has no AWT window: pass the
+`HWND` above. AWT hosts can still use the `java.awt.Window` overloads or
+`WindowsWindowHandle.of(window)`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Set an overlay icon
+
+A 16x16 status marker on the taskbar button. Works with every packaging type:
+
+```kotlin
+WindowsOverlayIcon.setIcon(hwnd, TaskbarIconSource.FromStock(StockIcon.WARNING), "1 unread message")
+WindowsOverlayIcon.clearIcon(hwnd)
+```
+
+Each call returns `true` on success; `lastError` holds the last failure.
+
+## Build a jump list
+
+`setJumpList` replaces the whole right-click menu in one call:
+
+```kotlin
+WindowsJumpListManager.setJumpList(
+    categories = listOf(
+        JumpListCategory("Recent", items = listOf(
+            JumpListItem("Project A", arguments = "myapp://open?project=a"),
+        )),
+    ),
+    tasks = listOf(
+        JumpListItem("New window", arguments = "myapp://new"),
+        JumpListItem.SEPARATOR,
+        JumpListItem("Settings", arguments = "myapp://settings"),
+    ),
+)
+```
+
+A click starts a new process with the entry's `arguments`. The
+[single-instance](/docs/lifecycle/single-instance) lock forwards a deep link to the running app,
+where [`onDeepLink`](/docs/lifecycle/deep-links) receives it.
+
+- Unpackaged builds (NSIS, MSI, distributable) need a process AUMID before the first window.
+  `nucleusApplication` sets it; otherwise call `WindowsJumpListManager.setProcessAppId()` at the
+  start of `main`. APPX and MSIX use the package identity.
+- Under `./gradlew run` the process is `java.exe`, so test from `runDistributable` or a packaged
+  build.
+
+## Add thumbnail toolbar buttons
+
+Up to seven buttons in the window's taskbar preview, registered once per window:
+
+```kotlin
+WindowsThumbnailToolbar.setButtons(
+    hwnd,
+    buttons = listOf(
+        ThumbnailToolbarButton(id = 0, tooltip = "Previous", icon = TaskbarIconSource.FromFile("icons/prev.ico")),
+        ThumbnailToolbarButton(id = 1, tooltip = "Play", icon = TaskbarIconSource.FromFile("icons/play.ico")),
+    ),
+    onClick = { buttonId -> handleTransport(buttonId) },
+)
+```
+
+Windows allows no new buttons after the first call. Change icon, tooltip, or flags with
+`updateButtons(hwnd, buttons)` using the same ids, hide one with `hidden = true`, and call
+`unregister(hwnd)` when the window closes. `onClick` runs on the UI thread.
+
+## Show a badge
+
+A count or status glyph on the taskbar button and Start tile. Windows grants badges only to APPX
+and MSIX apps, and `initialize()` is the call that fails elsewhere (`isAvailable` is `true` on any
+Windows machine):
+
+```kotlin
+if (WindowsBadgeManager.initialize()) {
+    WindowsBadgeManager.setGlyph(BadgeGlyph.NEW_MESSAGE)
+    WindowsBadgeManager.setCount(5) // 1 to 99, then "99+"; 0 clears
+}
+```
+
+Call `uninitialize()` on shutdown.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Overlay icons and the thumbnail toolbar use COM `ITaskbarList3`, keyed by `HWND`. Jump lists
+  use `ICustomDestinationList`. Windows owns that menu, which is why entries carry `arguments`
+  instead of a callback.
+- Badges use WinRT and need the package identity. Pass an `aumid` to `initialize` to override it.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+|---|---|
+| `WindowsOverlayIcon.setIcon(hwnd, icon, description = "")` / `clearIcon(hwnd)` | Return `Boolean`. |
+| `WindowsOverlayIcon.isAvailable` / `lastError` | Native library loaded; last failure message. |
+| `WindowsJumpListManager.setProcessAppId(aumid = null)` | Sets the process AUMID. |
+| `WindowsJumpListManager.setJumpList(categories, tasks, knownCategories)` | Every parameter defaults to empty. |
+| `WindowsJumpListManager.clearJumpList()` | Removes every entry. |
+| `JumpListCategory(name, items)` | A named group of entries. |
+| `JumpListItem(title, arguments, description, icon, isSeparator)` | Every parameter has a default. `JumpListItem.SEPARATOR` is valid in `tasks` only. |
+| `KnownCategory.FREQUENT` / `RECENT` | Shell-managed lists fed by your file associations. |
+| `WindowsThumbnailToolbar.setButtons(hwnd, buttons, onClick = null)` | Up to 7 buttons, once per window. |
+| `WindowsThumbnailToolbar.updateButtons(hwnd, buttons)` / `unregister(hwnd)` | Update registered buttons; remove the callback. |
+| `ThumbnailToolbarButton(id, tooltip, icon, enabled, hidden, noBackground, dismissOnClick, nonInteractive)` | `id` from `0` to `6`, `tooltip` at most 259 characters. |
+| `WindowsBadgeManager.initialize(aumid = null)` | Required first. APPX and MSIX only. |
+| `WindowsBadgeManager.setCount(count)` / `setGlyph(glyph)` / `clear()` / `uninitialize()` | `BadgeGlyph.NONE` clears a glyph. |
+
+`BadgeGlyph`: `NONE`, `ACTIVITY`, `ALARM`, `ALERT`, `ATTENTION`, `AVAILABLE`, `AWAY`, `BUSY`,
+`ERROR`, `NEW_MESSAGE`, `PAUSED`, `PLAYING`, `UNAVAILABLE`.
+
+`TaskbarIconSource` is one of `FromStock(StockIcon.WARNING)` (93 built-in icons, no file),
+`FromFile(path)` (an `.ico`), or `FromResource(dllPath, index)` (an icon in a DLL such as
+`shell32.dll`).
+
+## What's next
+
+- [Taskbar progress](/docs/os/dock-taskbar/progress): progress bars in the taskbar button.
+- [Single instance](/docs/lifecycle/single-instance): forward jump-list arguments to the running app.
+- [macOS Dock menu](/docs/os/dock-taskbar/macos): the Dock menu on macOS.
+- [Linux launcher](/docs/os/dock-taskbar/linux): launcher entries and quicklists on Linux.

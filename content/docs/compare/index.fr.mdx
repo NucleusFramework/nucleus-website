@@ -1,123 +1,60 @@
 ---
 title: Comparer
-description: Comment Nucleus se compare à Compose Multiplatform vanilla — et, secondairement, aux autres stacks desktop.
+description: Comment Nucleus se compare à Compose Multiplatform seul, aux autres outils de packaging JVM, et à Electron et Tauri.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Nucleus étend Compose Multiplatform pour les équipes qui écrivent déjà du Kotlin et doivent **shipper**
-une app desktop — pas seulement dessiner une fenêtre. La comparaison principale est face à
-**Compose Desktop vanilla**. Les outils de packaging et les stacks web viennent plus bas pour le contexte.
+Cette page confronte Nucleus à Electron et Tauri. Pour les alternatives Kotlin et JVM, voir
+[Nucleus et Compose Multiplatform seul](/docs/compare/cmp-default) et
+[Packaging comparé](/docs/compare/packaging).
 
-## Nucleus vs Compose Multiplatform vanilla
-
-Compose Multiplatform est la fondation. Nucleus est la couche de production par-dessus : chrome natif,
-modules OS, packaging élargi, auto-update et pipelines store. La migration est un
-[drop-in](/docs/migrate/from-jb-compose).
-
-| | **Nucleus** | CMP vanilla |
-|--|------------|-------------|
-| Langage | Kotlin | Kotlin |
-| UI | Compose + Skia GPU | Compose + Skia GPU |
-| Décorations de fenêtre | Natives (Liquid Glass, Fluent, Yaru, Jewel) | Limitées |
-| APIs OS | 40+ modules Kotlin | Légères (`Tray`, `Notification`) |
-| Formats de packaging | **18** | 6 (jpackage) |
-| Auto-update | Intégré (`updater-runtime`) | Aucun |
-| Pipelines store | PKG, MSIX, Snap, Flatpak (+ sandbox) | Pas de chemin dédié |
-| Cold start | ~0,2 s (GraalVM) · ~1,0 s (JVM+AOT) | 1–2 s |
-| Taille binaire | ~40 MB (GraalVM) · ~60 MB (JVM)* | 80–120 MB |
-| Forme Gradle | `nucleus.application { … }` (miroir CMP) | `compose.desktop.application { … }` |
-
-Guide de décision complet : [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default).
-
-### Quand rester sur CMP vanilla
-
-- Tu n'as besoin que de DMG / MSI / DEB via jpackage.
-- Tu n'as pas besoin d'auto-update, de canaux store, de packaging GraalVM ni de décorations natives.
-- Tu possèdes déjà des scripts de signature et d'upload que tu ne veux pas déplacer.
-
-### Quand basculer sur Nucleus
-
-- Tu veux un packaging prêt pour les stores (Mac App Store, Microsoft Store, Snapcraft, Flathub).
-- Tu veux l'auto-update, GraalVM Native Image, ou le câblage du cache AOT JDK.
-- Tu veux des décorations natives et 40+ modules OS sans écrire du JNI par plateforme.
-- Tu as déjà un projet Compose Desktop et veux une [migration drop-in](/docs/migrate/from-jb-compose).
-
-## Outils de packaging (écosystème JVM)
-
-Comment le packaging Nucleus se compare à jpackage, Conveyor, install4j et les autres — formats,
-auto-update, signature, CI, stores :
-
-→ [Packaging — Nucleus vs le reste](/docs/compare/packaging)
-
-## Autres stacks desktop (Electron, Tauri)
-
-Electron et Tauri répondent à une autre question : *comment construire du desktop quand mon équipe est
-JavaScript ?* Nucleus répond : *comment mon équipe Kotlin shippe le desktop au-dessus de Compose ?*
+## Electron et Tauri
 
 | | **Nucleus** | Electron | Tauri |
-|--|------------|----------|-------|
-| Langage(s) | Kotlin | JS + Node (+ C++ pour le natif) | JS + Rust |
-| UI | Compose + Skia GPU | Chromium (Blink + V8) | WebView OS |
-| APIs OS | 40+ modules Kotlin, mono-process | Modules natifs Node / IPC | Commandes Rust via IPC |
-| Partage mobile | Même Kotlin qu'Android / iOS | Bundle web | Bundle web |
-| Formats de packaging | **18** | 5–7 via electron-builder | 5 via tauri-bundler |
-| Cold start | ~0,2 s (GraalVM) | 2–3 s | &lt; 1 s |
-| RAM au repos | 30–120 MB* | 200–500 MB | ~87 MB* |
+| --- | --- | --- | --- |
+| Langages | Kotlin | JavaScript et Node (C++ pour les modules natifs) | JavaScript et Rust |
+| UI | Compose, Skia sur le GPU | Chromium | WebView de l'OS |
+| API OS | Modules Kotlin, un seul processus | Modules natifs Node, IPC | Commandes Rust via IPC |
+| Partagé avec le mobile | Le même Kotlin qu'Android et iOS | Bundle web | Bundle web |
+| Formats de packaging | 18 | 5 à 7 via electron-builder | 5 via tauri-bundler |
+| Démarrage à froid | ~0,2 s (GraalVM) | 2 à 3 s | moins de 1 s |
+| RAM au repos | 30 à 120 Mo | 200 à 500 Mo | ~87 Mo |
 
-Choisis **Electron** quand la vitesse de livraison et le bassin d'embauche JS comptent plus que la RAM
-ou le look natif. Choisis **Tauri** quand tu acceptes les WebViews par plateforme et un split Rust/JS
-pour de plus petits binaires. Choisis **Nucleus** quand l'équipe est déjà Kotlin et que tu veux Compose
-de bout en bout avec de vrais outils OS et de shipping.
+Choisissez Electron quand la vitesse de livraison et un vivier de recrutement JavaScript comptent
+plus que la mémoire. Choisissez Tauri si vous acceptez les WebViews de la plateforme et un partage
+Rust et JavaScript pour des binaires légers. Choisissez Nucleus si votre équipe écrit du Kotlin et
+veut Compose de l'interface jusqu'à l'installateur.
 
-### Mesuré : démarrage, RAM et nombre de process
+### Mesures : démarrage, RAM et nombre de processus
 
-Même fenêtre Hello-World, quatre stacks, protocole identique sur une machine Windows 11 — temps réel
-du lancement du process jusqu'au premier handle de fenêtre, et **private working set** une fois la
-fenêtre stabilisée.
+Une fenêtre Hello World dans chaque pile, chronométrée du lancement du processus à la première
+fenêtre.
 
-| Hello-World | Stack | Cold start | Warm start | RAM (private WS) | Process |
-|--|--|--|--|--|--|
-| **Nucleus (Tao)** | Image native GraalVM | ~0,17 s | ~0,10 s | **~30 MB** | 1 |
-| WinUI 3 | .NET 9 + Windows App SDK | ~0,20 s | ~0,28 s | ~32 MB | 1 |
-| Flutter | Dart AOT + Skia | ~0,28 s | ~0,28 s | ~33 MB | 1 |
-| Tauri | Rust + WebView2 | ~0,74 s | ~0,12 s | ~87 MB | 7 |
+| Windows 11 | Pile | Démarrage à froid | Démarrage à chaud | RAM (WS privé) | Processus |
+| --- | --- | --- | --- | --- | --- |
+| **Nucleus** | Image native GraalVM | ~0,17 s | ~0,10 s | **~30 Mo** | 1 |
+| WinUI 3 | .NET 9 et Windows App SDK | ~0,20 s | ~0,28 s | ~32 Mo | 1 |
+| Flutter | Dart AOT et Skia | ~0,28 s | ~0,28 s | ~33 Mo | 1 |
+| Tauri | Rust et WebView2 | ~0,74 s | ~0,12 s | ~87 Mo | 7 |
 
-- **Le Gestionnaire des tâches sous-estime les apps WebView2.** Le process Tauri affiche ~4 MB — la
-  vraie empreinte (~87 MB) vit dans six helpers `msedgewebview2.exe`. Nucleus est un seul process.
-- **Nucleus se place dans la même classe ~30 MB que WinUI 3 natif et Flutter** tout en restant
-  purement Kotlin/Compose.
-
-#### macOS
-
-Même protocole sur macOS 26 (Apple silicon) — temps réel jusqu'à la première fenêtre à l'écran, et
-**RSS total sur tous les process** que l'app lance. Le RSS inclut des pages de frameworks partagées ;
-comparer uniquement dans le tableau.
-
-| Hello-World | Stack | Cold start | Warm start | RAM (RSS, tous process) | Process |
-|--|--|--|--|--|--|
-| **Nucleus (Tao)** | Image native GraalVM | ~0,32 s | ~0,20 s | ~115 MB | 1 |
-| SwiftUI | référence native | ~0,14 s | ~0,14 s | ~78 MB | 1 |
-| Flutter | Dart AOT + Skia | ~0,79 s | ~0,17 s | ~100 MB | 1 |
-| Tauri | Rust + WKWebView | ~0,91 s | ~0,19 s | ~173 MB | 4 |
-
-## Notes
-
-Les chiffres de performance sont typiques d'une app Hello-World. Cold start et RAM réels grandissent
-avec ce que charge l'app. Nucleus a deux cibles runtime : image native GraalVM pour le cold start et
-la taille binaire, et JVM + cache AOT pour le débit. Voir [performance](/docs/performance).
+| macOS 26 (Apple silicon) | Pile | Démarrage à froid | Démarrage à chaud | RAM (RSS, tous processus) | Processus |
+| --- | --- | --- | --- | --- | --- |
+| **Nucleus** | Image native GraalVM | ~0,32 s | ~0,20 s | ~115 Mo | 1 |
+| SwiftUI | Référence native | ~0,14 s | ~0,14 s | ~78 Mo | 1 |
+| Flutter | Dart AOT et Skia | ~0,79 s | ~0,17 s | ~100 Mo | 1 |
+| Tauri | Rust et WKWebView | ~0,91 s | ~0,19 s | ~173 Mo | 4 |
 
 <Callout type="info">
-Dans les tableaux de comparaison, les chiffres Electron viennent de benchmarks publics. Les chiffres
-Nucleus, WinUI 3, Tauri et associés — y compris la RAM Tauri — ont été relevés de première main sur
-une seule machine Windows 11 (runs tièdes sauf mention) ; voir la section **Mesuré**.
-*La RAM Nucleus a été mesurée sur Windows 11 avec un build Hello World ; la taille binaire est
-l'installateur NSIS avec compression maximale.
+La colonne RAM macOS compte les pages partagées des frameworks : comparez les lignes d'un même
+tableau seulement. Le démarrage à froid et la RAM augmentent avec ce que charge votre application.
+Les chiffres d'Electron viennent de benchmarks publics, les autres ont été mesurés de première main.
+Voir [Performance](/docs/performance).
 </Callout>
 
 ## Et ensuite
 
-- [Nucleus vs Compose Multiplatform vanilla](/docs/compare/cmp-default) — ce que Nucleus ajoute par-dessus CMP.
-- [Packaging — 18 formats vs le reste](/docs/compare/packaging) — comparaison du pipeline de packaging.
-- [Pourquoi Nucleus](/docs/why-nucleus) — narrative produit pour les équipes Kotlin.
-- [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose) — étapes drop-in.
+- [Nucleus et Compose Multiplatform seul](/docs/compare/cmp-default) : ce que Nucleus ajoute à CMP.
+- [Packaging comparé](/docs/compare/packaging) : Nucleus face aux outils de packaging JVM.
+- [Benchmarks](/docs/performance/benchmarks) : résultats CPU, rendu et chargement de liste d'une pile à l'autre.
+- [Migrer depuis JetBrains Compose Desktop](/docs/migrate/from-jb-compose) : les étapes.

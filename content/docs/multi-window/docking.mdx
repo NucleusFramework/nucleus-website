@@ -1,0 +1,143 @@
+---
+title: Docking
+description: Lay docked satellites out around your content with DockLayout, size and order the panels, restrict where they go, and draw your own splitters.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`DockLayout` lays the satellites docked into a window around that window's content. It is
+`@ExperimentalNucleusApi` (see [Multi-window](/docs/multi-window)).
+
+## Add a dock layout
+
+Compose `DockLayout` inside a window that joined the workspace:
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    JoinSatelliteWorkspace(workspace)
+    WindowScaffold(titleBar = { TitleBar { Text("Document") } }) { padding ->
+        DockLayout(
+            workspace,
+            Modifier.fillMaxSize().padding(padding),
+            sideOrder = listOf(DockSide.Right, DockSide.Bottom, DockSide.Left, DockSide.Top),
+            layeredSides = setOf(DockSide.Right),
+        ) { Document() }
+    }
+}
+```
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `workspace` | required | The `SatelliteWorkspace` whose panels it hosts |
+| `host` | `LocalTaoWindow.current` | The window `SatelliteEntry.dockHost` refers to |
+| `sideOrder` | `DefaultDockSideOrder` | The four sides, outermost first |
+| `layeredSides` | `emptySet()` | Sides whose panels are layers instead of a split |
+| `splitter` | `{ DefaultDockSplitter() }` | Drawn between a side and the content, and between two panels |
+| `panel` | `{ it() }` | Frame around each panel (`SatelliteScope` receiver); must invoke the lambda |
+| `content` | required | The document |
+
+The outermost side runs the full length of the layout and owns its corners. Name each `DockSide`
+once. `DefaultDockSideOrder` is `listOf(Top, Bottom, Left, Right)`, which differs from
+`DockSide.entries`.
+
+## Choose split or layered sides
+
+| | Split (default) | Layered (`layeredSides`) |
+| --- | --- | --- |
+| Arrangement | Panels divide the side's length | Each panel is a full-length layer, from the edge inwards |
+| Thickness | Shared: `workspace.dockExtent(side)` | Per panel: `Docked.extent` |
+| Length | By `Docked.weight` | Full length |
+
+A layered side with three panels gives three columns, each with its own width and splitter.
+
+## Size a docked panel
+
+`SatellitePlacement.Docked(side, order = 0, extent = null, weight = 1f)` carries the geometry.
+`extent` applies on a layered side (`null` uses the side's `dockExtent`); `weight` applies on a
+split side and must be positive. The splitters update both, and snapshots store them.
+
+| Workspace call | Effect |
+| --- | --- |
+| `dockExtent(side)` / `setDockExtent(side, extent)` | Shared thickness of a split side; 280 dp until set |
+| `setDockedExtent(id, extent)` | A panel's own `extent`, clamped to its limits |
+| `setDockedWeight(id, weight)` | A panel's `weight` |
+| `plannedDockExtent(entry, side)` | The thickness `side` would have once `entry` docks there |
+
+A docked palette keeps the width it had as a floating window. When the window is too small, the
+panels shrink proportionally and get their stored extents back when it grows.
+
+### Bound the thickness
+
+A satellite has a `minExtent` (at least 80 dp) and a `maxExtent` (unbounded). Docking, splitters
+and `restore()` respect them; the floating window ignores them. Only the `Satellite` overload in
+`dev.nucleusframework.window.tao` (receiver `taoApplication`) takes them in this release; the
+`nucleusApplication` overload uses the defaults.
+
+## Draw splitters
+
+The `splitter` slot runs with `DockSplitterScope`: `side`, `orientation` (`Horizontal` for a
+vertical line), and `panel` (the panel it resizes, `null` for a split side's `dockExtent`).
+Apply `Modifier.dockSplitterHandle()` to the element the user grabs, which can be wider than
+what you draw:
+
+```kotlin
+@Composable
+fun DockSplitterScope.ThinSplitter() {
+    val horizontal = orientation == Orientation.Horizontal
+    val line = if (horizontal) Modifier.fillMaxHeight().width(1.dp) else Modifier.fillMaxWidth().height(1.dp)
+    Box(line.background(MaterialTheme.colorScheme.outlineVariant), contentAlignment = Alignment.Center) {
+        val grip = if (horizontal) Modifier.requiredWidth(5.dp).fillMaxHeight() else Modifier.requiredHeight(5.dp).fillMaxWidth()
+        Box(grip.dockSplitterHandle())
+    }
+}
+```
+
+## Restrict where a panel goes
+
+The workspace enforces these `Satellite` parameters in drags, `dock()`, `undock()`, `restore()`
+and the default header.
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `dockSides` | all four | Only these sides are offered. Empty: a floating-only palette |
+| `floatable` | `true` | `false` is a fixed panel that never becomes a window |
+| `reorderable` | `true` | `false` pins its rank; nothing can be dropped in front of it |
+
+`floatable = false` and `reorderable = false` require a docked `initialPlacement`.
+
+## Rank panels
+
+`Docked.order` counts from the top or left on a split side, and from the edge on a layered side.
+`dock(id, side, order)` inserts at `order`; without `order`, the panel returns to its last rank
+on that side, else the end. Pinned panels keep their declared rank.
+
+## Draw your own drop feedback
+
+During a drag, each `DockLayout` lights the zones it accepts and previews the space a release
+would fill. For custom feedback read `workspace.dockPreview` (a `DockTarget(host, side, order)`),
+`draggedSatellite` and `dragGhost`, which is `null` on native Wayland. See
+[Two ways to carry a drag](/docs/multi-window#two-ways-to-carry-a-drag).
+
+`DockSide` values are physical, also in right-to-left apps: put RTL navigation on
+`DockSide.Right`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Panels and content are `movableContentOf`: no layout change rebuilds a subtree. Only leaving
+  the host window disposes a panel.
+- On a split side, the thickest minimum and the thinnest maximum win; the minimum wins if they
+  cross.
+- Each allowed edge has a 64 dp drop zone (`SatelliteWorkspace.DockZoneWidth`). Where windows
+  overlap, the owner's layout is tried first, then the others by focus recency.
+- The layout runs left-to-right internally so splitters drag the right way, then restores your
+  `LayoutDirection` for the content.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Satellites](/docs/multi-window/satellites): declare palettes, headers and layouts.
+- [Tabs](/docs/multi-window/tabs#compose-tabs-with-satellites): hang one dock per tab window.
+- [Pointer icons](/docs/input/pointer-icons): the grab and resize cursors the handles use.

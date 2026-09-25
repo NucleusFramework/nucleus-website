@@ -1,0 +1,76 @@
+---
+title: Multi-fenêtre
+description: Les deux archétypes multi-fenêtre de Nucleus, palettes satellites ancrables et onglets façon Chrome, et le modèle de workspace qu'ils partagent.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus fournit deux archétypes multi-fenêtre, déclarés depuis `nucleusApplication` et inclus
+dans `nucleus-application` : des palettes satellites qui flottent à côté d'un document ou
+s'ancrent dedans, et des onglets façon Chrome qui se détachent en fenêtres.
+
+<Callout type="warn">
+Toutes les API de cette section sont `@ExperimentalNucleusApi` au niveau `ERROR`. Ajoutez
+`@OptIn(ExperimentalNucleusApi::class)`, ou activez l'opt-in du module avec
+`optIn.add("dev.nucleusframework.window.ExperimentalNucleusApi")` dans `kotlin.compilerOptions`.
+</Callout>
+
+## Choisir un archétype
+
+| | Satellites | Onglets |
+| --- | --- | --- |
+| Ce que voit l'utilisateur | Palettes d'outils, inspecteurs, panneaux autour d'un document | Des documents en onglets, dans une barre en haut de chaque fenêtre |
+| Qui ouvre les fenêtres | Vous ouvrez les fenêtres de document ; les palettes suivent celle qui a le focus | Le workspace : une fenêtre par groupe d'onglets |
+| Déplacements | Flottant ↔ ancré, d'un dock à l'autre, d'une fenêtre de document à l'autre | Réordonner, détacher, fusionner dans une autre fenêtre |
+| Déclaration | `Satellite(workspace, id, title) { … }` | `Tab(workspace, id, title) { … }` |
+| Page | [Satellites](/docs/multi-window/satellites), [Ancrage](/docs/multi-window/docking) | [Onglets](/docs/multi-window/tabs) |
+
+Les deux se combinent : une fenêtre d'onglets peut héberger son propre `DockLayout`. Voir
+[Combiner onglets et satellites](/docs/multi-window/tabs#combiner-onglets-et-satellites).
+`Satellite`, `SatelliteWindow`, `Tab` et `TabWindows` sont dans `dev.nucleusframework.application`,
+le reste dans `dev.nucleusframework.window.tao`.
+
+## Principes communs
+
+- **Le workspace décide du placement.** Déclarez chaque satellite ou onglet une fois, au niveau
+  de l'application. Le workspace choisit la fenêtre hôte et le déplace lors d'un glissement.
+  `initialPlacement`, `initiallyOpen` et `group` ne s'appliquent qu'à la première déclaration
+  d'un `id`.
+- **Les entrées survivent à la composition.** Un satellite ou un onglet déclaré à nouveau reprend
+  là où il était. `snapshot()` et `restore()` persistent la disposition.
+- **L'état suit le contenu.** `rememberSaveable` survit à chaque changement de fenêtre. Un
+  `remember` simple, non : remontez-le ou rendez-le sauvegardable.
+
+### Deux façons de transporter un glissement
+
+`SatelliteWorkspace.dragKind` et `TabWorkspace.dragKind` contiennent le `WorkspaceDragKind` du
+glissement en cours, ou `null`.
+
+| Valeur | Quand | Ce qui suit le pointeur |
+| --- | --- | --- |
+| `Window` | Windows, macOS, X11, XWayland | Une vraie fenêtre, ou une fenêtre fantôme |
+| `Transfer` | `TaoWindow.canPlaceOnScreen == false` (Wayland natif) | L'icône de glissement du compositeur ; `dragGhost` reste `null` |
+
+Faites dépendre le chrome sensible à Wayland de `TaoWindow.canPlaceOnScreen` ou de
+`SatelliteScope.isCompositorPlaced`, jamais du nom du compositeur.
+`NUCLEUS_TAO_LINUX_RENDERER=x11` lance l'application sous XWayland et rétablit les glissements où
+la fenêtre suit le pointeur.
+
+## Lancer les démos
+
+Lancez-en une avec `./gradlew :examples:<name>:run`.
+
+| Démo | Ce qu'elle montre |
+| --- | --- |
+| [`satellite-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/satellite-demo) | Palettes partagées, propriétaire qui suit le focus ou épinglé, glisser pour ancrer, instantanés |
+| [`tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tabs-demo) | Détacher, fusionner, réordonner, cartes de survol avec miniatures |
+| [`jewel-tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/jewel-tabs-demo) | Le workspace d'onglets dessiné avec le `TabStrip` de Jewel |
+| [`tab-satellites-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tab-satellites-demo) | Un `SatelliteWorkspace` par fenêtre d'onglets |
+| [`reader-dock-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/reader-dock-demo) | Lecteur de droite à gauche : côtés empilés, séparateurs et en-têtes personnalisés, panneaux fixes |
+
+## Et ensuite
+
+- [Satellites](/docs/multi-window/satellites) : déclarer des palettes qui suivent le document actif.
+- [Ancrage](/docs/multi-window/docking) : disposer les panneaux ancrés autour du contenu.
+- [Onglets](/docs/multi-window/tabs) : transformer des documents en onglets détachables.
+- [Linux et Wayland](/docs/windows/linux-wayland) : ce que change une fenêtre placée par le compositeur.

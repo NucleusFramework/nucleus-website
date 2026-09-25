@@ -1,0 +1,153 @@
+---
+title: Scheduler
+description: Exécutez depuis Kotlin des tâches de fond périodiques, calendaires et au démarrage, que l'OS déclenche à l'heure même quand votre app est fermée.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Le module `scheduler` exécute des tâches de fond planifiées, même quand votre app est fermée. Vous
+enregistrez une tâche une fois et l'OS la déclenche. Ajoutez
+`implementation("dev.nucleusframework:nucleus.scheduler:<version>")` ; le module expose
+`kotlinx-serialization-json`, appliquez donc `kotlin("plugin.serialization")` pour annoter les
+données d'entrée avec `@Serializable`.
+
+## Planifier une tâche
+
+Implémentez `DesktopTask`, enregistrez-la sous un `TaskId` et confiez les lancements du scheduler
+à `DesktopBootReceiver` en tête de `main()` :
+
+```kotlin
+val SyncId = TaskId("sync")
+
+class SyncTask : DesktopTask {
+    override suspend fun doWork(context: TaskContext): TaskResult {
+        performSync()
+        return TaskResult.Success
+    }
+}
+
+val registry = TaskRegistry.Builder().register(SyncId) { SyncTask() }.build()
+
+fun main(args: Array<String>) {
+    if (DesktopBootReceiver.isSchedulerInvocation(args)) {
+        DesktopBootReceiver.handle(args = args, registry = registry)
+        return
+    }
+    nucleusApplication(args) { /* ... */ }
+}
+```
+
+<Callout type="warn">
+Faites ce test avant `nucleusApplication`. Sinon, chaque exécution planifiée ouvre une fenêtre.
+</Callout>
+
+Mettez ensuite une requête en file. Mettre deux fois le même id en file ne fait rien par défaut
+(voir [`TaskRequest`](#taskrequest)).
+
+```kotlin
+val scheduler = DesktopTaskScheduler.getInstance()
+scheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours)) // compté depuis la mise en file
+scheduler.enqueue(TaskRequest.calendar(ReportId, CronExpression.everyDayAt(LocalTime.of(9, 0))))
+scheduler.enqueue(TaskRequest.onBoot(StartupCheckId)) // à l'ouverture de session
+```
+
+## Vérifier le sandbox macOS
+
+Sur macOS, `enqueue` renvoie `false` quand `ExecutableRuntime.isSandboxed()` vaut `true`. Rabattez-vous
+sur [Service management](/docs/lifecycle/background/service-management) :
+
+```kotlin
+if (ExecutableRuntime.isSandboxed()) {
+    AppServiceManager.register(AppService.Agent("com.example.myapp.sync"))
+} else {
+    DesktopTaskScheduler.enqueue(TaskRequest.periodic(SyncId, 1.hours))
+}
+```
+
+Un PKG Developer ID (`appStore = false`) n'est pas sandboxé et peut planifier des tâches ; le PKG
+App Store ne le peut pas. Voir [Type d'exécutable](/docs/lifecycle/executable-type#détecter-un-sandbox).
+
+## Notes
+
+- `inputData` est stocké en JSON brut sur le disque. Stockez une référence, pas un secret.
+- `CronExpression.everyHour()` se déclenche au début de chaque heure d'horloge, contrairement à
+  `periodic(id, 1.hours)`.
+- Sur macOS, une désinstallation laisse les entrées en place. Appelez `cancelAll()` depuis votre
+  flux de déconnexion ou de réinitialisation.
+- Pour tester les tâches sans l'OS, voir [Scheduler testing](/docs/lifecycle/background/scheduler-testing).
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- L'OS lance votre binaire avec `--nucleus-scheduler-run <taskId>`. Le receiver charge le
+  `TaskContext` stocké, vérifie les contraintes, appelle `doWork` et enregistre le résultat.
+- Entrées : `~/Library/LaunchAgents/dev.nucleusframework.<appId>.<taskId>.plist` (macOS),
+  `~/.config/systemd/user/nucleus-<appId>-<taskId>.{service,timer}` (Linux),
+  `\Nucleus\<appId>\<taskId>` dans le Planificateur de tâches (Windows).
+- Sous Linux et Windows, un script wrapper désenregistre la tâche une fois votre binaire supprimé.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+### DesktopTaskScheduler
+
+`isAvailable()`, `enqueue(request)`, `cancel(taskId)`, `cancelAll()`, `isScheduled(taskId)`,
+`getTaskInfo(taskId): TaskInfo?` (état, dernière et prochaine exécution, nombre d'exécutions,
+dernier résultat) et `getAllTasks()`. `enqueue` renvoie `true` quand la tâche est planifiée ou
+déjà présente.
+
+### TaskRequest
+
+`periodic(taskId, interval)` (15 minutes minimum, un intervalle plus court lève une exception),
+`calendar(taskId, expression)` ou `onBoot(taskId)`, chacun avec un builder optionnel :
+
+```kotlin
+TaskRequest.periodic(SyncId, 1.hours) {
+    inputData(SyncInput(endpoint = "https://api.example.com"))
+    runImmediately() // exécute aussi une fois à l'enregistrement (périodique uniquement)
+    constraints { requiredNetworkType = NetworkType.UNMETERED }
+    existingTaskPolicy(ExistingTaskPolicy.REPLACE) // KEEP (défaut), UPDATE_DATA, REPLACE
+}
+```
+
+`retryPolicy(RetryPolicy.Linear | ExponentialBackoff)` est stocké mais pas encore appliqué.
+
+`CronExpression` : `everyDayAt(time)`, `everyWeekdayAt(time)` (du lundi au vendredi),
+`everyWeekdayAt(day, time)`, `everyHour()`.
+
+`TaskResult` : `Success`, `Failure(message)` (sans nouvel essai), `Retry(message)` (une nouvelle
+exécution environ 5 minutes plus tard).
+
+### Contraintes
+
+Vérifiées au déclenchement. Une exécution périodique non satisfaite attend le déclenchement
+suivant ; une exécution calendaire ou au démarrage est relancée une fois environ 5 minutes plus
+tard.
+
+| Propriété | Description |
+|---|---|
+| `requiredNetworkType` | `NOT_REQUIRED`, `CONNECTED` ou `UNMETERED`. |
+| `requiresBatteryNotLow` | Batterie au-dessus de 15 %. Une machine sans batterie passe. |
+| `requiresCharging` | Sur secteur. |
+| `requiresDeviceIdle` | Aucune saisie utilisateur depuis au moins 5 minutes. |
+| `minimumStorageBytes` | Espace libre minimal sur la partition de l'app. |
+
+### SchedulerConfig
+
+Si votre app démarre via un lanceur personnalisé, pointez le scheduler vers lui avant le premier
+`enqueue`. Un changement ultérieur ne touche que les tâches mises en file ensuite.
+
+```kotlin
+SchedulerConfig.executablePath = "/opt/myapp/myapp-launcher" // absolu ; null = exécutable courant
+SchedulerConfig.executableArguments = listOf("--background") // avant --nucleus-scheduler-run
+```
+
+## Et ensuite
+
+- [Scheduler testing](/docs/lifecycle/background/scheduler-testing) : exécuter les tâches en mémoire avec un temps virtuel.
+- [Service management](/docs/lifecycle/background/service-management) : agents de fond pour les builds macOS sandboxés.
+- [Informations système](/docs/os/system-info) : les signaux derrière les contraintes.
+- [Auto-launch](/docs/lifecycle/background/launch-at-login) : lancer l'app elle-même à l'ouverture de session.

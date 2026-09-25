@@ -1,0 +1,130 @@
+---
+title: Dialogues et popups
+description: Ouvrez des dialogues modaux avec DecoratedDialog, HostedDialog ou le dialogue d'un toolkit, et affichez les popups Compose dans des surfaces natives placées par rapport à l'écran.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Sur cette page, vous ouvrez des dialogues natifs rattachés à une fenêtre et vous transformez les
+popups, menus et infobulles Compose en surfaces natives qui peuvent sortir de la fenêtre.
+
+## Ouvrir un dialogue
+
+Appelez `DecoratedDialog` depuis le contenu d'une fenêtre :
+
+```kotlin
+if (showSettings) {
+    DecoratedDialog(
+        onCloseRequest = { showSettings = false },
+        state = rememberDialogState(size = DpSize(480.dp, 320.dp)),
+        title = "Settings",
+    ) {
+        DialogTitleBar { _ -> Text("Settings") }
+        SettingsContent()
+    }
+}
+```
+
+Par défaut, un dialogue n'est pas redimensionnable et n'a ni bouton de réduction ni bouton
+d'agrandissement. La fenêtre qui l'ouvre en devient la propriétaire : le dialogue reste au-dessus
+d'elle, la suit lors des réductions et des changements de Space ou d'espace de travail, n'apparaît
+pas dans la barre des tâches et se ferme avec elle. La propriétaire ignore le pointeur tant que le
+dialogue est ouvert, mais conserve son focus clavier. Un dialogue déclaré au niveau de
+l'application bloque le pointeur dans toutes les fenêtres.
+
+### Placer le dialogue
+
+Un dialogue se centre sur sa propriétaire, ou sur l'écran s'il n'en a pas. Donnez `Dp.Unspecified`
+à un axe de la taille pour l'adapter au contenu
+([Adapter la fenêtre à son contenu](/docs/windows/window-state#adapter-la-fenêtre-à-son-contenu)).
+Pour choisir l'écran et utiliser des providers de position, passez un `DialogState` v2 de
+`dev.nucleusframework.window.tao.v2`
+([Utiliser un état de dialogue](/docs/windows/window-state#utiliser-un-état-de-dialogue)).
+
+## Utiliser le dialogue d'un toolkit
+
+| Toolkit | Dialogue | Barre de titre |
+| --- | --- | --- |
+| Material 3 | `dev.nucleusframework.window.material.MaterialDecoratedDialog` | `MaterialDialogTitleBar` |
+| Material 2 | `dev.nucleusframework.window.material2.MaterialDecoratedDialog` | `MaterialDialogTitleBar` |
+| Jewel | `dev.nucleusframework.window.jewel.JewelDecoratedDialog` | `JewelDialogTitleBar` |
+
+Ces dialogues sont des extensions de `NucleusApplicationScope`. Depuis un composable sans receveur :
+
+```kotlin
+with(LocalNucleusApplicationScope.current) {
+    MaterialDecoratedDialog(onCloseRequest = onClose, title = "Confirm") {
+        MaterialDialogTitleBar { _ -> Text("Confirm") }
+        ConfirmContent(onClose)
+    }
+}
+```
+
+<Callout type="warn" title="Modifié en 3.0">
+Les surcharges AWT sans receveur de `MaterialDecoratedDialog` et `JewelDecoratedDialog` ont
+disparu, et le dialogue Material 2 est désormais une extension de `NucleusApplicationScope`. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+- Pour laisser l'app choisir le chrome des dialogues d'une bibliothèque, appelez `HostedDialog`. Voir
+  [Ouvrir les fenêtres via un hôte](/docs/windows#ouvrir-les-fenêtres-via-un-hôte).
+- Le `DialogWindow` AWT de Compose Desktop n'est pas pris en charge. Le `Dialog` intégré de Compose,
+  qu'utilise `AlertDialog`, fonctionne dans toute fenêtre Nucleus.
+
+## Ouvrir les popups dans des surfaces natives
+
+Par défaut, le bord de la fenêtre coupe un `Popup`, un `DropdownMenu` ou une infobulle. Avec
+`nativePopupLayers = true`, chaque popup de la fenêtre s'ouvre dans sa propre surface native :
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication, nativePopupLayers = true) { /* ... */ }
+```
+
+`HostedWindow`, `MaterialDecoratedWindow` et `JewelDecoratedWindow` acceptent le même paramètre. Les
+`ListComboBox`, `PopupMenu`, `Dropdown` et infobulles de Jewel en profitent aussi.
+
+### Comment les popups se placent à l'écran
+
+- Dans un popup, `LocalWindowInfo` rapporte la zone de travail de l'écran, pas la fenêtre
+  propriétaire. Les position providers basculent contre le bord de l'écran, et un menu haut dans une
+  petite fenêtre se déploie sur toute sa hauteur.
+- Le popup reste dans la zone de travail de son écran et suit la propriétaire d'un moniteur à
+  l'autre.
+- Un `Dialog` Compose (avec scrim) garde la taille de la fenêtre propriétaire et ne suit pas l'écran.
+
+## Activer un seul sous-arbre
+
+`NativePopupLayers { }` donne des surfaces natives aux popups ouverts directement dans son contenu :
+
+```kotlin
+NativePopupLayers {
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { /* ... */ }
+}
+```
+
+Les sous-menus ouverts depuis une surface native n'ont besoin d'aucune activation.
+`NativePopupLayers` ne fait rien quand la fenêtre définit déjà `nativePopupLayers = true`, quand les
+popups natifs sont indisponibles ou hors d'une fenêtre Nucleus. Le
+[menu contextuel](/docs/os/menus/context-menu) natif sous Windows et Linux l'utilise toujours.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Surfaces des popups : une fenêtre enfant `NSPanel` sous macOS, un HWND `WS_POPUP` transparent
+  sous Windows, une fenêtre override-redirect sous X11 et une `wl_subsurface` sous Wayland. Sous
+  Windows et Linux, le popup est recalé à chaque déplacement de la propriétaire.
+- La surface dépasse de 32 dp les limites du popup : les ombres et les animations d'entrée ne sont
+  pas coupées.
+- `DialogTitleBar` ne dessine le bouton de fermeture que là où la plateforme a besoin d'un chrome
+  dessiné par Compose.
+- Une `LocalWindowExceptionHandlerFactory` couvre aussi les popups de sa fenêtre.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Menus contextuels](/docs/os/menus/context-menu) : le menu de la plateforme et les menus Fluent et Adwaita.
+- [État de fenêtre](/docs/windows/window-state) : taille, position et écran des dialogues.
+- [Fenêtres d'overlay](/docs/windows/overlay-windows) : fenêtres transparentes, traversables et toujours en arrière-plan.

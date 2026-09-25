@@ -1,0 +1,214 @@
+---
+title: Premiers pas
+description: Chargez des URL et du HTML, naviguez dans l'historique, évaluez du JavaScript et interceptez des requêtes depuis Compose.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Dans ce tutoriel, vous ouvrez une URL dans une WebView multiplateforme, réagissez à l'état de chargement, naviguez dans l'historique, évaluez du JavaScript et interceptez des navigations. Chaque extrait se place dans un source set `commonMain` de Compose Multiplatform.
+
+## Avant de commencer
+
+Ajoutez la dépendance décrite dans l'[aperçu WebView](/docs/webview) :
+
+```kotlin title="build.gradle.kts"
+commonMain.dependencies {
+    implementation("dev.nucleusframework:composewebview:<version>")
+}
+```
+
+Sur **desktop**, ouvrez la fenêtre avec Nucleus Tao (`nucleusApplication` et `decorated-window-tao`). La WebView s'embarque via [`NativeView`](/docs/tao/native-views) et ne tourne pas sur le backend AWT.
+
+## Charger une URL
+
+Hissez un `WebViewState` avec `rememberWebViewState` et placez `WebView` dans la mise en page :
+
+```kotlin
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import dev.nucleusframework.webview.web.WebView
+import dev.nucleusframework.webview.web.rememberWebViewState
+
+@Composable
+fun Browser(url: String) {
+    val state = rememberWebViewState(url) {
+        customUserAgentString = "MyApp/1.0"
+    }
+    WebView(state = state, modifier = Modifier.fillMaxSize())
+}
+```
+
+La lambda trailing de `rememberWebViewState` est un receiver `WebSettings` — définissez-y le user agent, le zoom, le JavaScript et les options spécifiques à la plateforme.
+
+## Charger du HTML
+
+Pour du HTML en ligne, utilisez `rememberWebViewStateWithHTMLData`. Pour un fichier empaqueté avec l'app, utilisez `rememberWebViewStateWithHTMLFile` :
+
+```kotlin
+val htmlState = rememberWebViewStateWithHTMLData(
+    data = """
+        <html><body><h1>Hello</h1></body></html>
+    """.trimIndent(),
+    baseUrl = null,
+)
+
+val fileState = rememberWebViewStateWithHTMLFile(
+    fileName = "index.html",
+    readType = WebViewFileReadType.ASSET_RESOURCES,
+)
+```
+
+`WebViewFileReadType.ASSET_RESOURCES` lit les racines d'assets de la plateforme ; `COMPOSE_RESOURCE_FILES` lit les ressources Compose Multiplatform.
+
+## Réagir à l'état de chargement
+
+`WebViewState` expose un état snapshot lisible dans n'importe quel composable — `isLoading`, `loadingState`, `lastLoadedUrl`, `pageTitle` et `errorsForCurrentRequest` :
+
+```kotlin
+Box(Modifier.fillMaxSize()) {
+    WebView(state = state, modifier = Modifier.fillMaxSize())
+    if (state.isLoading) {
+        LinearProgressIndicator(
+            progress = {
+                (state.loadingState as? LoadingState.Loading)?.progress ?: 0f
+            },
+            modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+        )
+    }
+    state.pageTitle?.let { title ->
+        Text(title, Modifier.align(Alignment.BottomCenter))
+    }
+}
+```
+
+`LoadingState` est une sealed class : `Initializing`, `Loading(progress)` ou `Finished`.
+
+## Naviguer avec un navigator
+
+Hissez un `WebViewNavigator` lorsque vous avez besoin d'actions de barre d'outils ou de chargements programmatiques :
+
+```kotlin
+val state = rememberWebViewState("https://example.com")
+val navigator = rememberWebViewNavigator()
+
+Column(Modifier.fillMaxSize()) {
+    Row {
+        IconButton(
+            onClick = { navigator.navigateBack() },
+            enabled = navigator.canGoBack,
+        ) { Icon(Icons.Default.ArrowBack, contentDescription = "Retour") }
+        IconButton(
+            onClick = { navigator.navigateForward() },
+            enabled = navigator.canGoForward,
+        ) { Icon(Icons.Default.ArrowForward, contentDescription = "Avant") }
+        IconButton(onClick = { navigator.reload() }) {
+            Icon(Icons.Default.Refresh, contentDescription = "Recharger")
+        }
+        IconButton(onClick = {
+            navigator.loadUrl("https://kotlinlang.org")
+        }) { Text("Kotlin") }
+    }
+    WebView(state = state, navigator = navigator, modifier = Modifier.weight(1f))
+}
+```
+
+Les commandes du navigator incluent `loadUrl`, `loadHtml`, `loadHtmlFile`, `evaluateJavaScript`, `navigateBack`, `navigateForward`, `reload` et `stopLoading`.
+
+## Évaluer du JavaScript
+
+```kotlin
+navigator.evaluateJavaScript("document.title") { title ->
+    println("Titre de la page : $title")
+}
+```
+
+## Pont JavaScript vers Kotlin
+
+Passez un `WebViewJsBridge` à `WebView`. Les handlers s'enregistrent sous un nom de méthode ; la page appelle `window.kmpJsBridge.callNative(...)` après le chargement :
+
+```kotlin
+val navigator = rememberWebViewNavigator()
+val bridge = rememberWebViewJsBridge(navigator)
+
+LaunchedEffect(bridge) {
+    bridge.register(object : IJsMessageHandler {
+        override fun methodName() = "echo"
+        override fun handle(
+            message: JsMessage,
+            navigator: WebViewNavigator?,
+            callback: (String) -> Unit,
+        ) {
+            callback(message.params)
+        }
+    })
+}
+
+WebView(
+    state = state,
+    navigator = navigator,
+    webViewJsBridge = bridge,
+    modifier = Modifier.fillMaxSize(),
+)
+```
+
+Depuis la page :
+
+```js
+window.kmpJsBridge.callNative("echo", JSON.stringify({ hello: "world" }), function (result) {
+  console.log(result);
+});
+```
+
+## Intercepter les navigations
+
+Attachez un `RequestInterceptor` à la création du navigator. Il s'exécute uniquement pour les chargements main-frame **initiés par le navigator** — pas pour les sous-ressources :
+
+```kotlin
+val navigator = rememberWebViewNavigator(
+    requestInterceptor = object : RequestInterceptor {
+        override fun onInterceptUrlRequest(
+            request: WebRequest,
+            navigator: WebViewNavigator,
+        ): WebRequestInterceptResult {
+            if (request.url.contains("blocked.example")) {
+                return WebRequestInterceptResult.Reject
+            }
+            return WebRequestInterceptResult.Allow
+        }
+    },
+)
+```
+
+Retournez `Allow`, `Reject` ou `Modify(request)` pour réécrire l'URL ou les en-têtes.
+
+## Gérer les cookies
+
+```kotlin
+scope.launch {
+    state.cookieManager.setCookie(
+        url = "https://example.com",
+        cookie = Cookie(name = "session", value = "abc", domain = "example.com"),
+    )
+    val cookies = state.cookieManager.getCookies("https://example.com")
+    state.cookieManager.removeCookies("https://example.com")
+    state.cookieManager.removeAllCookies()
+}
+```
+
+## Notes desktop
+
+- Linux a besoin de WebKit2GTK disponible sur le système (`libwebkit2gtk`).
+- Windows a besoin du WebView2 Runtime ou d'une installation Edge récente.
+- macOS utilise le WKWebView système ; aucun paquet runtime supplémentaire n'est requis.
+- Ouvrez la fenêtre hôte sur Tao. Voir [DecoratedWindow sur Tao](/docs/tao/decorated-window).
+
+<Callout type="info">
+Les hôtes e2e du dépôt (`e2e-desktop`, `e2e-android`, `e2e-wasmJs`, `iosApp`) exécutent la même suite visuelle contre une vraie WebView sur chaque plateforme. Utilisez-les comme référence complète de câblage.
+</Callout>
+
+## Et ensuite
+
+- [Référence de l'API](/docs/webview/api-reference) — chaque type public, ses paramètres et ses valeurs par défaut.
+- [Aperçu WebView](/docs/webview) — cibles prises en charge et backends par plateforme.
+- [Vues natives sur Tao](/docs/tao/native-views) — comment le desktop embarque la surface native.

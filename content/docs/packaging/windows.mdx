@@ -1,235 +1,136 @@
 ---
 title: Building for Windows
-description: Package a Nucleus app for Windows as an NSIS, MSI, MSIX/AppX, or Portable build and sign it for distribution.
+description: Package a Nucleus app for Windows as an NSIS, MSI, AppX, or Portable build, and see how the Windows renderer's ANGLE libraries ship.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-In this tutorial, you'll package a Nucleus app for Windows in one or more of six formats —
-NSIS, NSIS Web, MSI, MSIX/AppX, and Portable — and sign the result for distribution.
-
-## Before you start
-
-Windows packaging is part of the Nucleus Gradle plugin, so no extra dependency is required.
-You do need:
-
-- The Nucleus plugin applied to your build. It provides the `windows { }` block used below.
-- **Windows Developer Mode** enabled to build an AppX package locally
-  (Settings → System → For developers). GitHub-hosted Windows runners already have it on.
-- A `.pfx`/`.p12` certificate or Azure Artifact Signing credentials to sign a build.
+This page covers the `windows { }` block: NSIS, MSI, AppX, and Portable builds. Windows formats
+build only on a Windows host. To sign them, see [Code signing](/docs/packaging/code-signing#sign-on-windows).
 
 ## Configure the Windows build
 
-Add the formats you want to `targetFormats(...)`, then configure the `windows { }` block:
-
 ```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        nativeDistributions {
-            targetFormats(
-                TargetFormat.Nsis,
-                TargetFormat.Msi,
-                TargetFormat.AppX,
-                TargetFormat.Portable,
-            )
-
-            windows {
-                iconFile.set(project.file("icons/app.ico"))
-                upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
-                perUserInstall = true
-                menuGroup = "My Company"
-
-                signing {
-                    enabled = true
-                    certificateFile.set(file("certs/certificate.pfx"))
-                    certificatePassword = System.getenv("WIN_CSC_KEY_PASSWORD")
-                    algorithm = SigningAlgorithm.Sha256
-                    timestampServer = "http://timestamp.digicert.com"
-                }
-            }
-        }
+nativeDistributions {
+    targetFormats(TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX, TargetFormat.Portable)
+    windows {
+        iconFile.set(project.file("icons/app.ico"))
+        upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
+        menuGroup = "My Company"
     }
 }
 ```
 
-The six Windows formats are:
-
-- `TargetFormat.Nsis` — the standard Windows installer.
-- `TargetFormat.NsisWeb` — an NSIS downloader stub that fetches the payload at install time.
-- `TargetFormat.Msi` — a Windows Installer package for enterprise deployment.
-- `TargetFormat.AppX` — an MSIX/AppX package for the Microsoft Store and sideloading.
-- `TargetFormat.Portable` — a single executable that runs without installation.
-- `TargetFormat.Exe` — a bare electron-builder `.exe` target.
+| Format | Output |
+|--------|--------|
+| `Nsis`, `Exe` | The standard NSIS installer. |
+| `NsisWeb` | A small NSIS stub that downloads the payload at install time. |
+| `Msi` | A Windows Installer package for managed deployment. |
+| `AppX` | An MSIX/AppX package for the Microsoft Store and sideloading. |
+| `Portable` | A single executable that runs without installation. |
 
 ## Customize the NSIS installer
 
-Nucleus exposes the electron-builder NSIS options: one-click or assisted installs, per-user or
-per-machine placement, a language picker, custom header and sidebar bitmaps, a license dialog,
-and a `script` / `includeScript` escape hatch for custom NSIS sources.
-
-```kotlin
+```kotlin title="build.gradle.kts"
 windows {
     nsis {
         oneClick = false
-        allowElevation = true
         perMachine = true
         allowToChangeInstallationDirectory = true
         createDesktopShortcut = true
-        runAfterFinish = true
-
-        // Start-menu folder, from 2.5.11; windows.menuGroup is the default
-        menuCategory = "My Company"
-        shortcutName = "My App"
-
-        multiLanguageInstaller = true
-        installerLanguages = listOf("en_US", "fr_FR", "de_DE", "ja_JP")
-
-        installerHeader.set(project.file("packaging/header.bmp"))
-        installerSidebar.set(project.file("packaging/sidebar.bmp"))
+        installerLanguages = listOf("en_US", "fr_FR")
         license.set(project.file("LICENSE"))
+        deleteAppDataOnUninstall = true
     }
 }
 ```
 
-From 2.5.11, `menuCategory` and `shortcutName` are available on the NSIS targets as well
-(`nsis` and `nsis-web`). Both default to `null` — the shortcut lands in the start menu root
-and carries the application name — and `windows.menuGroup` is the default `menuCategory`, so
-the group you already declare for jpackage-era packaging keeps working.
+`nsis { }` maps to electron-builder's NSIS options. `script` and `includeScript` take your own
+`.nsi` and `.nsh` files. `deleteAppDataOnUninstall` removes `%APPDATA%\<appId>`. With a custom
+`includeScript`, delete that directory from your own `customUnInstall` macro instead.
 
 ## Build an MSI for enterprise deployment
 
-The MSI target is enabled by `TargetFormat.Msi`. Set `upgradeUuid` to a fixed value so Windows
-matches successor versions during an upgrade. Without a stable UUID, every new build is treated
-as a separate product.
-
-Install scope uses the same shape as NSIS — `windows.msi { perMachine }` maps 1:1 to
-electron-builder's `msi.perMachine`. MSI installs **per-machine** by default
-(`perMachine = true`). Prefer this over the deprecated inverted `windows.perUserInstall`
-flag; when `msi.perMachine` is unset, `perUserInstall` still applies for compatibility:
+Keep `upgradeUuid` fixed across releases. Windows matches successor versions by that UUID; without
+it, each build installs as a separate product.
 
 ```kotlin title="build.gradle.kts"
 windows {
-    upgradeUuid = "d24e3b8d-3e9b-4cc7-a5d8-5e2d1f0c9f1b"
-    menuGroup = "My Company" // MSI start-menu folder from 2.5.10
     msi {
-        perMachine = false // per-user MSI (Program Files → user-local)
-        oneClick = false   // assisted wizard (jpackage-style)
-        runAfterFinish = false
+        perMachine = false        // per-user install; default is true
+        oneClick = false          // assisted wizard
         createDesktopShortcut = true
-        createStartMenuShortcut = true
-        // menuCategory = "My Company" // optional; windows.menuGroup is the default
-        // shortcutName = "My App"
     }
 }
 ```
 
-From 2.5.10 the remaining installer options reach electron-builder. Defaults match
-electron-builder (`oneClick`, `runAfterFinish`, and both shortcut flags are `true`). Set
-`oneClick = false` for the assisted wizard jpackage used to produce. `windows.menuGroup` is
-the default `menuCategory`, so a start-menu folder you already declare for NSIS applies to
-MSI as well. `windows.menu` / `windows.shortcut` are not mapped: their jpackage defaults
-(`false`) are the opposite of electron-builder's (`true`).
+`perMachine`, `oneClick`, `runAfterFinish`, and both shortcut flags default to `true`.
+`windows.perUserInstall` is deprecated. `windows.menu` and `windows.shortcut` do not apply to MSI.
+For custom dialogs or registry changes, use NSIS.
 
 ## Build an AppX or MSIX package
 
-AppX targets produce an `.appx` (or a `.msixbundle` via CI). The Desktop Bridge runs with
-`runFullTrust`, so the app is not sandboxed in the Windows sense, but the format is accepted by
-the Microsoft Store and supports clean install and uninstall.
-
-```kotlin
+```kotlin title="build.gradle.kts"
 windows {
     appx {
-        // Sideload identity — any CN that matches your signing certificate
         identityName = "MyCompany.MyApp"
         publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
         publisherDisplayName = "My Company"
         applicationId = "MyApp"
-
-        languages = listOf("en-US", "fr-FR")
-        backgroundColor = "#001F3F"
-        storeLogo.set(project.file("packaging/appx/StoreLogo.png"))
-        square44x44Logo.set(project.file("packaging/appx/Square44x44Logo.png"))
         square150x150Logo.set(project.file("packaging/appx/Square150x150Logo.png"))
-        wide310x150Logo.set(project.file("packaging/appx/Wide310x150Logo.png"))
-
-        // Store requires MinVersion > 10.0.17134.0
-        minVersion = "10.0.17763.0"
-        maxVersionTested = "10.0.22621.0"
+        minVersion = "10.0.17763.0" // the Store requires more than 10.0.17134.0
     }
 }
 ```
 
-<Callout type="warn" title="Developer Mode required for local AppX builds">
-Local AppX builds need Windows Developer Mode enabled (Settings → System → For developers).
-GitHub-hosted Windows runners already have it on.
+<Callout type="warn" title="Microsoft Store identity">
+For a Store submission, `identityName`, `publisher`, and `publisherDisplayName` must match the
+values Partner Center assigned to your reservation. `publisher` is the `CN=<GUID>` from Partner
+Center, not your signing certificate's subject.
 </Callout>
 
-<Callout type="warn" title="Microsoft Store identity">
-For Microsoft Store submissions, `identityName`, `publisher`, and `publisherDisplayName` must
-match the values Partner Center assigned to your reservation; the Store rejects mismatches at
-upload time. `publisher` is the `CN=<GUID>` issued by Partner Center, not your local signing
-certificate's CN.
-</Callout>
+Building AppX locally needs Windows Developer Mode (Settings, System, For developers). The app runs
+with `runFullTrust` and keeps Win32 access. The `build-windows-appxbundle` CI action merges amd64
+and arm64 into one `.msixbundle`. AppX uses the [sandboxed pipeline](/docs/packaging/sandboxing).
 
 ## Enable Portable mode
 
-`TargetFormat.Portable` produces a single executable that unpacks to a temporary directory at
-launch. No installer UI, no admin rights, no registry entries — useful for thumb-drive
-distribution.
-
-Portable packages are self-extracting archives: higher `compressionLevel` values shrink the
-download but slow first launch while the payload unpacks. From 2.3.1, override only the
-portable format when the root level is set high for DEB/DMG:
+`TargetFormat.Portable` builds one executable that needs no installer, admin rights, or registry
+entries. It unpacks at each launch, so a lower compression level starts faster:
 
 ```kotlin title="build.gradle.kts"
-nativeDistributions {
-    compressionLevel = CompressionLevel.Ultra
-    windows {
-        portable {
-            compressionLevel = CompressionLevel.Normal
-        }
-    }
+windows {
+    portable { compressionLevel = CompressionLevel.Normal }
 }
 ```
 
 ## Add file associations and deep links
 
-Declare associations and URL protocols on `nativeDistributions`; they propagate into every
-Windows format:
+Associations and protocols declared on `nativeDistributions` reach every Windows format:
 
-```kotlin
+```kotlin title="build.gradle.kts"
 nativeDistributions {
-    protocol("MyApp", "myapp")  // myapp://… deep links
-    fileAssociation(
-        mimeType = "application/x-myapp",
-        extension = "myapp",
-        description = "MyApp Document",
-    )
+    protocol("MyApp", "myapp") // myapp:// deep links
+    fileAssociation(mimeType = "application/x-myapp", extension = "myapp", description = "MyApp Document")
 }
 ```
 
-For a Windows-specific file icon, call `windows.fileAssociation(...)` instead.
+Use `windows.fileAssociation(...)` to set a Windows-specific icon.
+
+## Ship the ANGLE libraries
+
+Nucleus renders through ANGLE on Direct3D 11 on Windows. The DLLs come with the window module as
+the transitive dependency `dev.nucleusframework:nucleus.angle-natives` (x64 and arm64), so you add
+nothing. They ship [next to the app](/docs/packaging#native-libraries-next-to-the-app).
 
 ## Reference
 
-The `windows { }` block exposes `iconFile`, `packageName`, `console`, `dirChooser`,
-`perUserInstall` (deprecated), `shortcut`, `menu`, `menuGroup`, `upgradeUuid`,
-`msiPackageVersion`, and `exePackageVersion`, plus the sub-blocks `nsis { }`, `msi { }`,
-`appx { }`, `portable { }`, and `signing { }`. See the
-[Gradle DSL reference](/docs/reference/gradle-dsl) for every property.
-
-## Notes
-
-- The MSI installer is built by electron-builder's WiX wrapper. For enterprise MSI
-  customization beyond installation paths (custom dialogs, registry tweaks), use NSIS instead.
-- `latest.yml` (Windows update metadata) is generated for NSIS, MSI, and Portable. AppX is
-  store-managed and has no auto-update YML.
-- `WindowsJumpListManager.setProcessAppId()` is called automatically on Windows during startup,
-  so taskbar grouping and AUMID-aware notifications work without extra configuration.
+The plugin generates `latest.yml` for NSIS, NSIS Web, MSI, and Portable; AppX updates come from the
+Store. Nucleus sets the AppUserModelID at startup, so taskbar grouping and notifications work. The
+full `windows { }` block is in the [Gradle DSL reference](/docs/reference/gradle-dsl).
 
 ## What's next
 
-- [Code signing](/docs/packaging/code-signing) — PFX and Azure Artifact Signing for Windows builds.
-- [Publishing](/docs/packaging/publishing) — push releases to GitHub, S3, or a generic server.
-- [CI/CD](/docs/packaging/ci-cd) — build and sign Windows packages on GitHub Actions.
-- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` configuration surface.
+- [Code signing](/docs/packaging/code-signing#sign-on-windows): PFX and Azure Artifact Signing.
+- [Auto-update](/docs/packaging/auto-update): update NSIS and MSI installs in place.
+- [CI/CD](/docs/packaging/ci-cd): build, bundle, and sign Windows packages on GitHub Actions.

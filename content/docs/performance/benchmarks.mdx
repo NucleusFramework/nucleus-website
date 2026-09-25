@@ -1,27 +1,19 @@
 ---
 title: Benchmarks
-description: Measured cross-runtime benchmark results — one Geekbench-style suite run inside a real Compose desktop app across JVM JIT, GraalVM Native Image, SwiftUI, Tauri, and Flutter.
+description: Measured results of one CPU, rendering and list-load suite run inside a Compose desktop app on the JVM, GraalVM Native Image, SwiftUI, Tauri and Flutter.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
 The [`benchmark-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/benchmark-demo)
-example runs one Geekbench-style suite — 13 CPU kernels, geometric render ramps, and a list-load
-bench — inside a real Compose desktop app, then re-implements the same kernels byte-for-byte in
-SwiftUI, Tauri, and Flutter. Every variant runs the identical suite on the same machine, so the
-numbers are directly comparable. This page presents the measured results.
-
-## Setup
-
-- **Date:** 2026-07-16
-- **Machine:** Apple M4, 10 cores, AC power, thermally stable
-- **Toolchains:** Oracle GraalVM 25.1.3+9.1 (Java 25.0.3), OpenJDK 26.0.1, Gradle daemon JBR 21
-- **Protocol:** each variant self-runs its suite (3 discarded warmups, then best-of-5 over the CPU kernels). Runs are strictly sequential, one app at a time; peak RSS is sampled during each run. Built-in self-checks pass everywhere.
+example runs one suite inside a Compose desktop app: 13 CPU kernels, three rendering ramps and a
+list-load test. The same kernels are ported to SwiftUI, Tauri and Flutter. Every variant ran on an
+Apple M4 on 2026-07-16.
 
 <Callout type="info">
-Composite scores are only comparable within an identical suite. Every value below comes from the
-same suite and the same machine session. CPU and GFX: higher is better. list, peak RAM, and app
-size: lower is better.
+Higher is better for CPU and GFX; lower is better for list, peak RAM and app size. Composite
+scores compare only within this suite.
 </Callout>
 
 ## Summary
@@ -41,28 +33,21 @@ Sorted by composite CPU score.
 | 9 | **aot-os** | GraalVM Native size-opt (`-Os`) | 80.1 | 10433 | 17.3 | 326 MB | 129 MB |
 | 10 | **flutter** | Dart AOT + Impeller | 57.3 | 15133 | 17.2 | 196 MB | 37 MB |
 
-## Key takeaways
+† Includes the WebKit processes; an upper bound. ‡ Excludes the system engine (SwiftUI and AppKit,
+or WebKit), so it does not compare directly with the variants that ship their runtime.
 
-- **Raw CPU.** GraalVM JIT leads (146.7). The LLVM baselines (Tauri 142, SwiftUI 139) and OpenJDK C2 (138–140) are bunched together. GraalVM Native only catches the JVM/LLVM pack **with PGO** (100.8 → 132.7); without a profile, `matmul` collapses (3877 vs 12225 MFLOP/s). `-O2` and `-Os` trail further behind.
-- **The PGO sweet spot.** `aot-o3-pgo` reaches near-JVM CPU (132.7) with **2.5× lower RAM** (269 MB vs 616–695 MB), a compact `.app` (129 MB), and fast startup. The cost is the PGO flow: instrumented build → GUI run → rebuild. PGO also shrinks the image (174 MB → 129 MB).
-- **RAM.** Flutter is the leanest (196 MB), ahead of SwiftUI (268) and GraalVM Native (269–326). The JVMs sit at 616–695 MB. Tauri is the heaviest (794 MB) once the WebKit process tree is counted (†).
-- **Startup / list.** Native ~17 ms, JVM ~21 ms, SwiftUI 14 ms (best), Tauri 233 ms (WebView DOM/canvas list rendering — an order of magnitude slower).
-- **Lowest CPU is Flutter** (57.3): `raytracer` at a quarter of the pack, weak `matmul`/`sha`/`sieve` — but it compensates with top-tier rendering (GFX 15133).
+## Read the results
 
-<Callout type="warn" title="Tauri RAM — the multi-process WebView pitfall (†)">
-Tauri/WKWebView is multi-process on macOS. The canvas and JS run in separate WebKit processes
-(`com.apple.WebKit.WebContent`, `.GPU`, `.Networking`), not in the app binary. The main-process
-RSS alone is 177 MB, but the real footprint — summing the WebKit process tree — is 794 MB, making
-Tauri the heaviest variant in RAM, not the lightest. (Summing RSS slightly overcounts shared
-`WebKit.framework` pages, so 794 MB is an upper bound; the 177→794 gap is large and real.)
-</Callout>
-
-<Callout type="info" title="App size — self-contained vs system runtime (‡)">
-The self-contained variants ship their own runtime, so their weight is the full `.app` (runtime +
-Skiko/dylibs + jars/binary): JVM (jlink), GraalVM Native, Flutter. SwiftUI and Tauri rely on the OS
-runtime — SwiftUI on the system SwiftUI/AppKit, Tauri on the system WebKit — so their binaries
-(0.34 / 5.6 MB) exclude the engine macOS provides. The two size classes are not directly comparable.
-</Callout>
+- **CPU.** GraalVM JIT scores highest (146.7). Tauri (142), SwiftUI (139) and OpenJDK C2 (138 to
+  140) sit close together. GraalVM Native reaches that group only with PGO (100.8 to 132.7).
+- **PGO.** `aot-o3-pgo` reaches 132.7 CPU with 269 MB of peak RAM, against 616 to 695 MB for the
+  JVM variants. The cost is the PGO workflow: an instrumented build, a GUI run, then a rebuild.
+  The profile also shrinks the image from 174 MB to 129 MB.
+- **RAM.** Flutter uses the least (196 MB), then SwiftUI (268) and GraalVM Native (269 to 326).
+  The JVM variants use 616 to 695 MB, and Tauri 794 MB (†).
+- **List load.** GraalVM Native takes about 17 ms, the JVM about 21 ms, SwiftUI 14 ms and Tauri
+  233 ms.
+- **Flutter** has the lowest CPU score (57.3) but one of the highest GFX scores (15133).
 
 ## Per-kernel CPU
 
@@ -84,12 +69,9 @@ Throughput, higher is better.
 | matmul_mt | 62088 | 69442 | 64038 | 33013 | 63925 | 60113 | 19988 | 17255 | 15956 | 9731 |
 | blur_mt | 345.0 | 188.4 | 244.1 | 261.7 | 238.3 | 285.9 | 203.5 | 194.4 | 155.1 | 40.0 |
 
-The Graal compiler signature (JIT and AOT+PGO alike) is strong `blur`/`sieve`, dull `fft`/`sha`. The
-known PGO regression on `mandelbrot` reproduces (1.98 with the profile vs 3.32 without).
-
 ## Render ramps
 
-Maximum sustained load at ≥ 55 fps, higher is better.
+Highest load sustained at 55 fps or more, higher is better.
 
 | Variant | Particles | Stars | Texts |
 |---------|----:|----:|----:|
@@ -103,24 +85,42 @@ Maximum sustained load at ≥ 55 fps, higher is better.
 
 ## Reproduce
 
-```bash title="terminal"
+```shell title="terminal"
 cd examples/benchmark-demo
 
-# JVM + native matrix (homogeneous RAM):
+# JVM and native matrix
 JAVA_HOME=<jbr-21> GRAALVM_HOME=<graalvm-25> JDK_C2_HOME=<jdk-26> \
   ONLY="jvm-c2 jvm-c2-pg jvm-graal aot-os aot-o2 aot-o3 aot-o3-pgo" ./run-all.sh
 
-# ports:
+# Ports
 ONLY="swiftui tauri flutter" ./run-all.sh
 ```
 
-Native builds must run with `JAVA_HOME=<graalvm>` (the current JVM must be GraalVM). Otherwise a
-stale Gradle-provisioned Oracle JDK 25 without `native-image` can match the `vendor=ORACLE`,
-`version=25` spec and get selected, failing the compile. Each variant writes a result JSON; the
-full per-variant appendix lives in the example's `RESULTS.md`.
+Run the native builds with `JAVA_HOME` pointing at GraalVM, or Gradle may pick a cached Oracle
+JDK 25 without `native-image` and the compile fails. Each variant writes a result JSON, and the
+example's `RESULTS.md` holds the full per-variant appendix.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- **Setup:** Apple M4, 10 cores, on AC power. Oracle GraalVM 25.1.3+9.1 (Java 25.0.3), OpenJDK
+  26.0.1, Gradle daemon on JBR 21.
+- **Protocol:** 3 discarded warmups, then the best of 5 over the CPU kernels. Variants run one at
+  a time in one session, peak RSS is sampled during each run, and every self-check passes.
+- **Tauri (†):** the Tauri process alone has a 177 MB RSS. The 794 MB sums the WebKit processes
+  (`WebContent`, `GPU`, `Networking`) and counts shared `WebKit.framework` pages more than once.
+  Its list goes through the DOM and a canvas.
+- **Kernels:** without PGO, `matmul` drops to 3877 MFLOP/s against 12225 with it. Graal does well
+  on `blur` and `sieve`, less well on `fft` and `sha256`, and PGO regresses `mandelbrot` (1.98
+  against 3.32).
+- **Reproduce:** Gradle picks the wrong JDK because a cached Oracle JDK 25 matches the
+  `vendor=ORACLE`, `version=25` toolchain spec.
+
+</Accordion>
+</Accordions>
 
 ## What's next
 
-- [GraalVM overview](/docs/performance/graalvm) — what native-image gives a Nucleus app.
-- [Configuration](/docs/performance/graalvm/configuration#optimize-with-a-pgo-profile) — set up the PGO profile behind the `aot-o3-pgo` result.
-- [AOT cache](/docs/performance/aot-cache) — JDK 25+ startup on the JVM path.
+- [GraalVM Native Image](/docs/performance/graalvm): what a native image changes for a Nucleus app.
+- [Optimize with a PGO profile](/docs/performance/graalvm/configuration#optimize-with-a-pgo-profile): the setup behind `aot-o3-pgo`.
+- [AOT cache](/docs/performance/aot-cache): faster startup on the JVM path.

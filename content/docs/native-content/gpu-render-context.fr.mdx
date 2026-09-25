@@ -1,0 +1,89 @@
+---
+title: Contexte de rendu GPU
+description: Donnez à un moteur de rendu du même processus le DirectContext Skia et le device GPU de la scène, pour qu'il dessine sans second device ni copie par frame.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TaoGpuRenderContext` publie le contexte GPU de la surface Compose englobante : le `DirectContext`
+Skia avec lequel la scène dessine et le device natif qui le porte. Un moteur de rendu du même
+processus, comme un moteur de cartes, une vue 3D ou une bibliothèque de graphiques, y alloue ses
+render targets, et Compose les échantillonne sans handle partagé ni copie. Il est inclus dans
+`nucleus-application`.
+
+Pour un producteur sur son propre device ou dans un autre processus, utilisez
+[`TextureView`](/docs/native-content/texture-view).
+
+## Obtenir le contexte
+
+Appelez `rememberTaoGpuRenderContext()` dans une surface qui possède un contexte GPU : le contenu
+d'une `DecoratedWindow`, une couche de popup native, un overlay de `NativeView` ou un panneau de
+barre système. Il renvoie `null` pendant la mise en place et la destruction, et quand aucun
+contexte matériel n'existe.
+
+```kotlin
+@Composable
+fun MapViewport() {
+    val renderContext = rememberTaoGpuRenderContext() ?: return
+    // Un contexte reconstruit est une nouvelle instance : indexez l'état du moteur dessus.
+    val renderer = remember(renderContext) { MapEngineRenderer(renderContext) }
+    DisposableEffect(renderContext) {
+        onDispose { renderContext.runOnGpuThread { renderer.releaseGpuResources() } }
+    }
+    LaunchedEffect(renderer) {
+        while (true) {
+            withFrameNanos { renderer.renderFrame() }   // Travail GPU dans le callback
+        }
+    }
+}
+```
+
+## Choisir le backend
+
+| Type | Plateformes | `backend` | Membre supplémentaire |
+| --- | --- | --- | --- |
+| `TaoMetalRenderContext` | macOS | `TaoRenderBackend.METAL` | `metalDevicePtr` : l'`id<MTLDevice>` |
+| `TaoOpenGlRenderContext` | Linux, Windows | `TaoRenderBackend.OPENGL` | `withContextCurrent { }` : active le contexte GL de la surface |
+
+Les deux exposent `skiaContext` et `runOnGpuThread { }`. Sous Windows, `OPENGL` désigne le GLES 3
+d'ANGLE sur Direct3D 11 : résolvez les points d'entrée via l'`eglGetProcAddress` d'ANGLE.
+
+## Respecter la propriété et la durée de vie
+
+- Chaque handle est emprunté : ne le retenez, ne le relâchez et ne le libérez jamais.
+- Le contexte est reconstruit au détachement de la fenêtre, lors d'un masquage/affichage sous
+  Wayland ou à la destruction d'un popup ou d'un panneau de barre système.
+  `rememberTaoGpuRenderContext()` renvoie alors une nouvelle instance ou `null`. Indexez l'état
+  avec `remember(renderContext)` et libérez les ressources GPU dans un
+  `DisposableEffect(renderContext)`, à l'intérieur de `runOnGpuThread` ou de `withContextCurrent`.
+- Appelez chaque membre depuis le thread UI (le thread principal sous macOS).
+
+## Cadencer les frames
+
+Lancez le travail GPU dans le callback de `withFrameNanos`, ou pendant la composition, le layout
+ou le dessin. Sous Linux, le code qui s'exécute après la suspension de `withFrameNanos` obtient
+`null` de `withContextCurrent` presque à chaque vsync. `withContextCurrent` peut s'imbriquer sans
+risque.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Sous macOS, `runOnGpuThread` passe sur le thread de rendu qui possède le contexte Metal et
+  bloque jusqu'au retour de l'action. Sous Linux et Windows, il s'exécute directement sur le
+  thread de la boucle d'événements.
+- Sous Linux, l'hôte confie le contexte EGL à un thread de swap pour `eglSwapBuffers` juste après
+  chaque frame, d'où la règle de cadencement.
+- `withContextCurrent` restaure le contexte précédent et réinitialise le cache d'état GL de
+  Skia : vos appels GL ne corrompent pas la frame de la scène.
+- Tant qu'une scène a des imports `TextureView` actifs ou des consommateurs du contexte GPU,
+  Nucleus garde la VSync active pendant la boucle modale de déplacement et de redimensionnement de
+  Windows et les rafales de redimensionnement sous Linux.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [TextureView](/docs/native-content/texture-view) : importer les frames GPU d'un producteur externe.
+- [Vues natives](/docs/native-content/native-views) : intégrer des widgets natifs interactifs.
+- [Threading](/docs/concepts/threading) : le thread UI sur lequel s'exécutent ces appels.

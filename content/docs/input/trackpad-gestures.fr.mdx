@@ -1,0 +1,109 @@
+---
+title: Gestes trackpad
+description: Gérez le défilement, le pincement et la rotation au trackpad avec les modifiers Compose standard.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Les gestes trackpad arrivent dans Compose sous forme de pointer events standard.
+`Modifier.scrollable`, les listes lazy et `Modifier.transformable` les gèrent sans code
+supplémentaire, et vous n'ajoutez aucune dépendance en plus de `nucleus-application`.
+
+## Événements par geste
+
+| Geste | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Défilement à deux doigts | `PanStart` / `PanMove` / `PanEnd` | `Scroll` | `Scroll` |
+| Molette de souris | `Scroll` | `Scroll` | `Scroll` |
+| Pincement, Ctrl + molette | `ScaleStart` / `ScaleChange` / `ScaleEnd` | `Scale*` | `Scale*` |
+| Rotation | deux pointeurs `Touch` | aucun | deux pointeurs `Touch` |
+
+## Défiler
+
+Les conteneurs défilants fonctionnent tels quels. Seul un handler `pointerInput` maison demande
+de l'attention : sur macOS, un balayage au trackpad arrive en `PanMove`, et un handler qui n'écoute
+que `Scroll` le manque.
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.first()
+            when (event.type) {
+                PointerEventType.PanMove -> move(change.panOffset)
+                PointerEventType.Scroll -> move(change.scrollDelta)
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+Pour recevoir chaque pas de trackpad en `Scroll`, lancez la JVM avec
+`-Dnucleus.tao.trackpadPanEvents=false`.
+
+## Zoomer par pincement
+
+<Callout type="warn" title="Modifié en 3.0">
+`detectTransformGestures` ne voit plus le pincement. Utilisez `Modifier.transformable` ou écoutez
+les événements `Scale*`. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x#gérer-les-événements-de-pincement-et-de-pan).
+</Callout>
+
+```kotlin
+@Composable
+fun ZoomableImage() {
+    var scale by remember { mutableFloatStateOf(1f) }
+    val state = rememberTransformableState { zoomChange, _, _ -> scale *= zoomChange }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .transformable(state),
+    )
+}
+```
+
+Dans un handler maison, lisez `PointerInputChange.scaleFactor` sur `ScaleChange`. C'est un ratio
+par événement : au-dessus de `1f` le contenu grossit, en dessous il rétrécit.
+
+## Faire pivoter
+
+`Modifier.transformable` et `detectTransformGestures` lisent l'angle de rotation sur macOS et
+Linux. Windows ne signale aucune rotation au trackpad. Un pincement et une rotation ne
+s'exécutent jamais en même temps : le geste qui commence en premier garde le trackpad jusqu'à sa
+fin.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- `panOffset` utilise les 10 dp par unité que Compose Desktop applique à un cran de molette : un
+  pan et un cran déplacent le contenu de la même distance.
+- `PanEnd` arrive après la queue d'inertie de macOS, et Compose ne lance pas une seconde inertie.
+- Ctrl + molette n'a pas de phase de fin : `ScaleEnd` suit 120 ms après le dernier cran.
+- Sous Linux, GDK signale l'échelle et la rotation comme un seul geste. Il s'ouvre en pincement,
+  et la rotation prend la main dès qu'il a tourné de 10° avec un zoom resté dans ±10 %.
+- `TaoWindow.onTrackpadGesture` expose le flux brut (macOS et Windows). Enregistrer un listener
+  remplace celui qu'utilise `DecoratedWindow`, ce qui coupe le pincement et la rotation dans cette
+  fenêtre.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | Défilement au trackpad sur macOS |
+| `PointerInputChange.panOffset` | Delta du pan en pixels |
+| `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd` | Pincement et Ctrl + molette |
+| `PointerInputChange.scaleFactor` | Ratio de zoom par événement |
+| `-Dnucleus.tao.trackpadPanEvents=false` | Envoie les pans du trackpad en `Scroll` |
+
+## Et ensuite
+
+- [Stylet et tactile](/docs/input/pen-stylus) : contacts sur écran tactile et pression.
+- [Icônes de pointeur](/docs/input/pointer-icons) : les curseurs au-delà des quatre que définit Compose.
+- [Migrer depuis 2.x](/docs/migrate/from-2.x) : tous les changements de comportement de la 3.0.

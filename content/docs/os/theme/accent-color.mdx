@@ -1,0 +1,67 @@
+---
+title: System accent color
+description: Read the user's OS accent color and high-contrast setting as Compose state that follows system changes.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`system-color` reads the user's accent color and high-contrast setting on macOS, Windows and
+Linux. Both are composables that recompose when the user changes them in the system settings.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.system-color:<version>")
+}
+```
+
+## Read the accent color
+
+```kotlin
+import dev.nucleusframework.systemcolor.systemAccentColor
+
+@Composable
+fun App() {
+    val accent = systemAccentColor()
+    val scheme = if (accent != null) darkColorScheme(primary = accent) else darkColorScheme()
+
+    MaterialTheme(colorScheme = scheme) {
+        // Recomposes when the user picks another accent.
+    }
+}
+```
+
+`systemAccentColor()` returns `null` when the OS does not report an accent, for example on a Linux
+desktop whose portal lacks the `accent-color` key. Fall back to your brand color.
+
+## Read the high-contrast setting
+
+```kotlin
+val highContrast = isSystemInHighContrast()
+// Strengthen borders and contrast tokens when highContrast is true.
+```
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Each OS bridge subscribes to the system's change notifications; nothing polls.
+- On Linux, the values come from the `accent-color` and `contrast` keys of
+  `org.freedesktop.portal.Settings`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Function | Returns |
+| --- | --- |
+| `isSystemAccentColorSupported(): Boolean` | Whether the OS can report an accent color. Not composable, so you can call it anywhere |
+| `@Composable systemAccentColor(): Color?` | The current accent color, or `null` |
+| `@Composable isSystemInHighContrast(): Boolean` | Whether the OS runs in high-contrast mode |
+
+## What's next
+
+- [Dark mode detector](/docs/os/theme/dark-mode): combine the accent with the system theme.
+- [Accessibility](/docs/input/accessibility): expose your UI to screen readers.
+- [Toolkits](/docs/toolkits): native window looks for each OS.

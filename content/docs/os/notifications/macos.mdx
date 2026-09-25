@@ -1,0 +1,120 @@
+---
+title: Notifications on macOS
+description: Kotlin bindings for Apple's UserNotifications framework, with authorization, categories, attachments, text input, triggers, and interruption levels.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-macos` gives you Apple's UserNotifications framework from Kotlin: authorization,
+scheduled requests, action categories with text input, attachments, and the Dock badge. Add
+`dev.nucleusframework:nucleus.notification-macos`.
+
+## Send a notification
+
+```kotlin
+NotificationCenter.requestAuthorization(
+    setOf(AuthorizationOption.ALERT, AuthorizationOption.SOUND, AuthorizationOption.BADGE),
+) { granted, error ->
+    if (!granted) return@requestAuthorization
+    NotificationCenter.add(
+        NotificationRequest(
+            identifier = "greeting",
+            content = NotificationContent(
+                title = "Hello",
+                body = "Welcome to Nucleus",
+                sound = NotificationSound.Default,
+                interruptionLevel = InterruptionLevel.TIME_SENSITIVE,
+                attachments = listOf(
+                    NotificationAttachment(identifier = "img", url = imageFile.absolutePath),
+                ),
+            ),
+            trigger = NotificationTrigger.TimeInterval(interval = 5.0), // null delivers now
+        ),
+    )
+}
+```
+
+<Callout type="warn">
+macOS delivers notifications only to a bundled app. Run `./gradlew runDistributable` or
+`./gradlew runGraalvmNative` during development: a plain `./gradlew run` has no bundle, and the
+system drops its notifications without an error.
+</Callout>
+
+Delegate methods and result callbacks run on a worker thread. Switch to `Dispatchers.Main` before
+you touch Compose state.
+
+## Add actions and text input
+
+Register categories once, then reference one from `NotificationContent.categoryIdentifier`:
+
+```kotlin
+NotificationCenter.setNotificationCategories(setOf(
+    NotificationCategory(
+        identifier = "MESSAGE",
+        actions = listOf(
+            TextInputNotificationAction(
+                identifier = "REPLY",
+                title = "Reply",
+                textInputButtonTitle = "Send",
+                textInputPlaceholder = "Type a reply…",
+            ),
+        ),
+        options = setOf(CategoryOption.CUSTOM_DISMISS_ACTION),
+    ),
+))
+
+NotificationCenter.setDelegate(object : NotificationCenterDelegate {
+    override fun willPresent(notification: DeliveredNotification) =
+        setOf(PresentationOption.BANNER, PresentationOption.SOUND)
+
+    override fun didReceive(response: NotificationResponse) {
+        handle(response.actionIdentifier, response.userText)
+    }
+})
+```
+
+`willPresent` decides how a notification shows while your app is in front. It runs synchronously,
+so return fast; an empty set hides the notification. Override `openSettings` to react to the
+notification settings button. If you also use `notification-common`, skip `setDelegate`: it
+installs its own.
+
+## Notes
+
+- Sandboxed apps need the notifications entitlement: point `macOS { entitlementsFile }` at an
+  `.entitlements` file that declares it.
+- To bypass Focus modes, set `InterruptionLevel.CRITICAL` and request
+  `AuthorizationOption.CRITICAL_ALERT`. Critical sounds need the same entitlement.
+- A bundle identifier mismatch causes most silent failures. Check that `NucleusApp.appId`
+  matches the bundle id of the packaged `.app`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Each call wraps the matching `UNUserNotificationCenter` method through a JNI bridge.
+- Callbacks run on a Nucleus thread named `NucleusNotificationCallback-N`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `NotificationCenter.isAvailable` | `false` off macOS, without the native library, or without an app bundle. Calls then do nothing; error callbacks receive the reason. |
+| `AuthorizationOption` | `BADGE`, `SOUND`, `ALERT`, `CRITICAL_ALERT`, `PROVIDES_APP_NOTIFICATION_SETTINGS`, `PROVISIONAL`, `TIME_SENSITIVE` |
+| `getNotificationSettings { }` | Current `authorizationStatus` and per-feature settings |
+| `NotificationTrigger.TimeInterval(interval, repeats)` | Seconds. Repeating needs `interval >= 60`. |
+| `NotificationTrigger.Calendar(dateComponents, repeats)` | A date from `DateComponents`, such as every Monday at 9:00 |
+| `NotificationSound` | `Default`, `Named(name)`, `DefaultCritical`, `CriticalNamed(name, volume)`, `DefaultCriticalWithVolume(volume)` |
+| `ActionOption` | `AUTHENTICATION_REQUIRED`, `DESTRUCTIVE`, `FOREGROUND` |
+| `setBadgeCount(n)` / `getBadgeCount { }` | Dock badge |
+| `getPendingNotifications { }` / `getDeliveredNotifications { }` | Queued or on-screen requests |
+| `removePendingNotifications(ids)` / `removeDeliveredNotifications(ids)` | Remove entries; `removeAll…()` variants clear everything |
+
+## What's next
+
+- [Cross-platform notifications](/docs/os/notifications): the shared `NotificationManager` API.
+- [Notifications on Windows](/docs/os/notifications/windows): toasts through `WindowsNotificationCenter`.
+- [Notifications on Linux](/docs/os/notifications/linux): freedesktop notifications through `LinuxNotificationCenter`.
+- [Code signing](/docs/packaging/code-signing): sign and bundle the app so macOS delivers its notifications.

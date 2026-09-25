@@ -1,0 +1,98 @@
+---
+title: HiDPI et rendu du texte
+description: Comment les fenêtres Nucleus suivent le facteur d'échelle de chaque écran, et comment fonctionne le texte ClearType sous Windows.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Chaque fenêtre Nucleus suit le facteur d'échelle de l'écran où elle se trouve et se redessine quand
+ce facteur change. Gardez votre mise en page en `Dp` : `Modifier.size(48.dp)` couvre 48 pixels
+physiques à 1.0 et 96 à 2.0.
+
+## Lire la densité courante
+
+```kotlin
+@Composable
+fun ShowDensity() {
+    val density = LocalDensity.current
+    Text("Scale: ${density.density}x · font scale: ${density.fontScale}")
+}
+```
+
+`LocalDensity` se met à jour quand vous déplacez la fenêtre vers un autre écran, branchez un
+moniteur ou changez l'échelle du système. Hors composition, lisez `TaoWindow.scaleFactor`, ou le
+`TaoMonitor.scaleFactor` de chaque écran :
+
+```kotlin
+val scales = TaoMonitors.all().associate { it.name to it.scaleFactor }
+```
+
+Sous Linux, les facteurs d'échelle sont entiers. Sur une sortie Wayland fractionnaire (125 %,
+150 %), Nucleus dessine à l'échelle entière et le compositeur met le résultat à l'échelle.
+
+## Afficher du texte ClearType sous Windows
+
+<Callout type="warn" title="Modifié en 3.0">
+Les fenêtres opaques sous Windows dessinent désormais le texte avec un lissage LCD (ClearType) au
+lieu d'un lissage en niveaux de gris. Voir [Migrer depuis la 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Vous n'écrivez aucun code pour cela. Le texte LCD fonctionne sous HotSpot, ProGuard et GraalVM
+Native Image, et exige la configuration `nucleus.application { }` du plugin Gradle Nucleus. Le
+texte reste en niveaux de gris sur les popups, les overlays `NativeView`, les fonds Mica et
+Acrylic, les fenêtres `transparent = true`, et quand ClearType est désactivé dans Windows.
+
+### Désactiver le texte LCD
+
+Pour garder un texte en niveaux de gris à l'exécution :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    jvmArgs("-Dnucleus.text.lcd=false")
+}
+```
+
+Ou ignorez le patch de compilation, ce qui rend aussi la propriété d'exécution sans effet :
+
+```properties title="gradle.properties"
+nucleus.text.lcd.patch=false
+```
+
+## Notes
+
+- Conservez les tailles de fenêtre en `Dp`, jamais en pixels, pour qu'elles survivent à un
+  changement d'échelle.
+- Sous Windows, les popups et `DecoratedDialog` prennent le DPI et la zone de travail de l'écran
+  où ils s'ouvrent, même s'il diffère de celui de la fenêtre propriétaire.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Windows déclare la prise en charge DPI Per-Monitor V2 au démarrage, y compris dans les images
+  natives GraalVM.
+- Le plugin Gradle modifie `FontRasterizationSettings.PlatformDefault` dans `ui-text-desktop` et
+  fait échouer le build si les classes Compose modifiées changent de forme.
+- Sous Linux, `nucleusApplication` appelle `applyLinuxHiDpiScale()` au démarrage pour le code AWT
+  et Swing. Si `sun.java2d.uiScale` n'est pas déjà défini, l'appel le règle et définit `GDK_SCALE`
+  quand la session ne l'a pas fait. Les fenêtres Nucleus n'en dépendent pas.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Description |
+|---|---|
+| `LocalDensity.current` | Densité Compose de la fenêtre qui affiche le composable. |
+| `TaoWindow.scaleFactor` | Facteur d'échelle actuel de l'écran de la fenêtre. |
+| `TaoMonitors.all()` / `TaoMonitor.scaleFactor` | Tous les écrans branchés et leur facteur d'échelle. |
+| `-Dnucleus.text.lcd=false` | Exécution : garder un texte en niveaux de gris sous Windows. |
+| `-Pnucleus.text.lcd.patch=false` | Compilation : ignorer le patch LCD de `ui-text-desktop`. |
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : la fenêtre dans laquelle vous affichez votre interface.
+- [État de la fenêtre](/docs/windows/window-state) : tailles, écrans et placement.
+- [Linux et Wayland](/docs/windows/linux-wayland) : détection de session et comportement sous
+  Wayland.

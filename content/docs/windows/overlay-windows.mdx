@@ -1,0 +1,160 @@
+---
+title: Overlay windows
+description: Build watermarks, desktop widgets, and heads-up overlays with transparent, click-through, always-on-bottom, and all-workspaces windows.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+An overlay sits outside the normal window stack: a watermark that ignores clicks, a widget pinned
+below other windows, a badge that follows you across workspaces. You build one with
+`DecoratedWindow` flags from `nucleus-application`.
+
+## Build a click-through watermark
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(
+        onCloseRequest = { },
+        state = rememberWindowState(
+            position = WindowPosition.Aligned(Alignment.BottomEnd),
+            size = DpSize(360.dp, 160.dp),
+        ),
+        title = "Watermark",
+        resizable = false,
+        undecorated = true,
+        transparent = true,
+        alwaysOnTop = true,
+        focusable = false,
+        clickThrough = true,
+        hiddenFromDock = true,
+        visibleOnAllWorkspaces = true,
+        forceX11 = true,
+    ) {
+        Watermark()
+    }
+}
+```
+
+Pair `clickThrough = true` with `focusable = false`: a window you cannot click has no use for
+keyboard focus.
+
+## Pin a widget below other windows
+
+A desktop widget swaps `alwaysOnTop` for `alwaysOnBottom` and keeps clicks:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = ::exitApplication,
+    title = "Nucleus widget",
+    undecorated = true,
+    transparent = true,
+    hiddenFromDock = true,
+    nativeContextMenu = true,
+    visibleOnAllWorkspaces = true,
+    forceX11 = true,
+    alwaysOnBottom = true,
+) {
+    WidgetSurface()
+}
+```
+
+`alwaysOnTop` and `alwaysOnBottom` exclude each other: the last one you set wins.
+
+<Callout type="warn">
+The window still shows in the taskbar and Alt+Tab unless you set `hiddenFromDock`. Native Wayland
+cannot glue a surface to the wallpaper.
+</Callout>
+
+## Toggle flags at run time
+
+`clickThrough`, `alwaysOnBottom`, and `visibleOnAllWorkspaces` are reactive. For imperative
+control, call the setters on `nucleusWindow.unsafe.taoWindow`:
+
+```kotlin
+fun applyOverlayMode(window: TaoWindow, passive: Boolean) {
+    window.setIgnoreCursorEvents(passive)
+    window.setAlwaysOnBottom(passive)
+    window.setVisibleOnAllWorkspaces(passive)
+}
+```
+
+`transparent` and `forceX11` apply at creation only.
+
+## Take an X11 surface on Wayland
+
+Stacking, position, and workspace flags do nothing on a native Wayland surface. `forceX11 = true`
+gives one window an XWayland surface and leaves the rest of the app on Wayland. To move the whole
+process, set `NUCLEUS_TAO_LINUX_RENDERER=x11` (or `GDK_BACKEND=x11`) before launch.
+
+`TaoWindow.isNativeWaylandSurface` tells you which surface a window received, after it is ready.
+To decide whether you can position a window, branch on `canPlaceOnScreen` instead. See
+[Linux and Wayland](/docs/windows/linux-wayland#branch-on-screen-placement).
+
+If `forceX11` finds no X server, the window stays on Wayland. Nucleus logs a warning for each flag
+that a native Wayland surface ignores.
+
+## Platform behavior
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+A transparent window keeps a shadow shaped to the drawn content. Floating above another app's
+full-screen Space is not supported.
+</Tab>
+<Tab value="Windows">
+`visibleOnAllWorkspaces` is a no-op. A window with `hiddenFromDock = true` already shows on every
+virtual desktop. A fully transparent window drops the system shadow and border.
+</Tab>
+<Tab value="Linux">
+Transparency works on X11 and Wayland. `alwaysOnBottom`, `visibleOnAllWorkspaces`, and positioning
+need X11: use `forceX11` per window or `NUCLEUS_TAO_LINUX_RENDERER=x11` for the process.
+</Tab>
+</Tabs>
+
+A mostly transparent window reads better with `undecorated = true` and custom chrome than with the
+stock `TitleBar`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- macOS: `clickThrough` sets `NSWindow.ignoresMouseEvents`, `visibleOnAllWorkspaces` uses
+  `NSWindowCollectionBehaviorCanJoinAllSpaces`.
+- Windows: `clickThrough` applies `WS_EX_TRANSPARENT | WS_EX_LAYERED`, `alwaysOnBottom` uses
+  `HWND_BOTTOM`.
+- Linux: `clickThrough` installs an empty GDK input region, `alwaysOnBottom` maps to
+  `_NET_WM_STATE_BELOW`, `visibleOnAllWorkspaces` to `gtk_window_stick()`.
+- Nucleus marks the Compose scene transparent, so dialog scrims and popups blend against the alpha
+  background.
+- Native Wayland ignores `WindowPosition.Aligned`; Nucleus logs this once per process.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Parameter | Default | Reactive | Description |
+|---|---|---|---|
+| `transparent` | `false` | No | Native surface with an alpha channel. |
+| `clickThrough` | `false` | Yes | Pointer events pass to whatever sits behind. |
+| `alwaysOnBottom` | `false` | Yes | Keeps the window below normal windows. Clears `alwaysOnTop`. |
+| `visibleOnAllWorkspaces` | `false` | Yes | Shows the window on every workspace or Space. |
+| `forceX11` | `false` | No | Linux only: XWayland surface for this window. |
+
+`HostedWindow` takes `alwaysOnBottom`. The Material and Jewel wrappers take `transparent`,
+`clickThrough`, `visibleOnAllWorkspaces`, and `forceX11`.
+
+| `TaoWindow` member | Description |
+|---|---|
+| `setIgnoreCursorEvents(ignore)` | Imperative `clickThrough`. |
+| `setAlwaysOnBottom(alwaysOnBottom)` | Imperative `alwaysOnBottom`. |
+| `setVisibleOnAllWorkspaces(visible)` | Imperative `visibleOnAllWorkspaces`. |
+| `isNativeWaylandSurface` | Window runs on a native Wayland surface. |
+| `canPlaceOnScreen` | App can read and set the window's screen position. |
+
+## What's next
+
+- [Windows](/docs/windows): the other `DecoratedWindow` parameters.
+- [Linux and Wayland](/docs/windows/linux-wayland): session detection, screen placement, and the
+  X11 fallback.
+- [Context menus](/docs/os/menus/context-menu): the menu an interactive widget needs.

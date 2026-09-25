@@ -1,0 +1,111 @@
+---
+title: Threading
+description: The UI thread that runs Compose under Nucleus, which callbacks reach it, how to port Swing-style code, and the Windows event-loop watchdog.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusApplication` runs the event loop on the thread that calls it, `main` in a standard app.
+That UI thread handles input, composition and drawing for every window, and `Dispatchers.Main`
+points at it, so `LaunchedEffect`, `rememberCoroutineScope()` and view-model scopes resume there.
+
+The AWT event dispatch thread (EDT) still exists, but it is a different thread. Code posted to it
+runs outside Compose's thread.
+
+## Native callbacks on the UI thread
+
+These modules call your code on the UI thread, so you can update Compose state directly:
+
+| Module | Callbacks |
+|---|---|
+| `notification-common` (macOS), `notification-windows`, `notification-linux` | Notification activations, actions, dismissals and failures |
+| `media-control` | Play, pause, next, previous, stop, seek |
+| `launcher-macos` / `launcher-linux` | Dock menu and Unity quicklist item clicks |
+| `menu-macos` | Menu actions and delegate events |
+
+<Callout type="warn" title="Changed in 3.0">
+These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as
+`SwingUtilities.isEventDispatchThread()` checks, must change. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Other modules call you on the thread that received the event. `global-hotkey`, for example, calls
+its listener from a native thread. Post to the UI thread with `NucleusUiThread` before touching UI
+state:
+
+```kotlin
+GlobalHotKeyManager.register(keyCode = KeyEvent.VK_F12) { _, _ ->
+    NucleusUiThread.post { viewModel.onHotKey() }
+}
+```
+
+`post` always queues the block, even from the UI thread, so callback order stays the same.
+
+## Port Swing-style code
+
+| Swing-style code | Replace with |
+|---|---|
+| `SwingUtilities.invokeLater { }`, `EventQueue.invokeLater { }` | `withContext(Dispatchers.Main) { }` or `NucleusUiThread.post { }` |
+| `Dispatchers.Swing` | `Dispatchers.Main` |
+| `SwingUtilities.isEventDispatchThread()` | Drop the check, or dispatch to `Dispatchers.Main` |
+| `javax.swing.Timer` | `LaunchedEffect` with `delay` |
+
+A Swing `JFrame` can still run beside Nucleus windows, on the EDT. Reach it with
+`SwingUtilities.invokeLater` and come back with `Dispatchers.Main`.
+
+## Detect a stalled event loop
+
+On Windows, Nucleus logs `SEVERE` with a full thread dump when a window stops responding. Register
+handlers to react, for example to report the hang:
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    onUnresponsive { crashReporter.reportHang() }
+    onResponsive { crashReporter.hangEnded() }
+    // ...
+}
+```
+
+- Both handlers run on a dedicated watchdog thread, since the UI thread is the stuck one. Work you
+  post to `Dispatchers.Main` from them waits until the stall ends.
+- `onResponsive` fires only after a stall that `onUnresponsive` reported.
+- Each call replaces the previous handler, so calling them from the application block is safe.
+- Nucleus shows no dialog by default.
+
+Wrap long synchronous UI-thread work in `expectUnresponsive` so it is not reported. It returns the
+block's result and works from any thread:
+
+```kotlin
+expectUnresponsive { importHugeProjectSynchronously() }
+```
+
+| System property | Effect |
+|---|---|
+| `-Dnucleus.tao.watchdog=false` | Disables the watchdog. `true` forces it on under a debugger. |
+| `-Dnucleus.tao.watchdogGraceMs=<ms>` | Extra time before a stall is reported. Default `5000`. |
+| `-Dnucleus.tao.watchdogDialog=true` | Also shows the native error dialog on a stall. |
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- On macOS the event loop runs on the process main thread, as AppKit requires.
+- Nucleus registers its `Dispatchers.Main` with a higher priority than `kotlinx-coroutines-swing`,
+  so the Swing dispatcher on the classpath does not take over.
+- Outside `nucleusApplication`, `NucleusUiThread.post` falls back to `EventQueue.invokeLater`, so
+  a Swing host gets its callbacks on the EDT. `isRegistered` tells you which case applies.
+- The watchdog asks Windows every 2 seconds whether each window is hung, sends nothing to the event
+  loop, and stays off under a debugger. It reads a poll that overslept by more than 10 seconds as
+  a system suspend.
+- The watchdog runs on Windows only: macOS has no public "not responding" query, and X11's ping
+  would disturb the loop it measures.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Architecture](/docs/concepts/architecture): the layers of a Nucleus app.
+- [Notifications](/docs/os/notifications): callbacks that now land on the UI thread.
+- [Media control](/docs/os/media-control): media key and Now Playing events.
+- [Migrate from 2.x](/docs/migrate/from-2.x): every 3.0 change in one list.

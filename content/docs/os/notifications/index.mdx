@@ -1,0 +1,101 @@
+---
+title: Cross-platform notifications
+description: Send desktop notifications on macOS, Windows, and Linux from a single Kotlin API.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`notification-common` sends a desktop notification with one API on macOS, Windows, and Linux:
+title, body, images, up to five buttons, and lifecycle callbacks. Add
+`dev.nucleusframework:nucleus.notification-common`; it pulls in the three platform modules.
+
+## Send a notification
+
+```kotlin
+NotificationManager.initialize() // optional: otherwise setup runs on the first send()
+
+val n = notification(
+    title = "Download complete",
+    message = "report.pdf has been saved",
+    onActivated = { openFile() },
+    onDismissed = { reason -> log.info("dismissed: $reason") },
+) {
+    button("Open") { openFile() }
+    button("Show in folder") { showInFolder() }
+}
+
+when (val result = n.send()) {
+    is NotificationResult.Success -> saveHandle(result.handle) // handle.dismiss() closes it
+    is NotificationResult.Failure -> log.warn(result.reason)
+}
+```
+
+Each `send()` shows a new notification, so you can send the same instance twice. Callbacks run on
+the UI thread. `onFailed` can run on the calling thread, because a send can fail before it
+reaches the OS.
+
+<Callout type="warn" title="Changed in 3.0">
+In 2.x, callbacks on Linux and Windows ran on the AWT event dispatch thread. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Platform-specific options
+
+The `linux { }`, `macos { }`, and `windows { }` blocks apply only on that OS, so you can keep them
+in shared code.
+
+```kotlin
+notification(title = "Build failed", message = "See the logs") {
+    linux { urgency = Urgency.CRITICAL; transient = true; category = "device.error" }
+    macos { interruptionLevel = InterruptionLevel.TIME_SENSITIVE; subtitle = "CI" }
+    windows { scenario = ToastScenario.URGENT; duration = ToastDuration.LONG }
+}
+```
+
+| Block | Properties |
+| --- | --- |
+| `linux { }` | `urgency`, `category`, `transient`, `resident`, `expireTimeout` (ms; `0` never expires, unset or `-1` uses the server default) |
+| `macos { }` | `interruptionLevel`, `relevanceScore` (`0.0..1.0`), `subtitle` |
+| `windows { }` | `scenario` (`ToastScenario`), `duration` (`ToastDuration`) |
+
+- macOS needs the matching Apple entitlement for `TIME_SENSITIVE` and `CRITICAL`, or falls back
+  to `ACTIVE`.
+- `ToastScenario.URGENT` breaks through Focus Assist on Windows 11 and later.
+
+## macOS setup
+
+macOS delivers notifications only to a bundled app the user has authorized. Request authorization
+with `NotificationCenter.requestAuthorization` and test with `./gradlew runDistributable`. Do not
+call `NotificationCenter.setDelegate`: the common layer installs its own delegate.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- `NotificationManager` picks the platform module for the host OS on first use. Only that module
+  loads.
+- On Windows, `initialize()` calls `WindowsNotificationCenter.initialize()`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `title` | `String` | Required title. |
+| `message` | `String` | Body text. Defaults to `""`. |
+| `largeImage` | `String?` | Image URI: hero image on Windows, image hint on Linux, attachment on macOS. |
+| `smallIcon` | `String?` | Icon URI: app logo on Windows, app icon on Linux, ignored on macOS. |
+| `onActivated` | `(() -> Unit)?` | The user clicked the body. |
+| `onDismissed` | `((DismissReason) -> Unit)?` | `USER_DISMISSED`, `TIMED_OUT`, `APPLICATION`, or `UNKNOWN`. |
+| `onFailed` | `(() -> Unit)?` | The notification could not be shown. |
+
+A sixth `button(...)` throws. `NotificationManager.isAvailable()` returns `false` when the OS has
+no notification backend or the native library did not load.
+
+## What's next
+
+- [Notifications on macOS](/docs/os/notifications/macos): authorization, scheduling, categories, and attachments.
+- [Notifications on Windows](/docs/os/notifications/windows): toast layouts, progress bars, and history.
+- [Notifications on Linux](/docs/os/notifications/linux): urgency, actions, and server capabilities.

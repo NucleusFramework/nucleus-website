@@ -1,98 +1,103 @@
 ---
-title: One DSL, eighteen installers
-description: Declare the desktop distribution formats you need in the Gradle plugin's DSL and build each one the host operating system supports.
+title: Packaging overview
+description: Declare the installer formats your app ships in the Nucleus Gradle DSL and build each one the host operating system supports.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-Nucleus declares every desktop distribution format in one `nucleus { }` Gradle block. You choose the
-formats with `targetFormats(...)`, and a single task builds each one the host operating system can
-produce. `TargetFormat` defines 18 formats, covering direct installers, store packages, and plain
-archives.
+The Nucleus Gradle plugin builds desktop installers from one `nativeDistributions { }` block. The
+packaging DSL comes with the plugin, so you add no dependency.
 
 ## Declare the formats
 
-The packaging DSL ships with the Gradle plugin, so there is no separate dependency to add:
-
 ```kotlin title="build.gradle.kts"
-plugins {
-    id("dev.nucleusframework") version "<version>"
-}
-```
-
-List the formats you want inside `nativeDistributions`:
-
-```kotlin title="build.gradle.kts"
-nucleus {
-    application {
-        mainClass = "com.example.MainKt"
-
-        nativeDistributions {
-            targetFormats(
-                TargetFormat.Dmg, TargetFormat.Pkg,
-                TargetFormat.Exe, TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
-                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman,
-                TargetFormat.Snap, TargetFormat.Flatpak,
-                TargetFormat.Zip,
-            )
-            packageName = "MyApp"
-            packageVersion = "1.0.0"
-        }
+nucleus.application {
+    mainClass = "com.example.MainKt"
+    nativeDistributions {
+        packageName = "MyApp"
+        packageVersion = "1.0.0"
+        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb, TargetFormat.AppImage)
     }
 }
 ```
-
-## Build the installers
 
 ```shell
 ./gradlew packageDistributionForCurrentOS
 ```
 
-Every format requested for the host operating system is written under `build/compose/binaries/`.
-
-<Callout type="info">
-Formats the host operating system cannot produce are skipped silently. The same build script runs
-unchanged on macOS, Windows, and Linux, which suits matrix CI.
-</Callout>
+The task builds every format the host supports and skips the rest, so one script runs on all three
+OSes. Output lands in `build/compose/binaries/main/<format>/`. Each format also has its own task
+(`packageDmg`, `packageNsis`), and `packageReleaseDistributionForCurrentOS` runs ProGuard first.
 
 ## Supported formats
 
-`TargetFormat` defines 18 constants. The table groups them by how you ship each build:
-
 | OS | Direct distribution | Store | Archives |
 |----|---------------------|-------|----------|
-| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7z |
-| Windows | Exe, NSIS, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
+| macOS | DMG, PKG (Developer ID) | PKG (Mac App Store) | ZIP, TAR, 7z |
+| Windows | Exe, NSIS, NSIS Web, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
 | Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
 
-The full set of enum constants is `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`,
-`NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, and `SevenZ`.
-Pass any of them to `targetFormats(...)`. The declaring type is
-`dev.nucleusframework.desktop.application.dsl.TargetFormat`.
+`TargetFormat.RawAppImage` builds the bare app image with no installer. Store formats use a
+[sandboxed layout](/docs/packaging/sandboxing).
 
-## How it works
+## Provision Node.js
 
-Nucleus runs jpackage to produce a platform `app-image`, then hands that image to electron-builder's
-`--prepackaged` mode to drive each installer format. The hybrid keeps jpackage's JVM runtime tuning
-while using electron-builder for the formats jpackage does not support, such as NSIS, AppX, Snap,
-Flatpak, and AppImage.
+The plugin downloads Node.js on first use and caches it in `~/.gradle/nucleus/nodejs`. You install
+nothing, and CI no longer needs `actions/setup-node`.
 
-When you mix direct-distribution formats with store formats, Nucleus runs two pipelines: a regular
-`createDistributable` for formats like DMG, NSIS, and DEB, and a `createSandboxedDistributable` for
-the store formats PKG, AppX, and Flatpak. The sandboxed pipeline pre-extracts native libraries,
-injects sandbox-aware JVM arguments, and applies the matching entitlements. See
-[Sandboxing](/docs/packaging/sandboxing).
+```kotlin title="build.gradle.kts"
+nativeDistributions {
+    nodejs {
+        version = "22"        // default: a major line, "lts", or a pinned release such as "22.11.0"
+        autoDownload = true   // false: use node and npm from PATH
+    }
+}
+```
 
-## Configure each platform
+The `compose.electronBuilder.nodePath` Gradle property and the `NUCLEUS_NODE_HOME` environment
+variable take precedence over the download. A floating version stays on the release it first
+downloaded: delete its cache directory to update.
 
-Per-OS settings live under `nativeDistributions.macOS { }`, `windows { }`, and `linux { }`:
+## Native libraries next to the app
 
-- [Building for macOS](/docs/packaging/macos) — DMG, PKG, universal binaries, and layered icons.
-- [Building for Windows](/docs/packaging/windows) — Exe, NSIS, MSI, AppX, and Portable.
-- [Building for Linux](/docs/packaging/linux) — DEB, RPM, AppImage, Pacman, Snap, and Flatpak.
+The plugin places the JNI libraries of Nucleus modules next to the app, so the packaged app
+extracts nothing at startup. For fat JARs and IDE runs, see
+[Native library loader](/docs/performance/native-library-loader).
+
+<Callout type="warn" title="Changed in 3.0">
+Packaged apps no longer carry Nucleus JNI libraries inside their JARs. Code that read them as
+classpath resources must load them through `NativeLibraryLoader`. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Trim the runtime image
+
+<Callout type="warn" title="Changed in 3.0">
+`stripJreFonts` defaults to `true`: the runtime image drops the JRE fonts, since Compose draws text
+with its own. An app that draws text with AWT or Swing must set `stripJreFonts = false`. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+With `includeAllModules = true`, the plugin leaves out `jdk.jlink`, which JDKs built without
+`jmods/` (such as Temurin 24+) refuse to link.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- jpackage builds the app image. electron-builder 26.16.1 wraps it in every format except
+  `RawAppImage`.
+- Node.js resolution order: `nodePath`, `NUCLEUS_NODE_HOME`, the `nodejs { }` download (checked
+  against `SHASUMS256.txt`), then `node` on `PATH`.
+- Packaged apps get `-Dnucleus.native.libraryPath=$APPDIR`. GraalVM images keep the libraries next
+  to the executable.
+
+</Accordion>
+</Accordions>
 
 ## What's next
 
-- [Code signing](/docs/packaging/code-signing) — sign and notarize builds for each platform.
-- [Publishing](/docs/packaging/publishing) — push installers to GitHub Releases, S3, or a generic host.
-- [Gradle DSL reference](/docs/reference/gradle-dsl) — the full `nucleus { }` DSL.
+- [macOS](/docs/packaging/macos), [Windows](/docs/packaging/windows), [Linux](/docs/packaging/linux): per-OS settings.
+- [Code signing](/docs/packaging/code-signing): sign and notarize each platform's builds.
+- [Auto-update](/docs/packaging/auto-update): ship updates to installed apps.
+- [CI/CD](/docs/packaging/ci-cd): build every format on GitHub Actions.

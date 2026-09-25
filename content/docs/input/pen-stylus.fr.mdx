@@ -1,0 +1,49 @@
+---
+title: Stylet et tactile
+description: Lisez les contacts d'écran tactile et de stylet, avec leur pression, depuis les pointer events Compose.
+---
+
+Les contacts d'écran tactile et de stylet arrivent dans Compose sous forme de pointeurs de type
+`PointerType.Touch`. Vous les lisez avec le même modifier `pointerInput` que la souris, sans rien
+ajouter en plus de `nucleus-application`.
+
+## Dessiner avec la pression
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            if (change.type == PointerType.Touch) {
+                addPoint(change.position, change.pressure)
+                change.consume()
+            }
+        }
+    }
+}
+```
+
+Les détecteurs de gestes, `consume()` et le hit testing traitent ces contacts comme n'importe quel
+autre pointeur Compose.
+
+## Prise en charge par plateforme
+
+| Plateforme | Arrive comme | Pression |
+| --- | --- | --- |
+| Windows | `PointerType.Touch` | Fournie si le digitaliseur la prend en charge |
+| Linux (Wayland et X11) | `PointerType.Touch` | Toujours `1f` |
+| macOS | Souris | Non fournie |
+
+- Traitez `pressure == 1f` comme « moyenne ou inconnue ». La plupart des écrans tactiles grand
+  public renvoient `1f`.
+- Nucleus ne produit jamais `PointerType.Stylus` ni `PointerType.Eraser`, et `PointerInputChange`
+  ne porte ni inclinaison ni rotation du stylet. Un stylet et un doigt ne diffèrent que par la
+  pression, sous Windows.
+- Un doigt glissé sur la barre de titre déplace la fenêtre sous Windows et Linux. Sous Linux, un
+  doigt sur un bord de fenêtre la redimensionne.
+
+## Et ensuite
+
+- [Gestes trackpad](/docs/input/trackpad-gestures) : pans, zoom par pincement et rotation.
+- [Linux et Wayland](/docs/windows/linux-wayland) : le comportement du compositeur sous Linux.
+- [Accessibilité](/docs/input/accessibility) : exposer votre UI aux lecteurs d'écran.

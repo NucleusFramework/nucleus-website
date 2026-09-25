@@ -1,0 +1,247 @@
+---
+title: Onglets
+description: Déclarez des documents comme onglets façon Chrome, qui se réordonnent, se détachent en fenêtres et fusionnent à nouveau, avec barres personnalisées, aperçus et dispositions enregistrées.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TabWindows` et `Tab` apportent le modèle d'onglets de Chrome : une barre d'onglets dans la barre de
+titre de chaque fenêtre, des fenêtres qui apparaissent quand un onglet est détaché et se ferment
+quand leur dernier onglet part. Les onglets sont `@ExperimentalNucleusApi` (voir
+[Multi-fenêtre](/docs/multi-window)).
+
+## Déclarer des onglets
+
+Créez un `TabWorkspace`, composez `TabWindows` une fois et déclarez chaque onglet au niveau de
+l'application :
+
+```kotlin title="Main.kt"
+fun main() = nucleusApplication {
+    val workspace = rememberTabWorkspace()
+    TabWindows(workspace, onLastWindowClosed = ::exitApplication)
+
+    for (document in documents) {
+        key(document.id) {
+            Tab(workspace, id = document.id, title = document.name) { Editor(document) }
+            DropClosedTab(workspace, documents, document.id)
+        }
+    }
+}
+```
+
+`TabWindows` ouvre une fenêtre par groupe d'onglets, avec la barre dans sa barre de titre et
+l'onglet sélectionné comme contenu. Ne déclarez jamais un `Tab` dans une fenêtre.
+
+Quand l'utilisateur ferme un onglet, le workspace l'oublie, mais votre liste le déclare encore.
+Retirez-le de la liste, sinon la composition suivante l'enregistre à nouveau :
+
+```kotlin
+@Composable
+private fun DropClosedTab(workspace: TabWorkspace, documents: MutableList<Document>, id: String) {
+    val closed = workspace.tab(id) == null
+    LaunchedEffect(closed) { if (closed) documents.removeAll { it.id == id } }
+}
+```
+
+## Paramètres de Tab et TabWindows
+
+`Tab(workspace, id, title, group = null) { … }` s'ouvre dans `group` à la première déclaration,
+sinon dans la dernière fenêtre qui a eu le focus, sinon dans une nouvelle fenêtre. Le `title` de
+l'onglet sélectionné sert de titre de fenêtre. Le contenu s'exécute avec `TabScope` : `workspace`,
+`tab`, `select()`, `close()`.
+
+| Paramètre de `TabWindows` | Défaut | Rôle |
+| --- | --- | --- |
+| `workspace` | requis | Le `TabWorkspace` |
+| `strip` | `{ TabStrip() }` | La barre d'une fenêtre, avec `TabStripScope` en receveur |
+| `dragGhost` | `{ TabDragGhostCard(it) }` | La carte sous le pointeur quand un onglet quitte sa barre |
+| `nativeContextMenu` | `true` | Menu contextuel natif pour les champs de texte |
+| `windowWrapper` | `{ it() }` | Enveloppe chaque fenêtre, barre comprise : `WindowBackground`, un `Surface` thématisé |
+| `windowBodyWrapper` | `{ it() }` | Enveloppe ce qui est sous la barre : un `DockLayout`, une barre d'état |
+| `onLastWindowClosed` | `{}` | Appelé chaque fois que le workspace passe de quelques onglets à aucun |
+
+Les deux wrappers reçoivent le `NucleusDecoratedWindowScope` de la fenêtre et doivent appeler leur
+lambda. Définissez le thème autour de `TabWindows`, pas dans une fenêtre : le workspace transmet
+ces locals à chaque fenêtre qu'il ouvre.
+
+```kotlin
+MaterialTheme(colorScheme = colors) {
+    CompositionLocalProvider(LocalTitleBarStyle provides rememberMaterialTitleBarStyle(colors)) {
+        TabWindows(workspace, onLastWindowClosed = ::exitApplication)
+        // Déclarations de Tab
+    }
+}
+```
+
+`rememberTabWorkspace(defaultWindowSize, captureThumbnails)` prend la taille des nouvelles fenêtres
+(960 × 640 dp par défaut) et l'activation des miniatures (`false`).
+
+## Glisser des onglets
+
+Avec la barre standard, l'utilisateur fait glisser un onglet le long de la barre pour le
+réordonner, hors de la fenêtre pour en ouvrir une nouvelle, ou sur la barre d'une autre fenêtre
+pour l'y fusionner. Glisser l'unique onglet d'une fenêtre déplace la fenêtre elle-même. Un onglet
+tiré d'une fenêtre agrandie s'ouvre à `defaultWindowSize`.
+
+`Modifier.tabDragHandle(workspace, tab)` est la poignée que `TabStrip` pose sur chaque onglet. Sous
+Wayland natif, elle réordonne dans la barre, puis passe à un glissement de la plateforme quand le
+pointeur en sort : pendant la phase locale, `draggedTab` est défini alors que `dragKind` vaut
+encore `null`. Une barre personnalisée dans la barre de titre applique aussi
+`Modifier.noWindowDrag()` à chaque poignée, pour que le déplacement de fenêtre du compositeur
+n'avale pas le geste.
+
+Pour une barre de droite à gauche, fournissez `LayoutDirection.Rtl` autour de `TabStrip`. Le
+réordonnancement et les index de dépôt la suivent.
+
+## Personnaliser la barre standard
+
+| Paramètre de `TabStrip` | Défaut | Rôle |
+| --- | --- | --- |
+| `reorderAnimation` | ressort, `StiffnessMediumLow` | Déplacement d'un onglet le long de la barre ; `null` le déplace d'un coup |
+| `hoverPreview` | `null` | La carte sous un onglet survolé. `TabHoverPreview.Default` pour la carte standard |
+| `tabLeading` / `tabTrailing` | `null` | Slots par onglet autour du titre : icône de fichier, point de modification |
+| `dropGhostCard` | `{ TabDropGhostCard(it) }` | La carte dans l'emplacement qu'occuperait un onglet d'une autre fenêtre |
+| `trailing` | `{}` | Après le dernier onglet : un bouton de nouvel onglet (un onglet déposé dessus est ajouté à la fin) |
+
+```kotlin
+TabWindows(
+    workspace = workspace,
+    strip = {
+        TabStrip(
+            hoverPreview = TabHoverPreview.Default,
+            tabTrailing = { tab -> if (tab.id in modified) Text("●") },
+            trailing = { IconButton(onClick = ::openDocument) { Text("+") } },
+        )
+    },
+)
+```
+
+`TabStripScope` expose `workspace`, `group`, `tabs` (dans l'ordre de la barre), `dropGhost` et
+`hoveredTab`.
+
+## Écrire une barre de zéro
+
+Une barre issue d'un autre design system a besoin de trois modificateurs :
+
+| Modificateur | À appliquer sur |
+| --- | --- |
+| `Modifier.tabStripGeometry(workspace, group)` | L'élément qui couvre toute la barre |
+| `Modifier.tabSlot(group, index)` | Chaque onglet, dans l'ordre de la barre |
+| `Modifier.tabDragHandle(workspace, tab)` | La poignée de chaque onglet |
+
+Quand un onglet d'une autre fenêtre survole la barre, `dropGhost` contient un
+`TabDropGhost(index, width, tab)` : composez `TabDropGhostCard(ghost)` à `index`. Ajoutez
+`TabHoverPreviewPopup(preview)` une fois pour les cartes de survol. `jewel-tabs-demo` enveloppe
+ainsi le `TabStrip` de Jewel.
+
+## Dessiner les aperçus
+
+**Miniatures.** `TabEntry.thumbnail` est un `ImageBitmap?`. Avec `captureThumbnails = true`, le
+workspace capture l'onglet sélectionné de chaque fenêtre ; appelez `captureThumbnail(tabId)` après
+un changement visible. Vous pouvez aussi en assigner une vous-même avant que l'onglet ne soit
+affiché. Le contenu d'une `NativeView` ou d'une `TextureView` manque dans les captures.
+`TabPreview(tab, modifier, contentScale, placeholder)` dessine la miniature.
+
+**Cartes de survol.** `TabHoverPreview(delay, offset, nativeLayer, content)` décrit la carte.
+`delay` vaut 650 ms par défaut ; `nativeLayer = false` dessine la carte dans la fenêtre, rognée
+par elle. La carte standard est `TabHoverPreviewCard(modifier, subtitle = null)` :
+
+```kotlin
+val preview = remember {
+    TabHoverPreview { TabHoverPreviewCard(subtitle = { Text(pathOf(tab.id), maxLines = 1) }) }
+}
+TabStrip(hoverPreview = preview)
+```
+
+**Cartes de glissement et de dépôt.** Dessinez `TabWindows(dragGhost)` et
+`TabStrip(dropGhostCard)` avec le même composable, basé sur `TabGhostCard(tab, modifier)`, pour
+que l'onglet atterrisse tel qu'il a voyagé. `dragGhost` s'exécute hors de `windowWrapper` et
+jamais sous Wayland natif.
+
+## Piloter les onglets depuis le code
+
+| Appel | Effet |
+| --- | --- |
+| `select(tabId)` | En fait l'onglet visible de son groupe |
+| `close(tabId)` | Le supprime, état compris ; un groupe vide ferme sa fenêtre |
+| `move(tabId, group, index = null)` | Le déplace dans `group` à `index` (`null` ajoute à la fin) et le sélectionne |
+| `reorder(tabId, index)` | Le déplace dans son groupe |
+| `tearOff(tabId, screenRectPx, scaleFactor)` | L'ouvre dans une nouvelle fenêtre, sur un rectangle d'écran en pixels physiques |
+
+Lisez `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (où s'ouvrent les nouveaux
+onglets), `groupOf(window)`, `tabsOf(group)`, `selectedTab(group)`, et le glissement en cours
+avec `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. Un onglet fermé disparaît : le déclarer
+à nouveau crée un nouvel onglet dans la fenêtre active.
+
+## Enregistrer et restaurer la disposition
+
+`snapshot()` renvoie un `TabLayoutSnapshot(groups)`. Chaque `TabGroupSnapshot` contient `id`,
+`tabIds`, `selectedId`, `position` et `size`. `restore(snapshot)` déplace les onglets et place les
+fenêtres, y compris pour les onglets déclarés plus tard. Il ne s'applique qu'une fois ;
+rappelez-le après qu'un onglet a été fermé puis redéclaré.
+
+## Combiner onglets et satellites
+
+Donnez à chaque fenêtre d'onglets son propre `SatelliteWorkspace`, indexé par l'id du groupe, et
+laissez ses satellites afficher l'onglet sélectionné. Un changement d'onglet ne remplace alors que
+le contenu.
+
+```kotlin
+TabWindows(
+    workspace = tabs,
+    windowWrapper = { content ->
+        tabs.groupOf(nucleusWindow.unsafe.taoWindow)?.let { JoinSatelliteWorkspace(panesOf(it.id)) }
+        content()
+    },
+    windowBodyWrapper = { body ->
+        val group = tabs.groupOf(nucleusWindow.unsafe.taoWindow)
+        if (group == null) body() else DockLayout(panesOf(group.id), Modifier.fillMaxSize()) { body() }
+    },
+)
+
+for (group in rememberTabGroups(tabs)) {
+    key(group.id) {
+        val document = tabs.selectedTab(group)?.let { documentOf(it.id) }
+        Satellite(panesOf(group.id), id = "inspector-${group.id}", title = "Inspector") {
+            Inspector(document)
+        }
+    }
+}
+```
+
+`rememberTabGroups` reflète `workspace.groups` via un effet, car `Tab` crée les groupes pendant la
+composition qui lit la liste :
+
+```kotlin
+@Composable
+fun rememberTabGroups(workspace: TabWorkspace): List<TabWindowGroup> {
+    var groups by remember(workspace) { mutableStateOf(workspace.groups.toList()) }
+    LaunchedEffect(workspace) { snapshotFlow { workspace.groups.toList() }.collect { groups = it } }
+    return groups
+}
+```
+
+Ouvrez et fermez ces satellites depuis un `LaunchedEffect`, jamais pendant la composition.
+`tab-satellites-demo` et `reader-dock-demo` montrent les deux montages.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Seul l'onglet sélectionné d'une fenêtre est composé : `captureThumbnail` n'atteint que les
+  onglets à l'écran.
+- La barre d'une autre fenêtre compte comme atteinte dès que la carte fantôme la touche ; la barre
+  sous le pointeur reste prioritaire.
+- Sous Wayland natif, un onglet qui quitte sa barre passe à une session glisser-déposer de la
+  plateforme, et chaque autre barre résout le dépôt dans ses propres coordonnées.
+- Un changement d'onglet ne reconstruit aucun des deux wrappers. Un onglet n'est rogné à son
+  emplacement que pendant son ouverture ou sa fermeture : une carte transportée n'est jamais
+  coupée.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Satellites](/docs/multi-window/satellites) : palettes, en-têtes et propriétaires.
+- [Ancrage](/docs/multi-window/docking) : le `DockLayout` qu'une fenêtre d'onglets peut héberger.
+- [Toolkits](/docs/toolkits) : les styles de barre de titre que reprend la barre standard.

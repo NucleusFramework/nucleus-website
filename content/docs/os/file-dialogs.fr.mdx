@@ -1,0 +1,62 @@
+---
+title: Dialogues de fichiers
+description: Sélecteurs d'ouverture, d'enregistrement et de dossier avec FileKit, configurés pour vous par nucleusApplication.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les applications Nucleus utilisent [FileKit](https://filekit.mintlify.app) pour les sélecteurs
+natifs d'ouverture, d'enregistrement et de dossier. Ajoutez la dépendance et appelez FileKit :
+Nucleus s'occupe de la configuration. Pour l'API complète (types de fichiers, sélection multiple,
+enregistrement, `PlatformFile`), consultez la
+[documentation de FileKit](https://filekit.mintlify.app/dialogs/setup).
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("io.github.vinceglb:filekit-dialogs:<filekit-version>")
+}
+```
+
+## Choisir un fichier
+
+```kotlin
+val scope = rememberCoroutineScope()
+
+Button(onClick = {
+    scope.launch {
+        val file = FileKit.openFilePicker(type = FileKitType.Image)
+        // file vaut null si l'utilisateur annule
+    }
+}) {
+    Text("Ouvrir une image")
+}
+```
+
+## Ce que Nucleus fait pour vous
+
+- **Initialisation.** `nucleusApplication` appelle `FileKit.init(NucleusApp.appId)` quand FileKit
+  est sur le classpath. Les lancements en dev, les apps empaquetées et les images natives partagent
+  un même répertoire de fichiers.
+- **Désinstallation.** Sous Windows, ce répertoire est `%APPDATA%\<appId>`, que le désinstalleur
+  NSIS supprime si vous activez `deleteAppDataOnUninstall`.
+- **Image native.** Le plugin Nucleus fournit les métadonnées GraalVM de FileKit : les sélecteurs
+  fonctionnent dans une image native sans configuration.
+
+<Callout type="warn" title="Modifié en 3.0">
+L'appel automatique à `FileKit.init` est nouveau. Votre propre `FileKit.init(…)` avant
+`nucleusApplication` reste prioritaire, un appel dans `content` remplace l'appel automatique, et
+`nucleusApplication(args, initializeFileKit = false)` le désactive. Voir
+[Migrer depuis Nucleus 2.x](/docs/migrate/from-2.x#vérifier-linitialisation-de-filekit).
+</Callout>
+
+## Rattacher le dialogue à une fenêtre
+
+Pour rendre le sélecteur modal à une fenêtre, passez le handle natif de la fenêtre depuis
+`nucleusWindow.unsafe.taoWindow` : `nativeHandle` sous Windows, `nsWindowHandle` sous macOS et
+`xdgPortalParent()` sous Linux (X11 et Wayland).
+
+## Et ensuite
+
+- [Point d'entrée de l'application](/docs/lifecycle/application) : toutes les options de `nucleusApplication`.
+- [Documentation de FileKit](https://filekit.mintlify.app) : l'API complète des sélecteurs et des fichiers.
+- [Fenêtres](/docs/windows) : `nucleusWindow` et le handle de fenêtre natif.

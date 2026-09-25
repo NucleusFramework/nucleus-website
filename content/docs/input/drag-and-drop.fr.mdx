@@ -1,0 +1,71 @@
+---
+title: Glisser-déposer
+description: Recevez les fichiers déposés sur une fenêtre et faites-en glisser des fichiers ou du texte avec l'API de glisser-déposer de Compose.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Le glisser-déposer passe par les modifiers Compose standard, `Modifier.dragAndDropTarget` et
+`Modifier.dragAndDropSource`, et est fourni avec `nucleus-application`. Les deux demandent
+`@OptIn(ExperimentalComposeUiApi::class)`.
+
+## Recevoir des fichiers déposés
+
+```kotlin
+val target = remember {
+    object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            @Suppress("UNCHECKED_CAST")
+            val files = event.awtTransferable
+                .getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+            onFiles(files)
+            return files.isNotEmpty()
+        }
+    }
+}
+
+Box(Modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = target))
+```
+
+Renvoyez `true` depuis `onDrop` pour accepter les données. `DataFlavor.stringFlavor` renvoie les
+mêmes chemins, séparés par des retours à la ligne.
+
+- Les dépôts entrants ne transportent que des fichiers. Le texte, le HTML et les URL ne sont pas
+  transmis.
+- La liste est disponible dans `onDrop`. Les callbacks d'entrée, de déplacement et de sortie
+  reçoivent une liste vide.
+- Les popups [`TrayApp`](/docs/os/tray/tray-app) acceptent les dépôts par le même modifier.
+
+## Faire glisser des données hors de la fenêtre
+
+Enveloppez un `Transferable` AWT qui propose `javaFileListFlavor`, `stringFlavor`, ou les deux :
+
+```kotlin
+Modifier.dragAndDropSource { _ ->
+    DragAndDropTransferData(
+        transferable = DragAndDropTransferable(StringSelection("Hello from Nucleus")),
+        supportedActions = listOf(DragAndDropTransferAction.Copy),
+        onTransferCompleted = { action -> /* null en cas d'annulation */ },
+    )
+}
+```
+
+Sans fichier ni texte dans le transferable, aucun glisser ne démarre. Votre fenêtre continue de se
+dessiner quand le curseur en sort.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Nucleus n'installe aucun `DropTarget` AWT, et lire `awtTransferable` ne démarre pas le toolkit
+  AWT.
+- Pour diagnostiquer un glisser qui ne démarre pas, lisez `TaoDnDDiagnostics.lastMessage`
+  (`dev.nucleusframework.window.tao`) : il contient la dernière raison d'un glisser ignoré.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Icônes de pointeur](/docs/input/pointer-icons) : afficher un curseur de préhension ou d'interdiction pendant un glisser.
+- [Onglets](/docs/multi-window/tabs) : détacher et fusionner des onglets sur la même session de glisser.
+- [Gestes trackpad](/docs/input/trackpad-gestures) : pans et zoom par pincement.

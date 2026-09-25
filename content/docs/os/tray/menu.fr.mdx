@@ -1,0 +1,74 @@
+---
+title: DSL du menu de la zone de notification
+description: Construisez le menu contextuel de la zone de notification en Kotlin avec des éléments, des éléments à cocher, des sous-menus, des séparateurs, des raccourcis affichés et un contenu piloté par l'état.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+La lambda finale de `Tray` construit son menu contextuel natif. Cette lambda est `@Composable` :
+elle lit l'état, appelle `painterResource` et contient des `if`, et le menu natif suit chaque
+changement.
+
+## Construire un menu
+
+```kotlin
+var connected by remember { mutableStateOf(false) }
+var advanced by remember { mutableStateOf(false) }
+
+Tray(icon = Icons.Default.Wifi, tooltip = "Network") {
+    Item(label = if (connected) "Disconnect" else "Connect") { connected = !connected }
+    Item(label = "Export", icon = Icons.Default.Upload) { export() }
+    Item(label = "Disabled", isEnabled = false)
+    CheckableItem(
+        label = "Advanced options",
+        checked = advanced,
+        onCheckedChange = { advanced = it },
+    )
+    if (advanced) {
+        SubMenu(label = "Advanced", icon = Icons.Default.Build) {
+            Item(label = "DNS settings") { openDns() }
+            SubMenu(label = "More") { Item(label = "Proxy") { openProxy() } }
+        }
+    }
+    Divider()
+    Item(label = "Quit") { exitApplication() }
+}
+```
+
+- `icon` accepte un `ImageVector` (avec un `iconTint` facultatif), un `Painter` ou un
+  `DrawableResource`. Les icônes de menu s'affichent en 16 px.
+- `SubMenu` s'imbrique sans limite de profondeur.
+- `TrayApp` reçoit son `menu` sous forme de lambda `TrayMenuBuilder` simple. Elle propose les
+  mêmes fonctions, mais elles ne sont pas `@Composable`.
+
+## Afficher des raccourcis
+
+`shortcut` affiche une combinaison de touches à côté d'un élément. Il n'enregistre aucun
+raccourci ; utilisez les [raccourcis globaux](/docs/os/global-hotkey) pour cela.
+
+```kotlin
+import dev.nucleusframework.composenativetray.menu.api.Key
+import dev.nucleusframework.composenativetray.menu.api.KeyShortcut
+
+Item(label = "New note", shortcut = KeyShortcut(Key.N, meta = true)) { newNote() }
+```
+
+macOS dessine les glyphes natifs (⌘N), Windows affiche un texte aligné à droite (`Win+N`) et le
+bureau Linux affiche le sien.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le DSL enregistre chaque appel dans une liste plate d'opérations de menu. La bibliothèque ne
+  reconstruit le menu natif que si l'empreinte de cette liste change : une recomposition qui
+  laisse le menu identique ne fait aucun appel natif.
+- Sous Linux, les raccourcis passent par la propriété DBusMenu `shortcut`.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Zone de notification](/docs/os/tray) : sources d'icône, clics et comportement par plateforme.
+- [Applications de zone de notification](/docs/os/tray/tray-app) : ouvrir une fenêtre popup depuis l'icône.
+- [Barre des menus macOS](/docs/os/menus/menu-bar) : la barre des menus de l'application sous macOS.

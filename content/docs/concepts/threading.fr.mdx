@@ -1,0 +1,115 @@
+---
+title: Threading
+description: Le thread UI qui exécute Compose sous Nucleus, les callbacks qui y arrivent, le portage du code de style Swing et le watchdog de la boucle d'événements sous Windows.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusApplication` fait tourner la boucle d'événements sur le thread qui l'appelle, `main` dans
+une application standard. Ce thread UI gère les entrées, la composition et le dessin de toutes les
+fenêtres, et `Dispatchers.Main` pointe vers lui : `LaunchedEffect`, `rememberCoroutineScope()` et
+les scopes de view-model y reprennent.
+
+Le thread de distribution d'événements AWT (EDT) existe toujours, mais c'est un autre thread. Le
+code posté dessus s'exécute hors du thread de Compose.
+
+## Les callbacks natifs sur le thread UI
+
+Ces modules appellent votre code sur le thread UI : vous pouvez mettre à jour l'état Compose
+directement.
+
+| Module | Callbacks |
+|---|---|
+| `notification-common` (macOS), `notification-windows`, `notification-linux` | Activations, actions, fermetures et échecs de notification |
+| `media-control` | Lecture, pause, suivant, précédent, arrêt, déplacement |
+| `launcher-macos` / `launcher-linux` | Clics dans le menu du Dock et la quicklist Unity |
+| `menu-macos` | Actions de menu et événements du délégué |
+
+<Callout type="warn" title="Modifié en 3.0">
+Ces callbacks tournaient auparavant sur l'EDT AWT. Le code qui supposait l'EDT, comme les
+vérifications `SwingUtilities.isEventDispatchThread()`, doit changer. Voir
+[Migrer depuis 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+Les autres modules vous appellent sur le thread qui a reçu l'événement. `global-hotkey`, par
+exemple, appelle son listener depuis un thread natif. Postez sur le thread UI avec
+`NucleusUiThread` avant de toucher à l'état de l'UI :
+
+```kotlin
+GlobalHotKeyManager.register(keyCode = KeyEvent.VK_F12) { _, _ ->
+    NucleusUiThread.post { viewModel.onHotKey() }
+}
+```
+
+`post` met toujours le bloc en file, même depuis le thread UI : l'ordre des callbacks reste
+stable.
+
+## Porter du code de style Swing
+
+| Code de style Swing | Remplacer par |
+|---|---|
+| `SwingUtilities.invokeLater { }`, `EventQueue.invokeLater { }` | `withContext(Dispatchers.Main) { }` ou `NucleusUiThread.post { }` |
+| `Dispatchers.Swing` | `Dispatchers.Main` |
+| `SwingUtilities.isEventDispatchThread()` | Supprimer la vérification, ou dispatcher vers `Dispatchers.Main` |
+| `javax.swing.Timer` | `LaunchedEffect` avec `delay` |
+
+Un `JFrame` Swing peut toujours tourner à côté des fenêtres Nucleus, sur l'EDT. Rejoignez-le avec
+`SwingUtilities.invokeLater` et revenez avec `Dispatchers.Main`.
+
+## Détecter une boucle d'événements bloquée
+
+Sous Windows, Nucleus journalise un `SEVERE` avec un thread dump complet quand une fenêtre ne
+répond plus. Enregistrez des handlers pour réagir, par exemple pour signaler le blocage :
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    onUnresponsive { crashReporter.reportHang() }
+    onResponsive { crashReporter.hangEnded() }
+    // ...
+}
+```
+
+- Les deux handlers tournent sur un thread watchdog dédié, puisque le thread UI est celui qui
+  bloque. Le travail que vous postez depuis eux sur `Dispatchers.Main` attend la fin du blocage.
+- `onResponsive` ne se déclenche qu'après un blocage signalé par `onUnresponsive`.
+- Chaque appel remplace le handler précédent : vous pouvez les appeler depuis le bloc applicatif.
+- Nucleus n'affiche aucun dialogue par défaut.
+
+Enveloppez un long travail synchrone sur le thread UI dans `expectUnresponsive` pour qu'il ne soit
+pas signalé. La fonction renvoie le résultat du bloc et s'appelle depuis n'importe quel thread :
+
+```kotlin
+expectUnresponsive { importHugeProjectSynchronously() }
+```
+
+| Propriété système | Effet |
+|---|---|
+| `-Dnucleus.tao.watchdog=false` | Désactive le watchdog. `true` le force sous un débogueur. |
+| `-Dnucleus.tao.watchdogGraceMs=<ms>` | Délai supplémentaire avant de signaler un blocage. `5000` par défaut. |
+| `-Dnucleus.tao.watchdogDialog=true` | Affiche aussi le dialogue d'erreur natif lors d'un blocage. |
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Sous macOS, la boucle d'événements tourne sur le thread principal du processus, comme l'exige
+  AppKit.
+- Nucleus enregistre son `Dispatchers.Main` avec une priorité supérieure à celle de
+  `kotlinx-coroutines-swing` : le dispatcher Swing présent sur le classpath ne prend pas la main.
+- Hors de `nucleusApplication`, `NucleusUiThread.post` se replie sur `EventQueue.invokeLater` : un
+  hôte Swing reçoit ses callbacks sur l'EDT. `isRegistered` indique quel cas s'applique.
+- Le watchdog demande à Windows toutes les 2 secondes si chaque fenêtre est bloquée, n'envoie rien
+  à la boucle d'événements et reste inactif sous un débogueur. Il interprète un sondage en retard
+  de plus de 10 secondes comme une mise en veille du système.
+- Le watchdog ne tourne que sous Windows : macOS n'a pas de requête publique « ne répond pas », et
+  le ping X11 perturberait la boucle qu'il mesure.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Architecture](/docs/concepts/architecture) : les couches d'une application Nucleus.
+- [Notifications](/docs/os/notifications) : des callbacks qui arrivent désormais sur le thread UI.
+- [Contrôle multimédia](/docs/os/media-control) : touches multimédias et événements Now Playing.
+- [Migrer depuis 2.x](/docs/migrate/from-2.x) : tous les changements de la 3.0 en une liste.

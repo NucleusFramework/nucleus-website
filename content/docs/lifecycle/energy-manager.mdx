@@ -1,41 +1,28 @@
 ---
 title: Energy manager
-description: Lower your app's OS scheduling priority and keep the display awake from Kotlin.
+description: Lower your app's OS scheduling priority in the background and keep the system or display awake from Kotlin.
 ---
 
-import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-The `energy-manager` module lets you control two forms of power behavior from Kotlin: lowering
-your app's CPU, I/O, and timer priority when it runs in the background, and preventing the
-display and system from sleeping during a long task. Both work on Windows, macOS, and Linux
-through the `EnergyManager` object.
-
-## Add the dependency
-
-```kotlin title="build.gradle.kts"
-dependencies {
-    implementation("dev.nucleusframework:nucleus.energy-manager:<version>")
-}
-```
+`EnergyManager` lowers your app's CPU and I/O priority while it sits in the background, and keeps
+the system or display awake during long work, on Windows, macOS and Linux. Add
+`dev.nucleusframework:nucleus.energy-manager` to call it; `Modifier.keepScreenOn()` works without it.
 
 ## Throttle a background window
 
-Efficiency mode comes in two levels. Light mode deprioritizes CPU scheduling only; full mode
-also throttles I/O and, on macOS, network. Tie them to window state — light mode when the
-window loses focus, full mode when it is minimized:
+Light mode lowers CPU priority only. Full mode also throttles I/O, and network on macOS:
 
 ```kotlin
-import dev.nucleusframework.energymanager.EnergyManager
-
-LaunchedEffect(state.isMinimized, isWindowFocused) {
+LaunchedEffect(isMinimized, isFocused) {
     when {
-        state.isMinimized -> {
+        isMinimized -> {
             EnergyManager.disableLightEfficiencyMode()
-            EnergyManager.enableEfficiencyMode()       // full — CPU and I/O throttled
+            EnergyManager.enableEfficiencyMode()       // CPU and I/O throttled
         }
-        !isWindowFocused -> {
+        !isFocused -> {
             EnergyManager.disableEfficiencyMode()
-            EnergyManager.enableLightEfficiencyMode()  // CPU only — I/O stays normal
+            EnergyManager.enableLightEfficiencyMode()  // CPU only
         }
         else -> {
             EnergyManager.disableEfficiencyMode()
@@ -45,192 +32,91 @@ LaunchedEffect(state.isMinimized, isWindowFocused) {
 }
 ```
 
-## Run a coroutine with reduced priority
+Inside a `DecoratedWindow`, read `isMinimized` and `isFocused` from `nucleusWindow`
+(`minimizedFlow`, `focusFlow`). Manual `enable` and `disable` calls are yours to pair.
 
-`withEfficiencyMode` runs a block on a dedicated background-priority thread and disposes the
-thread when the block returns. `withLightEfficiencyMode` applies process-level light QoS for
-the duration of the block, without pinning it to a thread:
+## Run a block at reduced priority
 
 ```kotlin
-// Dedicated low-priority thread (thread-level efficiency), I/O not throttled
-val report = EnergyManager.withEfficiencyMode {
-    computeHeavyReport()
-}
+// Dedicated low-priority thread; I/O not throttled
+val report = EnergyManager.withEfficiencyMode { computeHeavyReport() }
 
-// Process-level light QoS for the block — useful for batch I/O work
-EnergyManager.withLightEfficiencyMode {
-    syncDataFromServer()
-    writeToDatabase()
-}
+// Process-level light mode for the block, on the calling coroutine
+EnergyManager.withLightEfficiencyMode { syncDataFromServer() }
 ```
 
-<Callout type="info">
-Both helpers restore the previous mode when the block returns, including when it throws. Manual
-`enable`/`disable` calls are not balanced for you, so pair them yourself.
-</Callout>
+Both helpers restore the previous mode when the block returns or throws.
 
 ## Keep the system awake
 
-Prevent sleep while a task or presentation runs, then release the request when it finishes.
-Choose whether the **display** must stay on:
-
 ```kotlin
-import dev.nucleusframework.energymanager.AwakeMode
-import dev.nucleusframework.energymanager.EnergyManager
-
-// Presentation / kiosk — screen stays on (default)
-EnergyManager.keepAwake(AwakeMode.SYSTEM_AND_DISPLAY)
-
-// Long export / sync — machine stays awake; screen saver and display sleep behave normally
-EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)
-
-// ... work completes
+EnergyManager.keepAwake(AwakeMode.SYSTEM_AND_DISPLAY) // screen stays on (default)
+EnergyManager.keepAwake(AwakeMode.SYSTEM_ONLY)        // screen may blank or lock
 EnergyManager.releaseAwake()
 ```
 
-| Mode | System sleep | Display / screen saver |
-|------|--------------|------------------------|
-| `SYSTEM_AND_DISPLAY` (default) | Blocked | Blocked — screen stays on |
-| `SYSTEM_ONLY` | Blocked | Allowed — screen can blank or lock |
-
-Calling `keepAwake` while a request is already active replaces it with the new mode.
-`keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` remain as deprecated
-forwarders to `keepAwake()` / `releaseAwake()` / `isAwakeActive()`.
+`keepAwake` holds a single slot: a second call replaces the mode, and one `releaseAwake()` drops
+the request. On macOS, closing the lid still sleeps in `SYSTEM_ONLY`.
 
 ## Hold several awake requests at once
 
-`keepAwake` owns a single slot: the last caller wins, and one `releaseAwake()` drops the
-request for everybody. When independent features each need the machine awake — a video player,
-a download, a presentation view — acquire a handle per feature instead:
+Take one handle per independent feature, such as a player and a download:
 
 ```kotlin
-import dev.nucleusframework.energymanager.AwakeMode
-import dev.nucleusframework.energymanager.EnergyManager
-
 val playback = EnergyManager.acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)
-val download = EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY)
-
-playback.close() // the machine stays awake: `download` is still held
-download.close() // last handle gone — the OS request is released
+EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY).use { exportProject() }
+playback.close()
 ```
 
-`AwakeHandle` implements `AutoCloseable`, so `use { }` scopes a request to a block:
-
-```kotlin
-EnergyManager.acquireAwake(AwakeMode.SYSTEM_ONLY).use {
-    exportProject()
-}
-```
-
-Handles coexist with each other and with `keepAwake`. The OS request uses the strongest mode
-any live handle asked for, and is released only once every handle is closed and no unmatched
-`keepAwake` is left. `close()` is idempotent and thread-safe.
+The OS request uses the strongest mode any live handle asked for, and ends once every handle is
+closed and no `keepAwake` is left. `close()` is idempotent and thread-safe.
 
 ## Keep the screen on from a composable
 
-`Modifier.keepScreenOn()` is Compose Multiplatform's own modifier, and on the
-[Tao backend](/docs/tao) it now takes effect: while the modifier is attached, the display stays
-awake.
-
 ```kotlin
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.keepScreenOn
-
-@Composable
-fun VideoSurface() {
-    Box(Modifier.keepScreenOn()) {
-        Player()
-    }
-}
+Box(Modifier.keepScreenOn()) { Player() }
 ```
 
-Prefer it over the imperative calls for anything tied to a piece of UI: the request lives exactly
-as long as the composable is in the composition, so there is no release to forget.
+The display stays awake while the modifier is in the composition. Requests from several windows
+never release each other or your `keepAwake` slot.
 
-Under the hood it is refcounted process-wide and backed by one
-`acquireAwake(AwakeMode.SYSTEM_AND_DISPLAY)` handle, so several windows or popups can ask at the
-same time without releasing each other, and none of them disturbs a `keepAwake` slot your app
-owns. If the request cannot be honored the modifier degrades silently and logs at `FINE`.
+<Accordions>
+<Accordion title="Under the hood">
 
-<Callout type="info">
-The AWT backends do not implement the platform hook, so the modifier composes but has no effect
-there.
-</Callout>
+- Windows: EcoQoS plus `IDLE_PRIORITY_CLASS` for full mode (green leaf in Task Manager 22H2+).
+  Windows 10 1709+ applies EcoQoS on battery only; Windows 11 on AC too.
+- macOS: full mode runs on E-cores with I/O and network throttling on Apple Silicon.
+- Linux: full mode is `nice +19`, idle I/O priority and a 100 ms timer slack; light mode is
+  `nice +10`. `libdbus-1`, `libX11` and `libXss` load on demand, and a missing library turns the
+  matching feature off. `SYSTEM_ONLY` needs a session bus or systemd-logind; the X11 screen-saver
+  fallback cannot serve it.
+- `Modifier.keepScreenOn()` shares one `acquireAwake(SYSTEM_AND_DISPLAY)` handle across windows
+  and popups. When the OS refuses, it logs at `FINE` and does nothing else.
 
-## How it works
-
-Efficiency mode has two levels. Light mode leaves the app fully functional in the background:
-CPU scheduling is deprioritized through QoS hints, but I/O and network run at normal speed, so
-sync jobs and downloads still make progress. Full mode is meant for a minimized window where
-there is no UI to render — it adds I/O throttling and drops the process to the lowest priority
-class. Both are reversible immediately.
-
-Thread-level efficiency applies the same mechanism to the calling thread only. It confines one
-heavy coroutine to the slow lane without slowing the rest of the process, which keeps a
-responsive UI alongside background work. The `withEfficiencyMode` helper builds on this by
-running its block on a single pinned thread.
-
-Each platform maps these levels to native OS facilities:
-
-| OS | Full mode | Light mode | `SYSTEM_AND_DISPLAY` | `SYSTEM_ONLY` |
-|---|---|---|---|---|
-| Windows 11+ | `SetProcessInformation` EcoQoS + `IDLE_PRIORITY_CLASS` (green leaf in Task Manager 22H2+) | EcoQoS only | `SetThreadExecutionState(ES_SYSTEM_REQUIRED \| ES_DISPLAY_REQUIRED)` | `ES_SYSTEM_REQUIRED` only |
-| macOS | `setpriority(PRIO_DARWIN_BG)` + `task_policy_set` QoS Tier 5 (E-core confinement, I/O and network throttling on Apple Silicon) | `task_policy_set` Tier 5 only — CPU deprioritized, I/O unaffected | `IOPMAssertion(kIOPMAssertPreventUserIdleDisplaySleep)` | `kIOPMAssertPreventUserIdleSystemSleep` (like `caffeinate -i`; lid close still sleeps) |
-| Linux | `nice +19` + `ioprio` IDLE + `timerslack 100ms` | `nice +10` only | GNOME SessionManager / PowerManagement / logind / X11 | Suspend-only session inhibitor (no X11 screen-saver fallback) |
-
-Thread-level mode uses the per-thread form of these primitives on Linux,
-`pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND)` on macOS, and
-`SetThreadInformation`/`THREAD_PRIORITY_IDLE` on Windows.
+</Accordion>
+</Accordions>
 
 ## API reference
 
-### EnergyManager
-
 | Method | Description |
 |---|---|
-| `isAvailable(): Boolean` | Whether the native bridge loaded on this platform. |
+| `isAvailable(): Boolean` | Whether the native bridge loaded. |
 | `enableEfficiencyMode()` / `disableEfficiencyMode()` | Full process mode. |
 | `enableLightEfficiencyMode()` / `disableLightEfficiencyMode()` | Light process mode. |
-| `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | Per-thread; affects the calling thread only. |
-| `withEfficiencyMode { }` (suspend) | Runs the block on a dedicated thread with thread-level efficiency; the thread is disposed when the block returns. |
-| `withLightEfficiencyMode { }` (suspend) | Applies process-level light QoS for the block's lifetime; no thread pinning. |
-| `keepAwake(mode)` / `releaseAwake()` | Prevent and restore system (and optionally display) sleep. One shared slot; the last mode wins. |
-| `acquireAwake(mode): AwakeHandle` | Independent awake request released by `AwakeHandle.close()`. |
-| `isAwakeActive(): Boolean` | Whether an awake request is currently held. |
-| `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Deprecated forwarders to the `keepAwake` / `releaseAwake` / `isAwakeActive` APIs. |
+| `enableThreadEfficiencyMode()` / `disableThreadEfficiencyMode()` | The calling thread only. |
+| `withEfficiencyMode { }` (suspend) | Runs the block on a dedicated thread in thread-level mode. |
+| `withLightEfficiencyMode { }` (suspend) | Applies light process mode for the block. |
+| `keepAwake(mode = SYSTEM_AND_DISPLAY)` / `releaseAwake()` | One shared awake slot; the last mode wins. |
+| `acquireAwake(mode = SYSTEM_AND_DISPLAY): AwakeHandle` | An independent request, released by `close()`. |
+| `isAwakeActive(): Boolean` | Whether an awake request is held. |
+| `keepScreenAwake()` / `releaseScreenAwake()` / `isScreenAwakeActive()` | Deprecated forwarders to `keepAwake`, `releaseAwake`, `isAwakeActive`. |
 
-### AwakeMode
-
-| Value | Description |
-|---|---|
-| `SYSTEM_AND_DISPLAY` | Block system and display sleep (default). |
-| `SYSTEM_ONLY` | Block system sleep only; display and screen saver behave normally. |
-
-### AwakeHandle
-
-| Member | Description |
-|---|---|
-| `mode: AwakeMode` | The mode this handle requested. |
-| `isActive: Boolean` | `false` after `close()`. |
-| `close()` | Drops this request. Idempotent and thread-safe. |
-
-Every `enable`/`disable` call and `keepAwake`/`releaseAwake` returns an
-`EnergyManager.Result` with `success: Boolean`, `errorCode: Int`, and `message: String`. On an
-unsupported platform the result is `success = false` with `errorCode = -1`.
-
-## Notes
-
-- On Linux, `libdbus-1`, `libX11`, and `libXss` are loaded through `dlopen()` at runtime.
-  Missing libraries degrade gracefully, and a private DBus connection is used so the module
-  does not interfere with the JVM's accessibility bus. `SYSTEM_ONLY` needs a session bus
-  (GNOME, PowerManagement) or systemd-logind; the X11 screen-saver fallback cannot serve that mode.
-- On Windows 10 1709+, EcoQoS applies only on battery; Windows 11+ honors it on AC power too.
-- For a long task that must also wake the device, hold `keepAwake(…)` alongside a job from
-  the [scheduler](/docs/lifecycle/scheduler).
+`enable`, `disable`, `keepAwake` and `releaseAwake` return an `EnergyManager.Result` with
+`success`, `errorCode` and `message`. On an unsupported platform, `success` is `false` and
+`errorCode` is `-1`. `AwakeHandle` has `mode`, `isActive` and `close()`.
 
 ## What's next
 
-- [Scheduler](/docs/lifecycle/scheduler) — run deferred and periodic background work.
-- [Taskbar progress](/docs/lifecycle/taskbar-progress) — surface long-running task progress on the taskbar.
-- [Auto-launch](/docs/lifecycle/auto-launch) — start your app at login.
+- [Scheduler](/docs/lifecycle/background/scheduler): deferred and periodic background work.
+- [Taskbar progress](/docs/os/dock-taskbar/progress): show the progress of long work.
+- [Auto-launch](/docs/lifecycle/background/launch-at-login): start the app at login.

@@ -1,0 +1,100 @@
+---
+title: Material 2 and 3
+description: Theme a Nucleus window from a Compose MaterialTheme with the Material 2 or Material 3 adapter.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Material adapters theme a Nucleus `DecoratedWindow` from a Compose `MaterialTheme`, so the title
+bar and window controls follow your app's colors.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.nucleus-application:<version>")
+    // Material 3
+    implementation("dev.nucleusframework:nucleus.decorated-window-material3:<version>")
+    implementation("org.jetbrains.compose.material3:material3:<material3-version>")
+    // Or Material 2
+    // implementation("dev.nucleusframework:nucleus.decorated-window-material2:<version>")
+    // implementation("org.jetbrains.compose.material:material:1.12.0")
+}
+```
+
+The adapters do not expose `nucleus-application`: declare it yourself.
+
+| Adapter | Kotlin package |
+| --- | --- |
+| Material 3 | `dev.nucleusframework.window.material` (no `3`) |
+| Material 2 | `dev.nucleusframework.window.material2` |
+
+## Create a Material window
+
+Call `MaterialDecoratedWindow` inside a `MaterialTheme`. `MaterialTitleBar` draws a matching title
+bar.
+
+```kotlin
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.material.MaterialDecoratedWindow
+import dev.nucleusframework.window.material.MaterialTitleBar
+
+fun main() = nucleusApplication {
+    MaterialTheme(colorScheme = lightColorScheme()) {
+        MaterialDecoratedWindow(onCloseRequest = ::exitApplication, title = "Material 3") {
+            MaterialTitleBar { Text("Material 3") }
+            Surface(Modifier.fillMaxSize()) { /* content */ }
+        }
+    }
+}
+```
+
+For Material 2, import from `androidx.compose.material` and `dev.nucleusframework.window.material2`,
+and pass `colors = lightColors()`.
+
+The chrome follows palette switches. To follow the OS, drive the colors from
+`isSystemInDarkMode()`, which comes with `nucleus-application`.
+
+## Open a Material dialog
+
+```kotlin
+if (showAbout) {
+    MaterialDecoratedDialog(onCloseRequest = { showAbout = false }, title = "About") {
+        MaterialDialogTitleBar { Text("About") }
+        AboutContent()
+    }
+}
+```
+
+Call it from `nucleusApplication { }`, like the window.
+
+<Callout type="warn" title="Changed in 3.0">
+The Material windows and dialogs exist only as `NucleusApplicationScope` extensions, in both
+adapters. The AWT overloads on Compose's `ApplicationScope` are gone, and the Material 2 dialog is
+now a `NucleusApplicationScope` extension too. See [Migrate from Nucleus 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## API reference
+
+Both adapters expose the same functions unless noted.
+
+| Symbol | Notes |
+| --- | --- |
+| `NucleusApplicationScope.MaterialDecoratedWindow(...)` | The usual window parameters, plus `nativePopupLayers`, `nativeContextMenu`, `hiddenFromDock`, `titleBarStyle`, `undecorated`, `transparent`, `clickThrough`, `visibleOnAllWorkspaces`, `forceX11` |
+| `NucleusApplicationScope.MaterialDecoratedDialog(...)` | Dialog variant |
+| `DecoratedWindowScope.MaterialTitleBar(...)` | Title bar slot of a window |
+| `DecoratedDialogScope.MaterialDialogTitleBar(...)` | Title bar slot of a dialog |
+| `rememberMaterialWindowStyle(colorScheme)` | Material 3 only: window style derived from a `ColorScheme` |
+| `rememberMaterialTitleBarStyle(colorScheme)` | Material 3 only: title bar style; pass one to `titleBarStyle` to override the derived one |
+
+The Material windows have no `minimizable` or `maximizable` parameter. To drop those caption
+buttons, open a `DecoratedWindow` inside `NucleusDecoratedWindowTheme` with the Material styles.
+
+## What's next
+
+- [Toolkits](/docs/toolkits): compare Material with the native looks.
+- [Jewel](/docs/toolkits/jewel): IntelliJ Platform chrome.
+- [Dialogs and popups](/docs/windows/dialogs-popups): dialogs, popups, and native popup layers.

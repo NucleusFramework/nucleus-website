@@ -1,0 +1,178 @@
+---
+title: Référence de l'API
+description: PdfReaderState, PdfPage, PdfThumbnail, PdfReader et les types de données associés.
+---
+
+L'API publique vit sous `dev.nucleusframework.pdfium`. Les coordonnées des résultats de mise en page de texte sont en points PDF (1 pt = 1/72 de pouce), avec l'origine en bas à gauche de la page.
+
+## PdfReaderState
+
+Le state holder lié à un seul document. Hisse-le avec `rememberPdfReaderState()`.
+
+```kotlin
+@Stable
+class PdfReaderState {
+    // État snapshot
+    val pageCount: Int        // 0 tant qu'aucun document n'est ouvert
+    val isLoading: Boolean    // true pendant open()
+    val error: PdfError?      // dernière erreur de open(), le cas échéant
+    val metadata: PdfMetadata
+    var renderScale: Float    // 1.0 = ajusté à la largeur
+
+    // Intents
+    suspend fun open(bytes: ByteArray, password: String? = null)
+    suspend fun pageSize(pageIndex: Int): PageSize?
+    suspend fun pageText(pageIndex: Int): String
+    suspend fun pageTextLayout(pageIndex: Int): PageTextLayout?
+
+    // Rend avant l'affichage ; best-effort, remplit le cache
+    fun prefetch(pageIndex: Int, widthPx: Int, quality: RenderQuality = RenderQuality.FULL)
+
+    // Libère les handles natifs + les bitmaps en cache (appelé par rememberPdfReaderState)
+    fun dispose()
+
+    companion object {
+        const val DEFAULT_CACHE_BYTES: Long = 64L * 1024 * 1024
+        const val DEFAULT_THUMBNAIL_CACHE_BYTES: Long = 12L * 1024 * 1024
+    }
+}
+
+@Composable
+fun rememberPdfReaderState(
+    cacheBytes: Long = PdfReaderState.DEFAULT_CACHE_BYTES,
+    thumbnailCacheBytes: Long = PdfReaderState.DEFAULT_THUMBNAIL_CACHE_BYTES,
+): PdfReaderState
+```
+
+Les bitmaps sont indexés par `(pageIndex, quantized_width)`. Les deux budgets de cache sont réglables sur `rememberPdfReaderState(...)`.
+
+## PdfPage
+
+Rend une seule page. Gère le rendu progressif (aperçu basse résolution vers pleine qualité une fois stabilisé) et débounce les changements de taille en interne.
+
+```kotlin
+@Composable
+fun PdfPage(
+    state: PdfReaderState,
+    pageIndex: Int,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    background: Color = Color.White,
+    selectableText: Boolean = false,
+    linksEnabled: Boolean = true,
+    onLinkClick: ((PdfLink) -> Boolean)? = null,
+)
+```
+
+- `modifier` contrôle la largeur de mise en page ; le composable dérive le ratio d'aspect de la page PDF et définit sa propre hauteur.
+- `selectableText = true` active l'overlay de sélection piloté au pointeur.
+- Un `PdfPage` isolé n'a pas de liste à faire défiler, donc les liens GoTo internes ne sont actionnables que via `onLinkClick`.
+
+## PdfThumbnail
+
+Un aperçu basse résolution d'une seule page. Rend en `RenderQuality.PREVIEW`, partage le cache du `PdfReaderState` et se dimensionne à la largeur fournie par le modifier.
+
+```kotlin
+@Composable
+fun PdfThumbnail(
+    state: PdfReaderState,
+    pageIndex: Int,
+    modifier: Modifier = Modifier,
+    background: Color = Color.White,
+)
+```
+
+## PdfReader
+
+Un composable de commodité — un `LazyColumn` vertical qui empile chaque page du document.
+
+```kotlin
+@Composable
+fun PdfReader(
+    state: PdfReaderState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(12.dp),
+    pageSpacing: Dp = 16.dp,
+)
+```
+
+## RenderQuality
+
+```kotlin
+enum class RenderQuality {
+    // Pas d'annotations, pas de texte LCD. Utilisé pour les vignettes et les aperçus progressifs.
+    PREVIEW,
+
+    // Annotations activées, pas de texte LCD. Défaut équilibré pour l'affichage à l'écran.
+    FULL,
+}
+```
+
+## PageSize, PdfMetadata, PdfError
+
+```kotlin
+data class PageSize(val widthPoints: Float, val heightPoints: Float) {
+    val aspectRatio: Float // widthPoints / heightPoints, ou 1f pour les pages dégénérées
+}
+
+data class PdfMetadata(
+    val title: String? = null,
+    val author: String? = null,
+    val subject: String? = null,
+    val keywords: String? = null,
+    val creator: String? = null,
+    val producer: String? = null,
+)
+
+sealed class PdfError(open val message: String, open val cause: Throwable? = null) {
+    data class InvalidFormat(...) : PdfError(...)
+    data class PasswordRequired(...) : PdfError(...)
+    data class NativeFailure(...) : PdfError(...)
+    data class Io(...) : PdfError(...)
+}
+```
+
+## PageTextLayout
+
+Renvoyé par `PdfReaderState.pageTextLayout(...)` pour construire des overlays de texte personnalisés et des outils de surlignage.
+
+```kotlin
+@Immutable
+class PageTextLayout {
+    val pageIndex: Int
+    val pageSize: PageSize
+    val rectCount: Int
+    val charCount: Int
+
+    // Niveau rectangle (runs de ligne depuis FPDFText_GetRect)
+    fun left(i: Int): Float       // en points PDF, origine en bas à gauche
+    fun bottom(i: Int): Float
+    fun right(i: Int): Float
+    fun top(i: Int): Float
+    fun text(i: Int): String      // Unicode UTF-8
+
+    // Niveau caractère (FPDFText_GetCharBox / FPDFText_GetUnicode)
+    fun codepoint(i: Int): Int
+    fun charLeft(i: Int): Float
+    fun charBottom(i: Int): Float
+    fun charRight(i: Int): Float
+    fun charTop(i: Int): Float
+}
+```
+
+Pour mapper un rectangle vers un bitmap rendu aux dimensions en pixels `W × H` :
+
+```
+scaleX = W / pageSize.widthPoints
+scaleY = H / pageSize.heightPoints
+
+screenX = left × scaleX
+screenY = H - top × scaleY       // inverse Y (le PDF part du bas)
+screenW = (right - left)   × scaleX
+screenH = (top   - bottom) × scaleY
+```
+
+## Et ensuite
+
+- [Premiers pas](/docs/pdf/getting-started) — la même API utilisée à travers un écran de lecture complet.
+- [Aperçu du lecteur PDF](/docs/pdf) — cibles prises en charge et chemin de rendu.

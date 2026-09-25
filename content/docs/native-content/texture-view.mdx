@@ -1,0 +1,160 @@
+---
+title: TextureView
+description: Draw a GPU texture from an external producer inside the Compose scene, with no CPU frame copy.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`TextureView` draws a GPU texture that another component produces, such as a video decoder, a
+camera pipeline or a game engine, inside the Compose scene. No frame goes through the CPU, and
+z-order, clipping, `graphicsLayer` and scrolling apply as for any composable. It comes with
+`nucleus-application` and handles no input: use [`NativeView`](/docs/native-content/native-views)
+for interactive widgets, or [`TaoGpuRenderContext`](/docs/native-content/gpu-render-context) to
+render on the scene's own device.
+
+## Show a texture
+
+Wrap your producer's platform handle in a `TextureViewSource`, place a `TextureView`, and call
+`controller.markFrameAvailable()` after each finished frame:
+
+```kotlin
+@Composable
+fun VideoPane(source: TextureViewSource?) {
+    val controller = rememberTextureViewController()
+    DisposableEffect(source) {
+        // Start the producer; it calls controller.markFrameAvailable() after each frame.
+        onDispose { /* stop the producer */ }
+    }
+    TextureView(
+        source = source,
+        controller = controller,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+    )
+}
+```
+
+`markFrameAvailable()` is safe from any thread and re-runs only the draw pass. It does not pace
+your producer: throttle it to the display yourself. `contentScale`, `alignment` and
+`filterQuality` behave as on `Image`. When `source` is `null`, belongs to another platform, or
+fails to import, `TextureView` renders an empty `Box(modifier)`.
+
+## Platform sources
+
+<Tabs items={['Windows', 'macOS', 'Linux']}>
+<Tab value="Windows">
+
+```kotlin
+val source = nucleusD3D11SharedTextureSource(
+    sharedHandle = dxgiSharedHandle, // IDXGIResource::GetSharedHandle
+    widthPx = width,
+    heightPx = height,
+)
+```
+
+- Pass a legacy handle from `GetSharedHandle`. NT handles (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`)
+  do not import.
+- Use `R8G8B8A8_UNORM` or a compatible RGBA8 format with premultiplied alpha, at `widthPx` ×
+  `heightPx`.
+- With `D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX` (recommended), bracket producer writes with
+  `AcquireSync(0)` / `ReleaseSync(0)`; frames never tear. With plain `D3D11_RESOURCE_MISC_SHARED`
+  there is no copy, but call `Flush()` after each frame.
+
+See [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/mediafoundation-demo).
+
+</Tab>
+<Tab value="macOS">
+
+```kotlin
+// Shareable buffer, from any device or process
+val surfaceSource = nucleusIOSurfaceTextureSource(ioSurface = ioSurfaceRef, widthPx = width, heightPx = height)
+
+// Metal texture from the same process
+val metalSource = nucleusMetalTextureSource(metalTexture = mtlTexture, widthPx = width, heightPx = height)
+```
+
+- Use 32-bit `BGRA` or `RGBA` (sRGB included) with premultiplied alpha, at `widthPx` × `heightPx`.
+- Finish producer writes (`commit` and `waitUntilCompleted`, or double buffering) before
+  `markFrameAvailable()`.
+- The source retains the `IOSurface`, so your producer can release its own hold.
+- A Metal texture must be render-target capable on the window's device or backed by an
+  `IOSurface`; otherwise pass an `IOSurface` source.
+- On a Mac with only a discrete Intel GPU, the import fails and you get an empty box.
+
+See [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/avfoundation-demo).
+
+</Tab>
+<Tab value="Linux">
+
+```kotlin
+// Packed 32-bit RGB DMA-BUF
+val rgb = nucleusDmaBufTextureSource(
+    fd = dmaBufFd, widthPx = width, heightPx = height, stride = stride,
+    fourcc = NucleusDrmFormat.ARGB8888,
+)
+
+// Three-plane YUV from a hardware decoder
+val yuv = nucleusYuvDmaBufTextureSource(
+    widthPx = width,
+    heightPx = height,
+    format = NucleusYuvFormat.I420,
+    planes = listOf(
+        NucleusDmaBufPlane(fd = yFd, stride = yStride),
+        NucleusDmaBufPlane(fd = uFd, stride = uStride),
+        NucleusDmaBufPlane(fd = vFd, stride = vStride),
+    ),
+    colorSpace = NucleusYuvColorSpace.BT709_LIMITED,
+)
+```
+
+- RGB FourCC: `ARGB8888`, `XRGB8888`, `ABGR8888` or `XBGR8888`. You keep ownership of `fd`.
+- YUV supports `I420` and `YV12`. NV12 and NV21 are not supported.
+- `NucleusYuvColorSpace`: `BT601_LIMITED`, `BT601_FULL`, `BT709_LIMITED`, `BT709_FULL`. A wrong
+  value shows as washed-out or oversaturated color.
+- `controller.markFrameAvailable(acquireFenceFd)` hands over a `sync_file` fence instead of
+  finishing on the CPU. It requires `EGL_ANDROID_native_fence_sync`.
+
+See [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/gstreamer-demo).
+
+</Tab>
+</Tabs>
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Nucleus imports the producer's allocation on the window's GPU and samples it in the draw pass.
+  `TextureView`s that share one `TextureViewSource` share one import.
+- The Windows keyed-mutex path copies each frame once on the GPU; macOS always copies once.
+- NV12 and NV21 fail because the Skia build Compose ships cannot sample an interleaved chroma
+  plane. EGL takes its own reference to a DMA-BUF `fd` at import.
+- `rememberTextureViewController()` releases a pending fence when the composition leaves. Other
+  platforms ignore a fence fd and leave it yours.
+- `D3D11TestTextureProducer`, `MetalTestTextureProducer` and `DmaBufTestTextureProducer` produce
+  test frames for demos and CI.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+`TextureView(source, modifier, controller = null, filterQuality = FilterQuality.Low,
+contentScale = ContentScale.FillBounds, alignment = Alignment.Center)`
+
+| Factory | Platform | Handle |
+| --- | --- | --- |
+| `nucleusD3D11SharedTextureSource(sharedHandle, widthPx, heightPx)` | Windows | Legacy DXGI shared handle |
+| `nucleusIOSurfaceTextureSource(ioSurface, widthPx, heightPx)` | macOS | `IOSurfaceRef` |
+| `nucleusMetalTextureSource(metalTexture, widthPx, heightPx)` | macOS | `id<MTLTexture>` |
+| `nucleusDmaBufTextureSource(fd, widthPx, heightPx, stride, fourcc, offset, modifier)` | Linux | Single-plane DMA-BUF |
+| `nucleusEglImageTextureSource(eglImage, widthPx, heightPx)` | Linux | `EGLImageKHR` |
+| `nucleusYuvDmaBufTextureSource(widthPx, heightPx, format, planes, colorSpace)` | Linux | Planar YUV DMA-BUF |
+
+Handles are raw pointers passed as `Long`. An import failure only shows as an empty box: check
+formats and dimensions first. `TextureViewController.NO_FENCE` is `-1`.
+
+## What's next
+
+- [GPU render context](/docs/native-content/gpu-render-context): render on the scene's own device.
+- [Native views](/docs/native-content/native-views): embed interactive `NSView`, `HWND` or `GtkWidget` content.
+- [Windows](/docs/windows): open the window that hosts the texture.

@@ -1,0 +1,47 @@
+---
+title: Pen and touch input
+description: Read touchscreen and pen contacts, with pressure, from Compose pointer events.
+---
+
+Touchscreen and pen contacts reach Compose as pointers of type `PointerType.Touch`. You read them
+with the same `pointerInput` modifier as mouse input, and you add nothing beyond
+`nucleus-application`.
+
+## Draw with pressure
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            if (change.type == PointerType.Touch) {
+                addPoint(change.position, change.pressure)
+                change.consume()
+            }
+        }
+    }
+}
+```
+
+Gesture detectors, `consume()` and hit testing treat these contacts like any other Compose
+pointer.
+
+## Platform support
+
+| Platform | Arrives as | Pressure |
+| --- | --- | --- |
+| Windows | `PointerType.Touch` | Reported when the digitizer supports it |
+| Linux (Wayland and X11) | `PointerType.Touch` | Always `1f` |
+| macOS | Mouse | Not reported |
+
+- Treat `pressure == 1f` as "average or unknown". Most consumer touchscreens report `1f`.
+- Nucleus never produces `PointerType.Stylus` or `PointerType.Eraser`, and `PointerInputChange`
+  carries no tilt or barrel rotation. A pen and a finger differ only by pressure, on Windows.
+- A finger dragged on the title bar moves the window on Windows and Linux. On Linux, a finger on a
+  window edge resizes it.
+
+## What's next
+
+- [Trackpad gestures](/docs/input/trackpad-gestures): pans, pinch-to-zoom and rotation.
+- [Linux and Wayland](/docs/windows/linux-wayland): compositor behavior on Linux.
+- [Accessibility](/docs/input/accessibility): expose your UI to screen readers.

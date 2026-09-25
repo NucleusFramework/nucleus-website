@@ -1,0 +1,75 @@
+---
+title: Accessibilité
+description: Exposez votre sémantique Compose à VoiceOver, Narrateur, Orca et aux outils d'automatisation d'UI.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Nucleus expose votre sémantique Compose à VoiceOver sous macOS, au Narrateur sous Windows et à
+Orca sous Linux. Vous écrivez une sémantique Compose standard, et les lecteurs d'écran la lisent.
+Chaque `DecoratedWindow` embarque le pont, fourni avec `nucleus-application`.
+
+## Rendre votre UI accessible
+
+Attachez une sémantique Compose à vos composables. Vous ne construisez jamais de nœud
+d'accessibilité à la main :
+
+```kotlin
+Button(onClick = { count++ }, modifier = Modifier.testTag("increment")) {
+    Text("Increment")
+}
+
+Image(
+    painter = painterResource("logo.png"),
+    contentDescription = "Logo de l'entreprise",
+)
+
+Text(
+    "Chargement",
+    modifier = Modifier.semantics { contentDescription = "Chargement, veuillez patienter" },
+)
+```
+
+Un lecteur d'écran voit le `Button` comme un bouton activable et l'`Image` comme une image
+intitulée « Logo de l'entreprise ». Les nœuds marqués `InvisibleToUser` ou `HideFromAccessibility`
+restent hors de l'arbre du système.
+
+Quand un lecteur d'écran active, incrémente ou modifie un élément, Nucleus exécute le handler
+`SemanticsActions` Compose correspondant sur le thread UI. Un champ de texte en lecture seule ne
+propose pas l'édition au lecteur d'écran.
+
+## Retrouver des éléments depuis l'automatisation d'UI
+
+`Modifier.testTag(...)` devient un identifiant stable que les outils d'automatisation d'UI peuvent
+interroger à la place du libellé visible :
+
+| Plateforme | Attribut |
+| --- | --- |
+| macOS | `AXIdentifier` |
+| Windows | `UIA_AutomationIdPropertyId` |
+| Linux | Author id AccessKit |
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Nucleus projette l'arbre de sémantique sur NSAccessibility sous macOS, et via AccessKit sur UI
+  Automation sous Windows et AT-SPI sous Linux.
+- Nucleus ne parcourt l'arbre que lorsqu'une technologie d'assistance est connectée. D'ici là, le
+  défilement et les animations ne paient rien pour le pont.
+- Sous Windows et Linux, les mises à jour ne portent que les nœuds modifiés. macOS reconstruit
+  l'arbre complet à chaque mise à jour.
+- Un déplacement de fenêtre ne déclenche pas de nouvel envoi : les cadres des nœuds sont relatifs
+  à la fenêtre.
+- `TaoA11yRole`, `TaoA11yFlag` et `TaoA11yAction`, dans `dev.nucleusframework.window.tao`,
+  listent les rôles, états et actions visibles d'un lecteur d'écran. Votre application ne les
+  construit ni ne les lit. `MULTI_SELECTABLE`, `EXPANDED_TRUE` et `EXPANDED_FALSE` n'atteignent
+  que Linux.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : le `DecoratedWindow` qui installe le pont.
+- [Linux et Wayland](/docs/windows/linux-wayland) : le fenêtrage Linux, où AT-SPI passe par AccessKit.
+- [Stylet et tactile](/docs/input/pen-stylus) : contacts tactiles et stylet.

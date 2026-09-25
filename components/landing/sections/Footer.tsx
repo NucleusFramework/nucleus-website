@@ -22,7 +22,7 @@ export function Footer({ lang }: FooterProps) {
         <div className="footer-col">
           <h4>{pick(footerT.docs, lang)}</h4>
           <Link href={`${docsBase}/start/install`}>{pick(footerT.gettingStarted, lang)}</Link>
-          <Link href={`${docsBase}/concepts/runtimes`}>{pick(footerT.runtimeApis, lang)}</Link>
+          <Link href={`${docsBase}/performance`}>{pick(footerT.runtimeApis, lang)}</Link>
           <Link href={`${docsBase}/packaging`}>{pick(footerT.packaging, lang)}</Link>
           <Link href={`${docsBase}/packaging/ci-cd`}>{pick(footerT.cicd, lang)}</Link>
         </div>

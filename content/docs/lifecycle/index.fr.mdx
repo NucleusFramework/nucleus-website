@@ -1,55 +1,32 @@
 ---
-title: Cycle de vie, du démarrage à froid à la mise en veille
-description: Les modules lifecycle relient une app Nucleus aux événements et services de l'OS qui survivent à chaque fenêtre.
+title: Cycle de vie
+description: Les modules qui relient une app Nucleus aux événements et services de l'OS qui dépassent une seule fenêtre.
 ---
 
-Les modules lifecycle relient une app Nucleus aux événements et services du système
-d'exploitation qui survivent à n'importe quelle fenêtre : démarrage à froid et verrou
-d'instance, deep links, intégration au dock et à la taskbar, démarrage au login,
-planification de tâches de fond et gestion de l'énergie. Chaque étape est un module
-distinct, et vous n'ajoutez que ceux dont vous avez besoin.
-
-## Modules par étape du cycle de vie
-
-Chaque étape correspond à un module et à une page. Les deux fondations, `core-runtime` et
-`nucleus-application`, portent plusieurs des lignes ci-dessous.
+Les modules de cycle de vie relient votre app aux événements et services de l'OS qui dépassent
+n'importe quelle fenêtre. `nucleus-application` apporte `core-runtime` ; ajoutez les autres
+modules selon vos besoins. Chacun reste sans effet sur les plateformes qu'il ne gère pas : vous
+pouvez l'appeler depuis du code commun.
 
 | Étape | Module | Page |
 |---|---|---|
-| Démarrage à froid et verrou d'instance | `core-runtime` (`SingleInstanceManager`) | [Single instance](/docs/lifecycle/single-instance) |
-| URL et associations de fichiers | `core-runtime` (`DeepLinkHandler`) + DSL plugin | [Deep links](/docs/lifecycle/deep-links) |
-| Bundle id, version et vendeur au runtime | `core-runtime` (`NucleusApp`) | [App metadata](/docs/lifecycle/app-metadata) |
-| Mode de packaging de l'app | `core-runtime` (`ExecutableRuntime`) | [Executable type](/docs/lifecycle/executable-type) |
-| Menu du dock (macOS) | `launcher-macos` | [Launcher : macOS](/docs/lifecycle/launcher-macos) |
-| Overlays taskbar et jump list (Windows) | `launcher-windows` | [Launcher : Windows](/docs/lifecycle/launcher-windows) |
-| Unity launcher et quicklist (Linux) | `launcher-linux` | [Launcher : Linux](/docs/lifecycle/launcher-linux) |
-| Démarrage au login | `autolaunch` | [Auto-launch](/docs/lifecycle/auto-launch) |
-| Tâches périodiques et cron | `scheduler` | [Scheduler](/docs/lifecycle/scheduler) |
-| Agents `SMAppService` (macOS) | `service-management-macos` | [Service management](/docs/lifecycle/service-management) |
-| Efficacité énergétique et keep-awake | `energy-manager` | [Energy manager](/docs/lifecycle/energy-manager) |
-| Progression dans le dock ou la taskbar | `taskbar-progress` | [Taskbar progress](/docs/lifecycle/taskbar-progress) |
-
-## Fonctionnement
-
-Chaque module encapsule l'API native de son étape — `SMAppService`, `ITaskbarList3`,
-`NSDockTile`, `com.canonical.Unity.LauncherEntry`, les timers systemd et d'autres —
-derrière une surface Kotlin, pour que vous gardiez un seul code tout en laissant l'app
-s'intégrer à chaque OS via ses propres mécanismes. Les modules sont indépendants : n'ajoutez
-que ceux dont vous avez besoin, et chacun se réduit à un no-op sur les plateformes qu'il ne
-prend pas en charge.
-
-Deux modules portent les autres. `core-runtime` fournit les primitives d'exécution :
-`Platform`, `NucleusApp`, `SingleInstanceManager`, `DeepLinkHandler` et
-`ExecutableRuntime`. `nucleus-application` fournit le point d'entrée
-`nucleusApplication { }`, qui démarre le runtime et initialise ces primitives. Commencez par
-ces deux pages, puis lisez le module correspondant au comportement dont vous avez besoin.
-
-Les schemes de deep link se déclarent dans le build Gradle avec le DSL
-`protocol(name, schemes...)`, que le plugin traduit au moment du packaging en Apple Events
-sur macOS, en entrées de registre sur Windows et en associations MIME `.desktop` sur Linux.
+| Démarrage, sortie et quit système | `nucleus-application` | [Point d'entrée de l'application](/docs/lifecycle/application) |
+| Verrou d'instance | `core-runtime` | [Instance unique](/docs/lifecycle/single-instance) |
+| Schémas d'URL | `core-runtime` + DSL du plugin | [Deep links](/docs/lifecycle/deep-links) |
+| Id, version et vendeur de l'app à l'exécution | `core-runtime` | [Métadonnées de l'app](/docs/lifecycle/app-metadata) |
+| Format de packaging et sandbox | `core-runtime` | [Type d'exécutable](/docs/lifecycle/executable-type) |
+| Menu du Dock (macOS) | `launcher-macos` | [macOS Dock menu](/docs/os/dock-taskbar/macos) |
+| Icônes de superposition, jump lists, badges (Windows) | `launcher-windows` | [Windows taskbar](/docs/os/dock-taskbar/windows) |
+| Badges et quicklists du launcher (Linux) | `launcher-linux` | [Linux launcher](/docs/os/dock-taskbar/linux) |
+| Démarrage au login | `autolaunch` | [Démarrage au login](/docs/lifecycle/background/launch-at-login) |
+| Travail de fond périodique et calendaire | `scheduler`, `scheduler-testing` | [Scheduler](/docs/lifecycle/background/scheduler) |
+| Agents `SMAppService` (macOS) | `service-management-macos` | [Service management](/docs/lifecycle/background/service-management) |
+| Mode efficacité et maintien en éveil | `energy-manager` | [Energy manager](/docs/lifecycle/energy-manager) |
+| Progression sur le Dock ou la barre des tâches | `taskbar-progress`, `taskbar-progress-tao` | [Taskbar progress](/docs/os/dock-taskbar/progress) |
+| Changements de fichiers et de dossiers | `fs-watcher` | [Filesystem watcher](/docs/lifecycle/fs-watcher) |
 
 ## Et ensuite
 
-- [Single instance](/docs/lifecycle/single-instance) — garantir une seule instance et lui transmettre les arguments de lancement.
-- [Deep links](/docs/lifecycle/deep-links) — enregistrer des schemes d'URL personnalisés et traiter les URL entrantes.
-- [Architecture](/docs/concepts/architecture) — ce que `core-runtime` et `nucleus-application` mettent en place sous votre `main`.
+- [Point d'entrée de l'application](/docs/lifecycle/application) : `nucleusApplication` et ses options.
+- [Modules](/docs/concepts/modules) : ce qu'apporte `nucleus-application` et comment ajouter le reste.
+- [Architecture](/docs/concepts/architecture) : ce qui tourne sous votre fonction `main`.

@@ -1,0 +1,124 @@
+---
+title: Barre de menus macOS
+description: Construisez la barre de menus macOS native depuis Compose, avec des éléments, des raccourcis, des icônes, des badges et des sous-menus qui suivent votre état.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`menu-macos` construit la barre de menus native de macOS depuis Compose. Vous déclarez menus et
+éléments sous forme d'arbre, et la barre se met à jour quand l'état qu'elle lit change.
+`NativeMenuBar` ne fait rien sous Windows et Linux : l'appel peut rester dans le code partagé.
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.menu-macos:<version>")
+}
+```
+
+Le module apporte [`sf-symbols`](/docs/os/icons/sf-symbols) pour les noms d'icônes typés.
+
+## Construire une barre de menus
+
+```kotlin
+fun main() = nucleusApplication {
+    NativeMenuBar {
+        Menu("MyApp") {
+            Item("About MyApp") { showAbout() }
+            Separator()
+            Item("Quit MyApp", shortcut = NativeKeyShortcut("q")) { exitApplication() }
+        }
+        Menu("File") {
+            Item(
+                "New",
+                shortcut = NativeKeyShortcut("n"),
+                icon = NsMenuItemImage.SystemSymbol(SFSymbolObjectsAndTools.DOCUMENT_BADGE_PLUS),
+            ) { newDocument() }
+            Menu("Recent") {
+                Item("notes.md") { open("notes.md") }
+            }
+        }
+        MenuWindow("Window")
+        MenuHelp("Help") {
+            Item("Documentation") { openDocs() }
+        }
+    }
+
+    // Windows
+}
+```
+
+- Le premier `Menu` devient le menu de l'application, l'entrée en gras qui porte son nom. Un
+  `Menu` placé dans un `Menu` est un sous-menu.
+- Gardez `NativeMenuBar` hors du contenu des fenêtres : la barre reste en place quand des
+  fenêtres s'ouvrent et se ferment.
+- macOS remplit `MenuWindow` (liste des fenêtres, Tout ramener au premier plan) et `MenuHelp`
+  (champ de recherche) ; leur contenu est facultatif.
+- Les handlers de clic s'exécutent sur le thread UI et peuvent modifier l'état Compose.
+
+## Ajouter des cases à cocher et des boutons radio
+
+Vous gérez l'état ; l'élément affiche la coche :
+
+```kotlin
+var darkMode by remember { mutableStateOf(false) }
+
+Menu("View") {
+    CheckboxItem("Dark mode", checked = darkMode, onCheckedChange = { darkMode = it })
+    Separator()
+    RadioButtonItem("Light", selected = !darkMode, onClick = { darkMode = false })
+    RadioButtonItem("Dark", selected = darkMode, onClick = { darkMode = true })
+}
+```
+
+## Ajouter une recherche et des en-têtes de section
+
+```kotlin
+Menu("History") {
+    SearchField(placeholder = "Search history")
+    SectionHeader("Today")
+    Item("nucleusframework.dev") { open(url) }
+}
+```
+
+`SearchField` filtre les éléments du menu par titre pendant la saisie. `SectionHeader` exige
+macOS 14 et se replie sur un élément désactivé sur les systèmes plus anciens.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- À la première composition, `NativeMenuBar` sauvegarde la barre de menus courante et installe un
+  `NSMenu` construit depuis votre arbre. Il restaure la barre sauvegardée en quittant la
+  composition.
+- `MenuWindow` et `MenuHelp` deviennent les menus Fenêtre et Aide d'AppKit.
+- AppKit déclenche les actions sur son thread principal ; Nucleus les poste sur
+  `Dispatchers.Main`.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+Paramètres de `Item(text) { onClick }` :
+
+| Paramètre | Effet |
+| --- | --- |
+| `enabled` | Grise l'élément quand il vaut `false` |
+| `shortcut` | `NativeKeyShortcut(key)` : Commande par défaut ; ajoutez `shift`, `option`, `control`, `function`, ou `command = false`. `NativeKey` contient `ESCAPE`, `RETURN`, `TAB`, `DELETE`, `BACKSPACE`, les flèches et d'autres |
+| `icon` | `NsMenuItemImage.SystemSymbol` (un `SFSymbol` ou un nom brut, macOS 11+), `Named` (image AppKit ou du bundle) ou `File` |
+| `state` | `NsMenuItemState.OFF`, `ON` ou `MIXED` |
+| `badge` | `NsMenuItemBadge.Count`, `Text`, ou `Alerts`, `NewItems`, `Updates` localisés par macOS (macOS 14+) |
+| `subtitle` | Deuxième ligne sous le titre (macOS 14.4+) |
+| `toolTip` / `tag` / `indentationLevel` | Texte au survol / tag entier / indentation |
+| `isAlternate` | Remplace l'élément précédent tant que son modificateur est enfoncé |
+| `isHidden` | Masque l'élément en gardant son raccourci |
+| `onStateImage`, `offStateImage`, `mixedStateImage` | Remplacent la coche selon l'état |
+
+`Menu` accepte aussi une `icon`.
+
+## Et ensuite
+
+- [SF Symbols](/docs/os/icons/sf-symbols) : les noms typés pour les icônes `SystemSymbol`.
+- [Menus contextuels](/docs/os/menus/context-menu) : des menus natifs au clic droit dans vos fenêtres.
+- [Point d'entrée de l'application](/docs/lifecycle/application) : comment Cmd+Q et Dock > Quitter atteignent vos fenêtres.

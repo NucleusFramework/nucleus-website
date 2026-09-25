@@ -1,80 +1,62 @@
 ---
 title: Install
-description: Add the Nucleus Gradle plugin to a Kotlin project to build for macOS, Linux, and Windows from a single build.
+description: Apply the Nucleus Gradle plugin to a Kotlin project to build for macOS, Linux, and Windows from one build.
 ---
 
-import { Callout } from 'fumadocs-ui/components/callout';
-
-In this tutorial, you'll add the Nucleus Gradle plugin to a Kotlin project. Once the plugin is
-applied, the same build can compile, run, and package a desktop app for macOS, Linux, and Windows.
+In this tutorial, you'll apply the Nucleus Gradle plugin to a Kotlin project, so one build
+compiles, runs, and packages a desktop app for macOS, Linux, and Windows.
 
 ## Before you start
 
-Nucleus builds on Compose Multiplatform and requires:
-
-- **JDK 17 or later** on your `PATH`.
-- **Kotlin 2.4.10 or later** — see [Compatibility](#compatibility) for the version each Nucleus
-  line needs.
-- **Gradle 8.0 or later**. The Gradle wrapper bundled with new projects is sufficient.
-
-<Callout type="info">
-JDK 25 or later is required only to generate the AOT cache (`enableAotCache` in `nativeDistributions`).
-Any JDK 17+ works for development.
-</Callout>
+- **JDK 17 or later** on your `PATH`, from any vendor. The AOT cache and the Jewel toolkit need JDK 25.
+- **Kotlin 2.4.10 or later** and **Gradle 9.0 or later**.
 
 ## Compatibility
 
-| Nucleus Version | Kotlin Version | Compose Version |
+| Nucleus version | Kotlin version | Compose version |
 |-----------------|----------------|-----------------|
+| 3.0.x           | 2.4.10+        | 1.12.0          |
 | 2.5.0 – 2.5.18  | 2.4.10+        | 1.12.0          |
 | 2.0.0 – 2.4.7   | 2.4.0+         | 1.11.1          |
 
-The Compose version is a requirement, not a floor: `decorated-window-tao` builds against Compose
-Multiplatform internals that change between minors, so 2.5.x needs 1.12.0 and will not run on
-1.11.x. Pin the Compose plugin to the row that matches your Nucleus version.
-
-The Kotlin version is a minimum. Nucleus is compiled with the version in the table, and an older
-compiler cannot read its metadata.
+Pin the Compose plugin to the exact version of your row: 3.0.x does not run on Compose 1.11.x. The
+Kotlin version is a minimum.
 
 ## Apply the plugin
 
-In your module's `build.gradle.kts`, apply the Nucleus plugin alongside the Kotlin and Compose plugins:
+Apply the plugin from the Gradle Plugin Portal, and use the same `<version>` for every
+`dev.nucleusframework` runtime module on Maven Central:
 
 ```kotlin title="build.gradle.kts"
 plugins {
     kotlin("jvm") version "2.4.10"
+    kotlin("plugin.compose") version "2.4.10"
     id("org.jetbrains.compose") version "1.12.0"
     id("dev.nucleusframework") version "<version>"
 }
-```
 
-The `plugins` block resolves `dev.nucleusframework` from the Gradle Plugin Portal, so no extra
-`pluginManagement` repository is required.
-
-## Add the repositories
-
-Nucleus runtime modules publish to Maven Central under the group `dev.nucleusframework`. Add the
-repositories the plugin and its runtime need:
-
-```kotlin title="build.gradle.kts"
 repositories {
     mavenCentral()
     google()
 }
+
+kotlin {
+    jvmToolchain(25)
+}
 ```
 
-## Verify the plugin is applied
+The toolchain compiles your code. The JDK that packages and runs the app comes from `javaHome`, or
+from [`lastJdk`](/docs/performance/startup#package-with-the-latest-jdk).
 
-Applying the plugin registers a `nucleus` task group. List its tasks to confirm the plugin loaded:
+## Verify the plugin
 
 ```shell
 ./gradlew tasks --group nucleus
 ```
 
-If the command prints the group's tasks, the plugin is applied and you can start building.
+If Gradle lists the `nucleus` tasks, the plugin is applied.
 
 ## What's next
 
-- [Quickstart](/docs/start/quickstart) — write a `main` function, run a native Tao window, and package an installer.
-- [Project setup](/docs/start/project-setup) — repositories, Gradle properties, JDK toolchains, and multi-module layout.
-- [Configuration](/docs/start/configuration) — the full `nucleus { }` DSL.
+- [Quickstart](/docs/start/quickstart): write a `main` function, open a window, and package an installer.
+- [Configuration](/docs/start/configuration): the `nucleus { }` DSL.

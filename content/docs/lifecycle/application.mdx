@@ -1,0 +1,155 @@
+---
+title: Application entry point
+description: Start a Nucleus app with nucleusApplication, and control how it quits, locks to one instance, and initializes FileKit.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`nucleusApplication` is the `main` entry point of a Nucleus app. It starts the native event loop,
+runs your Compose content, and handles exit, system quit, single instance, and FileKit. It ships
+in `nucleus-application`.
+
+```kotlin
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.nucleusApplication
+
+fun main(args: Array<String>) = nucleusApplication(args) {
+    DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+        // window content
+    }
+}
+```
+
+Pass the `main` arguments so deep links and login launches reach the runtime. The app ends on
+`exitApplication()` or when its last window closes. Use `DecoratedWindow`, not Compose Desktop's
+AWT `Window`, `Dialog`, or `Tray`: they compile in this scope but are not supported.
+
+## Choose what happens on exit
+
+By default the JVM exits when the event loop stops: code 0 after a normal quit, 1 after a fatal
+error. Pass `exitProcessOnExit = false` to return to your `main` instead. A fatal error is then
+logged at `SEVERE` and rethrown, and you call `exitProcess` yourself, since the AWT thread can
+keep the JVM alive:
+
+```kotlin
+fun main(args: Array<String>) {
+    nucleusApplication(args, exitProcessOnExit = false) { /* ... */ }
+    flushLogs()
+    exitProcess(0)
+}
+```
+
+## Handle a system quit
+
+On macOS, Cmd+Q, Dock → Quit, logout, and shutdown call `onCloseRequest` on every open window,
+newest first, so your close-button logic covers a system quit. A window consents when its handler
+calls `exitApplication()` or closes the window. A window that stays open vetoes the quit. A
+window opened during the quit, such as a "Save changes?" dialog, delays the exit until it closes.
+
+<Callout type="warn" title="Changed in 3.0">
+In 2.x, a system quit on macOS terminated the app without calling `onCloseRequest`. A handler
+that never calls `exitApplication()` or closes its window now cancels the quit. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+A window that hides to the tray must let a real quit through. `isQuitting` is `true` during a
+system quit and resets if a window vetoes:
+
+```kotlin
+DecoratedWindow(
+    onCloseRequest = { if (isQuitting) exitApplication() else visible = false },
+    visible = visible,
+) { /* ... */ }
+```
+
+## Enforce a single instance
+
+Packaged builds hold the [single-instance](/docs/lifecycle/single-instance) lock. Dev runs skip
+it, so you can debug next to a packaged copy.
+
+<Callout type="warn" title="Changed in 3.0">
+`enableSingleInstance` now defaults to `!ExecutableRuntime.isDev()` instead of `true`. Pass
+`true` to test it from `./gradlew run`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Initialize FileKit
+
+When [FileKit](/docs/os/file-dialogs) is on the classpath, `nucleusApplication` calls
+`FileKit.init(NucleusApp.appId)` before your content runs. Dev runs, packaged builds, and native
+images then share one data directory (`%APPDATA%\<appId>` on Windows, which the uninstaller
+deletes when `deleteAppDataOnUninstall` is set). Your own `FileKit.init` call, before
+`nucleusApplication` or inside `content`, wins. `initializeFileKit = false` skips it.
+
+## Set the locale and Dock policy
+
+- `defaultLocale = Locale.FRENCH` forces the locale before any UI is built, including Compose's
+  text context menu and the default spellcheck language.
+- `dockIconFollowsWindows = true` (macOS) starts the app without a Dock icon and shows one only
+  while a `DecoratedWindow` with `hiddenFromDock = false` is visible. Tray popups never count.
+
+## Watch for a stalled UI
+
+On Windows, Nucleus logs `SEVERE` with a thread dump when the event loop stops responding, and
+calls your handlers on their own thread:
+
+```kotlin
+onUnresponsive { showWaitOrQuit() }
+onResponsive { hideWaitOrQuit() }
+```
+
+Wrap a known long call in `expectUnresponsive { }` to skip the report. Detection rules and the
+`-Dnucleus.tao.watchdog*` flags are on [Threading](/docs/concepts/threading).
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Before your content composes, `nucleusApplication` initializes GraalVM support, applies
+  `defaultLocale`, takes the single-instance lock, caches
+  [`AutoLaunch.wasStartedAtLogin(args)`](/docs/lifecycle/background/launch-at-login), sets the Windows AUMID
+  through `launcher-windows` when present, initializes FileKit, and starts the Tao event loop,
+  which serves as `Dispatchers.Main`.
+- It clears `ComposeUiFlags.pollSystemTheme`, so `isSystemInDarkTheme()` follows the reactive
+  `darkmode-detector` instead of polling the OS every second.
+- FileKit is `compileOnly`. Without it on the classpath, the init call fails with a caught
+  `LinkageError`.
+- `taoApplication` in `dev.nucleusframework.window.tao` is the bare event loop underneath. It
+  handles system quit but has no single-instance lock, FileKit, theme bridge, or `onDeepLink`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+### nucleusApplication
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `args` | `Array<String>` | `emptyArray()` | `main` arguments. Scanned for deep links and the login-launch marker. |
+| `enableSingleInstance` | `Boolean` | `!ExecutableRuntime.isDev()` | Acquires the single-instance lock. A second instance forwards its deep link and exits. |
+| `defaultLocale` | `Locale?` | `null` | Forces `Locale.getDefault()` and the `user.*` properties before the UI starts. |
+| `dockIconFollowsWindows` | `Boolean` | `false` | macOS only. Shows the Dock icon only while a visible window asks for it. |
+| `exitProcessOnExit` | `Boolean` | `true` | Terminates the JVM when the app ends. `false` returns to the caller. |
+| `initializeFileKit` | `Boolean` | `true` | Calls `FileKit.init(NucleusApp.appId)` when FileKit is present and not yet initialized. |
+| `content` | `@Composable NucleusApplicationScope.() -> Unit` | required | The application content. |
+
+### NucleusApplicationScope
+
+Extends Compose's `ApplicationScope`. `LocalNucleusApplicationScope` exposes it to composables
+deep in the tree.
+
+| Member | Description |
+|---|---|
+| `exitApplication()` | Asks the event loop to stop. During a system quit, counts as this window's consent. |
+| `isQuitting: Boolean` | `true` while a system quit is asking the windows to close. |
+| `onDeepLink(block: (URI) -> Unit)` | Registers the deep-link callback. See [Deep links](/docs/lifecycle/deep-links). |
+| `onUnresponsive(block)` / `onResponsive(block)` | Windows event-loop stall callbacks. |
+| `expectUnresponsive(block): T` | Runs `block` without reporting the stall it causes. |
+| `aotMode`, `isAotTraining`, `isAotRuntime` | The AOT cache mode of the running JVM. See [AOT cache](/docs/performance/aot-cache). |
+
+## What's next
+
+- [Windows](/docs/windows): `DecoratedWindow` and the window API.
+- [Single instance](/docs/lifecycle/single-instance): the lock and the second-launch hand-off.
+- [Threading](/docs/concepts/threading): the UI thread, native callbacks, and the watchdog.
+- [Tray apps](/docs/os/tray/tray-app): hide to the tray and quit from a menu.

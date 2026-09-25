@@ -1,0 +1,93 @@
+---
+title: System tray
+description: Draw a tray icon and its native menu from Compose on macOS, Windows, and Linux without AWT.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`Tray` draws a system tray icon and its native menu from Compose on macOS, Windows, and Linux.
+The icon and the menu update when the state they read changes.
+
+<Callout type="info" title="Separate repository">
+The tray ships from [`NucleusFramework/ComposeNativeTray`](https://github.com/NucleusFramework/ComposeNativeTray)
+with its own version. Add `dev.nucleusframework:composenativetray` for `Tray` and the menu DSL,
+and `dev.nucleusframework:composenativetray-app` for [tray apps](/docs/os/tray/tray-app).
+
+<Version module="tray" />
+</Callout>
+
+## Add a tray icon
+
+```kotlin
+import dev.nucleusframework.composenativetray.tray.api.Tray
+
+fun main() = nucleusApplication {
+    Tray(
+        icon = Icons.Default.Favorite,
+        tooltip = "My App",
+        primaryAction = { showWindow() },
+        onMenuOpened = { refreshStatus() },
+    ) {
+        Item(label = "Show window") { showWindow() }
+        Divider()
+        Item(label = "Quit") { exitApplication() }
+    }
+}
+```
+
+The icon stays while `Tray` is in the composition, so wrap it in an `if` to hide it. Pass
+`menuContent = null` for an icon without a menu.
+
+<Callout type="warn" title="Changed in 3.0">
+Compose Desktop's `androidx.compose.ui.window.Tray` relies on AWT and does not work under
+`nucleusApplication`. Use `dev.nucleusframework.composenativetray.tray.api.Tray`. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+## Handle clicks
+
+`primaryAction` runs on a left click on macOS and Windows. On Linux, KDE fires it on a single
+click and GNOME on a double click. Without `primaryAction`, a click opens the menu.
+`onMenuOpened` runs each time the menu opens, so you can refresh data first.
+
+## Set the icon
+
+`icon` accepts an `ImageVector` (with an optional `tint`), a `Painter`, or a `DrawableResource`.
+`iconContent` takes any composable, such as a badge:
+
+```kotlin
+Tray(
+    iconContent = {
+        Box(Modifier.size(24.dp).background(Color.Red, CircleShape)) {
+            Text("3", color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
+    },
+    tooltip = "3 notifications",
+) { /* … */ }
+```
+
+- Without `tint`, an `ImageVector` renders white on a dark tray and black on a light one.
+- For a hand-drawn `.ico` on Windows, pass `windowsIcon` and `macLinuxIcon` instead of `icon`.
+- `iconRenderProperties` sets the render sizes. The default targets 44 px on macOS, 32 px on
+  Windows, and 24 px on Linux.
+- Stock GNOME shows the icon only with the AppIndicator extension. KDE Plasma and Ubuntu show it
+  by default.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Compose renders the icon offscreen when its state changes and hands the pixels to the native
+  tray API. The library records the menu items during composition and rebuilds the native menu
+  when they change. It does not use AWT.
+- macOS uses an `NSStatusItem`, with light and dark variants of an untinted vector rendered ahead
+  of time. Windows uses `Shell_NotifyIcon`. Linux uses a StatusNotifierItem with a DBusMenu menu.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Tray menu DSL](/docs/os/tray/menu): items, checkable items, submenus, shortcuts, and reactive menus.
+- [Tray apps](/docs/os/tray/tray-app): open a Compose popup from the tray icon.
+- [Application entry point](/docs/lifecycle/application): `nucleusApplication` and `exitApplication`.

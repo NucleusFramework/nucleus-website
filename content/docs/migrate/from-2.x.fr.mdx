@@ -1,0 +1,336 @@
+---
+title: Migrer de Nucleus 2.x vers 3.0
+description: Portez une application Nucleus 2.x vers 3.0. Retirez le choix du backend et les fenêtres AWT, changez l'import de l'état de fenêtre et passez en revue les changements d'exécution et de build.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Dans ce tutoriel, vous allez porter une application Nucleus 2.x vers 3.0. Corrigez d'abord les
+erreurs de compilation, puis passez en revue les changements d'exécution et de build qui modifient
+le comportement sans casser la compilation.
+
+## Avant de commencer
+
+- Passez le plugin et chaque artefact `dev.nucleusframework` en `<version>`.
+- Utilisez JDK 17 ou plus récent et Compose Multiplatform 1.12. Voir
+  [Compatibilité](/docs/start/install).
+- Si votre application utilise `decorated-window-jbr` ou `decorated-window-jni`, prévoyez du temps
+  pour [retirer AWT](#remplacer-les-fenêtres-dialogues-et-tray-de-compose-desktop). C'est l'étape
+  la plus longue.
+
+## Passer en revue la liste de contrôle
+
+Chaque rupture et chaque changement de comportement de 3.0, avec l'étape de cette page et la page
+de la fonctionnalité.
+
+**Erreurs de compilation et API retirées**
+
+| Changement | Action | Docs |
+| --- | --- | --- |
+| `decorated-window-awt`, `-jbr`, `-jni` supprimés. `NucleusBackend`, `LocalNucleusBackend`, `nucleusApplication(backend = …)` et `NucleusApplicationScope.backend` retirés. | Retirez la dépendance et l'argument `backend`. [Étape](#supprimer-la-sélection-du-backend) | [Fenêtres](/docs/windows) |
+| `NucleusWindowUnsafe.awtWindow` / `awtDialog` retirés. Surcharges AWT sans receveur de `MaterialDecoratedWindow`, `MaterialDecoratedDialog`, `JewelDecoratedWindow`, `JewelDecoratedDialog` retirées. | Utilisez `unsafe.taoWindow` et les receveurs `NucleusApplicationScope`. [Étape](#supprimer-la-sélection-du-backend) | [Toolkits](/docs/toolkits) |
+| `Window`, `DialogWindow` et `Tray` AWT de Compose Desktop ne sont pas pris en charge. `SwingPanel` et l'embarquement d'un `Canvas` AWT échouent à l'exécution. | Utilisez `DecoratedWindow`, `DecoratedDialog`, `HostedWindow` / `HostedDialog`, ComposeNativeTray et `NativeView`. [Étape](#remplacer-les-fenêtres-dialogues-et-tray-de-compose-desktop) | [Dialogues et popups](/docs/windows/dialogs-popups) |
+| Les types `androidx.compose.ui.window.v2` de Compose sont refusés. | Importez `dev.nucleusframework.window.tao.v2` à la place. [Étape](#passer-létat-de-fenêtre-au-package-v2-de-nucleus) | [État de fenêtre](/docs/windows/window-state) |
+| `NucleusWindowHost.Window` prend deux nouveaux paramètres, `minimizable` et `maximizable`. | Ajoutez-les à votre hôte thématisé. [Étape](#mettre-à-jour-les-hôtes-de-fenêtre-personnalisés) | [Toolkits](/docs/toolkits) |
+| API multifenêtres des pré-versions renommées : `SatelliteDragKind` devient `WorkspaceDragKind`, `TabDropGhost.title` devient `TabDropGhost.tab`. La famille exige un opt-in. | Renommez, puis activez `ExperimentalNucleusApi`. [Étape](#activer-les-api-multifenêtres) | [Multifenêtre](/docs/multi-window) |
+| `macOS.appStore` et `TargetFormat.isStoreFormat` ne compilent plus. | Utilisez `macOS { pkg { appStore = … } }` et `ExecutableRuntime.isSandboxed()`. [Étape](#remplacer-les-options-store-du-pkg) | [Packaging macOS](/docs/packaging/macos) |
+
+**Changements de comportement à l'exécution**
+
+| Changement | Action | Docs |
+| --- | --- | --- |
+| Cmd+Q et Dock → Quitter appellent le `onCloseRequest` de chaque fenêtre. | Vérifiez que vos gestionnaires quittent ou ferment. [Étape](#vérifier-vos-gestionnaires-de-fermeture) | [Application](/docs/lifecycle/application) |
+| Les callbacks des notifications, du contrôle média et des launchers s'exécutent sur le thread UI de l'hôte, plus sur l'EDT AWT. | Retirez les hypothèses Swing de ces callbacks. [Étape](#sortir-les-callbacks-natifs-de-ledt-awt) | [Threading](/docs/concepts/threading) |
+| Le pincement du trackpad arrive en `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd`. | Passez le code de pincement à `Modifier.transformable` ou à un listener Scale. [Étape](#gérer-les-événements-de-pincement-et-de-pan) | [Gestes du trackpad](/docs/input/trackpad-gestures) |
+| Sous macOS, le défilement au trackpad arrive en `PanStart` / `PanMove` / `PanEnd`. | Gérez Pan dans vos gestionnaires `Scroll` personnalisés. [Étape](#gérer-les-événements-de-pincement-et-de-pan) | [Gestes du trackpad](/docs/input/trackpad-gestures) |
+| L'instance unique est désactivée en développement. | Passez `enableSingleInstance = true` pour la tester depuis `run`. [Étape](#tester-linstance-unique-en-développement) | [Instance unique](/docs/lifecycle/single-instance) |
+| `nucleusApplication` initialise FileKit avec `NucleusApp.appId`. | Vérifiez le répertoire de données FileKit, ou désactivez. [Étape](#vérifier-linitialisation-de-filekit) | [Dialogues de fichiers](/docs/os/file-dialogs) |
+| Windows : une boucle d'événements bloquée journalise `SEVERE` avec un dump des threads. | Branchez les callbacks ou signalez le travail long. [Étape](#gérer-le-watchdog-de-la-boucle-dévénements) | [Application](/docs/lifecycle/application) |
+| Windows : les fenêtres opaques rendent le texte en antialiasing LCD (ClearType). | Mettez à jour vos captures de référence, ou désactivez. [Étape](#vérifier-le-texte-lcd-sous-windows) | [HiDPI](/docs/windows/hidpi) |
+| Les polices du JRE sont retirées des images runtime jlink. | Gardez-les si vous dessinez du texte via AWT ou Swing. [Étape](#conserver-les-polices-du-jre-pour-le-texte-awt) | [Configuration](/docs/start/configuration) |
+| Les bibliothèques JNI de Nucleus sont livrées à côté de l'application empaquetée, plus dans ses JAR. | Chargez-les via `NativeLibraryLoader`, pas comme ressources. [Étape](#charger-les-bibliothèques-natives-nucleus-via-le-loader) | [Packaging](/docs/packaging) |
+
+**Changements de build et de CI**
+
+| Changement | Action | Docs |
+| --- | --- | --- |
+| Le plugin télécharge Node.js pour le packaging. | Retirez `setup-node` de la CI et mettez le téléchargement en cache. [Étape](#retirer-nodejs-de-la-ci) | [CI/CD](/docs/packaging/ci-cd) |
+| `nucleusOptimization` et son réglage `lastJdk` sont opt-in. `lastJdk` télécharge OpenJDK 27. | Activez-les si vous en voulez. [Étape](#activer-le-pack-de-démarrage) | [Performance](/docs/performance) |
+
+**Nouveautés de 3.0, aucune action requise**
+
+| Changement | Quand c'est utile | Docs |
+| --- | --- | --- |
+| `TaoWindow.canPlaceOnScreen` et `SatelliteScope.isCompositorPlaced` indiquent le placement sous Wayland natif. | Chrome qui lit la position des fenêtres sous Linux. [Étape](#activer-les-api-multifenêtres) | [Linux et Wayland](/docs/windows/linux-wayland) |
+| `nucleusApplication(exitProcessOnExit = true)` est la valeur par défaut. | Passez `false` pour continuer après la dernière fenêtre. | [Application](/docs/lifecycle/application) |
+| `-Dnucleus.native.cacheDir` et `NativeLibraryLoader.cacheDirectory` déplacent le cache des bibliothèques natives. | Fat JAR, lancements depuis l'IDE, distributions construites sans le plugin. [Étape](#charger-les-bibliothèques-natives-nucleus-via-le-loader) | [Packaging](/docs/packaging) |
+
+## Supprimer la sélection du backend
+
+Tao est le seul runtime de fenêtres de 3.0, et `nucleus-application` l'apporte avec lui.
+
+1. Retirez `decorated-window-jbr`, `decorated-window-jni`, `decorated-window-awt` et
+   `decorated-window-tao` des dépendances de chaque module.
+2. Retirez l'argument `backend` et l'import de `NucleusBackend`. Supprimez les lectures de
+   `LocalNucleusBackend` et de `NucleusApplicationScope.backend`, et gardez la branche Tao du code
+   propre à un backend :
+
+   ```diff
+   -fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBackend.Tao) {
+   +fun main(args: Array<String>) = nucleusApplication(args) {
+   ```
+
+3. Remplacez `nucleusWindow.unsafe.awtWindow` par `unsafe.taoWindow`, ou `unsafe.taoHandle` pour le
+   handle natif. Regardez d'abord `NucleusWindow` : `toFront()`, `setMinimumSize()`, `setIcon()` et
+   `boundsOnScreen()` couvrent la plupart des appels.
+4. Appelez les fenêtres et dialogues Material et Jewel sur un `NucleusApplicationScope` : les
+   surcharges AWT sans receveur ont disparu. Dans `nucleusApplication { }`, rien ne change. Plus bas
+   dans la composition, lisez le scope dans `LocalNucleusApplicationScope` :
+
+   ```kotlin
+   val scope = LocalNucleusApplicationScope.current
+   scope.MaterialDecoratedWindow(onCloseRequest = onClose, title = "Editor") { EditorContent() }
+   ```
+
+## Remplacer les fenêtres, dialogues et tray de Compose Desktop
+
+Nucleus 3.0 ne crée jamais de fenêtre AWT : `Window`, `DialogWindow` et `Tray` de Compose Desktop
+échouent donc sous `nucleusApplication`. Remplacez chacun par son équivalent Nucleus :
+
+| Compose Desktop (AWT) | Nucleus 3.0 |
+| --- | --- |
+| `Window(…)` | `DecoratedWindow(…)`, ou `HostedWindow(…)` dans une bibliothèque |
+| `DialogWindow(…)` | `DecoratedDialog(…)`, ou `HostedDialog(…)` dans une bibliothèque |
+| `Tray(…)` de `androidx.compose.ui.window` | `Tray(…)` de [ComposeNativeTray](/docs/os/tray) |
+| `SwingPanel`, `Canvas` AWT | [`NativeView`](/docs/native-content/native-views) |
+| `JFileChooser`, `java.awt.FileDialog` | [FileKit](/docs/os/file-dialogs) |
+| `window.window` (`ComposeWindow`) | `nucleusWindow` et `LocalNucleusWindow` |
+
+`DecoratedWindow` et `DecoratedDialog` prennent les mêmes arguments `onCloseRequest` et `title`.
+`HostedWindow` et `HostedDialog` prennent le toolkit fourni par l'application : une bibliothèque
+n'impose donc pas d'apparence.
+
+Pour le tray, ajoutez `dev.nucleusframework:composenativetray:<version>` et importez
+`dev.nucleusframework.composenativetray.tray.api.Tray`. Son API diffère du `Tray` de Compose :
+portez le menu avec le [DSL de menu du tray](/docs/os/tray/menu).
+
+<Callout type="info">
+Les classes AWT qui n'ont pas besoin de fenêtre continuent de fonctionner : `BufferedImage`,
+`ImageIO`, `java.awt.Font` et le presse-papiers AWT. Les API qui exigent une fenêtre ou la boucle
+d'événements AWT ne fonctionnent pas.
+</Callout>
+
+## Passer l'état de fenêtre au package v2 de Nucleus
+
+L'API de fenêtres v2 de Compose 1.12 dépend d'AWT : Nucleus en livre une copie aux mêmes membres.
+Changez l'import de `rememberWindowState`, `WindowState`, `DialogState`, `Screen`, des fournisseurs
+de géométrie et des fabriques `remember*` :
+
+```diff
+-import androidx.compose.ui.window.v2.rememberWindowState
++import dev.nucleusframework.window.tao.v2.rememberWindowState
+```
+
+Le `androidx.compose.ui.window.WindowState` v1 continue de fonctionner. Voir
+[État de fenêtre](/docs/windows/window-state).
+
+## Mettre à jour les hôtes de fenêtre personnalisés
+
+`NucleusWindowHost.Window` prend `minimizable: Boolean` et `maximizable: Boolean` après
+`resizable`. Un hôte thématisé doit ajouter les deux et les transmettre. Ils valent `true` par
+défaut sur `DecoratedWindow` et `HostedWindow`, et `DecoratedDialog` passe `false`.
+`NucleusDialogHost` ne change pas.
+
+## Activer les API multifenêtres
+
+Les satellites, le dock et les onglets sont `@ExperimentalNucleusApi` au niveau `ERROR`. Activez-les
+par site d'appel ou par module :
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    compilerOptions {
+        optIn.add("dev.nucleusframework.window.ExperimentalNucleusApi")
+    }
+}
+```
+
+Si vous utilisiez une pré-version, renommez `SatelliteDragKind` en `WorkspaceDragKind` (il sert
+désormais les deux workspaces) et `dropGhost.title` en `dropGhost.tab.title`.
+
+Sous Wayland natif, l'application ne peut ni lire ni fixer la position des fenêtres à l'écran.
+Testez `TaoWindow.canPlaceOnScreen` (ou `SatelliteScope.isCompositorPlaced` dans un satellite),
+pas le nom du compositeur. Voir [Linux et Wayland](/docs/windows/linux-wayland).
+
+## Remplacer les options store du PKG
+
+Un PKG cible désormais soit le Mac App Store, soit Developer ID. Déplacez l'option dans le bloc
+`pkg { }` :
+
+```diff title="build.gradle.kts"
+ macOS {
+-    appStore = true
++    pkg { appStore = true } // default; false builds a Developer ID PKG
+ }
+```
+
+Dans le code, remplacez les tests `ExecutableRuntime.isPkg()` et `isStoreFormat` par
+`ExecutableRuntime.isSandboxed()`. Un PKG Developer ID n'est pas sandboxé et peut donc se mettre à
+jour. Voir [Sandboxing](/docs/packaging/sandboxing).
+
+## Passer en revue les changements de comportement
+
+Ces changements compilent sans erreur. Vérifiez chacun sur votre application.
+
+### Vérifier vos gestionnaires de fermeture
+
+Sous macOS, Cmd+Q et Dock → Quitter appellent désormais `onCloseRequest` sur chaque fenêtre
+ouverte, comme sous Windows et Linux. Un gestionnaire qui n'appelle pas `exitApplication()` et ne
+ferme pas sa fenêtre annule la sortie. Un gestionnaire qui masque dans le tray laisse passer la
+sortie tant que `NucleusApplicationScope.isQuitting` vaut `true`. Voir
+[Application](/docs/lifecycle/application).
+
+### Sortir les callbacks natifs de l'EDT AWT
+
+Les callbacks de `notification-linux`, `notification-windows`, `media-control`, `launcher-linux`
+et `launcher-macos` s'exécutent sur le thread UI de l'hôte. Les écritures d'état Compose
+fonctionnent toujours. Retirez-en les tests `SwingUtilities.isEventDispatchThread()` et les appels
+Swing. Voir [Threading](/docs/concepts/threading).
+
+### Gérer les événements de pincement et de pan
+
+Un pincement au trackpad ou Ctrl+molette arrive en `ScaleStart` / `ScaleChange` / `ScaleEnd`, que
+`detectTransformGestures` ne voit pas en Compose 1.12 : utilisez `Modifier.transformable`. Sous
+macOS, le défilement au trackpad arrive en `PanStart` / `PanMove` / `PanEnd`. `Modifier.scrollable`
+le gère, mais un gestionnaire `Scroll` personnalisé doit aussi gérer Pan :
+
+```kotlin
+when (event.type) {
+    PointerEventType.Scroll -> offset += change.scrollDelta * stepPx
+    PointerEventType.PanMove -> offset += change.panOffset
+    PointerEventType.ScaleChange -> zoom *= change.scaleFactor
+}
+```
+
+`-Dnucleus.tao.trackpadPanEvents=false` envoie le défilement au trackpad en `Scroll`. Voir
+[Gestes du trackpad](/docs/input/trackpad-gestures).
+
+### Tester l'instance unique en développement
+
+Un second `./gradlew run` ou lancement depuis l'IDE démarre désormais une instance séparée. Les
+builds empaquetés gardent le verrou. Pour tester la redirection depuis `run`, passez
+`nucleusApplication(args, enableSingleInstance = true)`.
+
+### Vérifier l'initialisation de FileKit
+
+Quand FileKit est sur le classpath, `nucleusApplication` appelle `FileKit.init(NucleusApp.appId)` :
+lancements de développement, applications empaquetées et images natives partagent un même
+répertoire de données. Un appel à `FileKit.init` avant `nucleusApplication` garde votre
+configuration. Passez `initializeFileKit = false` pour ne pas toucher à FileKit.
+
+### Gérer le watchdog de la boucle d'événements
+
+Sous Windows, une boucle d'événements bloquée journalise désormais `SEVERE` avec un dump des
+threads. Affichez votre propre UI depuis les callbacks, et encadrez le travail synchrone long connu
+pour qu'il ne soit pas signalé :
+
+```kotlin
+nucleusApplication(args) {
+    onUnresponsive { showWaitOrQuit() }
+    onResponsive { hideWaitOrQuit() }
+    expectUnresponsive { importHugeProjectSynchronously() }
+}
+```
+
+`-Dnucleus.tao.watchdog=false` désactive le watchdog.
+
+### Vérifier le texte LCD sous Windows
+
+Sous Windows, les fenêtres opaques rendent désormais le texte en antialiasing ClearType, ce qui
+change les captures. Mettez à jour vos références, ou désactivez-le avec `-Dnucleus.text.lcd=false`
+à l'exécution ou `-Pnucleus.text.lcd.patch=false` au build.
+
+### Conserver les polices du JRE pour le texte AWT
+
+L'image runtime jlink ne contient plus les polices du JRE, car Compose dessine avec les siennes. Si
+vous rendez du texte via AWT ou Swing, écrivez `stripJreFonts = false` dans `nativeDistributions`.
+
+### Charger les bibliothèques natives Nucleus via le loader
+
+Les applications empaquetées placent les bibliothèques JNI de Nucleus à côté de l'application, plus
+dans les JAR des modules. Le code qui les lisait comme ressources JAR doit appeler
+`NativeLibraryLoader.load(…)`. Vos propres bibliothèques sous `nucleus/native/` restent dans leurs
+JAR.
+
+## Mettre à jour le build et la CI
+
+### Retirer Node.js de la CI
+
+Le plugin télécharge le Node.js dont le packaging a besoin. Retirez `actions/setup-node` de vos
+workflows et ajoutez `~/.gradle/nucleus/nodejs` aux chemins mis en cache. Pour garder le `node` du
+`PATH`, écrivez `nodejs { autoDownload = false }` dans `nativeDistributions`. Voir
+[CI/CD](/docs/packaging/ci-cd).
+
+### Activer le pack de démarrage
+
+`nucleusOptimization` est désactivé par défaut. Un seul interrupteur active Serial GC, un tas
+compact, un JAR runtime unique, le GC au repos et `lastJdk` (OpenJDK 27). Surchargez un réglage
+dans le bloc :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization = true
+    nucleusOptimization { lastJdk = false }
+}
+```
+
+Un `javaHome` explicite l'emporte sur `lastJdk`. Voir [Performance](/docs/performance).
+
+## Retester l'application
+
+Lancez l'application, puis testez chaque intégration qui dépendait d'AWT :
+
+- **Glisser-déposer.** Réécrivez les gestionnaires qui lisaient des données `TransferHandler` AWT.
+  Voir [Glisser-déposer](/docs/input/drag-and-drop).
+- **Liens profonds.** `onDeepLink { uri -> … }` ne change pas.
+- **Dialogues de fichiers et vues embarquées.** Vérifiez chaque sélecteur FileKit et chaque
+  `NativeView`.
+- **Placement des fenêtres sous Linux.** Les compositeurs Wayland ignorent les positions absolues.
+- **La sortie de l'application** sous macOS, et chaque gestionnaire de fermeture.
+- **Le packaging.** Construisez une fois chaque format d'installeur, et une image native si vous en
+  livrez une.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- `core-runtime` garde `WindowBackend.Awt`. Cette valeur décrit une application Compose Desktop ou
+  Swing qui embarque des bibliothèques Nucleus sans `nucleusApplication`, et n'a aucun effet sur
+  une application Nucleus.
+- `macOS.appStore` échoue au niveau `ERROR` au lieu de servir d'alias : 2.x l'ignorait, et un alias
+  aurait basculé les builds existants vers l'autre canal.
+- Le pincement arrivait auparavant en deux contacts tactiles synthétiques. La rotation arrive
+  toujours ainsi.
+- Un appel à `FileKit.init` dans `content` remplace l'appel automatique.
+- Les callbacks du watchdog s'exécutent sur un thread dédié. `-Dnucleus.tao.watchdogGraceMs=<ms>`
+  change le délai de grâce, et `-Dnucleus.tao.watchdogDialog=true` affiche aussi le dialogue natif.
+- Les fenêtres transparentes, les popups, Mica et Acrylic gardent un texte en niveaux de gris.
+- Seule l'image jlink perd les polices du JRE. `run` et les images natives GraalVM ne sont pas
+  concernés.
+- Les fat JAR, les lancements depuis l'IDE et les distributions construites sans le plugin
+  extraient toujours les bibliothèques natives dans un cache. Déplacez-le avec
+  `-Dnucleus.native.cacheDir=<dir>`, ou fixez `NativeLibraryLoader.cacheDirectory` dans `main()`
+  avant le chargement de la première bibliothèque native.
+- `compose.electronBuilder.nodePath` et `NUCLEUS_NODE_HOME` restent prioritaires sur le
+  téléchargement de Node.js.
+- `lastJdk` télécharge le JDK la première fois qu'une tâche de packaging ou `run` en a besoin, et se
+  rabat sur BellSoft Liberica sur les Mac Intel et Windows ARM.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Fenêtres](/docs/windows) : `nucleusApplication` et `DecoratedWindow` en 3.0.
+- [État de fenêtre](/docs/windows/window-state) : l'API de fenêtres v2 sans AWT.
+- [Multifenêtre](/docs/multi-window) : satellites, dock et onglets.
+- [Migrer avec un agent IA](/docs/migrate/ai-agent) : laissez un agent appliquer cette liste.

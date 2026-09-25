@@ -1,59 +1,57 @@
 ---
 title: Migrate with an AI agent
-description: Point any AI coding agent at one URL and it analyzes your app, asks the right questions, and migrates it to Nucleus step by step.
+description: Point an AI coding agent at the Nucleus migration playbook or at the 3.0 upgrade guide, and let it migrate your app one verified step at a time.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The fastest way to migrate an existing JetBrains Compose Desktop app is to let an AI coding
-agent do it, guided by our migration playbook. Nothing to install: the whole playbook —
-detection script, API references, checkpoints — lives in a single file your agent fetches.
+Paste one prompt into an AI coding agent such as Claude Code, Cursor, or Codex, inside your
+project, and review each step it makes.
 
-## One prompt, that's all
+## Upgrade a Nucleus 2.x app to 3.0
 
-Open your agent (Claude Code, Cursor, Codex, …) inside the app you want to migrate and paste:
+The prompt applies the [2.x to 3.0 checklist](/docs/migrate/from-2.x):
+
+```text
+Fetch https://nucleusframework.dev/en/docs/migrate/from-2.x and apply it to this project.
+Work through the checklist group by group: compile errors first, then runtime behavior
+changes, then build and CI. After each group, run ./gradlew build and stop so I can check
+the app before you continue.
+```
+
+Ask the agent to list the rows that don't apply, so you can confirm them. Retest quit flows on
+macOS, trackpad gestures, and close handlers yourself.
+
+## Migrate a JetBrains Compose Desktop app
 
 ```text
 Fetch https://nucleusframework.dev/nucleus-migrate.md and follow its instructions to
 analyze this app and migrate it to Nucleus step by step.
 ```
 
-## What the agent does
+The agent scans the app for AWT, Swing and packaging usage, asks which design system and native
+features you want, then migrates one phase at a time: Gradle DSL, window shell, AWT removal,
+features, packaging, GraalVM, CI. Each phase ends with a checkpoint, and a final report lists what
+changed.
 
-1. **Scans your project** with a bundled detector: AWT/Swing usage (file dialogs, tray,
-   clipboard, `SwingPanel`…), custom title bars, Material 2/3/Jewel, notifications, hand-rolled
-   updaters and single-instance locks, JNA, packaging formats (MSI…), GraalVM feasibility
-   signals, and your CI workflows.
-2. **Interviews you**: Tao or AWT backend, design system for the window chrome, which native
-   features to adopt (notifications, tray, auto-update, deep links, taskbar progress…),
-   MSI→NSIS, GraalVM now or later, CI migration.
-3. **Migrates one phase at a time** — Gradle DSL, window shell, AWT removal, feature adoption,
-   packaging, GraalVM, CI — each phase ending with a verifiable checkpoint (`./gradlew run`,
-   a visual check, a packaged installer) before moving on.
-4. **Reports** what changed, what was deliberately kept, and what to do next.
-
-<Callout title="Grounded in a real migration">
-The playbook encodes the DSL renames, threading rules, and the costliest gotchas learned from
-real-world migrations (overload ambiguity on `NucleusApplicationScope`, theme-wraps-window,
-`HostedWindow` for library code, Linux `Desktop.browse` deadlocks…), all verified against the
-plugin and runtime sources.
+<Callout type="warn">
+Nucleus 3.0 has no AWT window backend. If the agent adds `decorated-window-jbr` or
+`decorated-window-jni`, refuse and point it at [Migrate from Nucleus 2.x to 3.0](/docs/migrate/from-2.x).
 </Callout>
 
-## Claude Code users: install it as a skill (optional)
+## Install the playbook as a Claude Code skill
 
-The same playbook is packaged as a reusable skill with progressive loading (the agent only
-reads the reference it needs per phase). Download
-[nucleus-migrate.skill](https://nucleusframework.dev/nucleus-migrate.skill), then unzip it into
-your skills directory:
+Download [nucleus-migrate.skill](https://nucleusframework.dev/nucleus-migrate.skill) and unzip it
+into your skills directory:
 
-```bash
+```shell
 cd ~/.claude/skills && unzip ~/Downloads/nucleus-migrate.skill
 ```
 
-From any project, run `/nucleus-migrate` — or just say "migrate this app to Nucleus" and the
-skill triggers itself.
+Run `/nucleus-migrate`, or ask Claude Code to migrate the app to Nucleus.
 
-## Prefer doing it by hand?
+## What's next
 
-Follow the manual guides: [build migration from JetBrains Compose Desktop](/docs/migrate/from-jb-compose)
-and, coming from Nucleus 1.x, the [1.x to 2.0 guide](/docs/migrate/from-1.x).
+- [Migrate from Nucleus 2.x to 3.0](/docs/migrate/from-2.x): the checklist the first prompt applies.
+- [Migrate from JetBrains Compose Desktop](/docs/migrate/from-jb-compose): the build migration by hand.
+- [Migrate from Nucleus 1.x](/docs/migrate/from-1.x): the namespace move to 2.0.

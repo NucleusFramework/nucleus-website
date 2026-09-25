@@ -33,7 +33,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Un drapeau remplace le menu Compose par celui de la plateforme — NSMenu, Fluent, Adwaita, Breeze, avec libellés de raccourcis.',
     },
     icon: 'menu',
-    href: '/docs/window/context-menu',
+    href: '/docs/os/menus/context-menu',
     new: true,
   },
   {
@@ -43,7 +43,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Watermarks et widgets de bureau — traversants, toujours en arrière-plan, visibles sur tous les bureaux.',
     },
     icon: 'window',
-    href: '/docs/tao/overlay-windows',
+    href: '/docs/windows/overlay-windows',
     new: true,
   },
   {
@@ -53,7 +53,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Intégrez un NSView, un HWND ou un GtkWidget dans Compose — désormais avec Compose fondu par-dessus dans la même scène.',
     },
     icon: 'native',
-    href: '/docs/tao/native-views',
+    href: '/docs/native-content/native-views',
   },
   {
     name: { en: 'GPU render context', fr: 'Contexte de rendu GPU' },
@@ -62,7 +62,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'GPU in-process sur le device de la scène — DirectContext Skia, Metal / ANGLE / EGL. Pas de second GPU, pas de copie.',
     },
     icon: 'texture',
-    href: '/docs/tao/gpu-render-context',
+    href: '/docs/native-content/gpu-render-context',
   },
   {
     name: { en: 'TextureView', fr: 'TextureView' },
@@ -71,7 +71,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Textures GPU externes dans la scène Compose — D3D11, Metal, DMA-BUF. Vrai ordre z, sans copie CPU.',
     },
     icon: 'texture',
-    href: '/docs/tao/texture-view',
+    href: '/docs/native-content/texture-view',
   },
   {
     name: { en: 'AwakeMode', fr: 'AwakeMode' },
@@ -98,16 +98,16 @@ const ITEMS: FeatureItem[] = [
       fr: 'Le WorkManager du desktop — tâches périodiques, cron et au boot que l\'OS lance même app fermée. launchd, Task Scheduler, systemd.',
     },
     icon: 'scheduler',
-    href: '/docs/lifecycle/scheduler',
+    href: '/docs/lifecycle/background/scheduler',
   },
   {
     name: { en: 'Decorated Window', fr: 'Fenêtre décorée' },
     desc: {
-      en: 'Custom title bar, native controls, theme-aware. Tao backend by default.',
-      fr: 'Barre de titre personnalisée, contrôles natifs, adaptée au thème. Backend Tao par défaut.',
+      en: 'Custom title bar, native controls, theme-aware. No AWT window underneath.',
+      fr: 'Barre de titre personnalisée, contrôles natifs, adaptée au thème. Aucune fenêtre AWT dessous.',
     },
     icon: 'window',
-    href: '/docs/tao/decorated-window',
+    href: '/docs/windows',
   },
   {
     name: { en: 'Window Scaffold', fr: 'Scaffold de fenêtre' },
@@ -116,7 +116,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Mises en page plein fenêtre, régions de verre, Mica/Acrylic, primitives de chrome.',
     },
     icon: 'window',
-    href: '/docs/tao/window-scaffold',
+    href: '/docs/windows/window-scaffold',
   },
   {
     name: { en: 'Native Notifications', fr: 'Notifications natives' },
@@ -134,7 +134,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Icônes de statut avec menus, badges et clics — sur les trois systèmes.',
     },
     icon: 'tray',
-    href: '/docs/os/system-tray',
+    href: '/docs/os/tray',
   },
   {
     name: { en: 'Dock & Launcher', fr: 'Dock et launcher' },
@@ -152,7 +152,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Thème système réactif — relie isSystemInDarkTheme de Compose sous nucleusApplication.',
     },
     icon: 'theme',
-    href: '/docs/os/dark-mode',
+    href: '/docs/os/theme/dark-mode',
   },
   {
     name: { en: 'Global Hotkey', fr: 'Raccourci global' },
@@ -170,7 +170,7 @@ const ITEMS: FeatureItem[] = [
       fr: 'Barres de progression sur la barre des tâches Windows, le dock macOS et le launcher Unity.',
     },
     icon: 'progress',
-    href: '/docs/lifecycle/taskbar-progress',
+    href: '/docs/os/dock-taskbar/progress',
   },
   {
     name: { en: 'Deep Links', fr: 'Liens profonds' },

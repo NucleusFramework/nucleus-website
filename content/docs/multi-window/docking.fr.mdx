@@ -1,0 +1,147 @@
+---
+title: Ancrage
+description: Disposez les satellites ancrés autour de votre contenu avec DockLayout, dimensionnez et classez les panneaux, restreignez leurs emplacements et dessinez vos propres séparateurs.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`DockLayout` dispose les satellites ancrés dans une fenêtre autour du contenu de cette fenêtre.
+Il est `@ExperimentalNucleusApi` (voir [Multi-fenêtre](/docs/multi-window)).
+
+## Ajouter un DockLayout
+
+Composez `DockLayout` dans une fenêtre qui a rejoint le workspace :
+
+```kotlin
+DecoratedWindow(onCloseRequest = ::exitApplication) {
+    JoinSatelliteWorkspace(workspace)
+    WindowScaffold(titleBar = { TitleBar { Text("Document") } }) { padding ->
+        DockLayout(
+            workspace,
+            Modifier.fillMaxSize().padding(padding),
+            sideOrder = listOf(DockSide.Right, DockSide.Bottom, DockSide.Left, DockSide.Top),
+            layeredSides = setOf(DockSide.Right),
+        ) { Document() }
+    }
+}
+```
+
+| Paramètre | Défaut | Rôle |
+| --- | --- | --- |
+| `workspace` | requis | Le `SatelliteWorkspace` dont il héberge les panneaux |
+| `host` | `LocalTaoWindow.current` | La fenêtre que désigne `SatelliteEntry.dockHost` |
+| `sideOrder` | `DefaultDockSideOrder` | Les quatre côtés, du plus extérieur au plus intérieur |
+| `layeredSides` | `emptySet()` | Côtés dont les panneaux sont des couches plutôt qu'un partage |
+| `splitter` | `{ DefaultDockSplitter() }` | Dessiné entre un côté et le contenu, et entre deux panneaux |
+| `panel` | `{ it() }` | Cadre de chaque panneau (receveur `SatelliteScope`) ; doit appeler la lambda |
+| `content` | requis | Le document |
+
+Le côté le plus extérieur occupe toute la longueur de la disposition et possède ses coins.
+Nommez chaque `DockSide` une fois. `DefaultDockSideOrder` vaut `listOf(Top, Bottom, Left, Right)`,
+ce qui diffère de `DockSide.entries`.
+
+## Choisir des côtés partagés ou empilés
+
+| | Partagé (défaut) | Empilé (`layeredSides`) |
+| --- | --- | --- |
+| Disposition | Les panneaux se partagent la longueur du côté | Chaque panneau est une couche pleine longueur, du bord vers le contenu |
+| Épaisseur | Commune : `workspace.dockExtent(side)` | Par panneau : `Docked.extent` |
+| Longueur | Selon `Docked.weight` | Pleine longueur |
+
+Un côté empilé de trois panneaux donne trois colonnes, chacune avec sa largeur et son séparateur.
+
+## Dimensionner un panneau ancré
+
+`SatellitePlacement.Docked(side, order = 0, extent = null, weight = 1f)` porte la géométrie.
+`extent` s'applique sur un côté empilé (`null` reprend le `dockExtent` du côté) ; `weight`
+s'applique sur un côté partagé et doit être positif. Les séparateurs mettent les deux à jour, et
+les instantanés les enregistrent.
+
+| Appel du workspace | Effet |
+| --- | --- |
+| `dockExtent(side)` / `setDockExtent(side, extent)` | Épaisseur commune d'un côté partagé ; 280 dp tant qu'elle n'est pas définie |
+| `setDockedExtent(id, extent)` | L'`extent` propre d'un panneau, borné à ses limites |
+| `setDockedWeight(id, weight)` | Le `weight` d'un panneau |
+| `plannedDockExtent(entry, side)` | L'épaisseur qu'aurait `side` une fois `entry` ancré |
+
+Une palette ancrée garde la largeur qu'elle avait en fenêtre flottante. Quand la fenêtre est trop
+petite, les panneaux rétrécissent proportionnellement et retrouvent leur épaisseur enregistrée
+quand elle s'agrandit.
+
+### Borner l'épaisseur
+
+Un satellite a un `minExtent` (au moins 80 dp) et un `maxExtent` (illimité). L'ancrage, les
+séparateurs et `restore()` les respectent ; la fenêtre flottante les ignore. Dans cette version,
+seule la surcharge de `Satellite` de `dev.nucleusframework.window.tao` (receveur `taoApplication`)
+les accepte ; la surcharge `nucleusApplication` utilise les valeurs par défaut.
+
+## Dessiner les séparateurs
+
+Le slot `splitter` s'exécute avec `DockSplitterScope` : `side`, `orientation` (`Horizontal` pour
+une ligne verticale) et `panel` (le panneau redimensionné, `null` pour le `dockExtent` d'un côté
+partagé). Appliquez `Modifier.dockSplitterHandle()` à l'élément que l'utilisateur saisit, qui peut
+être plus large que ce que vous dessinez :
+
+```kotlin
+@Composable
+fun DockSplitterScope.ThinSplitter() {
+    val horizontal = orientation == Orientation.Horizontal
+    val line = if (horizontal) Modifier.fillMaxHeight().width(1.dp) else Modifier.fillMaxWidth().height(1.dp)
+    Box(line.background(MaterialTheme.colorScheme.outlineVariant), contentAlignment = Alignment.Center) {
+        val grip = if (horizontal) Modifier.requiredWidth(5.dp).fillMaxHeight() else Modifier.requiredHeight(5.dp).fillMaxWidth()
+        Box(grip.dockSplitterHandle())
+    }
+}
+```
+
+## Restreindre les emplacements d'un panneau
+
+Le workspace applique ces paramètres de `Satellite` aux glissements, à `dock()`, `undock()`,
+`restore()` et à l'en-tête par défaut.
+
+| Paramètre | Défaut | Effet |
+| --- | --- | --- |
+| `dockSides` | les quatre | Seuls ces côtés sont proposés. Vide : palette uniquement flottante |
+| `floatable` | `true` | `false` crée un panneau fixe qui ne devient jamais une fenêtre |
+| `reorderable` | `true` | `false` fige son rang ; rien ne peut être déposé devant lui |
+
+`floatable = false` et `reorderable = false` exigent un `initialPlacement` ancré.
+
+## Classer les panneaux
+
+`Docked.order` compte depuis le haut ou la gauche sur un côté partagé, et depuis le bord sur un
+côté empilé. `dock(id, side, order)` insère au rang `order` ; sans `order`, le panneau retrouve
+son dernier rang sur ce côté, sinon la fin. Les panneaux figés gardent leur rang déclaré.
+
+## Dessiner votre propre retour de dépôt
+
+Pendant un glissement, chaque `DockLayout` éclaire les zones qu'il accepte et prévisualise
+l'espace qu'occuperait le relâchement. Pour un retour personnalisé, lisez `workspace.dockPreview`
+(un `DockTarget(host, side, order)`), `draggedSatellite` et `dragGhost`, qui vaut `null` sous
+Wayland natif. Voir
+[Deux façons de transporter un glissement](/docs/multi-window#deux-façons-de-transporter-un-glissement).
+
+Les valeurs de `DockSide` sont physiques, y compris dans une application de droite à gauche :
+placez la navigation RTL sur `DockSide.Right`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Panneaux et contenu sont des `movableContentOf` : aucun changement de disposition ne reconstruit
+  un sous-arbre. Seul le départ de la fenêtre hôte libère un panneau.
+- Sur un côté partagé, le plus grand minimum et le plus petit maximum l'emportent ; le minimum
+  gagne s'ils se croisent.
+- Chaque bord autorisé a une zone de dépôt de 64 dp (`SatelliteWorkspace.DockZoneWidth`). Quand
+  des fenêtres se chevauchent, la disposition du propriétaire est testée d'abord, puis les autres
+  par ordre de focus récent.
+- La disposition travaille en gauche-à-droite en interne pour que les séparateurs glissent dans le
+  bon sens, puis rétablit votre `LayoutDirection` pour le contenu.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Satellites](/docs/multi-window/satellites) : déclarer palettes, en-têtes et dispositions.
+- [Onglets](/docs/multi-window/tabs#combiner-onglets-et-satellites) : un dock par fenêtre d'onglets.
+- [Icônes de pointeur](/docs/input/pointer-icons) : les curseurs de saisie et de redimensionnement des poignées.

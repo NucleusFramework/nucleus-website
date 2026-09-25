@@ -1,0 +1,99 @@
+---
+title: Un DSL, dix-huit installateurs
+description: Déclarez dans le DSL du plugin Gradle les formats de distribution desktop dont vous avez besoin et construisez chacun de ceux que l'OS hôte prend en charge.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Nucleus déclare chaque format de distribution desktop dans un seul bloc Gradle `nucleus { }`. Vous
+choisissez les formats avec `targetFormats(...)`, et une seule tâche construit chacun de ceux que l'OS
+hôte peut produire. `TargetFormat` définit 18 formats, couvrant les installateurs directs, les
+paquets pour store et les archives.
+
+## Déclarer les formats
+
+Le DSL de packaging est fourni avec le plugin Gradle : aucune dépendance séparée à ajouter.
+
+```kotlin title="build.gradle.kts"
+plugins {
+    id("dev.nucleusframework") version "<version>"
+}
+```
+
+Listez les formats voulus dans `nativeDistributions` :
+
+```kotlin title="build.gradle.kts"
+nucleus {
+    application {
+        mainClass = "com.example.MainKt"
+
+        nativeDistributions {
+            targetFormats(
+                TargetFormat.Dmg, TargetFormat.Pkg,
+                TargetFormat.Exe, TargetFormat.Nsis, TargetFormat.Msi, TargetFormat.AppX,
+                TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Pacman,
+                TargetFormat.Snap, TargetFormat.Flatpak,
+                TargetFormat.Zip,
+            )
+            packageName = "MyApp"
+            packageVersion = "1.0.0"
+        }
+    }
+}
+```
+
+## Construire les installateurs
+
+```shell
+./gradlew packageDistributionForCurrentOS
+```
+
+Chaque format demandé pour l'OS hôte est écrit sous `build/compose/binaries/`.
+
+<Callout type="info">
+Les formats que l'OS hôte ne peut pas produire sont ignorés silencieusement. Le même script de build
+tourne tel quel sur macOS, Windows et Linux, ce qui convient à une CI matricielle.
+</Callout>
+
+## Formats pris en charge
+
+`TargetFormat` définit 18 constantes. Le tableau les regroupe selon la façon dont vous distribuez
+chaque build :
+
+| OS | Distribution directe | Store | Archives |
+|----|----------------------|-------|----------|
+| macOS | DMG | PKG (Mac App Store) | ZIP, TAR, 7z |
+| Windows | Exe, NSIS, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
+| Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
+
+L'ensemble des constantes de l'enum est `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`,
+`Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar` et
+`SevenZ`. Passez-les à `targetFormats(...)`. Le type déclarant est
+`dev.nucleusframework.desktop.application.dsl.TargetFormat`.
+
+## Comment ça marche
+
+Nucleus appelle jpackage pour produire un `app-image` natif, puis confie cette image au mode
+`--prepackaged` d'electron-builder pour piloter chaque installateur. L'approche hybride garde le
+réglage du runtime JVM de jpackage tout en s'appuyant sur electron-builder pour les formats que
+jpackage ne gère pas, comme NSIS, AppX, Snap, Flatpak et AppImage.
+
+Quand vous mélangez des formats directs et des formats store, Nucleus exécute deux pipelines : un
+`createDistributable` classique pour des formats comme DMG, NSIS et DEB, et un
+`createSandboxedDistributable` pour les formats store PKG, AppX et Flatpak. Le pipeline sandboxé
+extrait les bibliothèques natives à l'avance, injecte les arguments JVM adaptés au sandbox et
+applique les entitlements correspondants. Voir [Sandboxing](/docs/packaging/sandboxing).
+
+## Configurer chaque plateforme
+
+Les réglages par OS vivent sous `nativeDistributions.macOS { }`, `windows { }` et `linux { }` :
+
+- [Construire pour macOS](/docs/packaging/macos) — DMG, PKG, binaires universels et icônes en couches.
+- [Construire pour Windows](/docs/packaging/windows) — Exe, NSIS, MSI, AppX et Portable.
+- [Construire pour Linux](/docs/packaging/linux) — DEB, RPM, AppImage, Pacman, Snap et Flatpak.
+
+## Et ensuite
+
+- [Signature de code](/docs/packaging/code-signing) — signez et notarisez les builds pour chaque plateforme.
+- [Publication](/docs/packaging/publishing) — publiez les installateurs sur GitHub Releases, S3 ou un hôte générique.
+- [Référence du DSL Gradle](/docs/reference/gradle-dsl) — le DSL `nucleus { }` complet.

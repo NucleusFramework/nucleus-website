@@ -1,0 +1,95 @@
+---
+title: HiDPI and text rendering
+description: How Nucleus windows follow each monitor's scale factor, and how ClearType text works on Windows.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Every Nucleus window tracks the scale factor of the display it sits on and re-renders when that
+factor changes. Keep your layout in `Dp`: `Modifier.size(48.dp)` covers 48 device pixels at 1.0
+and 96 at 2.0.
+
+## Read the current density
+
+```kotlin
+@Composable
+fun ShowDensity() {
+    val density = LocalDensity.current
+    Text("Scale: ${density.density}x · font scale: ${density.fontScale}")
+}
+```
+
+`LocalDensity` updates when you move the window to another display, plug in a monitor, or change
+the system scale. Outside composition, read `TaoWindow.scaleFactor`, or each display's
+`TaoMonitor.scaleFactor`:
+
+```kotlin
+val scales = TaoMonitors.all().associate { it.name to it.scaleFactor }
+```
+
+On Linux, scale factors are integers. On a fractional Wayland output (125 %, 150 %), Nucleus
+renders at the integer scale and the compositor scales the result.
+
+## Render ClearType text on Windows
+
+<Callout type="warn" title="Changed in 3.0">
+Opaque windows on Windows now draw text with LCD (ClearType) antialiasing instead of grayscale.
+See [Migrate from 2.x](/docs/migrate/from-2.x).
+</Callout>
+
+You write no code for it. It works under HotSpot, ProGuard and GraalVM Native Image, and needs the
+Nucleus Gradle plugin's `nucleus.application { }` setup. Text stays grayscale on popups,
+`NativeView` overlays, Mica and Acrylic backdrops, `transparent = true` windows, and when ClearType
+is off in Windows.
+
+### Turn LCD text off
+
+Keep grayscale text at run time:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    jvmArgs("-Dnucleus.text.lcd=false")
+}
+```
+
+Or skip the build-time patch, which also makes the runtime property a no-op:
+
+```properties title="gradle.properties"
+nucleus.text.lcd.patch=false
+```
+
+## Notes
+
+- Hold window sizes in `Dp`, never in pixels, so they survive a scale change.
+- On Windows, popups and `DecoratedDialog` take the DPI and work area of the monitor they open on,
+  even when it differs from the owner's.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Windows declares Per-Monitor V2 DPI awareness at startup, also in GraalVM native images.
+- The Gradle plugin patches `FontRasterizationSettings.PlatformDefault` in `ui-text-desktop` and
+  fails the build if the patched Compose classes change shape.
+- On Linux, `nucleusApplication` calls `applyLinuxHiDpiScale()` at startup for AWT and Swing code.
+  Unless `sun.java2d.uiScale` is already set, it sets it and sets `GDK_SCALE` when the session has
+  not. Nucleus windows do not depend on it.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Description |
+|---|---|
+| `LocalDensity.current` | Compose density of the window the composable renders in. |
+| `TaoWindow.scaleFactor` | Current scale factor of the window's monitor. |
+| `TaoMonitors.all()` / `TaoMonitor.scaleFactor` | Every attached display and its scale factor. |
+| `-Dnucleus.text.lcd=false` | Runtime: keep grayscale text on Windows. |
+| `-Pnucleus.text.lcd.patch=false` | Build: skip the LCD patch of `ui-text-desktop`. |
+
+## What's next
+
+- [Windows](/docs/windows): the window you render your UI into.
+- [Window state](/docs/windows/window-state): sizes, screens, and placement.
+- [Linux and Wayland](/docs/windows/linux-wayland): session detection and Wayland behavior.

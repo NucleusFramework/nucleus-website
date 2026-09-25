@@ -1,0 +1,79 @@
+---
+title: Détection du mode sombre
+description: Lisez le thème clair ou sombre du système d'exploitation depuis Kotlin et recomposez votre interface Compose quand il change.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`darkmode-detector` indique si macOS, Windows ou Linux est en mode sombre et vous prévient quand
+cela change. Le module est fourni avec `nucleus-application` ; déclarez
+`dev.nucleusframework:nucleus.darkmode-detector` seulement pour l'utiliser sans
+`nucleusApplication`.
+
+## Suivre le thème du système
+
+Dans `nucleusApplication`, le `isSystemInDarkTheme()` de Compose recompose quand l'utilisateur
+change le thème de l'OS : Material, Jewel et les bibliothèques tierces le suivent donc aussi.
+
+```kotlin
+fun main() = nucleusApplication {
+    val dark = isSystemInDarkTheme()
+    MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+        DecoratedWindow(onCloseRequest = ::exitApplication, title = "MyApp") {
+            // Content
+        }
+    }
+}
+```
+
+Dans tout autre hôte Compose, appelez `isSystemInDarkMode()` depuis
+`dev.nucleusframework.darkmodedetector`. Il renvoie la même valeur, et se replie sur
+`isSystemInDarkTheme()` dans un `@Preview`.
+
+## Thème fourni par nucleusApplication
+
+`nucleusApplication` transmet la valeur du détecteur au `LocalSystemTheme` de Compose, dont
+chaque fenêtre hérite. Il désactive aussi l'interrogation du thème que Compose fait une fois par
+seconde (`ComposeUiFlags.pollSystemTheme`) avant de créer la moindre fenêtre.
+
+## Lire le thème hors de Compose
+
+```kotlin
+val detector = getPlatformDarkModeDetector()
+val dark: Boolean = detector.isDark()
+
+val listener = Consumer<Boolean> { isDark -> println("dark mode: $isDark") }
+detector.registerListener(listener)
+// Later
+detector.removeListener(listener)
+```
+
+Le listener s'exécute sur le thread qui reçoit la notification de l'OS. Déplacez le travail
+d'interface vers `Dispatchers.Main`.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- macOS observe la préférence `AppleInterfaceStyle` via `NSDistributedNotificationCenter`.
+- Windows surveille `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`
+  avec `RegNotifyChangeKeyValue`.
+- Linux lit le réglage `color-scheme` du portail XDG Desktop. La valeur `1` signifie sombre.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `isSystemInDarkMode()` | Composable, recompose à chaque changement |
+| `getPlatformDarkModeDetector()` | Détecteur de l'OS courant, ou `NoopDarkModeDetector` ailleurs |
+| `IDarkModeDetector.isDark()` | Thème courant |
+| `registerListener(Consumer<Boolean>)` / `removeListener` | Notifications de changement |
+| `NoopDarkModeDetector` | Toujours clair, ignore les listeners. Pour les tests et les exécutions sans interface |
+
+## Et ensuite
+
+- [Couleur d'accentuation du système](/docs/os/theme/accent-color) : lire la couleur d'accentuation et l'état du contraste élevé.
+- [Toolkits](/docs/toolkits) : des fenêtres thémées qui suivent l'apparence de l'OS.
+- [Point d'entrée de l'application](/docs/lifecycle/application) : ce que `nucleusApplication` configure d'autre.

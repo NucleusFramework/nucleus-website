@@ -1,0 +1,69 @@
+---
+title: Drag and drop
+description: Receive files dropped on a window and drag files or text out of it with the Compose drag-and-drop API.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Drag and drop uses the standard Compose modifiers, `Modifier.dragAndDropTarget` and
+`Modifier.dragAndDropSource`, and comes with `nucleus-application`. Both need
+`@OptIn(ExperimentalComposeUiApi::class)`.
+
+## Receive dropped files
+
+```kotlin
+val target = remember {
+    object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            @Suppress("UNCHECKED_CAST")
+            val files = event.awtTransferable
+                .getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+            onFiles(files)
+            return files.isNotEmpty()
+        }
+    }
+}
+
+Box(Modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = target))
+```
+
+Return `true` from `onDrop` to accept the data. `DataFlavor.stringFlavor` returns the same paths
+joined by newlines.
+
+- Inbound drops carry files only. Text, HTML and URL drops are not delivered.
+- The file list is available in `onDrop`. The enter, move and exit callbacks receive an empty list.
+- [`TrayApp`](/docs/os/tray/tray-app) popups accept drops through the same modifier.
+
+## Drag data out of the window
+
+Wrap an AWT `Transferable` that offers `javaFileListFlavor`, `stringFlavor`, or both:
+
+```kotlin
+Modifier.dragAndDropSource { _ ->
+    DragAndDropTransferData(
+        transferable = DragAndDropTransferable(StringSelection("Hello from Nucleus")),
+        supportedActions = listOf(DragAndDropTransferAction.Copy),
+        onTransferCompleted = { action -> /* null when cancelled */ },
+    )
+}
+```
+
+A transferable with neither files nor text does not start a drag. Your window keeps drawing while
+the cursor is outside it.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Nucleus installs no AWT `DropTarget`, and reading `awtTransferable` does not start the AWT
+  toolkit.
+- To debug a drag that does not start, read `TaoDnDDiagnostics.lastMessage`
+  (`dev.nucleusframework.window.tao`): it holds the last reason a drag was skipped.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Pointer icons](/docs/input/pointer-icons): show a grab or not-allowed cursor during a drag.
+- [Tabs](/docs/multi-window/tabs): tear-off and merge built on the same drag session.
+- [Trackpad gestures](/docs/input/trackpad-gestures): pans and pinch-to-zoom.
