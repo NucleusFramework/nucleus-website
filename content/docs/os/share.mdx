@@ -1,0 +1,145 @@
+---
+title: Share sheet
+description: Open the system share sheet from Kotlin Multiplatform code, attached to a Nucleus window on desktop.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`share` opens the system share sheet with text, links and files. It is a Kotlin Multiplatform
+module: the same call works on macOS, Windows, Linux, Android, iOS and the web.
+
+| Platform | Share UI |
+| --- | --- |
+| macOS | `NSSharingServicePicker` |
+| Windows | Share UI (`DataTransferManager`) |
+| Linux | XDG desktop portal: "Open With" for one file or URL, "Save files" for a mixed payload |
+| Android | Android Sharesheet |
+| iOS | `UIActivityViewController` |
+| Web (`js`, `wasmJs`) | Web Share API (`navigator.share`) |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+// commonMain in a KMP project, dependencies { } in a JVM desktop app
+implementation("dev.nucleusframework:nucleus.share:<version>")
+```
+
+`nucleus-application` does not bring it: add it yourself to call `NucleusWindow.share`.
+
+## Share from a Nucleus window
+
+```kotlin
+val window = LocalNucleusWindow.current
+val density = LocalDensity.current
+val scope = rememberCoroutineScope()
+var anchor by remember { mutableStateOf<ShareAnchor?>(null) }
+
+Button(
+    onClick = {
+        scope.launch {
+            window.share(anchor) {
+                title = "Share"
+                text("Cross-platform native share sheet")
+                url("https://nucleusframework.dev")
+                file("/path/to/report.pdf", mimeType = "application/pdf")
+            }
+        }
+    },
+    modifier = Modifier.onGloballyPositioned { anchor = it.shareAnchor(density) },
+) { Text("Share") }
+```
+
+`NucleusWindow.share` attaches the sheet to the window: its HWND on Windows, its `NSWindow` on
+macOS, `x11:<xid>` on X11, and an `xdg_foreign` export on Wayland, released once the portal dialog
+closes. On macOS the picker points at `anchor`, or at the top centre of the window without one.
+A window that is not realized yet falls back to the app's frontmost window.
+
+## Share from common code
+
+```kotlin
+scope.launch {
+    try {
+        ShareSheet.share {
+            title = "Share"       // chooser title where the platform has one
+            subject = "Nucleus"   // e-mail subject on Android, description on Windows
+            text("Hello")
+            url("https://nucleusframework.dev")
+            fileUri("content://com.example/report.txt")
+        }
+    } catch (e: ShareException) {
+        log("${e.error}: ${e.message}")
+    }
+}
+```
+
+- `share` is `suspend` and safe from any dispatcher. It returns once the UI is on screen (once
+  the request is dispatched on Android and Linux, once the sheet closes on the web).
+- It reports neither the target the user picked nor a cancel.
+- Build a request directly with `ShareRequest(items, title, subject)` or `shareRequest { … }`.
+  Items are `ShareItem.Text`, `Url`, `File(path, mimeType)` and `FileUri(uri, mimeType)`.
+- `ShareSheet.isSupported` tells whether a share UI is available: on desktop, whether the native
+  bridge loaded.
+
+On desktop without `nucleus-application`, name the parent yourself with `ShareParent.Windows(hwnd)`,
+`ShareParent.MacOs(nsWindow, anchor)`, `ShareParent.Linux(portalParent, keepAlive)` or
+`ShareParent.Auto` (the default). On Android, pass a `Context`: `ShareSheet.share(request, activity)`.
+
+## Handle errors
+
+`ShareException.error` is a `ShareError`. The request is validated in common code first.
+
+| Value | Meaning |
+| --- | --- |
+| `Empty` | No item |
+| `InvalidItem` | Blank item, unparsable URL or blank MIME type |
+| `NoHandler` | No app can receive the payload |
+| `AlreadyOpen` | A share sheet is already on screen (iOS, web) |
+| `UnsupportedItem` | Item kind unsupported here: `content://` on desktop, a local path on the web |
+| `NoWindow` | No window or activity to present from |
+| `Unsupported` | No share UI, or the native bridge is missing |
+| `Io` | Reading or staging a file failed |
+| `Platform` | The platform API failed; see the message |
+
+## Platform notes
+
+- **macOS**: `title` and `subject` are ignored. Without a running `NSApplication` the call fails
+  after 10 s instead of hanging.
+- **Windows**: texts and URLs are joined into the payload's text, and the first URL is also its
+  web link. Files accept paths and `file://` URIs.
+- **Linux**: there is no share sheet. One URL or file opens the portal's "Open With" chooser, one
+  text goes through a temporary file, and a mixed payload opens a "Save files" dialog. Without a
+  portal, Nucleus falls back to `xdg-open`, then fails with `NoHandler`. On native Wayland,
+  `ShareParent.Auto` sends no parent: share from a window.
+- **Android**: local files are copied to the cache and served read-only by the library's own
+  `NucleusShareProvider` (authority `${applicationId}.nucleus.share`). `content://` URIs are
+  forwarded with a read grant. No init call is needed. `minSdk` is 21.
+- **iOS**: `title` and `subject` are ignored. On iPad the popover is centred on the presenting
+  view controller.
+- **Web**: MIME types matter, as on Android.
+
+<Callout type="warn" title="Web: secure context and user gesture">
+The Web Share API needs HTTPS or `localhost`, and a user gesture: call `share` from a click handler
+without awaiting anything slow first, or the browser rejects it (`ShareError.Platform`). There is
+no filesystem, so `file(path)` fails: share `fileUri("blob:…")`, `data:` or same-origin `https:`
+URIs. Browsers without `navigator.share`, such as Firefox desktop, report `isSupported = false`.
+</Callout>
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Desktop goes through a Rust JNI library, built on `robius-share`. Android, iOS and the web are
+  pure Kotlin.
+- On Wayland the portal needs the window export to stay alive until its dialog closes, while
+  `share` returns as soon as the dialog is shown. `ShareParent.Linux.keepAlive` is closed exactly
+  once: when the dialog is gone, right after `share` when no dialog was shown, or when the share
+  fails first.
+- Android purges staged copies older than a day on the next share.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [File dialogs](/docs/os/file-dialogs): open and save pickers attached to a window.
+- [Notifications](/docs/os/notifications): send a notification on every OS.

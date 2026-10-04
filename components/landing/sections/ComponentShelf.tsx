@@ -24,6 +24,12 @@ const COMPONENTS: ShippedComponent[] = [
     name: { en: 'WebView', fr: 'WebView' },
     replaces: ['WebView', 'WKWebView', 'iframe', 'WebView2'],
   },
+  {
+    api: 'ShareSheet.share { }',
+    pkg: 'dev.nucleusframework:nucleus.share',
+    name: { en: 'Share sheet', fr: 'Feuille de partage' },
+    replaces: ['Sharesheet', 'UIActivityViewController', 'NSSharingServicePicker', 'Web Share API', 'Windows Share', 'XDG portal'],
+  },
 ];
 
 interface ComponentShelfProps {

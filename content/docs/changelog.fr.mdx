@@ -83,6 +83,20 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 - **Boutons précédent et suivant de la souris** (#728) : ils arrivent dans Compose sous la forme
   `PointerButton.Back` et `PointerButton.Forward` sur les trois OS. Voir
   [Boutons de la souris](/docs/input/mouse-buttons).
+- **Feuille de partage** (#727). Le nouveau module `share` ouvre la feuille de partage du système
+  depuis du code Kotlin Multiplatform sous macOS, Windows, Linux, Android, iOS et sur le web.
+  `NucleusWindow.share` la rattache à une fenêtre. Voir [Feuille de partage](/docs/os/share).
+- **Onglets dans des fenêtres gérées par l'application** (#731, #732, `@ExperimentalNucleusApi`).
+  `TabWindows` prend un slot `titleBar`, et ses éléments sont publics : `BindTabGroupWindow`,
+  `TabGroupWindowPlacement`, `TabDragGhostWindow`, `rememberTabStripDrag`,
+  `Modifier.tabStripGrip` et `Modifier.tabStripCarry`. `TabGripCursor` règle le pointeur sur les
+  onglets. Voir
+  [Ouvrir les fenêtres d'onglets vous-même](/docs/tool-windows/tabs#ouvrir-les-fenêtres-donglets-vous-même).
+- **Glisser des onglets entre workspaces** (#734, `@ExperimentalNucleusApi`). `linkedWorkspaces`
+  et `onForeignDrop` permettent à un onglet d'atterrir sur la barre d'un autre `TabWorkspace`.
+  Voir [Glisser des onglets entre workspaces](/docs/tool-windows/tabs#glisser-des-onglets-entre-workspaces).
+- **`controlButtonsDirection` sur `Satellite`** (#733) : les satellites flottants placent leurs
+  contrôles du même côté que la fenêtre principale.
 - **Mise à jour à chaud sous Windows** (#720). Sur une installation NSIS par utilisateur,
   `installAndRestart` installe la nouvelle version pendant que l'application tourne, puis bascule
   dessus dès que sa première fenêtre est à l'écran. Les autres instances découvrent la mise à jour
@@ -143,6 +157,27 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Corrections de bugs
 
+- **Ctrl-clic est un clic secondaire sous macOS** (#737), dans les fenêtres et les popups natifs :
+  `ContextMenuArea` et les menus des champs de texte s'ouvrent dessus.
+- **Polices AWT dans les bundles GraalVM macOS** (#735). `java.awt.Font` n'échoue plus avec
+  `Problem reading font data`, qui faisait planter les applications Jewel au démarrage. Le bundle
+  embarque désormais `Contents/Resources/fontconfig.properties`.
+- **Linux : Xlib thread-safe avec libX11 < 1.8** (#744). Tao appelle `XInitThreads` avant que GTK
+  n'ouvre son display, ce qui corrige des plantages aléatoires `[xcb] Unknown sequence number` sous
+  Ubuntu 22.04 et d'autres distributions plus anciennes.
+- **Lanceur Linux : plus de blocage à la destruction précoce** (#744). Désenregistrer une
+  quicklist ou un menu juste après l'avoir enregistré ne bloque plus.
+- **`TaoWindow.setOuterPosition` refuse les positions impossibles** (#738). NaN, l'infini ou une
+  valeur au-delà de ±1 000 000 dp lèvent une `IllegalArgumentException` qui cite les valeurs, au
+  lieu d'interrompre le processus dans AppKit.
+- **Un seul `TaoGpuRenderContext` par surface** (#752). Chaque appel à
+  `rememberTaoGpuRenderContext()` sur une surface renvoie la même instance : l'état indexé dessus
+  est partagé, comme un moteur Filament par fenêtre.
+- **macOS : une fenêtre créée agrandie revient à sa taille flottante** (#733) au lieu d'une fenêtre
+  de la taille de l'écran.
+- **Onglets** (#731, #732) : un détachement après une restauration ne réutilise jamais l'id d'un
+  groupe restauré, et une barre ne plante plus quand un onglet quitte son groupe alors qu'il est
+  encore disposé.
 - **Les applications empaquetées gardent l'ordre du classpath Gradle** (#729). jpackage triait le
   classpath par nom de fichier : une application empaquetée pouvait charger une autre copie d'une
   classe que `./gradlew run`. Les applications Jewel échouaient avec

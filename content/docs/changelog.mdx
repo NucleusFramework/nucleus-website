@@ -78,6 +78,19 @@ The major version marks the API breaks: read the
   `latest*.yml`. See [Test updates](/docs/packaging/test-updates).
 - **Mouse back and forward buttons** (#728) reach Compose as `PointerButton.Back` and
   `PointerButton.Forward` on all three OSes. See [Mouse buttons](/docs/input/mouse-buttons).
+- **Share sheet** (#727). The new `share` module opens the system share sheet from Kotlin
+  Multiplatform code on macOS, Windows, Linux, Android, iOS and the web. `NucleusWindow.share`
+  attaches it to a window. See [Share sheet](/docs/os/share).
+- **Tabs in app-owned windows** (#731, #732, `@ExperimentalNucleusApi`). `TabWindows` takes a
+  `titleBar` slot, and its parts are public: `BindTabGroupWindow`, `TabGroupWindowPlacement`,
+  `TabDragGhostWindow`, `rememberTabStripDrag`, `Modifier.tabStripGrip` and
+  `Modifier.tabStripCarry`. `TabGripCursor` sets the pointer over tabs. See
+  [Open the tab windows yourself](/docs/tool-windows/tabs#open-the-tab-windows-yourself).
+- **Tab drags between workspaces** (#734, `@ExperimentalNucleusApi`). `linkedWorkspaces` and
+  `onForeignDrop` let a tab land on another `TabWorkspace`'s strip. See
+  [Drag tabs between workspaces](/docs/tool-windows/tabs#drag-tabs-between-workspaces).
+- **`controlButtonsDirection` on `Satellite`** (#733), so floating satellites put their controls
+  on the same side as the main window. See [Satellite parameters](/docs/tool-windows/satellites#satellite-parameters).
 - **Hot update on Windows** (#720). On a per-user NSIS install, `installAndRestart` installs the
   new version while the app keeps running and swaps to it once its first window is on screen.
   Other instances pick the update up through `pendingRestartVersion`. NSIS installs now keep the
@@ -131,6 +144,26 @@ The major version marks the API breaks: read the
 
 ### Bug fixes
 
+- **Control-click is a secondary click on macOS** (#737), in windows and native popups, so
+  `ContextMenuArea` and text-field menus open on it.
+- **AWT fonts in macOS GraalVM bundles** (#735). `java.awt.Font` no longer fails with `Problem
+  reading font data`, which crashed Jewel apps at startup. The bundle now ships
+  `Contents/Resources/fontconfig.properties`.
+- **Linux: Xlib is thread-safe on libX11 < 1.8** (#744). Tao calls `XInitThreads` before GTK opens
+  its display, which fixes random `[xcb] Unknown sequence number` crashes on Ubuntu 22.04 and
+  other older distributions.
+- **Linux launcher: no deadlock on early teardown** (#744). Unregistering a quicklist or menu right
+  after registering it no longer hangs.
+- **`TaoWindow.setOuterPosition` rejects unplaceable positions** (#738). NaN, infinity or a value
+  beyond ±1,000,000 dp throws `IllegalArgumentException` naming the values, instead of aborting
+  the process in AppKit.
+- **One `TaoGpuRenderContext` per surface** (#752). Every `rememberTaoGpuRenderContext()` call on
+  a surface returns the same instance, so state keyed on it is shared, such as one Filament engine
+  per window. See [GPU render context](/docs/native-content/gpu-render-context#get-the-context).
+- **macOS: a window created maximized restores to its floating size** (#733) instead of a
+  screen-sized window.
+- **Tabs** (#731, #732): a tear-off after a restore never reuses a restored group id, and a strip
+  no longer crashes when a tab leaves its group while still laid out.
 - **Packaged apps keep the Gradle classpath order** (#729). jpackage sorted the classpath by file
   name, so a packaged app could load a different copy of a class than `./gradlew run`. Jewel apps
   failed with `NoSuchMethodError: Job.cancel$default`.

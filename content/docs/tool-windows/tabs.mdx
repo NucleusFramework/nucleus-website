@@ -51,6 +51,7 @@ body runs with `TabScope`: `workspace`, `tab`, `select()`, `close()`.
 | --- | --- | --- |
 | `workspace` | required | The `TabWorkspace` |
 | `strip` | `{ TabStrip() }` | One window's strip, with `TabStripScope` as receiver |
+| `titleBar` | `{ DefaultTabTitleBar(it) }` | Each window's title bar, handed the strip to place in it |
 | `dragGhost` | `{ TabDragGhostCard(it) }` | The card under the pointer while a tab leaves its strip |
 | `nativeContextMenu` | `true` | Native context menu for text fields |
 | `windowWrapper` | `{ it() }` | Wraps each window, strip included: `WindowBackground`, a themed `Surface` |
@@ -68,6 +69,18 @@ MaterialTheme(colorScheme = colors) {
         // Tab declarations
     }
 }
+```
+
+`DefaultTabTitleBar` is a `BasicTitleBar` that gives the strip all the width between the window
+controls. Replace it to keep a title bar of your own, such as a gradient, fullscreen controls or
+`ControlButtonsDirection.SystemNative`:
+
+```kotlin
+TabWindows(
+    workspace = workspace,
+    strip = { MyStrip() },
+    titleBar = { strip -> JewelTitleBar(gradientStartColor = accent) { strip() } },
+)
 ```
 
 `rememberTabWorkspace(defaultWindowSize, captureThumbnails)` takes the size of new windows
@@ -96,6 +109,7 @@ indices follow it.
 | `hoverPreview` | `null` | The card under a hovered tab. `TabHoverPreview.Default` for the stock card |
 | `tabLeading` / `tabTrailing` | `null` | Per-tab slots around the title: a file icon, a modified dot |
 | `dropGhostCard` | `{ TabDropGhostCard(it) }` | The card in the slot a tab from another window would fill |
+| `gripCursor` | `TabGripCursor.Default` | The pointer over a tab and while it is carried. `TabGripCursor.None` keeps the strip's arrow |
 | `trailing` | `{}` | After the last tab: a new-tab button (a tab dropped on it is appended) |
 
 ```kotlin
@@ -116,18 +130,86 @@ TabWindows(
 
 ## Write a strip from scratch
 
-A strip from another design system needs three modifiers:
+A strip from another design system gets the stock strip's gestures from `rememberTabStripDrag`:
+the carry along the strip, the slide home on release and the hand-over once a tab leaves it.
 
-| Modifier | Apply to |
+| Part | Apply to |
 | --- | --- |
 | `Modifier.tabStripGeometry(workspace, group)` | The element spanning the whole strip |
-| `Modifier.tabSlot(group, index)` | Each tab, in strip order |
-| `Modifier.tabDragHandle(workspace, tab)` | Each tab's grip |
+| `Modifier.tabStripGrip(scope, drag, tab, index, cursor)` | Each tab's slot, the element that stays put |
+| `Modifier.tabStripCarry(drag, tab)` | What the tab draws, which follows the pointer |
+
+```kotlin
+@Composable
+fun TabStripScope.MyStrip() {
+    val scope = this
+    val drag = rememberTabStripDrag()
+    Row(Modifier.tabStripGeometry(workspace, group)) {
+        tabs.forEachIndexed { index, tab ->
+            key(tab.id) {
+                Box(
+                    Modifier
+                        .zIndex(if (drag.animating == tab.id) 1f else 0f)
+                        .tabStripGrip(scope, drag, tab, index, cursor = TabGripCursor.None),
+                ) {
+                    MyTab(tab, Modifier.tabStripCarry(drag, tab))
+                }
+            }
+        }
+    }
+}
+```
+
+`tabStripGrip` combines `tabSlot`, `noWindowDrag` and the drag handle. Put it on the slot, not on
+the carried drawing: a gesture on a node that moves with the pointer reads no movement.
+`TabStripDrag` exposes `held`, `animating` and `offsetPx(tabId)`. `rememberTabStripDrag` takes the
+same `reorderAnimation` as `TabStrip`.
+
+For a strip that keeps its own gestures, apply `Modifier.tabSlot(group, index)` to each tab and
+`Modifier.tabDragHandle(workspace, tab)` to its grip instead.
 
 While a tab from another window hovers the strip, `dropGhost` holds a
 `TabDropGhost(index, width, tab)`: compose `TabDropGhostCard(ghost)` at `index`. Add
 `TabHoverPreviewPopup(preview)` once for hover cards. `jewel-tabs-demo` wraps Jewel's `TabStrip`
 this way.
+
+## Open the tab windows yourself
+
+`TabWindows` is built from public parts. An app that needs its own window per group (its own
+state, title, key handling or close policy) composes them directly and keeps the workspace
+behavior:
+
+| Part | Role |
+| --- | --- |
+| `BindTabGroupWindow(workspace, group, window)` | Attaches the window to its group for drops, tear-offs and focus. Call it once inside the window |
+| `TabGroupWindowPlacement(group, state)` | Applies the positions and sizes the workspace asks for (restore, tear-off) to your `WindowState` |
+| `TabDragGhostWindow(workspace, nativeContextMenu, content)` | The window that follows a dragged tab. Compose it once, next to your windows |
+
+```kotlin
+for (group in rememberTabGroups(workspace)) {
+    key(group.id) {
+        val state = rememberWindowState(
+            position = group.position?.let { WindowPosition.Absolute(it.x, it.y) }
+                ?: WindowPosition.PlatformDefault,
+            size = group.size,
+        )
+        TabGroupWindowPlacement(group, state)
+        DecoratedWindow(
+            state = state,
+            title = workspace.selectedTab(group)?.title.orEmpty(),
+            onCloseRequest = { group.ids.forEach(workspace::close) },
+        ) {
+            BindTabGroupWindow(workspace, group)
+            MyWindowContent(workspace, group)
+        }
+    }
+}
+TabDragGhostWindow(workspace)
+```
+
+The window body is yours: draw the tab that `workspace.selectedTab(group)` returns. A strip in
+such a window gets its `TabStripScope` from an object that implements `workspace` and `group`.
+`rememberTabGroups` is defined in [Compose tabs with satellites](#compose-tabs-with-satellites).
 
 ## Draw previews
 
@@ -167,12 +249,39 @@ Read `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (where new tabs ope
 `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. A closed tab is gone: declaring it again
 creates a new tab in the active window.
 
+## Drag tabs between workspaces
+
+An app with several `TabWorkspace`s, for example one per virtual desktop, can let a tab cross from
+one to another. Link them and handle the drop:
+
+```kotlin
+LaunchedEffect(workspaces) {
+    for (workspace in workspaces) {
+        workspace.linkedWorkspaces = workspaces - workspace
+        workspace.onForeignDrop = { tab, into, target ->
+            // Only the app can declare the tab in the other workspace
+            moveDocument(tab.id, from = workspace, to = into, group = target.group.id, index = target.index)
+        }
+    }
+}
+```
+
+- Linked strips are tried after the workspace's own, for pointer drags only. Native Wayland's
+  drag-and-drop path ignores them.
+- The workspace leaves the dropped tab where it was. `onForeignDrop` closes it there and declares
+  it in `into`, at the `TabDropTarget` it received.
+- While the pointer is over a linked strip, `dropPreview` points at that workspace's group.
+- With `onForeignDrop = null` (the default), linked strips are no target and the drop tears the
+  tab off.
+- Where strips of several workspaces overlap, the strip under the pointer wins, then the window
+  focused last, across workspaces.
+
 ## Save and restore the layout
 
 `snapshot()` returns a `TabLayoutSnapshot(groups)`. Each `TabGroupSnapshot` holds `id`, `tabIds`,
 `selectedId`, `position` and `size`. `restore(snapshot)` moves the tabs and places the windows,
 including tabs declared later. It applies once; call it again after a tab is closed and
-redeclared.
+redeclared. A window torn off after a restore never takes the id of a restored group.
 
 ## Compose tabs with satellites
 

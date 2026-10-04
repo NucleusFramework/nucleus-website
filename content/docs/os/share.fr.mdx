@@ -1,0 +1,153 @@
+---
+title: Feuille de partage
+description: Ouvrez la feuille de partage du système depuis du code Kotlin Multiplatform, rattachée à une fenêtre Nucleus sur desktop.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`share` ouvre la feuille de partage du système avec du texte, des liens et des fichiers. C'est un
+module Kotlin Multiplatform : le même appel fonctionne sur macOS, Windows, Linux, Android, iOS et
+le web.
+
+| Plateforme | Interface de partage |
+| --- | --- |
+| macOS | `NSSharingServicePicker` |
+| Windows | Share UI (`DataTransferManager`) |
+| Linux | Portail XDG : « Ouvrir avec » pour un fichier ou une URL, « Enregistrer les fichiers » pour un contenu mixte |
+| Android | Android Sharesheet |
+| iOS | `UIActivityViewController` |
+| Web (`js`, `wasmJs`) | Web Share API (`navigator.share`) |
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+// commonMain dans un projet KMP, dependencies { } dans une application desktop JVM
+implementation("dev.nucleusframework:nucleus.share:<version>")
+```
+
+`nucleus-application` ne l'apporte pas : ajoutez-la vous-même pour appeler `NucleusWindow.share`.
+
+## Partager depuis une fenêtre Nucleus
+
+```kotlin
+val window = LocalNucleusWindow.current
+val density = LocalDensity.current
+val scope = rememberCoroutineScope()
+var anchor by remember { mutableStateOf<ShareAnchor?>(null) }
+
+Button(
+    onClick = {
+        scope.launch {
+            window.share(anchor) {
+                title = "Partager"
+                text("Feuille de partage native multiplateforme")
+                url("https://nucleusframework.dev")
+                file("/path/to/report.pdf", mimeType = "application/pdf")
+            }
+        }
+    },
+    modifier = Modifier.onGloballyPositioned { anchor = it.shareAnchor(density) },
+) { Text("Partager") }
+```
+
+`NucleusWindow.share` rattache la feuille à la fenêtre : son HWND sous Windows, sa `NSWindow` sous
+macOS, `x11:<xid>` sous X11, et un export `xdg_foreign` sous Wayland, libéré à la fermeture du
+dialogue du portail. Sous macOS, le sélecteur pointe vers `anchor`, ou vers le haut de la fenêtre,
+au centre, sans ancre. Une fenêtre pas encore réalisée se rabat sur la fenêtre de premier plan de
+l'application.
+
+## Partager depuis le code commun
+
+```kotlin
+scope.launch {
+    try {
+        ShareSheet.share {
+            title = "Partager"    // titre du sélecteur, là où la plateforme en a un
+            subject = "Nucleus"   // objet d'e-mail sous Android, description sous Windows
+            text("Bonjour")
+            url("https://nucleusframework.dev")
+            fileUri("content://com.example/report.txt")
+        }
+    } catch (e: ShareException) {
+        log("${e.error}: ${e.message}")
+    }
+}
+```
+
+- `share` est `suspend` et s'appelle depuis n'importe quel dispatcher. Il rend la main une fois
+  l'interface à l'écran (une fois la requête envoyée sous Android et Linux, une fois la feuille
+  fermée sur le web).
+- Il ne signale ni la cible choisie, ni une annulation.
+- Construisez une requête directement avec `ShareRequest(items, title, subject)` ou
+  `shareRequest { … }`. Les éléments sont `ShareItem.Text`, `Url`, `File(path, mimeType)` et
+  `FileUri(uri, mimeType)`.
+- `ShareSheet.isSupported` indique si une interface de partage est disponible : sur desktop, si le
+  pont natif s'est chargé.
+
+Sur desktop sans `nucleus-application`, nommez le parent vous-même avec
+`ShareParent.Windows(hwnd)`, `ShareParent.MacOs(nsWindow, anchor)`,
+`ShareParent.Linux(portalParent, keepAlive)` ou `ShareParent.Auto` (le défaut). Sous Android,
+passez un `Context` : `ShareSheet.share(request, activity)`.
+
+## Gérer les erreurs
+
+`ShareException.error` est un `ShareError`. La requête est d'abord validée dans le code commun.
+
+| Valeur | Signification |
+| --- | --- |
+| `Empty` | Aucun élément |
+| `InvalidItem` | Élément vide, URL illisible ou type MIME vide |
+| `NoHandler` | Aucune application ne peut recevoir le contenu |
+| `AlreadyOpen` | Une feuille de partage est déjà à l'écran (iOS, web) |
+| `UnsupportedItem` | Type d'élément non pris en charge ici : `content://` sur desktop, un chemin local sur le web |
+| `NoWindow` | Aucune fenêtre ni activité depuis laquelle présenter |
+| `Unsupported` | Pas d'interface de partage, ou pont natif absent |
+| `Io` | La lecture ou la préparation d'un fichier a échoué |
+| `Platform` | L'API de la plateforme a échoué ; voir le message |
+
+## Notes par plateforme
+
+- **macOS** : `title` et `subject` sont ignorés. Sans `NSApplication` en cours d'exécution, l'appel
+  échoue après 10 s au lieu de rester bloqué.
+- **Windows** : textes et URL sont joints dans le texte du contenu, et la première URL sert aussi
+  de lien web. Les fichiers acceptent des chemins et des URI `file://`.
+- **Linux** : il n'y a pas de feuille de partage. Une URL ou un fichier ouvre le sélecteur
+  « Ouvrir avec » du portail, un texte passe par un fichier temporaire, et un contenu mixte ouvre
+  un dialogue « Enregistrer les fichiers ». Sans portail, Nucleus se rabat sur `xdg-open`, puis
+  échoue avec `NoHandler`. Sous Wayland natif, `ShareParent.Auto` n'envoie pas de parent :
+  partagez depuis une fenêtre.
+- **Android** : les fichiers locaux sont copiés dans le cache et servis en lecture seule par le
+  `NucleusShareProvider` de la bibliothèque (autorité `${applicationId}.nucleus.share`). Les URI
+  `content://` sont transmises avec un droit de lecture. Aucun appel d'initialisation n'est
+  nécessaire. Le `minSdk` est 21.
+- **iOS** : `title` et `subject` sont ignorés. Sur iPad, le popover est centré sur le view
+  controller qui le présente.
+- **Web** : les types MIME comptent, comme sous Android.
+
+<Callout type="warn" title="Web : contexte sécurisé et geste utilisateur">
+La Web Share API exige HTTPS ou `localhost`, et un geste de l'utilisateur : appelez `share` depuis
+un gestionnaire de clic sans rien attendre de lent avant, sinon le navigateur refuse
+(`ShareError.Platform`). Il n'y a pas de système de fichiers, donc `file(path)` échoue : partagez
+des URI `fileUri("blob:…")`, `data:` ou `https:` de même origine. Les navigateurs sans
+`navigator.share`, comme Firefox desktop, renvoient `isSupported = false`.
+</Callout>
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Le desktop passe par une bibliothèque JNI en Rust, construite sur `robius-share`. Android, iOS
+  et le web sont en Kotlin pur.
+- Sous Wayland, le portail exige que l'export de la fenêtre reste vivant jusqu'à la fermeture de
+  son dialogue, alors que `share` rend la main dès que le dialogue s'affiche.
+  `ShareParent.Linux.keepAlive` est fermé exactement une fois : quand le dialogue disparaît, juste
+  après `share` quand aucun dialogue ne s'est affiché, ou quand le partage échoue avant.
+- Android purge les copies de plus d'un jour au partage suivant.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Dialogues de fichiers](/docs/os/file-dialogs) : sélecteurs d'ouverture et d'enregistrement rattachés à une fenêtre.
+- [Notifications](/docs/os/notifications) : envoyer une notification sur chaque OS.

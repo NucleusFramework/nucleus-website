@@ -355,6 +355,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | JRE fonts are stripped from jlink runtime images. | Keep them if you draw text through AWT or Swing. [Step](#keep-jre-fonts-for-awt-text) | [Configuration](/docs/start/configuration) |
 | Nucleus JNI libraries ship next to the packaged app, not inside its JARs. | Load them through `NativeLibraryLoader`, not as resources. [Step](#load-nucleus-native-libraries-through-the-loader) | [Packaging](/docs/packaging) |
 | Windows NSIS installs keep the runtime and app in `versions\<version>\`, and `installAndRestart` updates without closing the app. | Don't build paths from the install root. Call `UpdateHandoff.signalReady()` if the app shows no Nucleus window. | [Auto-update](/docs/packaging/auto-update#update-without-closing-the-app-on-windows) |
+| `TaoWindow.setOuterPosition` throws `IllegalArgumentException` for NaN, infinite or out-of-range positions (beyond ±1,000,000 dp). | Don't pass sentinels such as `Int.MIN_VALUE` as a window position. | [Window state](/docs/windows/window-state) |
 
 **Build and CI changes**
 
@@ -943,6 +944,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | Taskbar progress | `taskbar-progress`, [`taskbar-progress-tao`](/docs/os/dock-taskbar/progress) |
 | System accent color | `system-color` |
 | Global hotkeys | `global-hotkey` |
+| Share sheet, Kotlin Multiplatform | [`share`](/docs/os/share) |
 | Media controls (Now Playing, SMTC, MPRIS) | `media-control` |
 | System info (CPU, RAM, GPU, batteries) | `system-info` |
 | SF Symbols catalogue | [`sf-symbols`](/docs/os/icons/sf-symbols) |
@@ -2624,6 +2626,7 @@ Float and Close actions; dragging it moves the satellite between the two hosts.
 | `resizable` | `true` | Whether the user can resize the floating window |
 | `hideWhileOwnerFullscreenOrMaximized` | `true` | Hide the floating window while the owner fills the screen |
 | `nativeContextMenu` | `true` | Native context menu for text fields in the floating window |
+| `controlButtonsDirection` | `ControlButtonsDirection.Auto` | Side of the floating window's controls. Pass the main window's value, such as `SystemNative` |
 | `header` | `{ DefaultSatelliteHeader() }` | Chrome in the floating title bar and above the docked panel |
 | `floatingCaption` | `{}` | See [Floating satellites on Wayland](#floating-satellites-on-wayland) |
 | `content` | required | The body, with `SatelliteScope` as receiver |
@@ -2966,6 +2969,7 @@ body runs with `TabScope`: `workspace`, `tab`, `select()`, `close()`.
 | --- | --- | --- |
 | `workspace` | required | The `TabWorkspace` |
 | `strip` | `{ TabStrip() }` | One window's strip, with `TabStripScope` as receiver |
+| `titleBar` | `{ DefaultTabTitleBar(it) }` | Each window's title bar, handed the strip to place in it |
 | `dragGhost` | `{ TabDragGhostCard(it) }` | The card under the pointer while a tab leaves its strip |
 | `nativeContextMenu` | `true` | Native context menu for text fields |
 | `windowWrapper` | `{ it() }` | Wraps each window, strip included: `WindowBackground`, a themed `Surface` |
@@ -2983,6 +2987,18 @@ MaterialTheme(colorScheme = colors) {
         // Tab declarations
     }
 }
+```
+
+`DefaultTabTitleBar` is a `BasicTitleBar` that gives the strip all the width between the window
+controls. Replace it to keep a title bar of your own, such as a gradient, fullscreen controls or
+`ControlButtonsDirection.SystemNative`:
+
+```kotlin
+TabWindows(
+    workspace = workspace,
+    strip = { MyStrip() },
+    titleBar = { strip -> JewelTitleBar(gradientStartColor = accent) { strip() } },
+)
 ```
 
 `rememberTabWorkspace(defaultWindowSize, captureThumbnails)` takes the size of new windows
@@ -3011,6 +3027,7 @@ indices follow it.
 | `hoverPreview` | `null` | The card under a hovered tab. `TabHoverPreview.Default` for the stock card |
 | `tabLeading` / `tabTrailing` | `null` | Per-tab slots around the title: a file icon, a modified dot |
 | `dropGhostCard` | `{ TabDropGhostCard(it) }` | The card in the slot a tab from another window would fill |
+| `gripCursor` | `TabGripCursor.Default` | The pointer over a tab and while it is carried. `TabGripCursor.None` keeps the strip's arrow |
 | `trailing` | `{}` | After the last tab: a new-tab button (a tab dropped on it is appended) |
 
 ```kotlin
@@ -3031,18 +3048,86 @@ TabWindows(
 
 ## Write a strip from scratch
 
-A strip from another design system needs three modifiers:
+A strip from another design system gets the stock strip's gestures from `rememberTabStripDrag`:
+the carry along the strip, the slide home on release and the hand-over once a tab leaves it.
 
-| Modifier | Apply to |
+| Part | Apply to |
 | --- | --- |
 | `Modifier.tabStripGeometry(workspace, group)` | The element spanning the whole strip |
-| `Modifier.tabSlot(group, index)` | Each tab, in strip order |
-| `Modifier.tabDragHandle(workspace, tab)` | Each tab's grip |
+| `Modifier.tabStripGrip(scope, drag, tab, index, cursor)` | Each tab's slot, the element that stays put |
+| `Modifier.tabStripCarry(drag, tab)` | What the tab draws, which follows the pointer |
+
+```kotlin
+@Composable
+fun TabStripScope.MyStrip() {
+    val scope = this
+    val drag = rememberTabStripDrag()
+    Row(Modifier.tabStripGeometry(workspace, group)) {
+        tabs.forEachIndexed { index, tab ->
+            key(tab.id) {
+                Box(
+                    Modifier
+                        .zIndex(if (drag.animating == tab.id) 1f else 0f)
+                        .tabStripGrip(scope, drag, tab, index, cursor = TabGripCursor.None),
+                ) {
+                    MyTab(tab, Modifier.tabStripCarry(drag, tab))
+                }
+            }
+        }
+    }
+}
+```
+
+`tabStripGrip` combines `tabSlot`, `noWindowDrag` and the drag handle. Put it on the slot, not on
+the carried drawing: a gesture on a node that moves with the pointer reads no movement.
+`TabStripDrag` exposes `held`, `animating` and `offsetPx(tabId)`. `rememberTabStripDrag` takes the
+same `reorderAnimation` as `TabStrip`.
+
+For a strip that keeps its own gestures, apply `Modifier.tabSlot(group, index)` to each tab and
+`Modifier.tabDragHandle(workspace, tab)` to its grip instead.
 
 While a tab from another window hovers the strip, `dropGhost` holds a
 `TabDropGhost(index, width, tab)`: compose `TabDropGhostCard(ghost)` at `index`. Add
 `TabHoverPreviewPopup(preview)` once for hover cards. `jewel-tabs-demo` wraps Jewel's `TabStrip`
 this way.
+
+## Open the tab windows yourself
+
+`TabWindows` is built from public parts. An app that needs its own window per group (its own
+state, title, key handling or close policy) composes them directly and keeps the workspace
+behavior:
+
+| Part | Role |
+| --- | --- |
+| `BindTabGroupWindow(workspace, group, window)` | Attaches the window to its group for drops, tear-offs and focus. Call it once inside the window |
+| `TabGroupWindowPlacement(group, state)` | Applies the positions and sizes the workspace asks for (restore, tear-off) to your `WindowState` |
+| `TabDragGhostWindow(workspace, nativeContextMenu, content)` | The window that follows a dragged tab. Compose it once, next to your windows |
+
+```kotlin
+for (group in rememberTabGroups(workspace)) {
+    key(group.id) {
+        val state = rememberWindowState(
+            position = group.position?.let { WindowPosition.Absolute(it.x, it.y) }
+                ?: WindowPosition.PlatformDefault,
+            size = group.size,
+        )
+        TabGroupWindowPlacement(group, state)
+        DecoratedWindow(
+            state = state,
+            title = workspace.selectedTab(group)?.title.orEmpty(),
+            onCloseRequest = { group.ids.forEach(workspace::close) },
+        ) {
+            BindTabGroupWindow(workspace, group)
+            MyWindowContent(workspace, group)
+        }
+    }
+}
+TabDragGhostWindow(workspace)
+```
+
+The window body is yours: draw the tab that `workspace.selectedTab(group)` returns. A strip in
+such a window gets its `TabStripScope` from an object that implements `workspace` and `group`.
+`rememberTabGroups` is defined in [Compose tabs with satellites](#compose-tabs-with-satellites).
 
 ## Draw previews
 
@@ -3082,12 +3167,39 @@ Read `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (where new tabs ope
 `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. A closed tab is gone: declaring it again
 creates a new tab in the active window.
 
+## Drag tabs between workspaces
+
+An app with several `TabWorkspace`s, for example one per virtual desktop, can let a tab cross from
+one to another. Link them and handle the drop:
+
+```kotlin
+LaunchedEffect(workspaces) {
+    for (workspace in workspaces) {
+        workspace.linkedWorkspaces = workspaces - workspace
+        workspace.onForeignDrop = { tab, into, target ->
+            // Only the app can declare the tab in the other workspace
+            moveDocument(tab.id, from = workspace, to = into, group = target.group.id, index = target.index)
+        }
+    }
+}
+```
+
+- Linked strips are tried after the workspace's own, for pointer drags only. Native Wayland's
+  drag-and-drop path ignores them.
+- The workspace leaves the dropped tab where it was. `onForeignDrop` closes it there and declares
+  it in `into`, at the `TabDropTarget` it received.
+- While the pointer is over a linked strip, `dropPreview` points at that workspace's group.
+- With `onForeignDrop = null` (the default), linked strips are no target and the drop tears the
+  tab off.
+- Where strips of several workspaces overlap, the strip under the pointer wins, then the window
+  focused last, across workspaces.
+
 ## Save and restore the layout
 
 `snapshot()` returns a `TabLayoutSnapshot(groups)`. Each `TabGroupSnapshot` holds `id`, `tabIds`,
 `selectedId`, `position` and `size`. `restore(snapshot)` moves the tabs and places the windows,
 including tabs declared later. It applies once; call it again after a tab is closed and
-redeclared.
+redeclared. A window torn off after a restore never takes the id of a restored group.
 
 ## Compose tabs with satellites
 
@@ -3826,7 +3938,9 @@ For a producer on its own device or in another process, use
 
 Call `rememberTaoGpuRenderContext()` inside a surface that owns a GPU context: `DecoratedWindow`
 content, a native popup layer, a `NativeView` overlay or a tray panel. It returns `null` during
-bring-up and teardown, and when no hardware context exists.
+bring-up and teardown, and when no hardware context exists. Every call site on the same surface
+gets the same instance, so composables can share state keyed on it, such as one 3D engine per
+window.
 
 ```kotlin
 @Composable
@@ -4929,6 +5043,7 @@ as its own Gradle artifact, so you add only the modules you use.
 | System tray | `composenativetray` | yes | yes | yes |
 | Tray popup apps | `composenativetray-app` | yes | yes | yes |
 | Global hotkeys | `global-hotkey` | yes | yes | yes |
+| Share sheet (also Android, iOS, web) | [`share`](/docs/os/share) | yes | yes | yes |
 | Media controls | `media-control` | yes | yes | yes |
 | Dark mode | `darkmode-detector` | yes | yes | yes |
 | Accent color and high contrast | `system-color` | yes | yes | yes |
@@ -6610,6 +6725,150 @@ pane with `x-apple.systempreferences:com.apple.preference.security?Privacy_Liste
 - [Media controls](/docs/os/media-control): publish playback state and receive media commands.
 - [Tray menu DSL](/docs/os/tray/menu): show shortcut hints in the tray menu.
 - [Threading](/docs/concepts/threading): the threads Nucleus runs your code on.
+
+---
+
+# Share sheet
+
+URL: https://nucleusframework.dev/en/docs/os/share
+
+Open the system share sheet from Kotlin Multiplatform code, attached to a Nucleus window on desktop.
+
+`share` opens the system share sheet with text, links and files. It is a Kotlin Multiplatform
+module: the same call works on macOS, Windows, Linux, Android, iOS and the web.
+
+| Platform | Share UI |
+| --- | --- |
+| macOS | `NSSharingServicePicker` |
+| Windows | Share UI (`DataTransferManager`) |
+| Linux | XDG desktop portal: "Open With" for one file or URL, "Save files" for a mixed payload |
+| Android | Android Sharesheet |
+| iOS | `UIActivityViewController` |
+| Web (`js`, `wasmJs`) | Web Share API (`navigator.share`) |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+// commonMain in a KMP project, dependencies { } in a JVM desktop app
+implementation("dev.nucleusframework:nucleus.share:<version>")
+```
+
+`nucleus-application` does not bring it: add it yourself to call `NucleusWindow.share`.
+
+## Share from a Nucleus window
+
+```kotlin
+val window = LocalNucleusWindow.current
+val density = LocalDensity.current
+val scope = rememberCoroutineScope()
+var anchor by remember { mutableStateOf<ShareAnchor?>(null) }
+
+Button(
+    onClick = {
+        scope.launch {
+            window.share(anchor) {
+                title = "Share"
+                text("Cross-platform native share sheet")
+                url("https://nucleusframework.dev")
+                file("/path/to/report.pdf", mimeType = "application/pdf")
+            }
+        }
+    },
+    modifier = Modifier.onGloballyPositioned { anchor = it.shareAnchor(density) },
+) { Text("Share") }
+```
+
+`NucleusWindow.share` attaches the sheet to the window: its HWND on Windows, its `NSWindow` on
+macOS, `x11:<xid>` on X11, and an `xdg_foreign` export on Wayland, released once the portal dialog
+closes. On macOS the picker points at `anchor`, or at the top centre of the window without one.
+A window that is not realized yet falls back to the app's frontmost window.
+
+## Share from common code
+
+```kotlin
+scope.launch {
+    try {
+        ShareSheet.share {
+            title = "Share"       // chooser title where the platform has one
+            subject = "Nucleus"   // e-mail subject on Android, description on Windows
+            text("Hello")
+            url("https://nucleusframework.dev")
+            fileUri("content://com.example/report.txt")
+        }
+    } catch (e: ShareException) {
+        log("${e.error}: ${e.message}")
+    }
+}
+```
+
+- `share` is `suspend` and safe from any dispatcher. It returns once the UI is on screen (once
+  the request is dispatched on Android and Linux, once the sheet closes on the web).
+- It reports neither the target the user picked nor a cancel.
+- Build a request directly with `ShareRequest(items, title, subject)` or `shareRequest { … }`.
+  Items are `ShareItem.Text`, `Url`, `File(path, mimeType)` and `FileUri(uri, mimeType)`.
+- `ShareSheet.isSupported` tells whether a share UI is available: on desktop, whether the native
+  bridge loaded.
+
+On desktop without `nucleus-application`, name the parent yourself with `ShareParent.Windows(hwnd)`,
+`ShareParent.MacOs(nsWindow, anchor)`, `ShareParent.Linux(portalParent, keepAlive)` or
+`ShareParent.Auto` (the default). On Android, pass a `Context`: `ShareSheet.share(request, activity)`.
+
+## Handle errors
+
+`ShareException.error` is a `ShareError`. The request is validated in common code first.
+
+| Value | Meaning |
+| --- | --- |
+| `Empty` | No item |
+| `InvalidItem` | Blank item, unparsable URL or blank MIME type |
+| `NoHandler` | No app can receive the payload |
+| `AlreadyOpen` | A share sheet is already on screen (iOS, web) |
+| `UnsupportedItem` | Item kind unsupported here: `content://` on desktop, a local path on the web |
+| `NoWindow` | No window or activity to present from |
+| `Unsupported` | No share UI, or the native bridge is missing |
+| `Io` | Reading or staging a file failed |
+| `Platform` | The platform API failed; see the message |
+
+## Platform notes
+
+- **macOS**: `title` and `subject` are ignored. Without a running `NSApplication` the call fails
+  after 10 s instead of hanging.
+- **Windows**: texts and URLs are joined into the payload's text, and the first URL is also its
+  web link. Files accept paths and `file://` URIs.
+- **Linux**: there is no share sheet. One URL or file opens the portal's "Open With" chooser, one
+  text goes through a temporary file, and a mixed payload opens a "Save files" dialog. Without a
+  portal, Nucleus falls back to `xdg-open`, then fails with `NoHandler`. On native Wayland,
+  `ShareParent.Auto` sends no parent: share from a window.
+- **Android**: local files are copied to the cache and served read-only by the library's own
+  `NucleusShareProvider` (authority `${applicationId}.nucleus.share`). `content://` URIs are
+  forwarded with a read grant. No init call is needed. `minSdk` is 21.
+- **iOS**: `title` and `subject` are ignored. On iPad the popover is centred on the presenting
+  view controller.
+- **Web**: MIME types matter, as on Android.
+
+The Web Share API needs HTTPS or `localhost`, and a user gesture: call `share` from a click handler
+without awaiting anything slow first, or the browser rejects it (`ShareError.Platform`). There is
+no filesystem, so `file(path)` fails: share `fileUri("blob:…")`, `data:` or same-origin `https:`
+URIs. Browsers without `navigator.share`, such as Firefox desktop, report `isSupported = false`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Desktop goes through a Rust JNI library, built on `robius-share`. Android, iOS and the web are
+  pure Kotlin.
+- On Wayland the portal needs the window export to stay alive until its dialog closes, while
+  `share` returns as soon as the dialog is shown. `ShareParent.Linux.keepAlive` is closed exactly
+  once: when the dialog is gone, right after `share` when no dialog was shown, or when the share
+  fails first.
+- Android purges staged copies older than a day on the next share.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [File dialogs](/docs/os/file-dialogs): open and save pickers attached to a window.
+- [Notifications](/docs/os/notifications): send a notification on every OS.
 
 ---
 
@@ -12647,6 +12906,19 @@ The major version marks the API breaks: read the
   `latest*.yml`. See [Test updates](/docs/packaging/test-updates).
 - **Mouse back and forward buttons** (#728) reach Compose as `PointerButton.Back` and
   `PointerButton.Forward` on all three OSes. See [Mouse buttons](/docs/input/mouse-buttons).
+- **Share sheet** (#727). The new `share` module opens the system share sheet from Kotlin
+  Multiplatform code on macOS, Windows, Linux, Android, iOS and the web. `NucleusWindow.share`
+  attaches it to a window. See [Share sheet](/docs/os/share).
+- **Tabs in app-owned windows** (#731, #732, `@ExperimentalNucleusApi`). `TabWindows` takes a
+  `titleBar` slot, and its parts are public: `BindTabGroupWindow`, `TabGroupWindowPlacement`,
+  `TabDragGhostWindow`, `rememberTabStripDrag`, `Modifier.tabStripGrip` and
+  `Modifier.tabStripCarry`. `TabGripCursor` sets the pointer over tabs. See
+  [Open the tab windows yourself](/docs/tool-windows/tabs#open-the-tab-windows-yourself).
+- **Tab drags between workspaces** (#734, `@ExperimentalNucleusApi`). `linkedWorkspaces` and
+  `onForeignDrop` let a tab land on another `TabWorkspace`'s strip. See
+  [Drag tabs between workspaces](/docs/tool-windows/tabs#drag-tabs-between-workspaces).
+- **`controlButtonsDirection` on `Satellite`** (#733), so floating satellites put their controls
+  on the same side as the main window. See [Satellite parameters](/docs/tool-windows/satellites#satellite-parameters).
 - **Hot update on Windows** (#720). On a per-user NSIS install, `installAndRestart` installs the
   new version while the app keeps running and swaps to it once its first window is on screen.
   Other instances pick the update up through `pendingRestartVersion`. NSIS installs now keep the
@@ -12700,6 +12972,26 @@ The major version marks the API breaks: read the
 
 ### Bug fixes
 
+- **Control-click is a secondary click on macOS** (#737), in windows and native popups, so
+  `ContextMenuArea` and text-field menus open on it.
+- **AWT fonts in macOS GraalVM bundles** (#735). `java.awt.Font` no longer fails with `Problem
+  reading font data`, which crashed Jewel apps at startup. The bundle now ships
+  `Contents/Resources/fontconfig.properties`.
+- **Linux: Xlib is thread-safe on libX11 < 1.8** (#744). Tao calls `XInitThreads` before GTK opens
+  its display, which fixes random `[xcb] Unknown sequence number` crashes on Ubuntu 22.04 and
+  other older distributions.
+- **Linux launcher: no deadlock on early teardown** (#744). Unregistering a quicklist or menu right
+  after registering it no longer hangs.
+- **`TaoWindow.setOuterPosition` rejects unplaceable positions** (#738). NaN, infinity or a value
+  beyond ±1,000,000 dp throws `IllegalArgumentException` naming the values, instead of aborting
+  the process in AppKit.
+- **One `TaoGpuRenderContext` per surface** (#752). Every `rememberTaoGpuRenderContext()` call on
+  a surface returns the same instance, so state keyed on it is shared, such as one Filament engine
+  per window. See [GPU render context](/docs/native-content/gpu-render-context#get-the-context).
+- **macOS: a window created maximized restores to its floating size** (#733) instead of a
+  screen-sized window.
+- **Tabs** (#731, #732): a tear-off after a restore never reuses a restored group id, and a strip
+  no longer crashes when a tab leaves its group while still laid out.
 - **Packaged apps keep the Gradle classpath order** (#729). jpackage sorted the classpath by file
   name, so a packaged app could load a different copy of a class than `./gradlew run`. Jewel apps
   failed with `NoSuchMethodError: Job.cancel$default`.
