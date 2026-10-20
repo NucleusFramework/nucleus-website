@@ -31,7 +31,7 @@ Le plugin choisit le type de certificat de chaque format à partir de cette seul
 
 | Format | Signature de l'application | Signature de l'installateur | Notarisé |
 |--------|----------------------------|-----------------------------|----------|
-| DMG, ZIP | Developer ID Application | Aucune | Oui |
+| DMG, ZIP | Developer ID Application | Aucune, ou le DMG lui-même avec `dmg { sign = true }` | Oui |
 | PKG Developer ID (`pkg { appStore = false }`) | Developer ID Application | Developer ID Installer | Oui |
 | PKG App Store (défaut) | 3rd Party Mac Developer Application | 3rd Party Mac Developer Installer | Non |
 
@@ -90,6 +90,25 @@ windows {
 
 Renouvelez un PFX avant son expiration : SmartScreen signale un binaire à la signature expirée
 jusqu'à ce que vous appliquiez une nouvelle signature horodatée.
+
+### Signer les binaires embarqués
+
+Avec `enabled = true`, le plugin signe l'image de l'application avant de construire l'installateur :
+les exécutables du lanceur, les DLL du runtime Java, de Skiko et des bibliothèques natives Nucleus,
+ainsi que les DLL contenues dans des JAR non signés. Smart App Control de Windows refuse de charger
+une DLL non signée. Un binaire déjà signé, par exemple par l'éditeur du JDK, garde sa signature.
+Pour ne signer que les exécutables :
+
+```kotlin title="build.gradle.kts"
+windows {
+    signing {
+        enabled = true
+        signNativeLibraries = false // défaut : true
+    }
+}
+```
+
+Les mêmes réglages de certificat signent l'image de l'application et l'installateur.
 
 ## Signer sur Linux
 

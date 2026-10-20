@@ -49,6 +49,10 @@ windows {
 `.nsi` and `.nsh` files. `deleteAppDataOnUninstall` removes `%APPDATA%\<appId>`. With a custom
 `includeScript`, delete that directory from your own `customUnInstall` macro instead.
 
+With the [AOT cache](/docs/performance/aot-cache) on, an `includeScript` that defines its own
+`customInstall` macro must call `!insertmacro nucleusPinAotJarTimestamps` in it, or the installed
+app starts without its cache. The build warns when the call is missing.
+
 ## Build an MSI for enterprise deployment
 
 Keep `upgradeUuid` fixed across releases. Windows matches successor versions by that UUID; without
@@ -90,8 +94,16 @@ Center, not your signing certificate's subject.
 </Callout>
 
 Building AppX locally needs Windows Developer Mode (Settings, System, For developers). The app runs
-with `runFullTrust` and keeps Win32 access. The `build-windows-appxbundle` CI action merges amd64
-and arm64 into one `.msixbundle`. AppX uses the [sandboxed pipeline](/docs/packaging/sandboxing).
+with `runFullTrust` as a packaged Win32 process, not in an AppContainer, so AppX builds like the
+other Windows formats, GraalVM native images included (`packageGraalvmAppX`). `runAppX` sideloads
+and launches the package. The `build-windows-appxbundle` CI action merges amd64 and arm64 into one
+`.msixbundle`.
+
+<Callout type="warn" title="Changed in 3.0">
+AppX no longer goes through the sandboxed pipeline, and `ExecutableRuntime.isSandboxed()` returns
+`false` in an AppX install. Detect it with `ExecutableRuntime.isAppX()`. See
+[Detect the sandbox at runtime](/docs/packaging/sandboxing#detect-the-sandbox-at-runtime).
+</Callout>
 
 ## Enable Portable mode
 
@@ -116,6 +128,23 @@ nativeDistributions {
 ```
 
 Use `windows.fileAssociation(...)` to set a Windows-specific icon.
+
+## Bundle the Visual C++ runtime
+
+The app image carries the whole MSVC C++ runtime (`msvcp140*.dll`, `vcruntime140*.dll`,
+`concrt140.dll`), so a JNI library that imports one the JDK lacks, such as ONNX Runtime's
+`msvcp140_1.dll`, loads on a machine without the Visual C++ Redistributable. The plugin copies it
+from the newest Visual Studio install on the build machine. Without Visual Studio, it bundles
+nothing and logs a warning. To turn it off:
+
+```kotlin title="build.gradle.kts"
+windows {
+    bundleCRuntime = false // default: true
+}
+```
+
+GraalVM native images have their own switch, `graalvm { windows { bundleCRuntime } }`. See the
+[Gradle DSL reference](/docs/reference/gradle-dsl#graalvm-platforms).
 
 ## Ship the ANGLE libraries
 

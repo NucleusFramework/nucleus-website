@@ -51,6 +51,10 @@ vos propres fichiers `.nsi` et `.nsh`. `deleteAppDataOnUninstall` supprime `%APP
 Avec un `includeScript` personnalisé, supprimez ce répertoire depuis votre propre macro
 `customUnInstall`.
 
+Avec le [cache AOT](/docs/performance/aot-cache) activé, un `includeScript` qui définit sa propre
+macro `customInstall` doit y appeler `!insertmacro nucleusPinAotJarTimestamps`, sinon
+l'application installée démarre sans son cache. Le build vous avertit quand l'appel manque.
+
 ## Construire un MSI pour le déploiement en entreprise
 
 Gardez `upgradeUuid` fixe d'une release à l'autre. Windows reconnaît les versions successives par
@@ -93,9 +97,16 @@ correspondre aux valeurs attribuées par Partner Center à votre réservation. `
 </Callout>
 
 Construire un AppX en local exige le mode développeur de Windows (Paramètres, Système, Pour les
-développeurs). L'application tourne avec `runFullTrust` et garde l'accès Win32. L'action CI
-`build-windows-appxbundle` fusionne amd64 et arm64 en un seul `.msixbundle`. AppX utilise le
-[pipeline sandboxé](/docs/packaging/sandboxing).
+développeurs). L'application tourne avec `runFullTrust`, comme un processus Win32 empaqueté et non
+dans un AppContainer : AppX se construit donc comme les autres formats Windows, images natives
+GraalVM comprises (`packageGraalvmAppX`). `runAppX` installe le package en sideload et le lance.
+L'action CI `build-windows-appxbundle` fusionne amd64 et arm64 en un seul `.msixbundle`.
+
+<Callout type="warn" title="Modifié en 3.0">
+AppX ne passe plus par le pipeline sandboxé, et `ExecutableRuntime.isSandboxed()` renvoie `false`
+dans une installation AppX. Détectez-la avec `ExecutableRuntime.isAppX()`. Voir
+[Détecter le sandbox à l'exécution](/docs/packaging/sandboxing#détecter-le-sandbox-à-lexécution).
+</Callout>
 
 ## Activer le mode portable
 
@@ -122,6 +133,23 @@ nativeDistributions {
 ```
 
 Utilisez `windows.fileAssociation(...)` pour définir une icône propre à Windows.
+
+## Embarquer le runtime Visual C++
+
+L'image de l'application contient tout le runtime C++ MSVC (`msvcp140*.dll`, `vcruntime140*.dll`,
+`concrt140.dll`). Une bibliothèque JNI qui importe une DLL absente du JDK, comme le
+`msvcp140_1.dll` d'ONNX Runtime, se charge donc sur une machine sans Visual C++ Redistributable.
+Le plugin le copie depuis l'installation Visual Studio la plus récente de la machine de build. Sans
+Visual Studio, il n'embarque rien et affiche un avertissement. Pour le désactiver :
+
+```kotlin title="build.gradle.kts"
+windows {
+    bundleCRuntime = false // défaut : true
+}
+```
+
+Les images natives GraalVM ont leur propre option, `graalvm { windows { bundleCRuntime } }`. Voir
+la [référence du DSL Gradle](/docs/reference/gradle-dsl#graalvm-platforms).
 
 ## Livrer les bibliothèques ANGLE
 

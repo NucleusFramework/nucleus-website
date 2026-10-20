@@ -1,13 +1,13 @@
 ---
 title: Sandboxing
-description: Build the Mac App Store PKG, AppX, and Flatpak through the sandboxed pipeline, and detect the sandbox at runtime.
+description: Build the Mac App Store PKG and Flatpak through the sandboxed pipeline, and detect the sandbox at runtime.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-Three formats run sandboxed: the Mac App Store PKG ([App Sandbox](https://developer.apple.com/documentation/security/app-sandbox)),
-`AppX` (MSIX, full trust), and `Flatpak` ([Flatpak sandbox](https://docs.flatpak.org/en/latest/sandbox-permissions.html)).
+Two formats run sandboxed: the Mac App Store PKG ([App Sandbox](https://developer.apple.com/documentation/security/app-sandbox))
+and `Flatpak` ([Flatpak sandbox](https://docs.flatpak.org/en/latest/sandbox-permissions.html)).
 Add them to `targetFormats` next to your regular formats, and Nucleus bundles their native
 libraries ahead of time.
 
@@ -15,18 +15,20 @@ libraries ahead of time.
 targetFormats(
     TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb,
     TargetFormat.Pkg,     // with macOS { pkg { appStore = true } }, the default
-    TargetFormat.AppX,
     TargetFormat.Flatpak,
 )
 ```
 
 A PKG with `macOS { pkg { appStore = false } }` is a Developer ID PKG and builds like a DMG. See
-[Choose a PKG channel](/docs/packaging/macos#choose-a-pkg-channel).
+[Choose a PKG channel](/docs/packaging/macos#choose-a-pkg-channel). `AppX` runs with full trust
+and builds like the other Windows formats; see
+[Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
 
 <Callout type="warn" title="Changed in 3.0">
-A PKG no longer implies the App Sandbox. `TargetFormat.isStoreFormat` and `macOS.appStore` no
-longer compile, and runtime code that gated sandbox behavior on `ExecutableRuntime.isPkg()` should
-call `ExecutableRuntime.isSandboxed()`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+A PKG no longer implies the App Sandbox, and AppX no longer uses the sandboxed pipeline.
+`TargetFormat.isStoreFormat` and `macOS.appStore` no longer compile, and runtime code that gated
+sandbox behavior on `ExecutableRuntime.isPkg()` should call `ExecutableRuntime.isSandboxed()`. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
 </Callout>
 
 ## Keep a library's natives in its JAR
@@ -94,8 +96,9 @@ if (!ExecutableRuntime.isSandboxed()) {
 }
 ```
 
-`isSandboxed()` returns `true` inside the macOS App Sandbox, an AppX container, or a Flatpak. It
-follows the sandbox, not the installer format: a Developer ID PKG reports `false`.
+`isSandboxed()` returns `true` inside the macOS App Sandbox or a Flatpak. It follows the sandbox,
+not the installer format: a Developer ID PKG reports `false`, and so does an AppX, which runs as a
+full-trust Win32 process. Check `ExecutableRuntime.isAppX()` for the latter.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -105,7 +108,6 @@ follows the sandbox, not the installer format: a Developer ID PKG reports `false
   markers, and rewrites `System.load(String)` and `Runtime.load(String)` to load the bundled copy.
 - It sets `java.library.path`, `jna.library.path`, `jna.boot.library.path`, `jna.nounpack=true`
   and `jna.nosys=true`. The image lands in `app-sandboxed/` next to `app/`.
-- AppX joins this pipeline only because MSIX forbids extracting DLLs at runtime.
 - On macOS, `isSandboxed()` reads `APP_SANDBOX_CONTAINER_ID`.
 
 </Accordion>

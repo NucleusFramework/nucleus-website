@@ -62,6 +62,10 @@ macOS {
 }
 ```
 
+Définissez `dmg { sign = true }` pour signer l'image disque elle-même avec `signing { identity }`.
+Cela exige `signing { sign.set(true) }`, et le plugin signe l'image avant que `notarizeDmg`
+s'exécute.
+
 `nativeDistributions.compressionLevel = CompressionLevel.Ultra` exige un `minimumSystemVersion` de
 10.15 ou plus et aucun `dmg.format` imposé. Livrez un `Zip` à côté du DMG si vous utilisez la
 [mise à jour automatique](/docs/packaging/auto-update).
@@ -167,6 +171,28 @@ macOS {
 ```
 
 Enregistrez les launch agents à l'exécution avec la [Gestion des services](/docs/lifecycle/background/service-management).
+
+### Localiser les chaînes d'Info.plist
+
+macOS lit les valeurs localisées d'`Info.plist`, comme le texte d'une demande d'autorisation, dans
+`Contents/Resources/<lang>.lproj/InfoPlist.strings`. Déclarez-les langue par langue, ou copiez des
+répertoires `.lproj` déjà prêts :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    infoPlist {
+        extraKeysRawXml = """<key>NSMicrophoneUsageDescription</key><string>Voice notes.</string>"""
+        localization("fr", mapOf("NSMicrophoneUsageDescription" to "Notes vocales."))
+        localization("de", mapOf("NSMicrophoneUsageDescription" to "Sprachnotizen."))
+        localizationsDir = file("packaging/macos/localizations") // es.lproj/InfoPlist.strings, ...
+    }
+}
+```
+
+Le plugin écrit ces fichiers dans le bundle avant de le signer, en build JVM comme en GraalVM.
+`localizationsDir` ne contient que des répertoires `<lang>.lproj`. Une langue déclarée avec
+`localization(...)` ne doit pas avoir aussi un `InfoPlist.strings` dans `localizationsDir`, sinon
+le build échoue.
 
 <Accordions>
 <Accordion title="En coulisses">

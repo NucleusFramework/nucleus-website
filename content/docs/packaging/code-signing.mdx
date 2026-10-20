@@ -31,7 +31,7 @@ The plugin picks the certificate type per format from that one identity:
 
 | Format | App signature | Installer signature | Notarized |
 |--------|---------------|---------------------|-----------|
-| DMG, ZIP | Developer ID Application | None | Yes |
+| DMG, ZIP | Developer ID Application | None, or the DMG itself with `dmg { sign = true }` | Yes |
 | Developer ID PKG (`pkg { appStore = false }`) | Developer ID Application | Developer ID Installer | Yes |
 | App Store PKG (default) | 3rd Party Mac Developer Application | 3rd Party Mac Developer Installer | No |
 
@@ -88,6 +88,24 @@ windows {
 
 Renew a PFX before it expires: SmartScreen flags a binary with an expired signature until you apply
 a fresh, timestamped one.
+
+### Sign the bundled binaries
+
+With `enabled = true`, the plugin signs the app image before it builds the installer: the launcher
+executables, the DLLs of the Java runtime, Skiko and the Nucleus natives, and the DLLs packed inside
+unsigned JARs. Windows Smart App Control refuses to load an unsigned DLL. A binary that already
+carries a signature, such as a JDK vendor's, keeps it. To sign the executables only:
+
+```kotlin title="build.gradle.kts"
+windows {
+    signing {
+        enabled = true
+        signNativeLibraries = false // default: true
+    }
+}
+```
+
+The same certificate settings sign the app image and the installer.
 
 ## Sign on Linux
 
