@@ -41,8 +41,54 @@ when (val result = updater.checkForUpdates()) {
 ```
 
 `checkForUpdates()` suspends. In a dev run (`currentVersion` is `0.0.0-dev`) it returns
-`NotAvailable`. The tag picks the channel: `v1.0.0` is `latest`, `v1.0.0-beta.1` is `beta`,
-`v1.0.0-alpha.1` is `alpha`. A `beta` user sees `latest` and `beta`; an `alpha` user sees all three.
+`NotAvailable`. Build metadata never counts: `1.2.3+42` compares as `1.2.3`.
+
+## Read updates from GitHub Releases
+
+`GitHubProvider` reads the releases of a public repository through GitHub's web routes, which take
+no token and no REST API quota. For a private repository or a GitHub Enterprise Server, use
+`PrivateGitHubProvider`, which goes through the REST API with a token:
+
+```kotlin
+// Public repository, on github.com or a GitHub Enterprise Server
+provider = GitHubProvider(owner = "myorg", repo = "myapp", host = "github.example.com")
+
+// Private repository
+provider = PrivateGitHubProvider(
+    owner = "myorg",
+    repo = "myapp",
+    token = "github_pat_...", // read access to the repository contents only: it ships in the app
+)
+```
+
+The token's quota, 5,000 requests an hour, is shared by every installation. A check costs one
+request, and a download one per file. Both providers take `host` (default `github.com`) and
+`protocol` (default `https`; `http` only for a loopback host). Every file comes from the release
+the manifest was read from, so tags need no `v` prefix.
+
+<Callout type="warn" title="Changed in 3.0">
+`GitHubProvider` takes no token. `GitHubProvider(owner, repo, token)` no longer compiles: move
+private repositories to `PrivateGitHubProvider(owner, repo, token)`, and pass a `host` by name.
+</Callout>
+
+### Pick a release channel
+
+The tag picks a release's channel: `v1.0.0` is a release, `v1.0.0-beta.1` is `beta`,
+`v1.0.0-alpha.1` is `alpha`. The client's channel is `channel`, or for `channel = "latest"` the
+pre-release identifier of `currentVersion`.
+
+| Client channel | Follows |
+|---|---|
+| `alpha` | `alpha`, `beta`, and releases |
+| `beta` | `beta` and releases |
+| Any other name | Its own tags only |
+
+Among the tags it follows, the client takes the highest version, then reads that channel's
+manifest (`beta.yml` for `v1.1.0-beta.4`), or `latest*.yml` when the release does not publish it.
+`channel = "beta"` turns pre-releases on by itself. Channel names are case-sensitive, and tags that
+are not SemVer versions are skipped. To find a pre-release, `GitHubProvider` reads the 10 most
+recent releases and `PrivateGitHubProvider` the 100 most recent: a channel with no tag among them
+is not found.
 
 ## Supported formats
 
@@ -141,8 +187,10 @@ logs why and falls back to the password prompt.
 - Differential downloads compare electron-builder block maps with the previous artifact cached in
   `cacheDir` and fetch changed blocks with HTTP range requests. A missing map, a failed range
   request, or a digest mismatch falls back to a full download.
-- The updater checks the SHA-512 after download. On Windows it runs NSIS with `/S` and MSI with
-  `msiexec /passive` after the app exits.
+- The updater hashes a full download as it writes it, then compares the SHA-512 with the
+  manifest. On Windows it runs NSIS with `/S` and MSI with `msiexec /passive` after the app exits.
+- The DEB and RPM update script passes every path as a single-quoted literal, since the package
+  name comes from the manifest.
 - Silent Linux updates go through a root-owned `/opt/<App>/nucleus-update-helper` that verifies the
   detached `.asc` against your bundled public key before it runs `dpkg -i` or `rpm -U`.
 
@@ -170,17 +218,18 @@ logs why and falls back to the password prompt.
 - `UpdateLevel`: `MAJOR`, `MINOR`, `PATCH`, or `PRE_RELEASE`. Use it to force a dialog for a major
   version and install patches in the background.
 - `UpdateException` subtypes: `NetworkException`, `ChecksumException`, `NoMatchingFileException`,
-  `ParseException`.
+  `ParseException`. `downloadUpdate` throws `ParseException` before downloading anything when the
+  manifest names an artifact that is not a plain file name, such as `../app.zip`.
 
 ### Builder fields
 
 | Field | Default | Notes |
 |-------|---------|-------|
 | `currentVersion` | Detected from the packaged app | Compared with the remote version |
-| `provider` | Required | `GitHubProvider` or `GenericProvider` |
-| `channel` | `"latest"` | Release channel name |
+| `provider` | Required | `GitHubProvider`, `PrivateGitHubProvider`, or `GenericProvider` |
+| `channel` | `"latest"` | `latest`, `beta`, `alpha`, or a channel of your own |
 | `allowDowngrade` | `false` | |
-| `allowPrerelease` | `false` | Treated as `true` when `currentVersion` contains `-` |
+| `allowPrerelease` | `false` | Treated as `true` when `currentVersion` contains `-` or `channel` is not `latest` |
 | `executableType` | Detected | Forces the artifact type to download |
 | `httpClient` | JDK client following redirects | `NativeHttpClient` for private CAs |
 | `differentialDownload` | `true` | |
@@ -188,9 +237,12 @@ logs why and falls back to the password prompt.
 
 ### Providers
 
-- `GitHubProvider(owner, repo, token = null)`. The token travels in the `Authorization` header.
+- `GitHubProvider(owner, repo, host = "github.com", protocol = "https")`: public repositories.
+- `PrivateGitHubProvider(owner, repo, token, host = "github.com", protocol = "https")`: private
+  repositories and GitHub Enterprise Server, through the REST API.
 - `GenericProvider(baseUrl)`. `baseUrl` must use `https`, or construction throws
-  `IllegalArgumentException`. Plain `http` works for loopback hosts only, for local tests.
+  `IllegalArgumentException`. Plain `http` works for local tests on a loopback host only:
+  `localhost`, an IPv4 literal in `127.0.0.0/8`, or `[::1]`.
 
 ## What's next
 

@@ -41,9 +41,56 @@ when (val result = updater.checkForUpdates()) {
 ```
 
 `checkForUpdates()` est une fonction `suspend`. En exécution de développement (`currentVersion`
-vaut `0.0.0-dev`), elle renvoie `NotAvailable`. Le tag choisit le canal : `v1.0.0` donne `latest`,
-`v1.0.0-beta.1` donne `beta`, `v1.0.0-alpha.1` donne `alpha`. Un utilisateur `beta` voit `latest` et
-`beta` ; un utilisateur `alpha` voit les trois.
+vaut `0.0.0-dev`), elle renvoie `NotAvailable`. Les métadonnées de build ne comptent jamais :
+`1.2.3+42` se compare comme `1.2.3`.
+
+## Lire les mises à jour depuis GitHub Releases
+
+`GitHubProvider` lit les releases d'un dépôt public par les routes web de GitHub, qui ne demandent
+ni token ni quota de l'API REST. Pour un dépôt privé ou un GitHub Enterprise Server, utilisez
+`PrivateGitHubProvider`, qui passe par l'API REST avec un token :
+
+```kotlin
+// Dépôt public, sur github.com ou un GitHub Enterprise Server
+provider = GitHubProvider(owner = "myorg", repo = "myapp", host = "github.example.com")
+
+// Dépôt privé
+provider = PrivateGitHubProvider(
+    owner = "myorg",
+    repo = "myapp",
+    token = "github_pat_...", // lecture du contenu du dépôt uniquement : il est livré dans l'application
+)
+```
+
+Le quota du token, 5 000 requêtes par heure, est partagé par toutes les installations. Une
+vérification coûte une requête, un téléchargement une par fichier. Les deux providers acceptent
+`host` (défaut `github.com`) et `protocol` (défaut `https` ; `http` seulement pour un hôte
+loopback). Chaque fichier provient de la release dont le manifeste a été lu : les tags n'ont pas
+besoin du préfixe `v`.
+
+<Callout type="warn" title="Modifié en 3.0">
+`GitHubProvider` ne prend plus de token. `GitHubProvider(owner, repo, token)` ne compile plus :
+passez les dépôts privés à `PrivateGitHubProvider(owner, repo, token)`, et nommez l'argument `host`.
+</Callout>
+
+### Choisir un canal de release
+
+Le tag fixe le canal d'une release : `v1.0.0` est une release, `v1.0.0-beta.1` est `beta`,
+`v1.0.0-alpha.1` est `alpha`. Le canal du client est `channel`, ou, pour `channel = "latest"`,
+l'identifiant de pré-release de `currentVersion`.
+
+| Canal du client | Suit |
+|---|---|
+| `alpha` | `alpha`, `beta` et les releases |
+| `beta` | `beta` et les releases |
+| Tout autre nom | Ses propres tags uniquement |
+
+Parmi les tags qu'il suit, le client prend la version la plus haute, puis lit le manifeste de ce
+canal (`beta.yml` pour `v1.1.0-beta.4`), ou `latest*.yml` quand la release ne le publie pas.
+`channel = "beta"` active à lui seul les pré-releases. Les noms de canal respectent la casse, et
+les tags qui ne sont pas des versions SemVer sont ignorés. Pour trouver une pré-release,
+`GitHubProvider` lit les 10 releases les plus récentes et `PrivateGitHubProvider` les 100 plus
+récentes : un canal sans tag parmi elles reste introuvable.
 
 ## Formats pris en charge
 
@@ -147,8 +194,11 @@ journalise la raison et revient à la demande de mot de passe.
   précédent mis en cache dans `cacheDir` et récupèrent les blocs modifiés avec des requêtes HTTP
   range. Une map manquante, une requête range en échec ou un digest incorrect entraînent un
   téléchargement complet.
-- L'updater vérifie le SHA-512 après le téléchargement. Sur Windows, il lance NSIS avec `/S` et MSI
-  avec `msiexec /passive` après la fermeture de l'application.
+- L'updater calcule le hash d'un téléchargement complet pendant son écriture, puis compare le
+  SHA-512 au manifeste. Sur Windows, il lance NSIS avec `/S` et MSI avec `msiexec /passive` après
+  la fermeture de l'application.
+- Le script de mise à jour DEB et RPM passe chaque chemin en littéral entre apostrophes, car le nom
+  du package vient du manifeste.
 - Les mises à jour Linux silencieuses passent par un helper appartenant à root,
   `/opt/<App>/nucleus-update-helper`, qui vérifie la signature `.asc` avec votre clé publique
   livrée avant de lancer `dpkg -i` ou `rpm -U`.
@@ -177,17 +227,19 @@ journalise la raison et revient à la demande de mot de passe.
 - `UpdateLevel` : `MAJOR`, `MINOR`, `PATCH` ou `PRE_RELEASE`. Servez-vous-en pour imposer une boîte
   de dialogue sur une version majeure et installer les correctifs en arrière-plan.
 - Sous-types de `UpdateException` : `NetworkException`, `ChecksumException`,
-  `NoMatchingFileException`, `ParseException`.
+  `NoMatchingFileException`, `ParseException`. `downloadUpdate` lève `ParseException` avant tout
+  téléchargement quand le manifeste désigne un artefact qui n'est pas un simple nom de fichier, comme
+  `../app.zip`.
 
 ### Champs du builder
 
 | Champ | Défaut | Notes |
 |-------|--------|-------|
 | `currentVersion` | Détectée dans l'application empaquetée | Comparée à la version distante |
-| `provider` | Obligatoire | `GitHubProvider` ou `GenericProvider` |
-| `channel` | `"latest"` | Nom du canal de release |
+| `provider` | Obligatoire | `GitHubProvider`, `PrivateGitHubProvider` ou `GenericProvider` |
+| `channel` | `"latest"` | `latest`, `beta`, `alpha` ou un canal à vous |
 | `allowDowngrade` | `false` | |
-| `allowPrerelease` | `false` | Considéré comme `true` si `currentVersion` contient `-` |
+| `allowPrerelease` | `false` | Considéré comme `true` si `currentVersion` contient `-` ou si `channel` n'est pas `latest` |
 | `executableType` | Détecté | Impose le type d'artefact à télécharger |
 | `httpClient` | Client JDK qui suit les redirections | `NativeHttpClient` pour les autorités privées |
 | `differentialDownload` | `true` | |
@@ -195,10 +247,12 @@ journalise la raison et revient à la demande de mot de passe.
 
 ### Providers
 
-- `GitHubProvider(owner, repo, token = null)`. Le token passe dans l'en-tête `Authorization`.
+- `GitHubProvider(owner, repo, host = "github.com", protocol = "https")` : dépôts publics.
+- `PrivateGitHubProvider(owner, repo, token, host = "github.com", protocol = "https")` : dépôts
+  privés et GitHub Enterprise Server, via l'API REST.
 - `GenericProvider(baseUrl)`. `baseUrl` doit utiliser `https`, sinon la construction lève
-  `IllegalArgumentException`. `http` n'est accepté que pour les hôtes loopback, pour les tests
-  locaux.
+  `IllegalArgumentException`. `http` n'est accepté que pour les tests locaux sur un hôte loopback :
+  `localhost`, un littéral IPv4 de `127.0.0.0/8` ou `[::1]`.
 
 ## Et ensuite
 
