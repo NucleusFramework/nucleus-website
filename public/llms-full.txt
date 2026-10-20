@@ -112,8 +112,10 @@ kotlin {
 }
 ```
 
-The toolchain compiles your code. The JDK that packages and runs the app comes from `javaHome`, or
-from [`lastJdk`](/docs/performance/startup#package-with-the-latest-jdk).
+The toolchain compiles your code, and `run` and the packaging tasks use the same JDK. Set
+`javaHome` to package with another one, or turn on
+[`lastJdk`](/docs/performance/startup#package-with-the-latest-jdk). Without a toolchain, they use
+the JDK that runs Gradle.
 
 ## Verify the plugin
 
@@ -268,7 +270,10 @@ nucleus.application {
 DEB and RPM packages need a project URL. Without `homepage`, `packageDeb` and `packageGraalvmDeb`
 fail with `Please specify project homepage`. Any URL works, for example your repository.
 
-`packageName` and `packageVersion` end up in installer names and OS metadata.
+`packageName` and `packageVersion` end up in installer names and OS metadata. `packageVersion`
+accepts a SemVer pre-release or build suffix, such as `1.2.0-beta.1`. On macOS and Windows, which
+take numeric versions only, the app bundle gets `1.2.0`, and the installers and update manifests
+keep the full version.
 
 ## Select packaging formats
 
@@ -339,6 +344,8 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | Pre-release tool window APIs renamed: `SatelliteDragKind` is `WorkspaceDragKind`, `TabDropGhost.title` is `TabDropGhost.tab`. The family requires an opt-in. | Rename, then opt in to `ExperimentalNucleusApi`. [Step](#opt-in-to-the-tool-window-apis) | [Tool windows](/docs/tool-windows) |
 | `TaoMouseButton.OTHER` is now `5`; `3` and `4` are `BACK` and `FORWARD`. | Recompile code that reads raw Tao mouse button codes. | [Mouse buttons](/docs/input/mouse-buttons) |
 | `macOS.appStore` and `TargetFormat.isStoreFormat` no longer compile. | Use `macOS { pkg { appStore = … } }` and `ExecutableRuntime.isSandboxed()`. [Step](#replace-the-pkg-store-flags) | [macOS packaging](/docs/packaging/macos) |
+| `GitHubProvider(owner, repo, token)` no longer compiles. | Drop the token for a public repository, or use `PrivateGitHubProvider(owner, repo, token)`. [Step](#move-private-repositories-to-privategithubprovider) | [Auto-update](/docs/packaging/auto-update#read-updates-from-github-releases) |
+| `TabHoverPreview.nativeLayer` removed. | Delete the argument. Open the tab windows with `nativePopupLayers = true` to let the card hang outside the window. [Step](#update-tab-hover-previews) | [Tabs](/docs/tool-windows/tabs#draw-previews) |
 
 **Runtime behavior changes**
 
@@ -355,6 +362,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | JRE fonts are stripped from jlink runtime images. | Keep them if you draw text through AWT or Swing. [Step](#keep-jre-fonts-for-awt-text) | [Configuration](/docs/start/configuration) |
 | Nucleus JNI libraries ship next to the packaged app, not inside its JARs. | Load them through `NativeLibraryLoader`, not as resources. [Step](#load-nucleus-native-libraries-through-the-loader) | [Packaging](/docs/packaging) |
 | Windows NSIS installs keep the runtime and app in `versions\<version>\`, and `installAndRestart` updates without closing the app. | Don't build paths from the install root. Call `UpdateHandoff.signalReady()` if the app shows no Nucleus window. | [Auto-update](/docs/packaging/auto-update#update-without-closing-the-app-on-windows) |
+| `ExecutableRuntime.isSandboxed()` returns `false` in an AppX package. | Test `ExecutableRuntime.isAppX()` to detect AppX. [Step](#detect-appx-with-isappx) | [Executable type](/docs/lifecycle/executable-type) |
 | `TaoWindow.setOuterPosition` throws `IllegalArgumentException` for NaN, infinite or out-of-range positions (beyond ±1,000,000 dp). | Don't pass sentinels such as `Int.MIN_VALUE` as a window position. | [Window state](/docs/windows/window-state) |
 
 **Build and CI changes**
@@ -480,6 +488,27 @@ In runtime code, replace `ExecutableRuntime.isPkg()` and `isStoreFormat` checks 
 `ExecutableRuntime.isSandboxed()`. A Developer ID PKG is not sandboxed, so it can update itself.
 See [Sandboxing](/docs/packaging/sandboxing).
 
+## Move private repositories to PrivateGitHubProvider
+
+`GitHubProvider` takes no token in 3.0, so `GitHubProvider(owner, repo, token)` no longer
+compiles. For a public repository, drop the token. For a private repository or a GitHub Enterprise
+Server, switch to `PrivateGitHubProvider`:
+
+```diff
+-provider = GitHubProvider(owner = "myorg", repo = "myapp", token = token)
++provider = PrivateGitHubProvider(owner = "myorg", repo = "myapp", token = token)
+```
+
+Pass `host` by name. See
+[Read updates from GitHub Releases](/docs/packaging/auto-update#read-updates-from-github-releases).
+
+## Update tab hover previews
+
+`TabHoverPreview` lost its `nativeLayer` parameter. Delete the argument. The card now opens like
+the window's other popups: in the windows `TabWindows` opens, it draws inside the window, clipped by
+it. To let it hang below the window, open the tab windows yourself with `nativePopupLayers = true`.
+See [Draw previews](/docs/tool-windows/tabs#draw-previews).
+
 ## Review runtime behavior changes
 
 These changes compile without errors. Check each one against your app.
@@ -559,6 +588,12 @@ render text through AWT or Swing, set `stripJreFonts = false` in `nativeDistribu
 Packaged apps carry Nucleus JNI libraries next to the app instead of inside the module JARs. Code
 that read them as JAR resources must call `NativeLibraryLoader.load(…)`. Your own libraries under
 `nucleus/native/` stay in their JARs.
+
+### Detect AppX with isAppX
+
+An AppX package runs with full trust, so `ExecutableRuntime.isSandboxed()` now returns `false`
+there. Code that relied on `isSandboxed()` to detect AppX must test `ExecutableRuntime.isAppX()`.
+See [Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
 
 ## Update the build and CI
 
@@ -1008,6 +1043,10 @@ The UI thread that runs Compose under Nucleus, which callbacks reach it, how to 
 That UI thread handles input, composition and drawing for every window, and `Dispatchers.Main`
 points at it, so `LaunchedEffect`, `rememberCoroutineScope()` and view-model scopes resume there.
 
+On macOS, AppKit requires the process's first thread. When `main` runs on another thread, the
+loop moves to the first thread and `Dispatchers.Main` follows it, so `Dispatchers.Main.immediate`
+still runs inline from UI callbacks. `main` stays blocked until the app quits.
+
 The AWT event dispatch thread (EDT) still exists, but it is a different thread. Code posted to it
 runs outside Compose's thread.
 
@@ -1021,7 +1060,7 @@ These modules call your code on the UI thread, so you can update Compose state d
 | `media-control` | Play, pause, next, previous, stop, seek |
 | `launcher-macos` / `launcher-linux` | Dock menu and Unity quicklist item clicks |
 | `menu-macos` | Menu actions and delegate events |
-| `global-hotkey` | Hotkey presses |
+| `global-hotkey` | Hotkey presses and releases |
 
 These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as
 `SwingUtilities.isEventDispatchThread()` checks, must change. See
@@ -1106,6 +1145,108 @@ expectUnresponsive { importHugeProjectSynchronously() }
 
 ---
 
+# Testing
+
+URL: https://nucleusframework.dev/en/docs/concepts/testing
+
+Drive the Compose content of real Nucleus windows from an end-to-end test, and check a Nucleus module on your OS with the Nucleus Lab.
+
+`TaoRootsForTest` gives an end-to-end harness running inside your app the Compose roots of every
+open window. You send pointer and key events through Compose's input pipeline, as
+`runComposeUiTest` does in a test host, but on the real native window. Use it where OS input
+cannot be scripted, such as on Wayland. The Nucleus Lab covers the other half: it checks each
+Nucleus module against the OS you run.
+
+## Click a node by test tag
+
+```kotlin
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerButtons
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.TaoRootsForTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalNucleusApi::class, InternalComposeUiApi::class)
+suspend fun clickTag(tag: String) = withContext(Dispatchers.Main) {
+    val (root, node) = TaoRootsForTest.roots.firstNotNullOf { root ->
+        root.semanticsOwner
+            .getAllSemanticsNodes(mergingEnabled = true)
+            .firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            ?.let { root to it }
+    }
+    val center = node.boundsInRoot.center
+    root.sendPointerEvent(
+        PointerEventType.Press,
+        center,
+        buttons = PointerButtons(isPrimaryPressed = true),
+        button = PointerButton.Primary,
+    )
+    root.sendPointerEvent(
+        PointerEventType.Release,
+        center,
+        buttons = PointerButtons(),
+        button = PointerButton.Primary,
+    )
+}
+```
+
+- `roots` lists the window content and every popup layer, in creation order. A root appears when
+  its owner is created and leaves when it is disposed.
+- Touch the roots on the UI thread, through `Dispatchers.Main` or `NucleusUiThread.post`.
+- Pointer positions are in pixels relative to the root, the same space as `boundsInRoot`.
+- `sendKeyEvent(keyEvent)` sends a key to the focused node. Call `measureAndLayoutForTest()`, or
+  wait until `hasPendingMeasureOrLayout` is `false`, before you read the semantics tree again.
+- `TaoRootsForTest` comes with `nucleus-application`.
+
+`PlatformRootForTest` is internal Compose API (`@InternalComposeUiApi`). Its members can change
+with a Compose release.
+
+## Check a module with the Nucleus Lab
+
+The [Nucleus Lab](https://github.com/NucleusFramework/Nucleus/tree/main/examples/lab) is the test
+bench of the Nucleus repository. Each screen is a probe for one capability: it lists what is
+available on this OS, offers controls, shows what the OS reports back, and copies a Markdown report
+you can paste into an issue.
+
+From a clone of the Nucleus repository:
+
+```shell
+./gradlew :examples:lab:app:run
+./gradlew :examples:lab:app:run -Dlab.probe=shell.badge?count=5
+```
+
+- `-Dlab.probe=<id>` opens one probe, with optional parameters. `LAB_PROBE=<id>` does the same
+  from the environment.
+- A packaged Lab registers the `nucleus-lab://` scheme: `nucleus-lab://probe/<id>?key=value`
+  opens a probe from a browser or a terminal. *Copy link* on any probe gives you its link.
+- Each Nucleus release publishes the Lab as a packaged app for macOS, Windows and Linux.
+
+![The Nucleus Lab: probe list, the selected probe, its checks and the timeline, all docked satellites](/assets/docs/concepts/nucleus-lab.png)
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `TaoRootsForTest.roots: List<PlatformRootForTest>` | Live Compose roots of every Tao window and popup layer. `@ExperimentalNucleusApi` |
+| `PlatformRootForTest.semanticsOwner` | Semantics tree of the root |
+| `sendPointerEvent(eventType, position, …)` | Pointer input, in root pixels |
+| `sendKeyEvent(keyEvent): Boolean` | Key input to the focused node |
+| `hasPendingMeasureOrLayout` / `measureAndLayoutForTest()` | Layout state before an assertion |
+
+## What's next
+
+- [Threading](/docs/concepts/threading): the UI thread your harness must run on.
+- [Accessibility](/docs/input/accessibility): the semantics the tree exposes to screen readers.
+- [Troubleshooting](/docs/reference/troubleshooting): fixes for common runtime problems.
+
+---
+
 # Windows
 
 URL: https://nucleusframework.dev/en/docs/windows
@@ -1140,6 +1281,28 @@ options (single instance, locale, Dock policy, exit behavior) live on
 Nucleus has a single window backend: `NucleusBackend`, `LocalNucleusBackend`, and `backend =` are
 gone. Compose Desktop's AWT `Window`, `Dialog`, and `Tray` are unsupported. See
 [Migrate from 2.x](/docs/migrate/from-2.x).
+
+## Lay out the title bar
+
+Inside `TitleBar`, `Modifier.align` puts each child at the start, the centre, or the end of the bar.
+By default a centred child keeps its own width. Pass `TitleBarLayoutPolicy.FillCenter` to give it
+the whole width left between the start and end items and the window controls, for a search field
+or a tab strip:
+
+```kotlin
+TitleBar(layoutPolicy = TitleBarLayoutPolicy.FillCenter) { _ ->
+    Text("MyApp", Modifier.align(Alignment.Start))
+    QuickSearch(Modifier.align(Alignment.CenterHorizontally))
+    AccountButton(Modifier.align(Alignment.End))
+}
+```
+
+`FillCenter` accepts at most one centred child. `DialogTitleBar` and the Material and Jewel title
+bars take the same `layoutPolicy` parameter.
+
+![Default layout: the centre field keeps its own width](/assets/docs/windows/title-bar-layout-default.png)
+
+![FillCenter: the centre field spans the free width of the title bar](/assets/docs/windows/title-bar-layout-fill-center.png)
 
 ## Set the window chrome
 
@@ -1285,7 +1448,10 @@ A failure inside composition can't resume: close and recreate the window, or ret
 ### Title bar modifiers
 
 - `Modifier.macOSLargeCornerRadius()`: macOS 26 large window corner radius.
-- `Modifier.newFullscreenControls()`: layout for native fullscreen controls on macOS.
+- `Modifier.newFullscreenControls()`: in fullscreen, the bar slides in over the content on demand.
+  On macOS it follows the menu bar down. On Windows and Linux, a mouse reveals it at the top edge.
+  On a touch screen, a tap anywhere reveals it, a tap outside hides it, and it hides on its own
+  after a few seconds.
 
 ## What's next
 
@@ -1332,6 +1498,10 @@ val state = rememberWindowState(size = DpSize(Dp.Unspecified, Dp.Unspecified))
 
 A dialog with a parent centres on it, and one without centres on the screen. Later content changes
 don't resize the window.
+
+The window stays hidden until it has its measured size and position, so it never shows at a
+fallback size first. Content that never measures to a positive size appears at the fallback size
+after a short wait.
 
 ## Use the window API v2
 
@@ -1542,7 +1712,9 @@ WindowControls(direction = ControlButtonsDirection.Auto, renderer = WindowContro
 
 The buttons follow the window state and its `resizable`, `maximizable` and `minimizable` flags.
 Close calls `onCloseRequest`. On Linux, `Auto` also follows the desktop's button layout. See
-[Set the window chrome](/docs/windows#set-the-window-chrome).
+[Set the window chrome](/docs/windows#set-the-window-chrome). When KWin asks the window for no
+decorations, `WindowControls` draws only the exit-fullscreen button and `controlsInsets` is zero.
+See [Follow the compositor's decorations](/docs/windows/linux-wayland#follow-the-compositors-decorations).
 
 `Platform` draws Fluent buttons on Windows and GNOME or KDE buttons on Linux. On macOS it draws
 nothing and reserves the traffic-light space. To draw your own buttons, implement
@@ -1650,9 +1822,18 @@ if (showSettings) {
 
 A dialog is not resizable by default and has no minimize or maximize button. The window that opens
 it becomes its owner: the dialog stays above it, follows it across minimize, Spaces and workspaces,
-stays out of the taskbar, and closes with it. The owner ignores pointer input while the dialog is
-open but keeps its keyboard focus. A dialog declared at application scope blocks pointer input in
-every window.
+stays out of the taskbar, and closes with it.
+
+### Block the owner
+
+While the dialog is open, the owner ignores pointer input. Activating the owner, by a click on its
+uncovered part, its taskbar button, Alt+Tab or `toFront()`, brings the dialog forward with the
+keyboard focus instead, so keystrokes never reach the blocked content. Stacked dialogs chain: each
+one takes the activation of its own owner. A dialog with `visible`, `enabled` or `focusable` set to
+`false` leaves the owner's activation alone.
+
+A dialog declared at application scope blocks pointer input in every window. For a secondary
+window the user can put behind its parent, open a second `DecoratedWindow`.
 
 ### Place the dialog
 
@@ -1967,6 +2148,28 @@ NUCLEUS_TAO_LINUX_RENDERER=x11 ./gradlew run
 To move a single window, pass `forceX11 = true` to it. See
 [Overlay windows](/docs/windows/overlay-windows#take-an-x11-surface-on-wayland).
 
+## Follow the compositor's decorations
+
+KWin can tell a window to draw no decorations: on Plasma Mobile, under a "No titlebar and frame"
+window rule, or under a rule that forces KWin's own title bar. The stock title bars (`TitleBar`,
+`DialogTitleBar`, and the toolkit bars built on them) then drop the window controls but keep your
+content, such as tabs, a title or menus. A bar left empty takes no room. `WindowScaffold` reserves
+no space for the controls, and `WindowControls` draws only the exit-fullscreen button.
+
+Custom chrome reads `TaoWindow.isDecorationSuppressed` to do the same:
+
+```kotlin
+val taoWindow = nucleusWindow.unsafe.taoWindow
+if (!taoWindow.isDecorationSuppressed) {
+    MyWindowButtons()
+}
+```
+
+The property is Compose state and follows the compositor when it changes its mind. It is always
+`false` on X11 and on compositors without KDE's server-decoration protocol. In fullscreen, a bar
+with `Modifier.newFullscreenControls()` keeps its exit-fullscreen button when the desktop's button
+layout has a maximize button.
+
 ## Wayland and X11 differences
 
 | Concern | Native Wayland | X11 / XWayland |
@@ -2002,6 +2205,7 @@ X11 PRIMARY (middle-click) selection.
 |---|---|
 | `TaoWindow.canPlaceOnScreen` | `false` on a native Wayland surface, where the app can neither read nor set the window position. |
 | `TaoWindow.isNativeWaylandSurface` | Whether this window runs on a native Wayland surface. Read after the window is ready. |
+| `TaoWindow.isDecorationSuppressed` | `true` while the compositor asks the window to draw no decorations. Compose state. |
 | `TaoWindow.outerBoundsPx()` | `[x, y, width, height]` in physical pixels, or `null` before the window exists. |
 | `Platform.isWayland` | `true` in a Linux session where `XDG_SESSION_TYPE` is `wayland` or `WAYLAND_DISPLAY` is set. |
 | `LinuxDesktopEnvironment.Current` | `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate`, or `Unknown`. |
@@ -2552,18 +2756,20 @@ in flight, or `null`.
 Branch Wayland-sensitive chrome on `TaoWindow.canPlaceOnScreen`, or
 `SatelliteScope.isCompositorPlaced`, never on the compositor name.
 `NUCLEUS_TAO_LINUX_RENDERER=x11` runs the app on XWayland and restores window-following drags.
+A layout of your own carries its drags the same way with the transfer drag API. See
+[Carry a cross-window drag on Wayland](/docs/input/drag-and-drop#carry-a-cross-window-drag-on-wayland).
 
-## Run the demos
+## Try them in the Nucleus Lab
 
-Run one with `./gradlew :examples:<name>:run`.
+Each archetype has a probe in the [Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab).
+Open one with `./gradlew :examples:lab:app:run -Dlab.probe=<id>`.
 
-| Demo | What it shows |
+| Probe | What it shows |
 | --- | --- |
-| [`satellite-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/satellite-demo) | Shared palettes, owner follows focus or a pin, drag to dock, layout snapshots |
-| [`tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tabs-demo) | Tear-off, merge, reorder, hover cards with thumbnails |
-| [`jewel-tabs-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/jewel-tabs-demo) | The tab workspace drawn with Jewel's `TabStrip` |
-| [`tab-satellites-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/tab-satellites-demo) | One `SatelliteWorkspace` per tab window |
-| [`reader-dock-demo`](https://github.com/NucleusFramework/Nucleus/tree/main/examples/reader-dock-demo) | Right-to-left reader: layered sides, custom splitters and headers, fixed panes |
+| `workspace.satellites` | Shared palettes, owner follows focus or a pin, drag to dock, layout snapshots |
+| `workspace.tabs` | Tear-off, merge, reorder, hover cards with thumbnails, the strip drawn with Jewel's `TabStrip` |
+| `workspace.tab-satellites` | One `SatelliteWorkspace` per tab window |
+| `workspace.reader-dock` | Right-to-left reader: layered sides, custom splitters and headers, fixed panes |
 
 ## What's next
 
@@ -2629,6 +2835,7 @@ Float and Close actions; dragging it moves the satellite between the two hosts.
 | `controlButtonsDirection` | `ControlButtonsDirection.Auto` | Side of the floating window's controls. Pass the main window's value, such as `SystemNative` |
 | `header` | `{ DefaultSatelliteHeader() }` | Chrome in the floating title bar and above the docked panel |
 | `floatingCaption` | `{}` | See [Floating satellites on Wayland](#floating-satellites-on-wayland) |
+| `floatingBarMovesWindow` | `false` | See [Give the whole bar to the compositor](#give-the-whole-bar-to-the-compositor) |
 | `content` | required | The body, with `SatelliteScope` as receiver |
 
 `initialPlacement` through `reorderable` apply the first time an `id` is declared, unless `restore`
@@ -2680,7 +2887,8 @@ Call the workspace from effects and UI callbacks, not during composition.
 ## Write a header
 
 `header` and `content` run with `SatelliteScope`: `workspace`, `satellite` (the entry),
-`isDocked`, `isCompositorPlaced`, and `dock(side)`, `undock()`, `close()`.
+`isDocked`, `isCompositorPlaced`, `floatingBarMovesWindow`, and `dock(side)`, `undock()`,
+`close()`.
 
 A custom header puts `Modifier.satelliteDragHandle(scope)` on the docked strip only. The floating
 title bar already carries the handle, and a second one would start two drags. A press without
@@ -2724,6 +2932,22 @@ On a compositor-placed window only the compositor can move the window. The float
 splits there: the header docks the satellite, and a 56 dp strip (`SatelliteCaptionStripWidth`)
 beside the window controls moves the window. Nucleus composes `floatingCaption` in that strip,
 only when `isCompositorPlaced` is `true`. Put a "move" glyph there, not a control.
+
+### Give the whole bar to the compositor
+
+For palettes the user moves around more often than docks, pass `floatingBarMovesWindow = true`.
+On a compositor-placed window a press anywhere on the floating title bar then moves the window,
+as on any other window, and no caption strip is reserved. The satellite docks from what the
+header marks itself: a `dock()` action, or a grip with `Modifier.satelliteDragHandle`.
+
+```kotlin
+Satellite(workspace, id = "tools", title = "Tools", floatingBarMovesWindow = true) { ToolsPanel() }
+```
+
+`DefaultSatelliteHeader` handles it: it makes its drag grip the dock handle and drops the chip. A
+custom header reads `SatelliteScope.floatingBarMovesWindow`, `true` only while floating on a
+compositor-placed window, and puts the handle on a grip in that case too. The parameter has no
+effect where the app places its windows: the whole bar drags the satellite there either way.
 
 ## Open a standalone satellite window
 
@@ -2812,6 +3036,8 @@ DecoratedWindow(onCloseRequest = ::exitApplication) {
 The outermost side runs the full length of the layout and owns its corners. Name each `DockSide`
 once. `DefaultDockSideOrder` is `listOf(Top, Bottom, Left, Right)`, which differs from
 `DockSide.entries`.
+
+![Dragging satellites to an edge of the document: the zone lights up and the release docks the panel](/assets/docs/tool-windows/satellite-docking.gif)
 
 ## Choose split or layered sides
 
@@ -3019,6 +3245,8 @@ does not swallow the gesture.
 For a right-to-left strip, provide `LayoutDirection.Rtl` around `TabStrip`. Reorder and drop
 indices follow it.
 
+![Tearing a tab off into its own window, then dropping it back on the strip](/assets/docs/tool-windows/tab-tear-off-merge.gif)
+
 ## Customize the stock strip
 
 | `TabStrip` parameter | Default | Meaning |
@@ -3088,8 +3316,8 @@ For a strip that keeps its own gestures, apply `Modifier.tabSlot(group, index)` 
 
 While a tab from another window hovers the strip, `dropGhost` holds a
 `TabDropGhost(index, width, tab)`: compose `TabDropGhostCard(ghost)` at `index`. Add
-`TabHoverPreviewPopup(preview)` once for hover cards. `jewel-tabs-demo` wraps Jewel's `TabStrip`
-this way.
+`TabHoverPreviewPopup(preview)` once for hover cards. The `workspace.tabs` probe of the
+[Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) wraps Jewel's `TabStrip` this way: pick Jewel under Strip.
 
 ## Open the tab windows yourself
 
@@ -3137,9 +3365,10 @@ change. You can also assign one yourself before the tab is shown. `NativeView` a
 content is missing from captures. `TabPreview(tab, modifier, contentScale, placeholder)` draws
 the thumbnail.
 
-**Hover cards.** `TabHoverPreview(delay, offset, nativeLayer, content)` describes the card.
-`delay` defaults to 650 ms; `nativeLayer = false` draws the card inside the window, clipped. The stock card is
-`TabHoverPreviewCard(modifier, subtitle = null)`:
+**Hover cards.** `TabHoverPreview(delay, offset, content)` describes the card. `delay` defaults
+to 650 ms. The card fades in, slides from tab to tab while the pointer moves along the strip, and
+fades out. Coming back to the strip right after leaving it shows the card again without the
+delay. The stock card is `TabHoverPreviewCard(modifier, subtitle = null)`:
 
 ```kotlin
 val preview = remember {
@@ -3148,9 +3377,16 @@ val preview = remember {
 TabStrip(hoverPreview = preview)
 ```
 
+The card opens like the window's other popups. The windows `TabWindows` opens draw it inside the
+window, clipped by it. To let it hang below the window, as a browser's does,
+[open the tab windows yourself](#open-the-tab-windows-yourself) with `nativePopupLayers = true`.
+See [Open popups as native surfaces](/docs/windows/dialogs-popups#open-popups-as-native-surfaces).
+
 **Drag and drop cards.** Draw `TabWindows(dragGhost)` and `TabStrip(dropGhostCard)` with the same
 composable, built on `TabGhostCard(tab, modifier)`, so the tab lands as it travelled.
 `dragGhost` runs outside `windowWrapper` and never on native Wayland.
+
+![The hover card fades in, then slides from tab to tab](/assets/docs/tool-windows/tab-hover-card.gif)
 
 ## Drive tabs from code
 
@@ -3166,6 +3402,26 @@ Read `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (where new tabs ope
 `groupOf(window)`, `tabsOf(group)`, `selectedTab(group)`, and the drag in flight with
 `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. A closed tab is gone: declaring it again
 creates a new tab in the active window.
+
+## Keep pinned tabs first
+
+`TabWorkspace.constrainIndex` narrows where a tab may stand in a group. It receives the tab, the
+group and the index the tab would take, and returns the index it may take instead. This keeps
+pinned tabs ahead of the others, as a browser does:
+
+```kotlin
+val workspace = rememberTabWorkspace()
+workspace.constrainIndex = { tabId, group, index ->
+    val pinnedCount = group.ids.count { it in pinned && it != tabId }
+    if (tabId in pinned) index.coerceAtMost(pinnedCount) else index.coerceAtLeast(pinnedCount)
+}
+```
+
+Every placement goes through it: `move`, `reorder`, a tab's first declaration, and the drop
+preview of a drag in its own strip, another window's or a linked workspace's. The other tabs only
+make room where the dragged tab can land, so a release never puts it anywhere else. Set it before
+the first `Tab` declaration so first placements follow it too. `null`, the default, allows any
+index.
 
 ## Drag tabs between workspaces
 
@@ -3242,7 +3498,8 @@ fun rememberTabGroups(workspace: TabWorkspace): List<TabWindowGroup> {
 ```
 
 Open and close those satellites from a `LaunchedEffect`, never during composition.
-`tab-satellites-demo` and `reader-dock-demo` show both setups.
+The `workspace.tab-satellites` and `workspace.reader-dock` probes of the
+[Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) show both setups.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -3331,6 +3588,11 @@ fun ZoomableImage() {
 In a custom handler, read `PointerInputChange.scaleFactor` on `ScaleChange`. It is a ratio per
 event: above `1f` zooms in, below `1f` zooms out.
 
+When macOS or Linux cancels a pinch, for example because the system takes over the gesture, the
+pinch ends with `ScaleEnd` and Nucleus then cancels the window's pointer input. Gesture handlers
+see a cancellation, not a release. A trackpad pan in progress ends with `PanEnd` first, and the
+next finger movement starts a new one.
+
 ## Rotate
 
 `Modifier.transformable` and `detectTransformGestures` read the rotation angle on macOS and Linux.
@@ -3404,15 +3666,68 @@ Native popup windows and the Windows `NativeView` overlay do not receive the sid
 
 ---
 
+# Keyboard
+
+URL: https://nucleusframework.dev/en/docs/input/keyboard
+
+Read key events with the Compose key modifiers, and tell a held key's auto-repeats from a new press.
+
+Key events reach Compose through the standard `Modifier.onKeyEvent` and
+`Modifier.onPreviewKeyEvent`, and you add nothing beyond `nucleus-application`. Nucleus adds one
+property to Compose's `KeyEvent`: whether a key-down is an auto-repeat.
+
+## Ignore auto-repeat
+
+While the user holds a key, the OS sends key-down after key-down. `KeyEvent.isRepeat` is `true`
+for those repeats, so a held shortcut acts once:
+
+```kotlin
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.isRepeat
+
+@OptIn(ExperimentalNucleusApi::class)
+fun Modifier.closeTabShortcut(onClose: () -> Unit): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.key == Key.W) {
+            if (!event.isRepeat) onClose()
+            true
+        } else {
+            false
+        }
+    }
+```
+
+Without the check, holding Ctrl+W closes one tab per repeat.
+
+- Only a `KeyDown` is ever a repeat. Key-ups and the event that carries the typed character
+  report `false`, and text fields repeat characters as usual.
+- `isRepeat` is `false` for an event Nucleus did not produce, such as one built in a test.
+- It works in windows and in native popups, on macOS, Windows and Linux (X11 and Wayland).
+- `isRepeat` is `@ExperimentalNucleusApi`.
+
+## Notes
+
+- On Linux, a window enables its input method only while a text field has focus. A Wayland
+  compositor with an on-screen keyboard, such as Plasma Mobile, shows the keyboard for text entry
+  only, not each time a window becomes active.
+
+## What's next
+
+- [Global hotkeys](/docs/os/global-hotkey): shortcuts that work while the app is in the background.
+- [Mouse buttons](/docs/input/mouse-buttons): the back and forward side buttons.
+- [Accessibility](/docs/input/accessibility): expose your UI to screen readers.
+
+---
+
 # Pen and touch input
 
 URL: https://nucleusframework.dev/en/docs/input/pen-stylus
 
 Read touchscreen and pen contacts, with pressure, from Compose pointer events.
 
-Touchscreen and pen contacts reach Compose as pointers of type `PointerType.Touch`. You read them
-with the same `pointerInput` modifier as mouse input, and you add nothing beyond
-`nucleus-application`.
+Touchscreen contacts reach Compose as pointers of type `PointerType.Touch`, and a tablet pen as
+`PointerType.Stylus`, or `PointerType.Eraser` for its eraser end. You read them with the same
+`pointerInput` modifier as mouse input, and you add nothing beyond `nucleus-application`.
 
 ## Draw with pressure
 
@@ -3421,7 +3736,7 @@ Modifier.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             val change = awaitPointerEvent().changes.first()
-            if (change.type == PointerType.Touch) {
+            if (change.type == PointerType.Touch || change.type == PointerType.Stylus) {
                 addPoint(change.position, change.pressure)
                 change.consume()
             }
@@ -3433,19 +3748,46 @@ Modifier.pointerInput(Unit) {
 Gesture detectors, `consume()` and hit testing treat these contacts like any other Compose
 pointer.
 
+## Read the pointer type
+
+`PointerInputChange.type` names the tool behind each event, so one handler can draw with the pen
+tip and erase with the other end:
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            if (!change.pressed) continue
+            when (change.type) {
+                PointerType.Stylus -> addPoint(change.position, change.pressure)
+                PointerType.Eraser -> erase(change.position)
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+A pen that touches the surface presses the primary button. A pen hovering in range arrives as
+`Move` events with no button pressed. Compose sends `Enter` and `Exit` for the mouse only, so a
+pen hover never produces them.
+
 ## Platform support
 
-| Platform | Arrives as | Pressure |
-| --- | --- | --- |
-| Windows | `PointerType.Touch` | Reported when the digitizer supports it |
-| Linux (Wayland and X11) | `PointerType.Touch` | Always `1f` |
-| macOS | Mouse | Not reported |
+| Platform | Finger | Pen | Pressure |
+| --- | --- | --- | --- |
+| Windows | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Reported when the digitizer supports it |
+| Linux (Wayland and X11) | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Always `1f` for a finger, not reported for a pen |
+| macOS | No touchscreen | `PointerType.Stylus` / `Eraser` | Not reported |
 
 - Treat `pressure == 1f` as "average or unknown". Most consumer touchscreens report `1f`.
-- Nucleus never produces `PointerType.Stylus` or `PointerType.Eraser`, and `PointerInputChange`
-  carries no tilt or barrel rotation. A pen and a finger differ only by pressure, on Windows.
+- `PointerInputChange` carries no tilt or barrel rotation.
 - A finger dragged on the title bar moves the window on Windows and Linux. On Linux, a finger on a
   window edge resizes it.
+- On Linux, the gaps between `uptimeMillis` values follow the times the screen sampled the
+  contact, not the times the events reached the app, so velocity and fling stay correct after a
+  slow frame.
 
 ## What's next
 
@@ -3507,6 +3849,81 @@ Modifier.dragAndDropSource { _ ->
 A transferable with neither files nor text does not start a drag. Your window keeps drawing while
 the cursor is outside it.
 
+## Carry a cross-window drag on Wayland
+
+On native Wayland a window cannot read or set its screen position (`TaoWindow.canPlaceOnScreen`
+is `false`), so the source of a drag between two of your windows cannot tell which window the
+pointer is over. The transfer drag API carries such a drag on the platform's drag-and-drop
+session instead: the window under the pointer resolves the drop, and the source acts on the
+outcome. [Satellites](/docs/tool-windows/satellites) and [tabs](/docs/tool-windows/tabs) use it
+for their own drags. Use it for a docking or tab layout of your own. It is
+`@ExperimentalNucleusApi` and lives in `dev.nucleusframework.window.tao.workspace`.
+
+Implement `TransferDrag` for the session, and keep the drag in flight where every window sees it:
+
+```kotlin
+// One drag in flight per process, visible to every window
+var currentDrag: PanelDrag? by mutableStateOf(null)
+
+@OptIn(ExperimentalNucleusApi::class)
+class PanelDrag(val panelId: String) : TransferDrag {
+    override val title = "Layers"
+    override val ghostSizePx = Size(240f, 32f)
+    override val ghostSource = TransferGhostSource.None
+    var zone: DropZone? = null
+
+    override fun end() {
+        zone?.let { movePanel(panelId, it) }
+        currentDrag = null
+    }
+
+    override fun cancel() {
+        currentDrag = null
+    }
+}
+```
+
+Put `Modifier.transferDragHandle` on the grip of the source. `begin` returns the session, or
+`null` to refuse the drag:
+
+```kotlin
+val window = LocalTaoWindow.current ?: return
+Box(
+    Modifier.transferDragHandle(
+        key = "layers",
+        window = window,
+        begin = { PanelDrag("layers").also { currentDrag = it } },
+    ),
+)
+```
+
+In every window that accepts the drop, accept only while a session is in flight and resolve
+`DragAndDropEvent.positionInWindowPx()` against your drop zones:
+
+```kotlin
+val target = remember {
+    object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            val drag = currentDrag ?: return false
+            drag.zone = zoneAt(event.positionInWindowPx()) ?: return false
+            return true
+        }
+    }
+}
+Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { currentDrag != null }, target = target))
+```
+
+`end()` runs on the source once the platform session is over, whether or not anything was
+dropped.
+
+- `ghostSource` sets what the drag icon pictures: `TransferGhostSource.WholeWindow`,
+  `Region(rectPx)` for one part of the source window, or `None` for a card that shows `title`.
+- The `gesture` parameter takes a `TransferDragGesture`. Its `onDrag` keeps the pointer for as long
+  as it returns `false`, so a tab strip can reorder locally before the session starts. The
+  default, `TransferDragGesture.Immediate`, hands over once the pointer passes the touch slop.
+- Linux only. Elsewhere the session does not start and `cancel()` is called. Branch on
+  `canPlaceOnScreen` and move real windows on the other platforms.
+
 <Accordions>
 <Accordion title="Under the hood">
 
@@ -3522,6 +3939,8 @@ the cursor is outside it.
 
 - [Pointer icons](/docs/input/pointer-icons): show a grab or not-allowed cursor during a drag.
 - [Tabs](/docs/tool-windows/tabs): tear-off and merge built on the same drag session.
+- [Tool windows](/docs/tool-windows#two-ways-to-carry-a-drag): how satellites and tabs pick a
+  drag kind.
 - [Trackpad gestures](/docs/input/trackpad-gestures): pans and pinch-to-zoom.
 
 ---
@@ -3825,7 +4244,7 @@ val source = nucleusD3D11SharedTextureSource(
   `AcquireSync(0)` / `ReleaseSync(0)`; frames never tear. With plain `D3D11_RESOURCE_MISC_SHARED`
   there is no copy, but call `Flush()` after each frame.
 
-See [mediafoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/mediafoundation-demo).
+The `rendering.video` probe of the [Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) plays a video through this path with Media Foundation.
 
 **macOS**
 
@@ -3845,7 +4264,7 @@ val metalSource = nucleusMetalTextureSource(metalTexture = mtlTexture, widthPx =
   `IOSurface`; otherwise pass an `IOSurface` source.
 - On a Mac with only a discrete Intel GPU, the import fails and you get an empty box.
 
-See [avfoundation-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/avfoundation-demo).
+The `rendering.video` probe of the [Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) plays a video through this path with AVFoundation.
 
 **Linux**
 
@@ -3877,7 +4296,7 @@ val yuv = nucleusYuvDmaBufTextureSource(
 - `controller.markFrameAvailable(acquireFenceFd)` hands over a `sync_file` fence instead of
   finishing on the CPU. It requires `EGL_ANDROID_native_fence_sync`.
 
-See [gstreamer-demo](https://github.com/NucleusFramework/Nucleus/tree/main/examples/gstreamer-demo).
+The `rendering.video` probe of the [Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) plays a video through this path with GStreamer.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -3917,6 +4336,7 @@ formats and dimensions first. `TextureViewController.NO_FENCE` is `-1`.
 - [GPU render context](/docs/native-content/gpu-render-context): render on the scene's own device.
 - [Native views](/docs/native-content/native-views): embed interactive `NSView`, `HWND` or `GtkWidget` content.
 - [Windows](/docs/windows): open the window that hosts the texture.
+- [Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab): the `rendering.textures` probe composites every texture source side by side.
 
 ---
 
@@ -5472,8 +5892,11 @@ LinuxNotificationCenter.addListener(object : LinuxNotificationListener {
 })
 ```
 
-All three methods have empty defaults. `onActivationToken` delivers the X11 or Wayland token you
-use to request window focus. Callbacks run on the UI thread.
+All three methods have empty defaults. Callbacks run on the UI thread.
+
+To bring a window to the front from `onActionInvoked`, call `requestFocus()` on it. The window
+takes the activation token the server sent with the click, which Wayland requires.
+`onActivationToken` delivers that token for an app that hands it on itself.
 
 Listener callbacks ran on the AWT event dispatch thread in 2.x. See
 [Migrate from 2.x](/docs/migrate/from-2.x).
@@ -5556,6 +5979,8 @@ The icon stays while `Tray` is in the composition, so wrap it in an `if` to hide
 Compose Desktop's `androidx.compose.ui.window.Tray` relies on AWT and does not work under
 `nucleusApplication`. Use `dev.nucleusframework.composenativetray.tray.api.Tray`. See
 [Migrate from 2.x](/docs/migrate/from-2.x).
+
+![A tray icon and its menu in the macOS menu bar](/assets/docs/os/tray-menu-macos.png)
 
 ## Handle clicks
 
@@ -6356,6 +6781,17 @@ fun main() = nucleusApplication {
   content is optional.
 - Click handlers run on the UI thread and can change Compose state.
 
+![A native macOS menu with a shortcut, a badge, a section header, a radio group and a submenu](/assets/docs/os/menu-bar-macos.png)
+
+## Handle Cmd+Q
+
+Without a Cmd+Q item, Cmd+Q runs the built-in quit, which asks each window's `onCloseRequest`. An
+item bound to `NativeKeyShortcut("q")` takes the shortcut over: Cmd+Q runs its action instead, so
+confirm unsaved work there.
+
+- Quit with `exitApplication()`. `exitProcess` skips closing the windows.
+- While the item is disabled, Cmd+Q beeps and does nothing.
+
 ## Add checkboxes and radio buttons
 
 You hold the state; the item shows the checkmark:
@@ -6684,6 +7120,62 @@ DisposableEffect(Unit) {
 - `GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { … }` binds a media key on Windows and
   Linux. On macOS it returns `-1`; use [media controls](/docs/os/media-control) there.
 
+## Track presses and releases
+
+The two-parameter listener above receives presses only, auto-repeats included. Pass a
+`HotKeyEventListener` to receive every `HotKeyEvent` instead:
+
+```kotlin
+val handle = GlobalHotKeyManager.register(
+    keyCode = KeyEvent.VK_SPACE,
+    modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+    description = "Peek",
+    listener = HotKeyEventListener { event ->
+        when (event.state) {
+            HotKeyState.PRESSED -> if (!event.isRepeat) showPeek()
+            HotKeyState.RELEASED -> hidePeek()
+        }
+    },
+)
+```
+
+- Only Linux reports `RELEASED`, on X11 and Wayland. macOS and Windows deliver presses only.
+- Holding the chord on Linux repeats the press. `isRepeat` is `true` for those repeats, and always
+  `false` on macOS and Windows.
+- `timestamp` is in the platform's millisecond clock, or `0` when the platform gives none. Compare
+  it only with other events of the same hotkey.
+- `register(MediaKey, listener)` accepts a `HotKeyEventListener` too.
+
+## Bring a window to the front
+
+Call `requestFocus()` or `toFront()` on the window from the listener. On Wayland, the compositor
+lets a window take focus only with the activation token it issued for the hotkey press, and the
+window uses that token on its own:
+
+```kotlin
+val window = LocalNucleusWindow.current
+DisposableEffect(window) {
+    val handle = GlobalHotKeyManager.register(
+        keyCode = KeyEvent.VK_SPACE,
+        modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+        description = "Show the app",
+        listener = HotKeyEventListener { event ->
+            if (event.state == HotKeyState.PRESSED && !event.isRepeat) {
+                window.show()
+                window.requestFocus()
+            }
+        },
+    )
+    onDispose { GlobalHotKeyManager.unregister(handle) }
+}
+```
+
+- Request focus from the listener. The token is single-use and expires after a few seconds.
+- The portal sends a token from xdg-desktop-portal 1.21 on. With an older portal, the compositor
+  can refuse the focus request and flag the window instead.
+- `event.activationToken` exposes the token for an app that hands it on itself, for example to
+  another process. It is `null` on X11, macOS and Windows, which need none.
+
 ## Linux portal registrations
 
 On Wayland, the desktop portal asks the user to approve your shortcuts, once per chord. Nucleus
@@ -6705,6 +7197,10 @@ pane with `x-apple.systempreferences:com.apple.preference.security?Privacy_Liste
 - The portal remembers each grant per `(app_id, shortcut_id)`. Nucleus derives the id from the
   chord (`nucleus_m{mods}_k{keyCode}`), so it stays stable across launches.
   `portalShortcutId(handle)` returns it, or `null` off Linux.
+- Releases come from the portal's `Deactivated` signal on Wayland and from the grabbed key's
+  `KeyRelease` on X11. GNOME re-emits `Activated` for each auto-repeat, each with a fresh token.
+- Hotkeys and Linux notification clicks hand their `xdg-activation` token to a shared mailbox in
+  `core-runtime` (`ActivationToken`). A window's focus request takes the latest one.
 
 </Accordion>
 </Accordions>
@@ -6714,7 +7210,8 @@ pane with `x-apple.systempreferences:com.apple.preference.security?Privacy_Liste
 | Symbol | Notes |
 | --- | --- |
 | `initialize()` | Loads the native library and starts the event source |
-| `register(keyCode, modifiers = 0, description = null, listener): Long` | Also `register(MediaKey, listener)`: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK` |
+| `register(keyCode, modifiers = 0, description = null, listener): Long` | Also `register(MediaKey, listener)`: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK`. `listener` is a `HotKeyListener` (presses) or a `HotKeyEventListener` (every event) |
+| `HotKeyEvent` | `keyCode`, `modifiers`, `state` (`HotKeyState.PRESSED` / `RELEASED`), `isRepeat`, `timestamp`, `activationToken: String?` |
 | `HotKeyModifier.ALT` / `CONTROL` / `SHIFT` / `META` | Combine with `+`; `0 + META` for one. On macOS `ALT` is Option and `META` is Command, elsewhere `META` is Windows or Super |
 | `commitRegistrations()` | Shows the Wayland portal dialog now |
 | `isAvailable` / `lastError` | Native library loaded; last failure message, `null` after a success |
@@ -6782,6 +7279,8 @@ Button(
 macOS, `x11:<xid>` on X11, and an `xdg_foreign` export on Wayland, released once the portal dialog
 closes. On macOS the picker points at `anchor`, or at the top centre of the window without one.
 A window that is not realized yet falls back to the app's frontmost window.
+
+![The macOS share sheet anchored to the button that opened it](/assets/docs/os/share-sheet-macos.png)
 
 ## Share from common code
 
@@ -7444,7 +7943,10 @@ SystemInfo.batteryInfo()?.let { battery ->
   throws.
 - Coverage varies by OS. Windows reports few temperature sensors through `components()`, and
   `motherboard()` returns the most fields on Linux.
-- `processes()` walks the whole process table. Call `process(pid)` when you need one entry.
+- `processes()` walks the whole process table. Call `process(pid)` when you need one entry: it
+  reads that process alone.
+
+![Live CPU readings: global usage, brand and per-core load](/assets/docs/os/system-info-cpu.png)
 
 ## API reference
 
@@ -8526,6 +9028,9 @@ file as `Modified`. `Debounced` delivery now reports `Moved`, or `Removed` + `Cr
 - Each `FsWatcher` owns one native watcher (inotify, FSEvents, `ReadDirectoryChangesW`) shared by
   its registrations. It starts on the first `watch()` and stops after the last registration closes.
 - Registering one directory under two spellings creates two independent registrations.
+- On Linux, the watcher subscribes to create, modify, remove and move events only. A recursive
+  `watch` adds one inotify watch per subdirectory without filling the kernel event queue, so large
+  trees do not start with an `Overflow`.
 - On macOS, `Raw` mode delivers the FSEvents flags as they come, historical ones included.
 - Polling runs in the same native library. Without it, `isSupported()` returns `false` and
   `create()` throws `FsWatchException` for every strategy.
@@ -8660,7 +9165,9 @@ misconfigured package. In dev, `nucleusApplication` skips the
 
 ## Detect a sandbox
 
-`isSandboxed()` returns `true` inside the macOS App Sandbox, an AppX container, or a Flatpak.
+`isSandboxed()` returns `true` inside the macOS App Sandbox or a Flatpak. An
+[AppX package](/docs/packaging/windows#build-an-appx-or-msix-package) is not sandboxed, so
+`isSandboxed()` returns `false` there; detect it with `ExecutableRuntime.isAppX()`.
 Gate sandbox-sensitive code on it, not on the format: on macOS, a PKG built with
 `macOS { pkg { appStore = false } }` is not sandboxed, while the App Store PKG is.
 
@@ -8695,7 +9202,7 @@ Which formats build sandboxed apps is covered in [Sandboxing](/docs/packaging/sa
 | `type()` | `ExecutableType` | The packaging format. |
 | `type(propertyName)` | `ExecutableType` | Reads the format from another system property. |
 | `parseType(rawValue)` | `ExecutableType` | Parses a raw string. Unknown input maps to `DEV`. |
-| `isSandboxed()` | `Boolean` | `true` in the macOS App Sandbox, an AppX container, or a Flatpak. |
+| `isSandboxed()` | `Boolean` | `true` in the macOS App Sandbox or a Flatpak. `false` in an AppX package. |
 | `markerVersion()` | `String?` | App version from the marker file (native images). For the version in general, read [`NucleusApp.version`](/docs/lifecycle/app-metadata). |
 | `isGraalVmNativeImage` | `Boolean` | `true` in a GraalVM native image. |
 | `isExe()` … `isDev()` | `Boolean` | One check per `ExecutableType` value. |
@@ -8754,8 +9261,8 @@ OSes. Output lands in `build/compose/binaries/main/<format>/`. Each format also 
 | Windows | Exe, NSIS, NSIS Web, MSI, Portable | AppX (Microsoft Store) | ZIP, TAR, 7z |
 | Linux | DEB, RPM, AppImage, Pacman | Snap, Flatpak | ZIP, TAR, 7z |
 
-`TargetFormat.RawAppImage` builds the bare app image with no installer. Store formats use a
-[sandboxed layout](/docs/packaging/sandboxing).
+`TargetFormat.RawAppImage` builds the bare app image with no installer. The Mac App Store PKG and
+Flatpak use a [sandboxed layout](/docs/packaging/sandboxing).
 
 ## Provision Node.js
 
@@ -8797,10 +9304,12 @@ With `includeAllModules = true`, the plugin leaves out `jdk.jlink`, which JDKs b
 <Accordions>
 <Accordion title="Under the hood">
 
-- jpackage builds the app image. electron-builder 26.16.1 wraps it in every format except
+- jpackage builds the app image. electron-builder 26.17.0 wraps it in every format except
   `RawAppImage`.
 - Node.js resolution order: `nodePath`, `NUCLEUS_NODE_HOME`, the `nodejs { }` download (checked
   against `SHASUMS256.txt`), then `node` on `PATH`.
+- Each package task tracks the electron-builder configuration of its own format, so changing one
+  format's settings rebuilds that format only.
 - Packaged apps get `-Dnucleus.native.libraryPath=$APPDIR`. GraalVM images keep the libraries next
   to the executable.
 
@@ -8874,6 +9383,9 @@ macOS {
     }
 }
 ```
+
+Set `dmg { sign = true }` to sign the disk image itself with the `signing { identity }`. It
+requires `signing { sign.set(true) }`, and the plugin signs the image before `notarizeDmg` runs.
 
 `nativeDistributions.compressionLevel = CompressionLevel.Ultra` requires `minimumSystemVersion`
 10.15+ and no pinned `dmg.format`. Ship a `Zip`
@@ -8977,6 +9489,28 @@ macOS {
 
 Register launch agents at runtime with [Service management](/docs/lifecycle/background/service-management).
 
+### Localize Info.plist strings
+
+macOS reads localized `Info.plist` values, such as the text of a permission prompt, from
+`Contents/Resources/<lang>.lproj/InfoPlist.strings`. Declare them per language, or copy prebuilt
+`.lproj` directories:
+
+```kotlin title="build.gradle.kts"
+macOS {
+    infoPlist {
+        extraKeysRawXml = """<key>NSMicrophoneUsageDescription</key><string>Voice notes.</string>"""
+        localization("fr", mapOf("NSMicrophoneUsageDescription" to "Notes vocales."))
+        localization("de", mapOf("NSMicrophoneUsageDescription" to "Sprachnotizen."))
+        localizationsDir = file("packaging/macos/localizations") // es.lproj/InfoPlist.strings, ...
+    }
+}
+```
+
+The plugin writes the files into the bundle before signing it, in JVM and GraalVM builds.
+`localizationsDir` holds only `<lang>.lproj` directories. A language declared with
+`localization(...)` must not also have an `InfoPlist.strings` in `localizationsDir`, or the build
+fails.
+
 <Accordions>
 <Accordion title="Under the hood">
 
@@ -9053,6 +9587,10 @@ windows {
 `.nsi` and `.nsh` files. `deleteAppDataOnUninstall` removes `%APPDATA%\<appId>`. With a custom
 `includeScript`, delete that directory from your own `customUnInstall` macro instead.
 
+With the [AOT cache](/docs/performance/aot-cache) on, an `includeScript` that defines its own
+`customInstall` macro must call `!insertmacro nucleusPinAotJarTimestamps` in it, or the installed
+app starts without its cache. The build warns when the call is missing.
+
 ## Build an MSI for enterprise deployment
 
 Keep `upgradeUuid` fixed across releases. Windows matches successor versions by that UUID; without
@@ -9092,8 +9630,14 @@ values Partner Center assigned to your reservation. `publisher` is the `CN=<GUID
 Center, not your signing certificate's subject.
 
 Building AppX locally needs Windows Developer Mode (Settings, System, For developers). The app runs
-with `runFullTrust` and keeps Win32 access. The `build-windows-appxbundle` CI action merges amd64
-and arm64 into one `.msixbundle`. AppX uses the [sandboxed pipeline](/docs/packaging/sandboxing).
+with `runFullTrust` as a packaged Win32 process, not in an AppContainer, so AppX builds like the
+other Windows formats, GraalVM native images included (`packageGraalvmAppX`). `runAppX` sideloads
+and launches the package. The `build-windows-appxbundle` CI action merges amd64 and arm64 into one
+`.msixbundle`.
+
+AppX no longer goes through the sandboxed pipeline, and `ExecutableRuntime.isSandboxed()` returns
+`false` in an AppX install. Detect it with `ExecutableRuntime.isAppX()`. See
+[Detect the sandbox at runtime](/docs/packaging/sandboxing#detect-the-sandbox-at-runtime).
 
 ## Enable Portable mode
 
@@ -9118,6 +9662,23 @@ nativeDistributions {
 ```
 
 Use `windows.fileAssociation(...)` to set a Windows-specific icon.
+
+## Bundle the Visual C++ runtime
+
+The app image carries the whole MSVC C++ runtime (`msvcp140*.dll`, `vcruntime140*.dll`,
+`concrt140.dll`), so a JNI library that imports one the JDK lacks, such as ONNX Runtime's
+`msvcp140_1.dll`, loads on a machine without the Visual C++ Redistributable. The plugin copies it
+from the newest Visual Studio install on the build machine. Without Visual Studio, it bundles
+nothing and logs a warning. To turn it off:
+
+```kotlin title="build.gradle.kts"
+windows {
+    bundleCRuntime = false // default: true
+}
+```
+
+GraalVM native images have their own switch, `graalvm { windows { bundleCRuntime } }`. See the
+[Gradle DSL reference](/docs/reference/gradle-dsl#graalvm-platforms).
 
 ## Ship the ANGLE libraries
 
@@ -9146,8 +9707,8 @@ URL: https://nucleusframework.dev/en/docs/packaging/linux
 Build DEB, RPM, AppImage, and Pacman packages for a Nucleus app, add maintainer scripts, and package for the Snap Store and Flathub.
 
 This page covers the `linux { }` block: DEB, RPM, AppImage, Pacman, Snap, and Flatpak. Linux
-formats build only on a Linux host with `rpm` and `fakeroot` (RPM), `libfuse2` (AppImage), and
-`flatpak` plus `flatpak-builder` (Flatpak). The `setup-nucleus` CI action installs them.
+formats build only on a Linux host with `rpm` and `fakeroot` (RPM), and `flatpak` plus
+`flatpak-builder` (Flatpak). The `setup-nucleus` CI action installs them.
 
 ## Configure the target formats
 
@@ -9170,7 +9731,9 @@ nativeDistributions {
 
 Build with `packageDeb`, `packageRpm`, or `packagePacman`. The `StartupWMClass` of the `.desktop`
 entry defaults to `mainClass` with dots replaced by hyphens; set `startupWMClass` if the window
-manager reports another class. Bump `appRelease` to re-release the same `packageVersion`.
+manager reports another class. The entry's `Name` is `appName`, while the executable and
+`/opt/<packageName>` keep a name without spaces. Bump `appRelease` to re-release the same
+`packageVersion`.
 
 ## Build an AppImage
 
@@ -9187,8 +9750,44 @@ linux {
 }
 ```
 
-`Maximum` and `Ultra` compression slow every AppImage launch, so keep `Normal` for the AppImage
-even when `nativeDistributions.compressionLevel` is higher. `Ultra` also recompresses the DEB.
+The image runs on the static AppImage runtime: users need no `libfuse2`, only the `fusermount` or
+`fusermount3` binary their distribution ships. `CompressionLevel.Store` builds a gzip image; every
+other level builds the same zstd image. `Ultra` still recompresses the DEB.
+
+## Integrate the AppImage with the desktop
+
+An AppImage carries its `.desktop` entry and icons, but nothing installs them, so GNOME shows a
+generic icon in the dock and leaves the app out of the application grid. `AppImageIntegration`
+installs them into the user's data directory after the user agrees. It ships in `core-runtime`,
+which comes with `nucleus-application`.
+
+```kotlin
+import dev.nucleusframework.core.runtime.AppImageIntegration
+import dev.nucleusframework.core.runtime.AppImageIntegrationResult
+import dev.nucleusframework.core.runtime.AppImageIntegrationStatus
+
+val integration = AppImageIntegration()
+
+when (integration.status()) {
+    AppImageIntegrationStatus.NotIntegrated -> {
+        // Ask the user first, then:
+        if (askUser()) integration.integrate()
+    }
+    is AppImageIntegrationStatus.Stale -> integration.integrate() // the image moved or was updated
+    else -> Unit
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `NotAppImage` | Not running from an AppImage, or not on Linux. Nothing to offer. |
+| `NotIntegrated` | No entry for this app exists. Offer to integrate. |
+| `Integrated` | The entry written by `integrate()` matches this image. |
+| `Stale` | That entry points at a moved image or another version. Refresh it without asking. |
+| `ExternallyManaged` | Another entry owns the app: a DEB or RPM, an integration tool, a hand-written file. `integrate()` refuses to touch it. |
+
+`integrate()` returns `AppImageIntegrationResult.Integrated(desktopFile)` or
+`AppImageIntegrationResult.Failed(reason, cause)`. The installed entry launches the image itself.
 
 ## Add install and remove scripts
 
@@ -9270,6 +9869,10 @@ nativeDistributions {
 - `afterInstall` and `afterRemove` are appended to Nucleus's template (desktop integration,
   AppArmor, polkit policy for passwordless updates). The other four go raw to fpm.
 - `Ultra` rebuilds the DEB with `xz -9e`. RPM and Pacman already use xz.
+- `AppImageIntegration` writes the image's entry to `$XDG_DATA_HOME/applications` (default
+  `~/.local/share/applications`) with `Exec=` pointing at `$APPIMAGE`, copies its hicolor icons,
+  and marks the entry with `X-Nucleus-AppImage`. Any other visible entry with the same
+  `StartupWMClass`, or a user entry that launches this image, counts as `ExternallyManaged`.
 - electron-builder builds the snap from its own template, which has no arm64 build.
 
 </Accordion>
@@ -9314,7 +9917,7 @@ The plugin picks the certificate type per format from that one identity:
 
 | Format | App signature | Installer signature | Notarized |
 |--------|---------------|---------------------|-----------|
-| DMG, ZIP | Developer ID Application | None | Yes |
+| DMG, ZIP | Developer ID Application | None, or the DMG itself with `dmg { sign = true }` | Yes |
 | Developer ID PKG (`pkg { appStore = false }`) | Developer ID Application | Developer ID Installer | Yes |
 | App Store PKG (default) | 3rd Party Mac Developer Application | 3rd Party Mac Developer Installer | No |
 
@@ -9371,6 +9974,24 @@ windows {
 
 Renew a PFX before it expires: SmartScreen flags a binary with an expired signature until you apply
 a fresh, timestamped one.
+
+### Sign the bundled binaries
+
+With `enabled = true`, the plugin signs the app image before it builds the installer: the launcher
+executables, the DLLs of the Java runtime, Skiko and the Nucleus natives, and the DLLs packed inside
+unsigned JARs. Windows Smart App Control refuses to load an unsigned DLL. A binary that already
+carries a signature, such as a JDK vendor's, keeps it. To sign the executables only:
+
+```kotlin title="build.gradle.kts"
+windows {
+    signing {
+        enabled = true
+        signNativeLibraries = false // default: true
+    }
+}
+```
+
+The same certificate settings sign the app image and the installer.
 
 ## Sign on Linux
 
@@ -9471,10 +10092,10 @@ For Linux, store `gpg --armor --export-secret-keys <keyId>` as a secret, then wr
 
 URL: https://nucleusframework.dev/en/docs/packaging/sandboxing
 
-Build the Mac App Store PKG, AppX, and Flatpak through the sandboxed pipeline, and detect the sandbox at runtime.
+Build the Mac App Store PKG and Flatpak through the sandboxed pipeline, and detect the sandbox at runtime.
 
-Three formats run sandboxed: the Mac App Store PKG ([App Sandbox](https://developer.apple.com/documentation/security/app-sandbox)),
-`AppX` (MSIX, full trust), and `Flatpak` ([Flatpak sandbox](https://docs.flatpak.org/en/latest/sandbox-permissions.html)).
+Two formats run sandboxed: the Mac App Store PKG ([App Sandbox](https://developer.apple.com/documentation/security/app-sandbox))
+and `Flatpak` ([Flatpak sandbox](https://docs.flatpak.org/en/latest/sandbox-permissions.html)).
 Add them to `targetFormats` next to your regular formats, and Nucleus bundles their native
 libraries ahead of time.
 
@@ -9482,17 +10103,19 @@ libraries ahead of time.
 targetFormats(
     TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb,
     TargetFormat.Pkg,     // with macOS { pkg { appStore = true } }, the default
-    TargetFormat.AppX,
     TargetFormat.Flatpak,
 )
 ```
 
 A PKG with `macOS { pkg { appStore = false } }` is a Developer ID PKG and builds like a DMG. See
-[Choose a PKG channel](/docs/packaging/macos#choose-a-pkg-channel).
+[Choose a PKG channel](/docs/packaging/macos#choose-a-pkg-channel). `AppX` runs with full trust
+and builds like the other Windows formats; see
+[Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
 
-A PKG no longer implies the App Sandbox. `TargetFormat.isStoreFormat` and `macOS.appStore` no
-longer compile, and runtime code that gated sandbox behavior on `ExecutableRuntime.isPkg()` should
-call `ExecutableRuntime.isSandboxed()`. See [Migrate from 2.x](/docs/migrate/from-2.x).
+A PKG no longer implies the App Sandbox, and AppX no longer uses the sandboxed pipeline.
+`TargetFormat.isStoreFormat` and `macOS.appStore` no longer compile, and runtime code that gated
+sandbox behavior on `ExecutableRuntime.isPkg()` should call `ExecutableRuntime.isSandboxed()`. See
+[Migrate from 2.x](/docs/migrate/from-2.x).
 
 ## Keep a library's natives in its JAR
 
@@ -9559,8 +10182,9 @@ if (!ExecutableRuntime.isSandboxed()) {
 }
 ```
 
-`isSandboxed()` returns `true` inside the macOS App Sandbox, an AppX container, or a Flatpak. It
-follows the sandbox, not the installer format: a Developer ID PKG reports `false`.
+`isSandboxed()` returns `true` inside the macOS App Sandbox or a Flatpak. It follows the sandbox,
+not the installer format: a Developer ID PKG reports `false`, and so does an AppX, which runs as a
+full-trust Win32 process. Check `ExecutableRuntime.isAppX()` for the latter.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -9570,7 +10194,6 @@ follows the sandbox, not the installer format: a Developer ID PKG reports `false
   markers, and rewrites `System.load(String)` and `Runtime.load(String)` to load the bundled copy.
 - It sets `java.library.path`, `jna.library.path`, `jna.boot.library.path`, `jna.nounpack=true`
   and `jna.nosys=true`. The image lands in `app-sandboxed/` next to `app/`.
-- AppX joins this pipeline only because MSIX forbids extracting DLLs at runtime.
 - On macOS, `isSandboxed()` reads `APP_SANDBOX_CONTAINER_ID`.
 
 </Accordion>
@@ -9672,8 +10295,52 @@ when (val result = updater.checkForUpdates()) {
 ```
 
 `checkForUpdates()` suspends. In a dev run (`currentVersion` is `0.0.0-dev`) it returns
-`NotAvailable`. The tag picks the channel: `v1.0.0` is `latest`, `v1.0.0-beta.1` is `beta`,
-`v1.0.0-alpha.1` is `alpha`. A `beta` user sees `latest` and `beta`; an `alpha` user sees all three.
+`NotAvailable`. Build metadata never counts: `1.2.3+42` compares as `1.2.3`.
+
+## Read updates from GitHub Releases
+
+`GitHubProvider` reads the releases of a public repository through GitHub's web routes, which take
+no token and no REST API quota. For a private repository or a GitHub Enterprise Server, use
+`PrivateGitHubProvider`, which goes through the REST API with a token:
+
+```kotlin
+// Public repository, on github.com or a GitHub Enterprise Server
+provider = GitHubProvider(owner = "myorg", repo = "myapp", host = "github.example.com")
+
+// Private repository
+provider = PrivateGitHubProvider(
+    owner = "myorg",
+    repo = "myapp",
+    token = "github_pat_...", // read access to the repository contents only: it ships in the app
+)
+```
+
+The token's quota, 5,000 requests an hour, is shared by every installation. A check costs one
+request, and a download one per file. Both providers take `host` (default `github.com`) and
+`protocol` (default `https`; `http` only for a loopback host). Every file comes from the release
+the manifest was read from, so tags need no `v` prefix.
+
+`GitHubProvider` takes no token. `GitHubProvider(owner, repo, token)` no longer compiles: move
+private repositories to `PrivateGitHubProvider(owner, repo, token)`, and pass a `host` by name.
+
+### Pick a release channel
+
+The tag picks a release's channel: `v1.0.0` is a release, `v1.0.0-beta.1` is `beta`,
+`v1.0.0-alpha.1` is `alpha`. The client's channel is `channel`, or for `channel = "latest"` the
+pre-release identifier of `currentVersion`.
+
+| Client channel | Follows |
+|---|---|
+| `alpha` | `alpha`, `beta`, and releases |
+| `beta` | `beta` and releases |
+| Any other name | Its own tags only |
+
+Among the tags it follows, the client takes the highest version, then reads that channel's
+manifest (`beta.yml` for `v1.1.0-beta.4`), or `latest*.yml` when the release does not publish it.
+`channel = "beta"` turns pre-releases on by itself. Channel names are case-sensitive, and tags that
+are not SemVer versions are skipped. To find a pre-release, `GitHubProvider` reads the 10 most
+recent releases and `PrivateGitHubProvider` the 100 most recent: a channel with no tag among them
+is not found.
 
 ## Supported formats
 
@@ -9768,8 +10435,10 @@ logs why and falls back to the password prompt.
 - Differential downloads compare electron-builder block maps with the previous artifact cached in
   `cacheDir` and fetch changed blocks with HTTP range requests. A missing map, a failed range
   request, or a digest mismatch falls back to a full download.
-- The updater checks the SHA-512 after download. On Windows it runs NSIS with `/S` and MSI with
-  `msiexec /passive` after the app exits.
+- The updater hashes a full download as it writes it, then compares the SHA-512 with the
+  manifest. On Windows it runs NSIS with `/S` and MSI with `msiexec /passive` after the app exits.
+- The DEB and RPM update script passes every path as a single-quoted literal, since the package
+  name comes from the manifest.
 - Silent Linux updates go through a root-owned `/opt/<App>/nucleus-update-helper` that verifies the
   detached `.asc` against your bundled public key before it runs `dpkg -i` or `rpm -U`.
 
@@ -9797,17 +10466,18 @@ logs why and falls back to the password prompt.
 - `UpdateLevel`: `MAJOR`, `MINOR`, `PATCH`, or `PRE_RELEASE`. Use it to force a dialog for a major
   version and install patches in the background.
 - `UpdateException` subtypes: `NetworkException`, `ChecksumException`, `NoMatchingFileException`,
-  `ParseException`.
+  `ParseException`. `downloadUpdate` throws `ParseException` before downloading anything when the
+  manifest names an artifact that is not a plain file name, such as `../app.zip`.
 
 ### Builder fields
 
 | Field | Default | Notes |
 |-------|---------|-------|
 | `currentVersion` | Detected from the packaged app | Compared with the remote version |
-| `provider` | Required | `GitHubProvider` or `GenericProvider` |
-| `channel` | `"latest"` | Release channel name |
+| `provider` | Required | `GitHubProvider`, `PrivateGitHubProvider`, or `GenericProvider` |
+| `channel` | `"latest"` | `latest`, `beta`, `alpha`, or a channel of your own |
 | `allowDowngrade` | `false` | |
-| `allowPrerelease` | `false` | Treated as `true` when `currentVersion` contains `-` |
+| `allowPrerelease` | `false` | Treated as `true` when `currentVersion` contains `-` or `channel` is not `latest` |
 | `executableType` | Detected | Forces the artifact type to download |
 | `httpClient` | JDK client following redirects | `NativeHttpClient` for private CAs |
 | `differentialDownload` | `true` | |
@@ -9815,9 +10485,12 @@ logs why and falls back to the password prompt.
 
 ### Providers
 
-- `GitHubProvider(owner, repo, token = null)`. The token travels in the `Authorization` header.
+- `GitHubProvider(owner, repo, host = "github.com", protocol = "https")`: public repositories.
+- `PrivateGitHubProvider(owner, repo, token, host = "github.com", protocol = "https")`: private
+  repositories and GitHub Enterprise Server, through the REST API.
 - `GenericProvider(baseUrl)`. `baseUrl` must use `https`, or construction throws
-  `IllegalArgumentException`. Plain `http` works for loopback hosts only, for local tests.
+  `IllegalArgumentException`. Plain `http` works for local tests on a loopback host only:
+  `localhost`, an IPv4 literal in `127.0.0.0/8`, or `[::1]`.
 
 ## What's next
 
@@ -10278,6 +10951,7 @@ val isNative: Boolean = ExecutableRuntime.isGraalVmNativeImage
 - [GraalVM Native Image](/docs/performance/graalvm): toolchain, DSL, metadata and CI.
 - [AOT cache](/docs/performance/aot-cache): training runs and the cache lifecycle.
 - [Startup optimization](/docs/performance/startup): the `nucleusOptimization` knobs, idle GC and `lastJdk`.
+- [Rendering performance](/docs/performance/rendering): partial redraw, the repaint overlay and idle windows.
 - [Benchmarks](/docs/performance/benchmarks): CPU, rendering and list-load results on the JVM, a native image and other toolkits.
 - [Native code in Kotlin](/docs/performance/native-code), [Native library loader](/docs/performance/native-library-loader),
   [Native HTTP](/docs/performance/native-http) and [Native SSL](/docs/performance/native-ssl): native interop modules.
@@ -10312,10 +10986,13 @@ also leave the pack off and turn on a single knob.
 | `singleJar` | Flattens the runtime JARs into one JAR. With ProGuard, it sets `joinOutputJars` instead. |
 | `idleGc` | Collects garbage while the app sits unused. See [Idle GC](#idle-gc). |
 | `lastJdk` | Packages and runs the app with OpenJDK 27. See [Package with the latest JDK](#package-with-the-latest-jdk). |
+| `partialRedraw` | Repaints only what changed in each frame. See [Rendering performance](/docs/performance/rendering#turn-on-partial-redraw). |
+| `mallocArenas` | Linux: caps glibc's malloc arenas at 2 to lower resident memory. See [Cap glibc malloc arenas on Linux](#cap-glibc-malloc-arenas-on-linux). |
 
 The pack never replaces a value you set (`garbageCollector`, `javaHome`, `-Xms`,
 `-XX:MaxRAMPercentage`), and it does not enable the [AOT cache](/docs/performance/aot-cache) or
-ProGuard. In a GraalVM native image only `idleGc` applies.
+ProGuard. `serialGc`, `compactHeap`, `singleJar` and `lastJdk` do not apply to a GraalVM native
+image.
 
 ## Package with the latest JDK
 
@@ -10332,6 +11009,23 @@ Idle GC runs `System.gc()` right away when a window is minimized, or 3 s after e
 lost focus. Startup never triggers one. It covers the windows `nucleusApplication` opens and works
 in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off for one run.
 
+## Cap glibc malloc arenas on Linux
+
+glibc creates up to 8 malloc arenas per CPU core, and each one keeps the memory it once held. A
+desktop app runs many threads (JVM, Skia, GPU driver, coroutines), so its resident memory ends up
+far above what it uses. `mallocArenas` caps the arenas at 2 when the app starts, in JVM apps and
+native images alike.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { mallocArenas = true }
+}
+```
+
+- `-Dnucleus.optimization.mallocArenaMax=<n>` in `jvmArgs` sets another cap, and `0` turns it off.
+- A `MALLOC_ARENA_MAX` variable, or `glibc.malloc.arena_max` in `GLIBC_TUNABLES`, always wins.
+- It has no effect on macOS, Windows, or a musl libc.
+
 <Accordions>
 <Accordion title="Under the hood">
 
@@ -10340,7 +11034,10 @@ in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off 
   `<gradle-user-home>/nucleus/jdk`. The fallback uses the full Liberica JDK, since Lite has no
   `jmods` for `jlink`. A `NUCLEUS_JDK_HOME` that is not JDK 27 or has no `bin/java` is ignored
   with a warning.
-- A native image reads idle GC from `nucleus/nucleus-app.properties`, since it has no launcher `.cfg`.
+- A native image reads idle GC and the arena cap from `nucleus/nucleus-app.properties`, since it
+  has no launcher `.cfg`.
+- `nucleusApplication` and `GraalVmInitializer.initialize()` call `mallopt(M_ARENA_MAX, n)` before
+  the app starts its threads: glibc ignores the cap once more than 8 arenas exist.
 - A native image takes its collector and heap from `graalvm { garbageCollector; maxHeapSizePercent }`.
 
 </Accordion>
@@ -10351,6 +11048,148 @@ in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off 
 - [AOT cache](/docs/performance/aot-cache): skip JVM warmup with a Project Leyden cache.
 - [GraalVM Native Image](/docs/performance/graalvm): compile the app to a native binary.
 - [Gradle DSL reference](/docs/reference/gradle-dsl): every property of `nucleus.application`.
+
+---
+
+# Rendering performance
+
+URL: https://nucleusframework.dev/en/docs/performance/rendering
+
+Repaint only what changed with partial redraw, see each frame's damage with the debug overlay, count recompositions, and let idle windows give their GPU memory back.
+
+This page covers how a Nucleus window renders its frames: partial redraw, the debug switches that
+show what each frame repaints, and what an idle window does. Everything here comes with
+`nucleus-application` and works on macOS, Windows and Linux, on the JVM and in a native image.
+
+## Turn on partial redraw
+
+With partial redraw on, a frame repaints and presents only the part of the window that changed
+since the previous one, instead of the whole window. A blinking cursor or a spinner then repaints
+only its own area, and a window where nothing moves presents no frame at all.
+
+Partial redraw is off by default. Turn it on with the `partialRedraw` knob of the
+[startup pack](/docs/performance/startup), or with the whole pack:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+    // or: nucleusOptimization = true
+}
+```
+
+The knob patches Compose's render layers at build time, so the runtime can tell which layers
+changed, and turns the runtime on. Your source code stays the same. It applies to the `run` task,
+to packaged apps and to GraalVM native images.
+
+Pass `-Dnucleus.tao.partialRedraw=false` to repaint every frame in full for one run, or `true` to
+force it on.
+
+## See what each frame repaints
+
+The `debug { }` block turns on overlays and logs for the `run` task. Packages, `runDistributable`
+and native images never get them.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+
+    debug {
+        partialRedraw {
+            tint = true   // flash what each frame changed in red
+            stats = true  // log how much of the window frames repaint
+        }
+    }
+}
+```
+
+| Switch | Effect |
+|--------|--------|
+| `tint` | Flashes what each frame repainted in translucent red, every other frame, like Android's "Show GPU view updates". A frame repainted in full flashes the whole window. |
+| `stats` | Logs every few seconds how much of the window frames repaint and which layers damaged them, and why frames repaint in full when that reason changes. |
+| `verify` | Renders every partial frame again in full off screen and logs any pixel that differs. Slow, and turns `tint` off. |
+
+To turn a switch on for one run without editing the build, pass the comma-separated
+`nucleus.debug` Gradle property:
+
+```shell
+./gradlew run -Pnucleus.debug=tint,stats
+```
+
+A flash larger than what moved means the frame repainted more than it needed. The usual cause is
+a layer that does not clip its content or casts a shadow: its damage is then its nearest clipping
+ancestor's bounds. The partial redraw switches need partial redraw on; otherwise the build warns
+and every frame repaints in full.
+
+![With tint on, only the moving band flashes red; the static panel is never repainted](/assets/docs/performance/partial-redraw-tint.gif)
+
+## Count recompositions
+
+`recomposition` logs the composables that ran the most, every few seconds, first composition
+included. It works with or without partial redraw.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    debug {
+        recomposition {
+            enabled = true
+            top = 20 // composables per report, default 10
+        }
+    }
+}
+```
+
+`-Pnucleus.debug=recomposition` turns it on for one run.
+
+## Idle windows
+
+A window renders a frame only when its content changes. A coroutine on `Dispatchers.Main`, such as
+a `delay` loop, a clock or a `withContext(Dispatchers.Main)` hop, runs between frames and does not
+render one by itself.
+
+Once a window has drawn nothing for 3 seconds, or as soon as it is minimized, Nucleus releases the
+GPU resources Skia cached for it: the textures an animation or an image-heavy screen uploaded. The
+next frame recreates what it needs. A window with a live
+[GPU render context](/docs/native-content/gpu-render-context) consumer keeps its cache. There is
+nothing to configure.
+
+## Notes
+
+- Some frames always repaint in full: the first one, a resize, a change of window background or
+  corner, a frame while a popup is open, and the frame after a layer that draws content recorded
+  elsewhere, such as a backdrop blur.
+- Under macOS and Windows, a frame whose changes cover 80 % of the window or more repaints in full,
+  which costs less there than a partial frame.
+- The build-time patch only exists in builds of the Nucleus plugin. An app started from the IDE
+  without the plugin's `run` task, or under hot reload, repaints every frame in full.
+- Compose deactivates a lazy-list item scrolled out of view after the frame instead of inside it.
+  Pass `-Dnucleus.tao.outOfFrameExecutor=false` to go back to deactivating it inside the frame.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Damage is tracked per render layer, between layout and draw. Each layer's content version,
+  properties and window footprint are compared with the previous frame. Anything uncertain
+  repaints in full.
+- Linux presents through EGL with buffer age and `eglSwapBuffersWithDamage`, so the compositor
+  receives the damaged region. Windows presents through ANGLE with `eglPostSubBufferNV`, which
+  passes the damaged rectangle to DXGI as the dirty rect. macOS tracks the damage of each Metal
+  drawable.
+- A native image reads the switch from `nucleus/nucleus-app.properties`
+  (`optimization.partialRedraw`), since it has no launcher `.cfg`. The system property wins.
+- `NUCLEUS_TAO_PARTIAL_REDRAW=0` in the environment also turns off the native side.
+- `-Dnucleus.tao.partialRedraw.verify.dump=<dir>` writes the first failing frame pairs of
+  `verify` as PNG files.
+- The GPU cache purge flushes and submits the deletes synchronously, since no frame follows to
+  submit them. On Linux it waits for the swap thread to hand the context back.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Startup optimization](/docs/performance/startup): the other `nucleusOptimization` knobs.
+- [Benchmarks](/docs/performance/benchmarks): rendering ramps on the JVM and in a native image.
+- [GPU render context](/docs/native-content/gpu-render-context): render into a window with your own GPU code.
 
 ---
 
@@ -10666,8 +11505,11 @@ graalvm {
 
 - `macOS { minimumSystemVersion }` defaults to `"12.0"`. `macOsSdkVersion` defaults to `"26.0"`;
   Liquid Glass needs SDK 26. `cStubsSrc` links extra C stubs.
-- On Windows the plugin copies `vcruntime140.dll`, `vcruntime140_1.dll` and `msvcp140.dll` next to
-  the `.exe`, so the app needs no Visual C++ Redistributable. Tune it with
+- On Windows the plugin copies the whole Visual C++ runtime next to the `.exe` (`vcruntime140`,
+  `vcruntime140_1`, `msvcp140`, `msvcp140_1`, `msvcp140_2` and `concrt140`), so neither the app
+  nor a JNI library it loads, such as ONNX Runtime, needs the Visual C++ Redistributable. The DLLs
+  come from the newest MSVC redistributable of your Visual Studio install, else from the GraalVM
+  `bin` directory, which ships only the first three. Tune it with
   `windows { bundleCRuntime; dlls; sourceDir }`.
 
 ## No release variant
@@ -10789,10 +11631,16 @@ The plugin merges five sources, each passed through its own `-H:ConfigurationFil
    font managers, security providers and `main` (`generateGraalvmPlatformMetadata`).
 4. A bytecode scan of the runtime classpath (`analyzeGraalvmStaticMetadata`). It also catches
    `MethodHandles.Lookup.findClass()`, JNI callbacks and `@Serializable` companions. The orphan
-   detector reads the app's JVM target folders, such as `desktopMainClasses`.
+   detector reads the app's JVM target folders, such as `desktopMainClasses`. Native methods of
+   GraalVM C interop (`@CFunction`, `@CConstant`) and GraalVM word types never reach the JNI
+   metadata, since `native-image` binds them itself.
 5. Metadata inside `nucleus.graalvm-runtime`: resource globs (`**/*.svg`, `**/*.ttf`,
    `composeResources/**`, `META-INF/services/**`, …), `-H:+SharedArenaSupport`, and AWT font and
    splash-screen substitutions.
+
+The bytecode scan, `filterGraalvmLibraryMetadata` and `cleanupGraalvmMetadata` read multi-release
+JARs as the GraalVM toolchain's JDK sees them: a class replaced under `META-INF/versions/<n>` is
+read in the version that JDK loads.
 
 `cleanupGraalvmMetadata` compares your file with sources 1 to 4. It always drops the Kotlin
 phantoms the agent records (`kotlin.Any`, `FunctionN`, …) and never drops types under the
@@ -10913,7 +11761,9 @@ Run the binary from a terminal. A missing registration shows up as `ClassNotFoun
 - The quick-build mode is a task input, so switching between `runGraalvmNative` and the
   distributable tasks recompiles.
 - The image compiles from a copy of the uber JAR without the Nucleus JNI libraries.
-  `NativeLibraryLoader` loads them from next to the executable and never extracts them. See
+  `NativeLibraryLoader` loads them from next to the executable and never extracts them. Outside
+  headless builds the copy also leaves out Skiko's native library, for every architecture: Skiko
+  loads the one packaged beside the binary, so the image does not embed a second copy. See
   [Native library loader](/docs/performance/native-library-loader).
 - Node.js lands in `<gradle-user-home>/nucleus/nodejs` for electron-builder.
 
@@ -11547,11 +12397,11 @@ All DSL types live in `dev.nucleusframework.desktop.application.dsl`.
 | `fromFiles(vararg Any)` | | Extra files on the classpath |
 | `mainClass` | `String?` | Entry point |
 | `mainJar` | `RegularFileProperty` | Entry JAR |
-| `javaHome` | `String` | JDK used to run and package. Always wins over `lastJdk` |
+| `javaHome` | `String` | JDK used to run and package. Defaults to the project's JVM toolchain (`java.toolchain` or `jvmToolchain(...)`), else the Gradle daemon's JDK. An explicit value always wins over `lastJdk` |
 | `args`, `args(vararg)` | `MutableList<String>` | App arguments |
 | `jvmArgs`, `jvmArgs(vararg)` | `MutableList<String>` | JVM arguments. The defaults already contain `--enable-native-access=ALL-UNNAMED` (JEP 472) |
 | `garbageCollector` | `GarbageCollector?` | HotSpot collector: `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`. Unset keeps JDK ergonomics. An explicit `-XX:+Use…GC` in `jvmArgs` still wins |
-| `nucleusOptimization` | `Boolean` (`false`) | Startup pack. See [below](#nucleusoptimization) |
+| `nucleusOptimization` | `Boolean` (`false`) | Optimization pack. See [below](#nucleusoptimization) |
 | `nucleusOptimization { }` | `NucleusOptimizationSettings` | Per-knob overrides |
 | `nativeDistributions { }` | `JvmApplicationDistributions` | See [`nativeDistributions { }`](#nativedistributions) |
 | `buildTypes { }` | `JvmApplicationBuildTypes` | See [`buildTypes { }`](#buildtypes) |
@@ -11560,7 +12410,7 @@ All DSL types live in `dev.nucleusframework.desktop.application.dsl`.
 
 ### `nucleusOptimization { }` [#nucleusoptimization]
 
-`nucleusOptimization = true` turns on five startup knobs at once. Each knob in the block is a `Boolean?`: `null` follows the master switch, `true` or `false` forces that knob regardless of the others.
+`nucleusOptimization = true` turns on seven knobs at once. Each knob in the block is a `Boolean?`: `null` follows the master switch, `true` or `false` forces that knob regardless of the others.
 
 ```kotlin
 nucleus.application {
@@ -11576,6 +12426,8 @@ nucleus.application {
 | `singleJar` | Flattens the runtime JARs (or sets `joinOutputJars` when ProGuard is on) so the jpackage image holds one JAR |
 | `idleGc` | Requests a GC 3 s after the last window loses focus, or at once when a window is minimized. Also baked into GraalVM images |
 | `lastJdk` | Packages and runs with OpenJDK 27, downloaded to `<gradle-user-home>/nucleus/jdk` (BellSoft Liberica JDK 27 on Intel macOS and Windows ARM). `javaHome` wins. The Gradle compile JDK does not change |
+| `partialRedraw` | Repaints and presents only what changed in each frame. Adds `-Dnucleus.tao.partialRedraw=true` |
+| `mallocArenas` | Linux: caps glibc's malloc arenas at 2. Adds `-Dnucleus.optimization.mallocArenaMax=2`, unless `jvmArgs` sets another value (`0` disables it). A `MALLOC_ARENA_MAX` environment variable wins. Also baked into GraalVM images |
 
 The pack leaves `enableAotCache` and ProGuard alone. See [Startup optimization](/docs/performance/startup).
 
@@ -11607,6 +12459,35 @@ Each named `AdditionalLauncher` adds a second executable to the jpackage image. 
 | `obfuscate` | `Property<Boolean>` | `false` |
 | `optimize` | `Property<Boolean>` | `true` |
 | `joinOutputJars` | `Property<Boolean>` | `false` |
+| `consumerRules` | `Property<Boolean>` | `false` |
+| `consumerRulesExclusions`, `excludeConsumerRules(vararg)` | `SetProperty<String>` | empty |
+
+#### Apply library consumer rules [#proguard-consumer-rules]
+
+Standalone ProGuard ignores the keep rules libraries ship for R8. `consumerRules = true` applies the
+rule files every dependency carries under `META-INF/proguard/`, and keeps the service providers its
+`META-INF/services` files declare, as R8 and the Android Gradle plugin do:
+
+```kotlin title="build.gradle.kts"
+buildTypes {
+    release {
+        proguard {
+            isEnabled = true
+            consumerRules = true
+            // group:module or a project path; * matches any run of characters
+            excludeConsumerRules("com.squareup.*:*", ":shared")
+        }
+    }
+}
+```
+
+A rule file that uses anything but keep, attribute, warning or assumption options is skipped with a
+warning. An excluded dependency loses its rule files but keeps its service providers. The rules
+stay off by default because they keep more than an existing configuration did.
+
+The default rules keep enum `values()` and `valueOf()`, and turn off return-type specialization
+(`-optimizations !method/specialization/returntype`), which produced classes that fail with
+`VerifyError: Bad return type`.
 
 ## `nativeDistributions { }` [#nativedistributions]
 
@@ -11619,7 +12500,7 @@ From `AbstractDistributions`, also available under `nativeApplication { distribu
 | Property | Type | Notes |
 | --- | --- | --- |
 | `outputBaseDir` | `DirectoryProperty` | Default `build/compose/binaries` |
-| `appName`, `packageName`, `packageVersion` | `String?` | |
+| `appName`, `packageName`, `packageVersion` | `String?` | A SemVer pre-release or build suffix (`1.2.0-beta.1`) is accepted. On macOS and Windows the app image gets the numeric part only; installers and update manifests keep the full version |
 | `copyright`, `description`, `vendor`, `homepage` | `String?` | |
 | `appResourcesRootDir` | `DirectoryProperty` | Per-OS resources copied into the app |
 | `licenseFile` | `RegularFileProperty` | |
@@ -11677,7 +12558,7 @@ The plugin looks for Node.js in this order: the `compose.electronBuilder.nodePat
 
 `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
 
-jpackage builds `RawAppImage`, the bare app image. electron-builder builds every other format from it. `AppX` and `Flatpak` always go through the sandboxed pipeline; `Pkg` does only when `macOS { pkg { appStore = true } }`, the default.
+jpackage builds `RawAppImage`, the bare app image. electron-builder builds every other format from it. `Flatpak` always goes through the sandboxed pipeline; `Pkg` does only when `macOS { pkg { appStore = true } }`, the default. `AppX` runs with full trust and builds like the other Windows formats.
 
 `TargetFormat.isStoreFormat` is deprecated at `ERROR` level and no longer compiles. A PKG is a store format only when `pkg.appStore` is `true`, so branch on the DSL value instead. See [Migrate from 2.x](/docs/migrate/from-2.x).
 
@@ -11705,7 +12586,7 @@ jpackage builds `RawAppImage`, the bare app image. electron-builder builds every
 | `pkg { }` | `PkgSettings` | See [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | See [`appExtensions { }`](#macos-app-extensions) |
 | `launchAgents { }` | `LaunchAgentSettings` | See [`launchAgents { }`](#macos-launch-agents) |
-| `infoPlist { extraKeysRawXml }` | `InfoPlistSettings` | Extra keys, as raw XML, added to `Info.plist` |
+| `infoPlist { }` | `InfoPlistSettings` | `extraKeysRawXml`: extra keys, as raw XML. `localization(language, strings)`: writes `<language>.lproj/InfoPlist.strings`. `localizationsDir`: a `File?` whose `<lang>.lproj` directories are copied into `Contents/Resources`. See [Localize Info.plist strings](/docs/packaging/macos#localize-infoplist-strings) |
 
 `macOS.appStore` is deprecated at `ERROR` level and no longer compiles. The 2.x property was ignored (PKG always targeted the App Store), so it was not aliased. Set `macOS { pkg { appStore = … } }` after choosing the channel you want. See [Migrate from 2.x](/docs/migrate/from-2.x).
 
@@ -11783,7 +12664,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `format` | `DmgFormat?`: `UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO` |
 | `size` | `String?` |
 | `shrink` | `Boolean?` |
-| `sign` | `Boolean` (default `false`) |
+| `sign` | `Boolean` (default `false`). Signs the image with `signing.identity`; needs `signing.sign` |
 | `background`, `icon`, `badgeIcon` | `RegularFileProperty` |
 | `backgroundColor` | `String?` |
 | `window { x; y; width; height }` | `Int?` each |
@@ -11813,6 +12694,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `packageName`, `packageVersion` | `String?` | | |
 | `msiPackageVersion`, `exePackageVersion` | `String?` | | Per-format version overrides |
 | `console` | `Boolean` | `false` | Attach a console window |
+| `bundleCRuntime` | `Boolean` | `true` | Complete the app image's MSVC C++ runtime from the newest Visual Studio install. See [Bundle the Visual C++ runtime](/docs/packaging/windows#bundle-the-visual-c-runtime) |
 | `dirChooser` | `Boolean` | `true` | |
 | `shortcut`, `menu` | `Boolean` | `false` | `menu` is also `true` when `menuGroup` is set |
 | `menuGroup` | `String?` | | |
@@ -11885,6 +12767,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `certificatePassword`, `certificateSha1`, `certificateSubjectName` | `String?` | |
 | `algorithm` | `SigningAlgorithm`: `Sha1`, `Sha256`, `Sha512` | `Sha256` |
 | `timestampServer` | `String?` | |
+| `signNativeLibraries` | `Boolean` | `true`. Also signs the bundled DLLs, loose and inside unsigned JARs. The launchers are signed regardless |
 | `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName` | `String?` | Azure Artifact Signing |
 
 See [Code signing](/docs/packaging/code-signing).
@@ -11938,7 +12821,7 @@ The defaults come from the `compose.desktop.linux.sign` and `compose.desktop.lin
 | `category` | `AppImageCategory?` | `AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility` |
 | `genericName`, `synopsis` | `String?` | |
 | `desktopEntries` | `Map<String, String>` | Extra desktop entry keys |
-| `compressionLevel` | `CompressionLevel?` | Overrides the root value. `Normal` or `Store` start faster under FUSE |
+| `compressionLevel` | `CompressionLevel?` | Overrides the root value. `Store` builds a gzip image; `Normal`, `Maximum` and `Ultra` build the same zstd image |
 
 ### `snap { }` [#linux-snap]
 
@@ -12042,8 +12925,8 @@ The `INNOVATION` channel now resolves to `25i4` (GraalVM 25.4, JDK 25.0.4) inste
 | `macOS` | `minimumSystemVersion` | `Property<String>` | `"12.0"` |
 | `macOS` | `macOsSdkVersion` | `Property<String>` | `"26.0"` |
 | `windows` | `bundleCRuntime` | `Property<Boolean>` | `true`: copy the MSVC runtime DLLs next to the `.exe` |
-| `windows` | `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` |
-| `windows` | `sourceDir` | `DirectoryProperty` | toolchain `bin` |
+| `windows` | `dlls` | `ListProperty<String>` | The whole C++ runtime: `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`, `msvcp140_1.dll`, `msvcp140_2.dll`, `concrt140.dll` |
+| `windows` | `sourceDir` | `DirectoryProperty` | The newest MSVC redistributable, else the toolchain `bin` (which ships the first three DLLs only) |
 | `metadataRepository` | `enabled` | `Property<Boolean>` | `true` |
 | `metadataRepository` | `version` | `Property<String>` | `"1.1.4"` |
 | `metadataRepository` | `excludedModules` | `SetProperty<String>` | `group:artifact` entries |
@@ -12076,7 +12959,7 @@ The `INNOVATION` channel now resolves to `25i4` (GraalVM 25.4, JDK 25.0.4) inste
 
 ## Generated app properties [#app-properties]
 
-The plugin writes `nucleus/nucleus-app.properties` into the app resources. The `NucleusApp` runtime object reads it at startup, which is how DSL values reach the runtime libraries. Keys: `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, and `optimization.idleGc` when the `idleGc` knob is on.
+The plugin writes `nucleus/nucleus-app.properties` into the app resources. The `NucleusApp` runtime object reads it at startup, which is how DSL values reach the runtime libraries. Keys: `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, and `optimization.idleGc`, `optimization.partialRedraw` and `optimization.mallocArenaMax` when the matching knob is on.
 
 ## What's next
 
@@ -12268,27 +13151,18 @@ See [Provision Node.js](/docs/packaging#provision-nodejs).
 
 ## Linux packaging
 
-### AppImage takes about 60 seconds to start
+### AppImage fails to start: "error loading libfuse.so.2"
 
-**Symptom.** The app opens quickly in development but takes about a minute when packaged
-as an AppImage.
+**Symptom.** The AppImage exits at launch with `dlopen(): error loading libfuse.so.2`, typically on
+Ubuntu 22.04+ or Fedora 36+.
 
-**Cause.** `compressionLevel = CompressionLevel.Maximum` or `Ultra`. AppImage uses squashfs,
-and maximum compression triggers FUSE decompression on every launch.
+**Cause.** The AppImage was built by Nucleus 2.x, whose runtime needs the system `libfuse2`.
 
-**Fix.** Use `CompressionLevel.Normal` (the default) for AppImage. Prefer a format-local
-override so DEB/DMG can stay on a higher global level:
-
-```kotlin title="build.gradle.kts"
-nativeDistributions {
-    compressionLevel = CompressionLevel.Ultra
-    linux {
-        appImage {
-            compressionLevel = CompressionLevel.Normal
-        }
-    }
-}
-```
+**Fix.** Rebuild with Nucleus 3.0. Its AppImages run on the static AppImage runtime, which needs
+only the `fusermount` or `fusermount3` binary the distribution ships. The compression level no
+longer changes the start time: `CompressionLevel.Store` builds a gzip image, and `Normal`,
+`Maximum` and `Ultra` all build the same zstd image. See
+[Build an AppImage](/docs/packaging/linux#build-an-appimage).
 
 ### DEB or RPM fails: "Please specify project homepage"
 
@@ -12631,7 +13505,7 @@ replacement.
 | Area | Vanilla CMP | Nucleus |
 | --- | --- | --- |
 | Formats | DMG, PKG, MSI, EXE, DEB, RPM, raw app image | Those, plus NSIS, NSIS Web, AppX, Portable, AppImage, Pacman, Snap, Flatpak, ZIP, TAR, 7Z: 18 in total |
-| Stores | | Mac App Store PKG, AppX and Flatpak through a [sandboxed pipeline](/docs/packaging/sandboxing), plus a Developer ID PKG |
+| Stores | | Mac App Store PKG and Flatpak through a [sandboxed pipeline](/docs/packaging/sandboxing), plus a Developer ID PKG |
 | Auto-update | None | Differential updates from electron-builder `latest-*.yml` metadata. See [Auto-update](/docs/packaging/auto-update) |
 | Runtime | JVM | [GraalVM native image](/docs/performance/graalvm), or JVM with the JDK 25+ [AOT cache](/docs/performance/aot-cache) (`enableAotCache = true`) |
 | Code signing | | Windows PFX or Azure Artifact Signing, and universal macOS binaries through the `build-macos-universal` action |
@@ -12844,6 +13718,14 @@ The major version marks the API breaks: read the
 
 ### Breaking changes
 
+- **`GitHubProvider` takes no token** (#790). `GitHubProvider(owner, repo, token)` no longer
+  compiles; private repositories and GitHub Enterprise Server use the new
+  `PrivateGitHubProvider(owner, repo, token)`. See [Move private repositories to
+  PrivateGitHubProvider](/docs/migrate/from-2.x#move-private-repositories-to-privategithubprovider).
+- **`TabHoverPreview.nativeLayer` is removed** (#803). The hover card opens like the window's other
+  popups; to make it hang below a `TabWindows` window, open the windows yourself with
+  `nativePopupLayers = true`. See [Update tab hover
+  previews](/docs/migrate/from-2.x#update-tab-hover-previews).
 - **Tao is the only window backend** (#593). `decorated-window-awt`, `decorated-window-jbr` and
   `decorated-window-jni` are gone, along with `NucleusBackend`, `LocalNucleusBackend`,
   `nucleusApplication(backend = …)` and `NucleusApplicationScope.backend`.
@@ -12868,6 +13750,42 @@ The major version marks the API breaks: read the
 
 ### Behavior changes
 
+- **AppX is no longer sandboxed** (#793). It builds through the regular Windows pipeline, which adds
+  `packageGraalvmAppX`, and `ExecutableRuntime.isSandboxed()` returns `false` there; use `isAppX()`.
+  See [Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
+- **`javaHome` defaults to the JVM toolchain** (#853, #830). `run` and packaging use
+  `java.toolchain` / `jvmToolchain(...)` instead of the Gradle daemon's JDK. See [Apply the
+  plugin](/docs/start/install#apply-the-plugin).
+- **AppImages run on the static type2 runtime** (#845) and no longer need `libfuse2`; `Store` builds
+  a gzip image and every other level the same zstd image. See [Build an
+  AppImage](/docs/packaging/linux#build-an-appimage).
+- **SemVer suffixes work on macOS and Windows** (#255). `1.2.0-beta.1` packages; the app bundle gets
+  `1.2.0` and the installers keep the full version. See [Write the minimal
+  configuration](/docs/start/configuration#write-the-minimal-configuration).
+- **A modal dialog takes its owner's activation** (#869, #515). Clicking the owner, its taskbar
+  button, Alt+Tab or `toFront()` brings the dialog forward with keyboard focus. See [Block the
+  owner](/docs/windows/dialogs-popups#block-the-owner).
+- **macOS: a Cmd+Q menu item handles the shortcut** (#775, #749). A `NativeMenuBar` item bound to
+  Cmd+Q runs instead of the built-in quit, and beeps while it is disabled. See [Handle
+  Cmd+Q](/docs/os/menus/menu-bar#handle-cmdq).
+- **Focus requests take the Wayland activation token on their own** (#773, #739). `requestFocus()` /
+  `toFront()` from a global hotkey or a Linux notification action brings the window to the front.
+  See [Bring a window to the front](/docs/os/global-hotkey#bring-a-window-to-the-front).
+- **Tab hover cards animate like Chromium's** (#803). They fade in, slide from tab to tab and fade
+  out. See [Draw previews](/docs/tool-windows/tabs#draw-previews).
+- **A cancelled pinch cancels pointer input** (#789, #799, #807). On macOS and Linux, `ScaleEnd` is
+  followed by a pointer-input cancellation, and an open trackpad pan ends first. See [Zoom with a
+  pinch](/docs/input/trackpad-gestures#zoom-with-a-pinch).
+- **Idle windows give their GPU memory back** (#860, #866). Skia's resource cache is purged 3 s
+  after a window's last frame and at once on minimize. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **A `Dispatchers.Main` dispatch no longer renders a frame** (#770). On Linux and Windows, a
+  `delay` loop or a `withContext(Dispatchers.Main)` hop no longer draws a frame by itself. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **Lazy items are deactivated out of the frame** (#808). `-Dnucleus.tao.outOfFrameExecutor=false`
+  reverts this. See [Rendering notes](/docs/performance/rendering#notes).
+- **`SystemInfo.process(pid)` reads one process** (#779, #784, #797) instead of walking the process
+  table on every field. See [System info](/docs/os/system-info).
 - **Cmd+Q and Dock → Quit call `onCloseRequest`** (#696). Every open window gets the request,
   so a handler that never exits vetoes the quit. See
   [Handle a system quit](/docs/lifecycle/application#handle-a-system-quit).
@@ -12898,6 +13816,72 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **Partial redraw** (#756, #824). With `nucleusOptimization { partialRedraw = true }`, or the whole
+  `nucleusOptimization` pack, a frame repaints and presents only what changed, on macOS, Windows and
+  Linux, on the JVM and in native images. See [Turn on partial
+  redraw](/docs/performance/rendering#turn-on-partial-redraw).
+- **`debug { }` block for the `run` task** (#756). `partialRedraw { tint; stats; verify }` flashes
+  or logs what each frame repaints, and `recomposition { enabled; top }` logs the composables that
+  ran the most. See [See what each frame
+  repaints](/docs/performance/rendering#see-what-each-frame-repaints).
+- **`layoutPolicy` on every title bar** (#781). `TitleBar`, `DialogTitleBar` and the Material 2,
+  Material 3 and Jewel title bars accept `TitleBarLayoutPolicy.FillCenter`, which stretches the
+  centre child between the start and end items. See [Lay out the title
+  bar](/docs/windows#lay-out-the-title-bar).
+- **Title bars follow KWin's decoration mode** (#825). When the compositor asks for no decorations,
+  the built-in title bars drop their window controls but keep the app's content. Custom chrome reads
+  `TaoWindow.isDecorationSuppressed`. See [Follow the compositor's
+  decorations](/docs/windows/linux-wayland#follow-the-compositors-decorations).
+- **Touch reveals the fullscreen title bar** (#825). With `Modifier.newFullscreenControls()` on
+  Windows and Linux, a tap reveals the overlay bar and a tap outside hides it. See [Title bar
+  modifiers](/docs/windows#title-bar-modifiers).
+- **Tell a held key's repeats from a new press** (#805). `KeyEvent.isRepeat` (experimental) is
+  `true` for auto-repeated key-downs, so a held Ctrl+W acts once. See [Ignore
+  auto-repeat](/docs/input/keyboard#ignore-auto-repeat).
+- **Tablet pens arrive as `PointerType.Stylus` and `Eraser`** (#857, #859, #870) on Linux, macOS and
+  Windows. See [Read the pointer type](/docs/input/pen-stylus#read-the-pointer-type).
+- **Public transfer-drag API** (#863, experimental). `TransferDrag`, `Modifier.transferDragHandle`,
+  `TransferGhostSource` and `TransferDragGesture` let your own docking or tab layout carry
+  cross-window drags on native Wayland. See [Carry a cross-window drag on
+  Wayland](/docs/input/drag-and-drop#carry-a-cross-window-drag-on-wayland).
+- **Constrain where a tab may stand** (#804). `TabWorkspace.constrainIndex` applies to `move`,
+  `reorder`, first declaration and every drop preview, for example to keep pinned tabs first. See
+  [Keep pinned tabs first](/docs/tool-windows/tabs#keep-pinned-tabs-first).
+- **A floating satellite can give its whole title bar to the compositor** (#802). With
+  `Satellite(floatingBarMovesWindow = true)`, the whole bar moves the window on native Wayland. See
+  [Give the whole bar to the
+  compositor](/docs/tool-windows/satellites#give-the-whole-bar-to-the-compositor).
+- **Global hotkeys report releases and repeats** (#773, #739). `HotKeyEventListener` receives every
+  `HotKeyEvent` with its `state`, `isRepeat`, `timestamp` and Wayland `activationToken`. See [Track
+  presses and releases](/docs/os/global-hotkey#track-presses-and-releases).
+- **`TaoRootsForTest` exposes the Compose roots of Tao windows** (#826, experimental), so an in-app
+  end-to-end harness can drive a real native window. See
+  [Testing](/docs/concepts/testing#click-a-node-by-test-tag).
+- **The Nucleus Lab replaces the demo apps** (#795). One app of probes, one per capability, opened
+  with `-Dlab.probe=<id>` or `nucleus-lab://probe/<id>`. See [Check a module with the Nucleus
+  Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab).
+- **Windows signing covers the app image** (#763, #748). Launchers and bundled DLLs, including those
+  inside unsigned JARs, are signed before the installer, so Smart App Control loads them. See [Sign
+  the bundled binaries](/docs/packaging/code-signing#sign-the-bundled-binaries).
+- **The whole MSVC C++ runtime ships with the app** (#834), in JVM app images (`windows {
+  bundleCRuntime }`) and GraalVM images. See [Bundle the Visual C++
+  runtime](/docs/packaging/windows#bundle-the-visual-c-runtime).
+- **ProGuard consumer rules** (#787). `proguard { consumerRules = true }` applies the
+  `META-INF/proguard/` rules of dependencies and keeps their `META-INF/services` providers. See
+  [Apply library consumer rules](/docs/reference/gradle-dsl#proguard-consumer-rules).
+- **glibc malloc arena cap** (#769, #757). `nucleusOptimization { mallocArenas = true }` caps
+  glibc's arenas at 2 on Linux. See [Cap glibc malloc arenas on
+  Linux](/docs/performance/startup#cap-glibc-malloc-arenas-on-linux).
+- **AppImage desktop integration** (#847, #848). `AppImageIntegration` installs the image's
+  `.desktop` entry and icons after the user agrees. See [Integrate the AppImage with the
+  desktop](/docs/packaging/linux#integrate-the-appimage-with-the-desktop).
+- **Localized Info.plist strings** (#854). `macOS { infoPlist { localization(...); localizationsDir
+  } }` writes `<lang>.lproj/InfoPlist.strings`. See [Localize Info.plist
+  strings](/docs/packaging/macos#localize-infoplist-strings).
+- **GitHub update lookups without the REST API** (#790). `GitHubProvider` reads public releases
+  through `releases.atom`, takes `host` and `protocol`, and picks the highest version on the
+  client's channel. See [Pick a release
+  channel](/docs/packaging/auto-update#pick-a-release-channel).
 - **Test updates without publishing a release** (#725). Simulate an update from `./gradlew run`
   (`-Pnucleus.updater.simulate=update`), point the app at your packaging output
   (`nucleus.updater.feedUrl`), or serve the next build with `serveUpdateFeed`. Installed apps
@@ -12967,11 +13951,41 @@ The major version marks the API breaks: read the
 
 ### Dependencies
 
+- **electron-builder 26.17.0** (#743).
 - **Kotlin 2.4.20, Compose Multiplatform 1.12.1, Jewel 0.41.0** (#723). Apps need Kotlin 2.4.20
   or later and Compose 1.12.1. See [Compatibility](/docs/start/install#compatibility).
 
 ### Bug fixes
 
+- **Wrap-content windows show at their measured size** (#868, #532) instead of flashing at the
+  fallback size. See [Size a window to its
+  content](/docs/windows/window-state#size-a-window-to-its-content).
+- **`dmg.sign = true` signs the DMG** (#855). See [Package a
+  DMG](/docs/packaging/macos#package-a-dmg).
+- **Linux desktop entries keep the display name** (#801).
+- **ProGuard release builds pass verification** (#794). The default rules turn off return-type
+  specialization, which caused `VerifyError: Bad return type`.
+- **One package rebuild per changed format** (#846).
+- **One `libGLESv2` on Windows** (#843).
+- **Updater**: SemVer build metadata is ignored (#771), `GenericProvider` allows `http` only on
+  loopback hosts (#742), manifest file names cannot escape the staging directory (#740), the DEB/RPM
+  update script quotes its paths (#741), and full downloads are hashed while written (#780).
+- **Partial redraw repaints layers a layout-phase write invalidates** (#831), and a popup closed
+  during layout no longer throws (#839).
+- **GraalVM**: images no longer embed Skiko twice (#822), static analysis reads multi-release JARs
+  for the image's JDK (#861), C interop natives stay out of JNI metadata (#862), and the Linux strip
+  no longer races its copies (#800).
+- **Windows: `cpuInfo()` reads per-CPU counters through PDH** (#867) instead of a slow WMI query.
+- **Linux**: recursive `fs-watcher` watches no longer overflow the inotify queue (#851),
+  notifications keep emoji (#849), `system-color` stops watching when the session bus disconnects
+  (#783), and no on-screen keyboard opens without a text field (#850).
+- **Linux touchscreens** (#813, #814, #815): a drag no longer registers as a tap plus a press, and
+  queued touches no longer play on after the fingers lift.
+- **Wayland: a click on a tab under its hover card stays a click** (#803).
+- **macOS: `Dispatchers.Main.immediate` runs inline from UI callbacks** (#852, #829).
+- **Windows rendering** (#761, #764, #873, #874): clean frames are paced to the display, windows
+  overhanging the desktop present through a DirectComposition mirror, animations keep running during
+  a modal move or resize, and a drag ends at the OS release point.
 - **Control-click is a secondary click on macOS** (#737), in windows and native popups, so
   `ContextMenuArea` and text-field menus open on it.
 - **AWT fonts in macOS GraalVM bundles** (#735). `java.awt.Font` no longer fails with `Problem
