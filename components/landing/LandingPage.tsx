@@ -5,7 +5,6 @@ import { useEffect } from 'react';
 import { TopNav } from './sections/TopNav';
 import { Hero } from './sections/Hero';
 import { Pitch } from './sections/Pitch';
-import { Toolkits } from './sections/Toolkits';
 import { Features } from './sections/Features';
 import { Accessibility } from './sections/Accessibility';
 import { Perf } from './sections/Perf';
@@ -55,7 +54,6 @@ export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
       <Pitch lang={lang} />
       <Features lang={lang} />
       <Accessibility lang={lang} />
-      <Toolkits lang={lang} />
       <Perf lang={lang} />
       <NativeParadox lang={lang} />
       <ShipPipeline lang={lang} />

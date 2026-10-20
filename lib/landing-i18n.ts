@@ -21,7 +21,6 @@ export function isLang(v: unknown): v is Lang {
 // =====================================================================
 export const navT = {
   docs: { en: 'Docs', fr: 'Docs' } as Bi<string>,
-  toolkits: { en: 'Toolkits', fr: 'Toolkits' } as Bi<string>,
   nativeApis: { en: 'Native APIs', fr: 'APIs natives' } as Bi<string>,
   download: { en: 'Download', fr: 'Télécharger' } as Bi<string>,
   changelog: { en: 'Changelog', fr: 'Changelog' } as Bi<string>,
@@ -314,70 +313,6 @@ export const accessibilityT = {
   pv_screenReader: { en: 'Screen Reader', fr: 'Lecteur d\'écran' } as Bi<string>,
   pv_orca: { en: 'Orca Screen Reader', fr: 'Lecteur d\'écran Orca' } as Bi<string>,
   pv_atspi: { en: 'AT-SPI bus bridged via AccessKit', fr: 'Bus AT-SPI ponté via AccessKit' } as Bi<string>,
-};
-
-// =====================================================================
-// Toolkits
-// =====================================================================
-export const toolkitsT = {
-  eyebrow: { en: 'Five native looks', fr: 'Cinq looks natifs' } as Bi<string>,
-  title: {
-    en: React.createElement(React.Fragment, null,
-      'Match every desktop, ',
-      React.createElement('span', { className: 'hero-grad' }, 'by design.'),
-    ),
-    fr: React.createElement(React.Fragment, null,
-      'Colle à chaque desktop, ',
-      React.createElement('span', { className: 'hero-grad' }, 'par design.'),
-    ),
-  } as Bi,
-  subtitle: {
-    en: 'Write your UI once in Compose, render it in the desktop style of your choice — macOS 26 Liquid Glass, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel, or cross-platform Material 3. macOS, Fluent and Yaru ship as open-source design systems on Maven Central (with Nucleus-backed decorated windows); Jewel is JetBrains\' toolkit; Material 3 is the Nucleus fallback.',
-    fr: 'Une UI écrite une fois en Compose, rendue dans le style desktop voulu — macOS 26 Liquid Glass, Windows 11 Fluent, Ubuntu Yaru, IntelliJ Jewel ou Material 3 multiplateforme. macOS, Fluent et Yaru sont des design systems open-source sur Maven Central (avec fenêtres décorées basées sur Nucleus) ; Jewel est le toolkit JetBrains ; Material 3 est le repli Nucleus.',
-  } as Bi<string>,
-  isNew: { en: 'Available', fr: 'Disponible' } as Bi<string>,
-  macOsName: { en: 'macOS Tahoe', fr: 'macOS Tahoe' } as Bi<string>,
-  fluentOs: { en: 'Windows 11', fr: 'Windows 11' } as Bi<string>,
-  yaruStyle: { en: 'GTK · LibAdwaita', fr: 'GTK · LibAdwaita' } as Bi<string>,
-  yaruOs: { en: 'Ubuntu · GNOME', fr: 'Ubuntu · GNOME' } as Bi<string>,
-  jewelStyle: { en: 'IntelliJ Platform', fr: 'IntelliJ Platform' } as Bi<string>,
-  jewelOs: { en: 'Cross-platform tooling', fr: 'Outils multiplateformes' } as Bi<string>,
-  m3Style: { en: 'Material You', fr: 'Material You' } as Bi<string>,
-  m3Os: { en: 'Cross-platform', fr: 'Multiplateforme' } as Bi<string>,
-  footnote: {
-    en: React.createElement(React.Fragment, null,
-      'Pick one toolkit per OS, or mix freely — every design system runs on every platform. You can ship a Fluent build on macOS while you prototype the native look. Either way, your ',
-      React.createElement('code', null, 'DecoratedWindow'),
-      ' stays the same Composable.',
-    ),
-    fr: React.createElement(React.Fragment, null,
-      'Choisissez un toolkit par OS, ou mélangez librement — chaque design system tourne sur chaque plateforme. Vous pouvez livrer un build Fluent sur macOS le temps de prototyper le look natif. Dans tous les cas, le ',
-      React.createElement('code', null, 'DecoratedWindow'),
-      ' reste le même Composable.',
-    ),
-  } as Bi,
-  // Preview UI strings
-  pv_settings: { en: 'Settings', fr: 'Paramètres' } as Bi<string>,
-  pv_settingsNucleus: { en: 'Settings — Nucleus Demo', fr: 'Paramètres — Démo Nucleus' } as Bi<string>,
-  pv_general: { en: 'General', fr: 'Général' } as Bi<string>,
-  pv_appearance: { en: 'Appearance', fr: 'Apparence' } as Bi<string>,
-  pv_network: { en: 'Network', fr: 'Réseau' } as Bi<string>,
-  pv_darkMode: { en: 'Dark mode', fr: 'Mode sombre' } as Bi<string>,
-  pv_dynamic: { en: 'Dynamic color', fr: 'Couleur dynamique' } as Bi<string>,
-  pv_continue: { en: 'Continue', fr: 'Continuer' } as Bi<string>,
-  pv_system: { en: 'System', fr: 'Système' } as Bi<string>,
-  pv_followSystem: { en: 'Follow system', fr: 'Suivre le système' } as Bi<string>,
-  pv_accent: { en: 'Accent', fr: 'Accent' } as Bi<string>,
-  pv_save: { en: 'Save', fr: 'Enregistrer' } as Bi<string>,
-  pv_darkStyle: { en: 'Dark style', fr: 'Style sombre' } as Bi<string>,
-  pv_accentColor: { en: 'Accent color', fr: 'Couleur d\'accent' } as Bi<string>,
-  pv_apply: { en: 'Apply', fr: 'Appliquer' } as Bi<string>,
-  pv_cancel: { en: 'Cancel', fr: 'Annuler' } as Bi<string>,
-  pv_editor: { en: 'Editor', fr: 'Éditeur' } as Bi<string>,
-  pv_plugins: { en: 'Plugins', fr: 'Plugins' } as Bi<string>,
-  pv_theme: { en: 'Theme', fr: 'Thème' } as Bi<string>,
-  pv_colors: { en: 'Colors', fr: 'Couleurs' } as Bi<string>,
-  pv_keymap: { en: 'Keymap', fr: 'Raccourcis' } as Bi<string>,
 };
 
 // =====================================================================

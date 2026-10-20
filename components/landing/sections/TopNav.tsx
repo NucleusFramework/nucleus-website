@@ -22,7 +22,6 @@ export function TopNav({ lang }: TopNavProps) {
         </Link>
         <div className="nav-links">
           <Link href={docsHref}>{pick(navT.docs, lang)}</Link>
-          <a href="#toolkits">{pick(navT.toolkits, lang)}</a>
           <a href="#paradigm">{pick(navT.nativeApis, lang)}</a>
           <Link href={`${docsHref}/start/install`}>{pick(navT.download, lang)}</Link>
           <Link href={`${docsHref}/changelog`}>{pick(navT.changelog, lang)}</Link>
