@@ -30,10 +30,39 @@ const STAR_FIELD: Array<[number, number, number, number]> = [
 export function Atom({ speed = 1, size = 560, accent = '#5B8DEF' }: AtomProps) {
   // Speed multiplier: bigger = slower (period is divided by speed)
   const s = (sec: number) => `${(sec / speed).toFixed(2)}s`;
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  const svgRef = React.useRef<SVGSVGElement>(null);
+
+  // Pause every loop (CSS + SMIL) when off-screen or when the user prefers reduced motion
+  React.useEffect(() => {
+    const wrap = wrapRef.current;
+    const svg = svgRef.current;
+    if (!wrap || !svg) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let visible = true;
+    const sync = () => {
+      const paused = reduced.matches || !visible;
+      wrap.dataset.paused = String(paused);
+      if (paused) svg.pauseAnimations();
+      else svg.unpauseAnimations();
+    };
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      sync();
+    });
+    io.observe(wrap);
+    reduced.addEventListener('change', sync);
+    sync();
+    return () => {
+      io.disconnect();
+      reduced.removeEventListener('change', sync);
+    };
+  }, []);
 
   return (
-    <div className="atom-wrap" style={{ width: `min(${size}px, 100%)` }}>
+    <div ref={wrapRef} className="atom-wrap" style={{ width: `min(${size}px, 100%)` }}>
       <svg
+        ref={svgRef}
         viewBox="-280 -280 560 560"
         className="atom-svg"
         preserveAspectRatio="xMidYMid meet"
@@ -206,11 +235,18 @@ export function Atom({ speed = 1, size = 560, accent = '#5B8DEF' }: AtomProps) {
           animation: nucleusPulse 3.4s ease-in-out infinite;
         }
         .nucleus-bright {
+          transform-origin: 0 0;
           animation: nucleusBright 3.4s ease-in-out infinite;
           filter: drop-shadow(0 0 16px #FFF) drop-shadow(0 0 32px #5B8DEF);
         }
         .nucleus-bg-glow {
           animation: nucleusBgPulse 4s ease-in-out infinite;
+        }
+        .atom-wrap[data-paused='true'] * {
+          animation-play-state: paused !important;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .atom-wrap * { animation: none !important; }
         }
         @keyframes nucleusPulse {
           0%, 100% { transform: scale(1); opacity: 1; }

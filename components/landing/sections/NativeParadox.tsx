@@ -1378,6 +1378,8 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
           {NATIVE_EXAMPLES.map((e) => (
             <button
               key={e.id}
+              type="button"
+              aria-pressed={e.id === exId}
               onClick={() => { setExId(e.id); setOsIdx(0); }}
               className={`np-ex ${e.id === exId ? 'is-active' : ''}`}
             >
@@ -1398,6 +1400,8 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
                 {example.natives.map((n, i) => (
                   <button
                     key={n.os}
+                    type="button"
+                    aria-pressed={i === osIdx}
                     onClick={() => setOsIdx(i)}
                     className={`np-os ${i === osIdx ? 'is-active' : ''}`}
                   >{n.os}</button>
@@ -1415,15 +1419,15 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
           </div>
 
           {/* Big arrow between */}
-          <div className="np-arrow" aria-hidden="true">
+          <div className="np-arrow">
             <div className="np-arrow-ratio">
               <div className="np-arrow-num">{ratio}×</div>
               <div className="np-arrow-num-k">{pick(npT.fewerLines, lang)}</div>
             </div>
-            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" className="np-arrow-icon">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" className="np-arrow-icon" aria-hidden="true">
               <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <div className="np-arrow-tag">
+            <div className="np-arrow-tag" aria-hidden="true">
               <img src={asset('/assets/logo.png')} alt="" />
               Nucleus
             </div>
@@ -1436,9 +1440,9 @@ export function NativeParadox({ lang }: NativeParadoxProps) {
                 <span className="np-label-dot"/> {pick(npT.oneApi, lang)}
               </div>
               <div className="np-os-tabs np-os-tabs-static">
-                <button className="np-os is-active">macOS</button>
-                <button className="np-os is-active">Windows</button>
-                <button className="np-os is-active">Linux</button>
+                <span className="np-os is-active">macOS</span>
+                <span className="np-os is-active">Windows</span>
+                <span className="np-os is-active">Linux</span>
               </div>
             </div>
             <div className="np-code np-code-nucleus">

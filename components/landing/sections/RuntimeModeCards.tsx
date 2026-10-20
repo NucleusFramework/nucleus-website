@@ -46,16 +46,22 @@ function RuntimeStat({ label, value, fmt, unit, active }: Stat & { active: boole
   const [v, setV] = useState(0);
   useEffect(() => {
     if (!active) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setV(value);
+      return;
+    }
+    let frame = 0;
     const start = performance.now();
     const dur = 1400;
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / dur);
       const eased = 1 - Math.pow(1 - t, 3);
       setV(value * eased);
-      if (t < 1) requestAnimationFrame(tick);
+      if (t < 1) frame = requestAnimationFrame(tick);
       else setV(value);
     };
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [active, value]);
 
   return (
@@ -93,7 +99,7 @@ function RuntimeModeCard({ variant, tag, name, tagline, desc, stats, throughputL
         <div className="rmode-thru-track">
           <div
             className="rmode-thru-fill"
-            style={{ width: inView ? `${throughputPct}%` : '0%' }}
+            style={{ width: `${throughputPct}%`, transform: inView ? 'scaleX(1)' : 'scaleX(0)' }}
           />
           <span className="rmode-thru-cpp" style={{ left: '96%' }} title={cppLabel}>C++</span>
         </div>

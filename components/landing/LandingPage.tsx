@@ -15,14 +15,7 @@ import { Community } from './sections/Community';
 import { Footer } from './sections/Footer';
 import type { Lang } from '@/lib/landing-i18n';
 
-// Hardcoded tweak defaults (tweaks panel removed from production build)
-const TWEAK_DEFAULTS = {
-  accent: '#5B8DEF',
-  atomSpeed: 1,
-  background: 'deep',
-  density: 'comfortable',
-  showStarfield: true,
-} as const;
+const ACCENT = '#5B8DEF';
 
 interface LandingPageProps {
   lang?: Lang;
@@ -30,33 +23,35 @@ interface LandingPageProps {
 }
 
 export function LandingPage({ lang = 'en', stars = null }: LandingPageProps) {
-  // Apply tweaks live + cursor highlight on .feat-card (ported from index.html script)
+  // Cursor-following highlight on .feat-card, throttled to one write per frame
   useEffect(() => {
-    document.documentElement.style.setProperty('--accent', TWEAK_DEFAULTS.accent);
-    document.body.dataset.bg = TWEAK_DEFAULTS.background;
-    document.body.dataset.density = TWEAK_DEFAULTS.density;
-
-    const onMove = (e: MouseEvent) => {
-      const target = e.target as Element | null;
-      const card = target?.closest?.('.feat-card') as HTMLElement | null;
-      if (!card) return;
+    let frame = 0;
+    let last: PointerEvent | null = null;
+    const apply = () => {
+      frame = 0;
+      const e = last;
+      const card = (e?.target as Element | null)?.closest?.('.feat-card') as HTMLElement | null;
+      if (!e || !card) return;
       const r = card.getBoundingClientRect();
       card.style.setProperty('--mx', `${e.clientX - r.left}px`);
       card.style.setProperty('--my', `${e.clientY - r.top}px`);
     };
-    document.addEventListener('mousemove', onMove);
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      last = e;
+      if (!frame) frame = requestAnimationFrame(apply);
+    };
+    document.addEventListener('pointermove', onMove, { passive: true });
     return () => {
-      document.removeEventListener('mousemove', onMove);
-      delete document.body.dataset.bg;
-      delete document.body.dataset.density;
-      document.documentElement.style.removeProperty('--accent');
+      document.removeEventListener('pointermove', onMove);
+      cancelAnimationFrame(frame);
     };
   }, []);
 
   return (
-    <div className="landing-root" data-bg={TWEAK_DEFAULTS.background} data-density={TWEAK_DEFAULTS.density}>
+    <div className="landing-root">
       <TopNav lang={lang} />
-      <Hero accent={TWEAK_DEFAULTS.accent} atomSpeed={TWEAK_DEFAULTS.atomSpeed} lang={lang} stars={stars} />
+      <Hero accent={ACCENT} lang={lang} stars={stars} />
       <Pitch lang={lang} />
       <Features lang={lang} />
       <Accessibility lang={lang} />

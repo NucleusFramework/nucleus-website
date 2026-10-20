@@ -6,12 +6,12 @@ import { formatStarCount } from '@/lib/site';
 
 interface HeroProps {
   accent: string;
-  atomSpeed: number;
+  atomSpeed?: number;
   lang: Lang;
   stars?: number | null;
 }
 
-export function Hero({ accent, atomSpeed, lang, stars = null }: HeroProps) {
+export function Hero({ accent, atomSpeed = 1, lang, stars = null }: HeroProps) {
   const base = lang === 'fr' ? '/fr' : '/en';
   const installHref = `${base}/docs/start/install`;
   const migrateHref = `${base}/docs/migrate/from-jb-compose`;

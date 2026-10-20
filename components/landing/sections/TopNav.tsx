@@ -16,7 +16,7 @@ export function TopNav({ lang }: TopNavProps) {
     <nav className="nav">
       <div className="nav-inner">
         <Link href={home} className="nav-brand">
-          <img src={asset('/assets/logo.png')} alt="" />
+          <img src={asset('/assets/logo.png')} alt="" width={28} height={28} />
           <span>Nucleus</span>
           <span className="ver">{NUCLEUS_VTAG}</span>
         </Link>
@@ -24,48 +24,13 @@ export function TopNav({ lang }: TopNavProps) {
           <Link href={docsHref}>{pick(navT.docs, lang)}</Link>
           <a href="#toolkits">{pick(navT.toolkits, lang)}</a>
           <a href="#paradigm">{pick(navT.nativeApis, lang)}</a>
-          <a href="#install">{pick(navT.download, lang)}</a>
-          <a href="https://github.com/NucleusFramework/Nucleus" target="_blank" rel="noreferrer">{pick(navT.changelog, lang)}</a>
+          <Link href={`${docsHref}/start/install`}>{pick(navT.download, lang)}</Link>
+          <Link href={`${docsHref}/changelog`}>{pick(navT.changelog, lang)}</Link>
         </div>
         <div className="nav-right">
-          <div
-            className="nav-lang"
-            style={{
-              display: 'inline-flex',
-              gap: 2,
-              padding: 2,
-              borderRadius: 999,
-              border: '1px solid rgba(255,255,255,0.08)',
-              fontSize: 12,
-              marginRight: 4,
-            }}
-          >
-            <Link
-              href="/en/"
-              aria-label="English"
-              style={{
-                padding: '4px 9px',
-                borderRadius: 999,
-                lineHeight: 1,
-                fontWeight: 600,
-                textDecoration: 'none',
-                color: lang === 'en' ? 'var(--text)' : 'var(--muted)',
-                background: lang === 'en' ? 'rgba(255,255,255,0.08)' : 'transparent',
-              }}
-            >EN</Link>
-            <Link
-              href="/fr/"
-              aria-label="Français"
-              style={{
-                padding: '4px 9px',
-                borderRadius: 999,
-                lineHeight: 1,
-                fontWeight: 600,
-                textDecoration: 'none',
-                color: lang === 'fr' ? 'var(--text)' : 'var(--muted)',
-                background: lang === 'fr' ? 'rgba(255,255,255,0.08)' : 'transparent',
-              }}
-            >FR</Link>
+          <div className="nav-lang">
+            <Link href="/en/" aria-label="English" aria-current={lang === 'en' ? 'page' : undefined}>EN</Link>
+            <Link href="/fr/" aria-label="Français" aria-current={lang === 'fr' ? 'page' : undefined}>FR</Link>
           </div>
           <div className="nav-icon-group">
             <a href={SITE.github} target="_blank" rel="noreferrer" className="nav-icon-btn" aria-label="GitHub">

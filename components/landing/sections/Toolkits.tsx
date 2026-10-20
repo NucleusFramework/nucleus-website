@@ -21,8 +21,9 @@ function ToolkitCard({ id, name, style, os, module: mod, href, children, onHover
   return (
     <div
       className={`tk-card tk-card-${id} ${hovered === id ? 'is-hovered' : ''} ${hovered && hovered !== id ? 'is-dimmed' : ''}`}
-      onMouseEnter={() => onHover(id)}
-      onMouseLeave={() => onHover(null)}
+      // Mouse only: touch would leave the card stuck hovered and its siblings dimmed
+      onPointerEnter={(e) => { if (e.pointerType === 'mouse') onHover(id); }}
+      onPointerLeave={(e) => { if (e.pointerType === 'mouse') onHover(null); }}
     >
       <div className="tk-window">
         {children}
