@@ -29,11 +29,11 @@ All DSL types live in `dev.nucleusframework.desktop.application.dsl`.
 | `fromFiles(vararg Any)` | | Extra files on the classpath |
 | `mainClass` | `String?` | Entry point |
 | `mainJar` | `RegularFileProperty` | Entry JAR |
-| `javaHome` | `String` | JDK used to run and package. Always wins over `lastJdk` |
+| `javaHome` | `String` | JDK used to run and package. Defaults to the project's JVM toolchain (`java.toolchain` or `jvmToolchain(...)`), else the Gradle daemon's JDK. An explicit value always wins over `lastJdk` |
 | `args`, `args(vararg)` | `MutableList<String>` | App arguments |
 | `jvmArgs`, `jvmArgs(vararg)` | `MutableList<String>` | JVM arguments. The defaults already contain `--enable-native-access=ALL-UNNAMED` (JEP 472) |
 | `garbageCollector` | `GarbageCollector?` | HotSpot collector: `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`. Unset keeps JDK ergonomics. An explicit `-XX:+Use…GC` in `jvmArgs` still wins |
-| `nucleusOptimization` | `Boolean` (`false`) | Startup pack. See [below](#nucleusoptimization) |
+| `nucleusOptimization` | `Boolean` (`false`) | Optimization pack. See [below](#nucleusoptimization) |
 | `nucleusOptimization { }` | `NucleusOptimizationSettings` | Per-knob overrides |
 | `nativeDistributions { }` | `JvmApplicationDistributions` | See [`nativeDistributions { }`](#nativedistributions) |
 | `buildTypes { }` | `JvmApplicationBuildTypes` | See [`buildTypes { }`](#buildtypes) |
@@ -42,7 +42,7 @@ All DSL types live in `dev.nucleusframework.desktop.application.dsl`.
 
 ### `nucleusOptimization { }` [#nucleusoptimization]
 
-`nucleusOptimization = true` turns on five startup knobs at once. Each knob in the block is a `Boolean?`: `null` follows the master switch, `true` or `false` forces that knob regardless of the others.
+`nucleusOptimization = true` turns on seven knobs at once. Each knob in the block is a `Boolean?`: `null` follows the master switch, `true` or `false` forces that knob regardless of the others.
 
 ```kotlin
 nucleus.application {
@@ -58,6 +58,8 @@ nucleus.application {
 | `singleJar` | Flattens the runtime JARs (or sets `joinOutputJars` when ProGuard is on) so the jpackage image holds one JAR |
 | `idleGc` | Requests a GC 3 s after the last window loses focus, or at once when a window is minimized. Also baked into GraalVM images |
 | `lastJdk` | Packages and runs with OpenJDK 27, downloaded to `<gradle-user-home>/nucleus/jdk` (BellSoft Liberica JDK 27 on Intel macOS and Windows ARM). `javaHome` wins. The Gradle compile JDK does not change |
+| `partialRedraw` | Repaints and presents only what changed in each frame. Adds `-Dnucleus.tao.partialRedraw=true` |
+| `mallocArenas` | Linux: caps glibc's malloc arenas at 2. Adds `-Dnucleus.optimization.mallocArenaMax=2`, unless `jvmArgs` sets another value (`0` disables it). A `MALLOC_ARENA_MAX` environment variable wins. Also baked into GraalVM images |
 
 The pack leaves `enableAotCache` and ProGuard alone. See [Startup optimization](/docs/performance/startup).
 
@@ -89,6 +91,35 @@ Each named `AdditionalLauncher` adds a second executable to the jpackage image. 
 | `obfuscate` | `Property<Boolean>` | `false` |
 | `optimize` | `Property<Boolean>` | `true` |
 | `joinOutputJars` | `Property<Boolean>` | `false` |
+| `consumerRules` | `Property<Boolean>` | `false` |
+| `consumerRulesExclusions`, `excludeConsumerRules(vararg)` | `SetProperty<String>` | empty |
+
+#### Apply library consumer rules [#proguard-consumer-rules]
+
+Standalone ProGuard ignores the keep rules libraries ship for R8. `consumerRules = true` applies the
+rule files every dependency carries under `META-INF/proguard/`, and keeps the service providers its
+`META-INF/services` files declare, as R8 and the Android Gradle plugin do:
+
+```kotlin title="build.gradle.kts"
+buildTypes {
+    release {
+        proguard {
+            isEnabled = true
+            consumerRules = true
+            // group:module or a project path; * matches any run of characters
+            excludeConsumerRules("com.squareup.*:*", ":shared")
+        }
+    }
+}
+```
+
+A rule file that uses anything but keep, attribute, warning or assumption options is skipped with a
+warning. An excluded dependency loses its rule files but keeps its service providers. The rules
+stay off by default because they keep more than an existing configuration did.
+
+The default rules keep enum `values()` and `valueOf()`, and turn off return-type specialization
+(`-optimizations !method/specialization/returntype`), which produced classes that fail with
+`VerifyError: Bad return type`.
 
 ## `nativeDistributions { }` [#nativedistributions]
 
@@ -101,7 +132,7 @@ From `AbstractDistributions`, also available under `nativeApplication { distribu
 | Property | Type | Notes |
 | --- | --- | --- |
 | `outputBaseDir` | `DirectoryProperty` | Default `build/compose/binaries` |
-| `appName`, `packageName`, `packageVersion` | `String?` | |
+| `appName`, `packageName`, `packageVersion` | `String?` | A SemVer pre-release or build suffix (`1.2.0-beta.1`) is accepted. On macOS and Windows the app image gets the numeric part only; installers and update manifests keep the full version |
 | `copyright`, `description`, `vendor`, `homepage` | `String?` | |
 | `appResourcesRootDir` | `DirectoryProperty` | Per-OS resources copied into the app |
 | `licenseFile` | `RegularFileProperty` | |
@@ -161,7 +192,7 @@ The plugin looks for Node.js in this order: the `compose.electronBuilder.nodePat
 
 `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
 
-jpackage builds `RawAppImage`, the bare app image. electron-builder builds every other format from it. `AppX` and `Flatpak` always go through the sandboxed pipeline; `Pkg` does only when `macOS { pkg { appStore = true } }`, the default.
+jpackage builds `RawAppImage`, the bare app image. electron-builder builds every other format from it. `Flatpak` always goes through the sandboxed pipeline; `Pkg` does only when `macOS { pkg { appStore = true } }`, the default. `AppX` runs with full trust and builds like the other Windows formats.
 
 <Callout type="warn" title="Changed in 3.0">
 `TargetFormat.isStoreFormat` is deprecated at `ERROR` level and no longer compiles. A PKG is a store format only when `pkg.appStore` is `true`, so branch on the DSL value instead. See [Migrate from 2.x](/docs/migrate/from-2.x).
@@ -191,7 +222,7 @@ jpackage builds `RawAppImage`, the bare app image. electron-builder builds every
 | `pkg { }` | `PkgSettings` | See [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | See [`appExtensions { }`](#macos-app-extensions) |
 | `launchAgents { }` | `LaunchAgentSettings` | See [`launchAgents { }`](#macos-launch-agents) |
-| `infoPlist { extraKeysRawXml }` | `InfoPlistSettings` | Extra keys, as raw XML, added to `Info.plist` |
+| `infoPlist { }` | `InfoPlistSettings` | `extraKeysRawXml`: extra keys, as raw XML. `localization(language, strings)`: writes `<language>.lproj/InfoPlist.strings`. `localizationsDir`: a `File?` whose `<lang>.lproj` directories are copied into `Contents/Resources`. See [Localize Info.plist strings](/docs/packaging/macos#localize-infoplist-strings) |
 
 <Callout type="warn" title="Changed in 3.0">
 `macOS.appStore` is deprecated at `ERROR` level and no longer compiles. The 2.x property was ignored (PKG always targeted the App Store), so it was not aliased. Set `macOS { pkg { appStore = … } }` after choosing the channel you want. See [Migrate from 2.x](/docs/migrate/from-2.x).
@@ -271,7 +302,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `format` | `DmgFormat?`: `UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO` |
 | `size` | `String?` |
 | `shrink` | `Boolean?` |
-| `sign` | `Boolean` (default `false`) |
+| `sign` | `Boolean` (default `false`). Signs the image with `signing.identity`; needs `signing.sign` |
 | `background`, `icon`, `badgeIcon` | `RegularFileProperty` |
 | `backgroundColor` | `String?` |
 | `window { x; y; width; height }` | `Int?` each |
@@ -301,6 +332,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `packageName`, `packageVersion` | `String?` | | |
 | `msiPackageVersion`, `exePackageVersion` | `String?` | | Per-format version overrides |
 | `console` | `Boolean` | `false` | Attach a console window |
+| `bundleCRuntime` | `Boolean` | `true` | Complete the app image's MSVC C++ runtime from the newest Visual Studio install. See [Bundle the Visual C++ runtime](/docs/packaging/windows#bundle-the-visual-c-runtime) |
 | `dirChooser` | `Boolean` | `true` | |
 | `shortcut`, `menu` | `Boolean` | `false` | `menu` is also `true` when `menuGroup` is set |
 | `menuGroup` | `String?` | | |
@@ -373,6 +405,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `certificatePassword`, `certificateSha1`, `certificateSubjectName` | `String?` | |
 | `algorithm` | `SigningAlgorithm`: `Sha1`, `Sha256`, `Sha512` | `Sha256` |
 | `timestampServer` | `String?` | |
+| `signNativeLibraries` | `Boolean` | `true`. Also signs the bundled DLLs, loose and inside unsigned JARs. The launchers are signed regardless |
 | `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName` | `String?` | Azure Artifact Signing |
 
 See [Code signing](/docs/packaging/code-signing).
@@ -426,7 +459,7 @@ The defaults come from the `compose.desktop.linux.sign` and `compose.desktop.lin
 | `category` | `AppImageCategory?` | `AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility` |
 | `genericName`, `synopsis` | `String?` | |
 | `desktopEntries` | `Map<String, String>` | Extra desktop entry keys |
-| `compressionLevel` | `CompressionLevel?` | Overrides the root value. `Normal` or `Store` start faster under FUSE |
+| `compressionLevel` | `CompressionLevel?` | Overrides the root value. `Store` builds a gzip image; `Normal`, `Maximum` and `Ultra` build the same zstd image |
 
 ### `snap { }` [#linux-snap]
 
@@ -532,8 +565,8 @@ The `INNOVATION` channel now resolves to `25i4` (GraalVM 25.4, JDK 25.0.4) inste
 | `macOS` | `minimumSystemVersion` | `Property<String>` | `"12.0"` |
 | `macOS` | `macOsSdkVersion` | `Property<String>` | `"26.0"` |
 | `windows` | `bundleCRuntime` | `Property<Boolean>` | `true`: copy the MSVC runtime DLLs next to the `.exe` |
-| `windows` | `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` |
-| `windows` | `sourceDir` | `DirectoryProperty` | toolchain `bin` |
+| `windows` | `dlls` | `ListProperty<String>` | The whole C++ runtime: `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`, `msvcp140_1.dll`, `msvcp140_2.dll`, `concrt140.dll` |
+| `windows` | `sourceDir` | `DirectoryProperty` | The newest MSVC redistributable, else the toolchain `bin` (which ships the first three DLLs only) |
 | `metadataRepository` | `enabled` | `Property<Boolean>` | `true` |
 | `metadataRepository` | `version` | `Property<String>` | `"1.1.4"` |
 | `metadataRepository` | `excludedModules` | `SetProperty<String>` | `group:artifact` entries |
@@ -566,7 +599,7 @@ The `INNOVATION` channel now resolves to `25i4` (GraalVM 25.4, JDK 25.0.4) inste
 
 ## Generated app properties [#app-properties]
 
-The plugin writes `nucleus/nucleus-app.properties` into the app resources. The `NucleusApp` runtime object reads it at startup, which is how DSL values reach the runtime libraries. Keys: `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, and `optimization.idleGc` when the `idleGc` knob is on.
+The plugin writes `nucleus/nucleus-app.properties` into the app resources. The `NucleusApp` runtime object reads it at startup, which is how DSL values reach the runtime libraries. Keys: `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, and `optimization.idleGc`, `optimization.partialRedraw` and `optimization.mallocArenaMax` when the matching knob is on.
 
 ## What's next
 

@@ -29,11 +29,11 @@ Tous les types du DSL se trouvent dans `dev.nucleusframework.desktop.application
 | `fromFiles(vararg Any)` | | Fichiers supplémentaires sur le classpath |
 | `mainClass` | `String?` | Point d'entrée |
 | `mainJar` | `RegularFileProperty` | JAR d'entrée |
-| `javaHome` | `String` | JDK utilisé pour lancer et empaqueter. Prime toujours sur `lastJdk` |
+| `javaHome` | `String` | JDK utilisé pour lancer et empaqueter. Par défaut, la toolchain JVM du projet (`java.toolchain` ou `jvmToolchain(...)`), sinon le JDK du daemon Gradle. Une valeur explicite prime toujours sur `lastJdk` |
 | `args`, `args(vararg)` | `MutableList<String>` | Arguments de l'application |
 | `jvmArgs`, `jvmArgs(vararg)` | `MutableList<String>` | Arguments JVM. Les valeurs par défaut contiennent déjà `--enable-native-access=ALL-UNNAMED` (JEP 472) |
 | `garbageCollector` | `GarbageCollector?` | Collecteur HotSpot : `SERIAL`, `PARALLEL`, `G1`, `Z`, `SHENANDOAH`, `EPSILON`. Non défini, l'ergonomie du JDK s'applique. Un `-XX:+Use…GC` explicite dans `jvmArgs` l'emporte |
-| `nucleusOptimization` | `Boolean` (`false`) | Pack de démarrage. Voir [plus bas](#nucleusoptimization) |
+| `nucleusOptimization` | `Boolean` (`false`) | Pack d'optimisation. Voir [plus bas](#nucleusoptimization) |
 | `nucleusOptimization { }` | `NucleusOptimizationSettings` | Surcharges option par option |
 | `nativeDistributions { }` | `JvmApplicationDistributions` | Voir [`nativeDistributions { }`](#nativedistributions) |
 | `buildTypes { }` | `JvmApplicationBuildTypes` | Voir [`buildTypes { }`](#buildtypes) |
@@ -42,7 +42,7 @@ Tous les types du DSL se trouvent dans `dev.nucleusframework.desktop.application
 
 ### `nucleusOptimization { }` [#nucleusoptimization]
 
-`nucleusOptimization = true` active cinq options de démarrage d'un coup. Chaque option du bloc est un `Boolean?` : `null` suit l'interrupteur principal, `true` ou `false` force l'option quelles que soient les autres.
+`nucleusOptimization = true` active sept options d'un coup. Chaque option du bloc est un `Boolean?` : `null` suit l'interrupteur principal, `true` ou `false` force l'option quelles que soient les autres.
 
 ```kotlin
 nucleus.application {
@@ -58,6 +58,8 @@ nucleus.application {
 | `singleJar` | Aplatit les JAR du runtime (ou active `joinOutputJars` quand ProGuard est actif) pour que l'image jpackage ne contienne qu'un JAR |
 | `idleGc` | Demande un GC 3 s après la perte du focus par la dernière fenêtre, ou tout de suite quand une fenêtre est réduite. Aussi intégré aux images GraalVM |
 | `lastJdk` | Empaquette et lance avec OpenJDK 27, téléchargé dans `<gradle-user-home>/nucleus/jdk` (BellSoft Liberica JDK 27 sur macOS Intel et Windows ARM). `javaHome` l'emporte. Le JDK de compilation Gradle ne change pas |
+| `partialRedraw` | Ne repeint et ne présente que ce qui a changé à chaque frame. Ajoute `-Dnucleus.tao.partialRedraw=true` |
+| `mallocArenas` | Linux : limite les arènes malloc de glibc à 2. Ajoute `-Dnucleus.optimization.mallocArenaMax=2`, sauf si `jvmArgs` fixe une autre valeur (`0` la désactive). Une variable d'environnement `MALLOC_ARENA_MAX` l'emporte. Également intégré aux images GraalVM |
 
 Le pack ne touche ni à `enableAotCache` ni à ProGuard. Voir [Optimisation du démarrage](/docs/performance/startup).
 
@@ -89,6 +91,37 @@ Chaque `AdditionalLauncher` nommé ajoute un second exécutable à l'image jpack
 | `obfuscate` | `Property<Boolean>` | `false` |
 | `optimize` | `Property<Boolean>` | `true` |
 | `joinOutputJars` | `Property<Boolean>` | `false` |
+| `consumerRules` | `Property<Boolean>` | `false` |
+| `consumerRulesExclusions`, `excludeConsumerRules(vararg)` | `SetProperty<String>` | vide |
+
+#### Appliquer les règles consommateur des bibliothèques [#proguard-consumer-rules]
+
+ProGuard autonome ignore les règles keep que les bibliothèques livrent pour R8. `consumerRules = true`
+applique les fichiers de règles que chaque dépendance embarque sous `META-INF/proguard/`, et conserve
+les fournisseurs de services que déclarent ses fichiers `META-INF/services`, comme le font R8 et le
+plugin Android Gradle :
+
+```kotlin title="build.gradle.kts"
+buildTypes {
+    release {
+        proguard {
+            isEnabled = true
+            consumerRules = true
+            // group:module ou chemin de projet ; * correspond à n'importe quelle suite de caractères
+            excludeConsumerRules("com.squareup.*:*", ":shared")
+        }
+    }
+}
+```
+
+Un fichier de règles qui utilise autre chose que des options keep, d'attributs, d'avertissement ou
+d'hypothèse est ignoré avec un avertissement. Une dépendance exclue perd ses fichiers de règles mais
+garde ses fournisseurs de services. L'option reste désactivée par défaut, car elle conserve plus de
+code qu'une configuration existante.
+
+Les règles par défaut conservent `values()` et `valueOf()` des enums, et désactivent la
+spécialisation du type de retour (`-optimizations !method/specialization/returntype`), qui
+produisait des classes en échec avec `VerifyError: Bad return type`.
 
 ## `nativeDistributions { }` [#nativedistributions]
 
@@ -101,7 +134,7 @@ Héritées d'`AbstractDistributions`, également disponibles sous `nativeApplica
 | Propriété | Type | Notes |
 | --- | --- | --- |
 | `outputBaseDir` | `DirectoryProperty` | Par défaut `build/compose/binaries` |
-| `appName`, `packageName`, `packageVersion` | `String?` | |
+| `appName`, `packageName`, `packageVersion` | `String?` | Un suffixe SemVer de pré-release ou de build (`1.2.0-beta.1`) est accepté. Sur macOS et Windows, l'image de l'application ne reçoit que la partie numérique ; les installateurs et les manifestes de mise à jour gardent la version complète |
 | `copyright`, `description`, `vendor`, `homepage` | `String?` | |
 | `appResourcesRootDir` | `DirectoryProperty` | Ressources par OS copiées dans l'application |
 | `licenseFile` | `RegularFileProperty` | |
@@ -161,7 +194,7 @@ Le plugin cherche Node.js dans cet ordre : la propriété Gradle `compose.electr
 
 `RawAppImage`, `Pkg`, `Deb`, `Rpm`, `Dmg`, `Exe`, `Msi`, `Nsis`, `NsisWeb`, `Portable`, `AppX`, `AppImage`, `Pacman`, `Snap`, `Flatpak`, `Zip`, `Tar`, `SevenZ`.
 
-jpackage construit `RawAppImage`, l'image d'application brute. electron-builder produit tous les autres formats à partir d'elle. `AppX` et `Flatpak` passent toujours par le pipeline sandboxé ; `Pkg` seulement avec `macOS { pkg { appStore = true } }`, la valeur par défaut.
+jpackage construit `RawAppImage`, l'image d'application brute. electron-builder produit tous les autres formats à partir d'elle. `Flatpak` passe toujours par le pipeline sandboxé ; `Pkg` seulement avec `macOS { pkg { appStore = true } }`, la valeur par défaut. `AppX` tourne en full trust et se construit comme les autres formats Windows.
 
 <Callout type="warn" title="Modifié en 3.0">
 `TargetFormat.isStoreFormat` est déprécié au niveau `ERROR` et ne compile plus. Un PKG n'est un format store que si `pkg.appStore` vaut `true` : testez donc la valeur du DSL. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
@@ -191,7 +224,7 @@ jpackage construit `RawAppImage`, l'image d'application brute. electron-builder 
 | `pkg { }` | `PkgSettings` | Voir [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | Voir [`appExtensions { }`](#macos-app-extensions) |
 | `launchAgents { }` | `LaunchAgentSettings` | Voir [`launchAgents { }`](#macos-launch-agents) |
-| `infoPlist { extraKeysRawXml }` | `InfoPlistSettings` | Clés supplémentaires, en XML brut, ajoutées à `Info.plist` |
+| `infoPlist { }` | `InfoPlistSettings` | `extraKeysRawXml` : clés supplémentaires, en XML brut. `localization(language, strings)` : écrit `<language>.lproj/InfoPlist.strings`. `localizationsDir` : un `File?` dont les répertoires `<lang>.lproj` sont copiés dans `Contents/Resources`. Voir [Localiser les chaînes d'Info.plist](/docs/packaging/macos#localiser-les-chaînes-dinfoplist) |
 
 <Callout type="warn" title="Modifié en 3.0">
 `macOS.appStore` est déprécié au niveau `ERROR` et ne compile plus. En 2.x, la propriété était ignorée (le PKG ciblait toujours l'App Store) : elle n'a donc pas été convertie en alias. Choisissez d'abord le canal voulu, puis définissez `macOS { pkg { appStore = … } }`. Voir [Migrer depuis 2.x](/docs/migrate/from-2.x).
@@ -271,7 +304,7 @@ Chaque extension est signée avec ses propres entitlements, puis l'application e
 | `format` | `DmgFormat?` : `UDRW`, `UDRO`, `UDCO`, `UDZO`, `UDBZ`, `ULFO` |
 | `size` | `String?` |
 | `shrink` | `Boolean?` |
-| `sign` | `Boolean` (par défaut `false`) |
+| `sign` | `Boolean` (par défaut `false`). Signe l'image avec `signing.identity` ; exige `signing.sign` |
 | `background`, `icon`, `badgeIcon` | `RegularFileProperty` |
 | `backgroundColor` | `String?` |
 | `window { x; y; width; height }` | `Int?` chacun |
@@ -301,6 +334,7 @@ Chaque extension est signée avec ses propres entitlements, puis l'application e
 | `packageName`, `packageVersion` | `String?` | | |
 | `msiPackageVersion`, `exePackageVersion` | `String?` | | Surcharges de version par format |
 | `console` | `Boolean` | `false` | Ouvre une fenêtre de console |
+| `bundleCRuntime` | `Boolean` | `true` | Complète le runtime C++ MSVC de l'image de l'application depuis l'installation Visual Studio la plus récente. Voir [Embarquer le runtime Visual C++](/docs/packaging/windows#embarquer-le-runtime-visual-c) |
 | `dirChooser` | `Boolean` | `true` | |
 | `shortcut`, `menu` | `Boolean` | `false` | `menu` vaut aussi `true` quand `menuGroup` est défini |
 | `menuGroup` | `String?` | | |
@@ -373,6 +407,7 @@ Chaque extension est signée avec ses propres entitlements, puis l'application e
 | `certificatePassword`, `certificateSha1`, `certificateSubjectName` | `String?` | |
 | `algorithm` | `SigningAlgorithm` : `Sha1`, `Sha256`, `Sha512` | `Sha256` |
 | `timestampServer` | `String?` | |
+| `signNativeLibraries` | `Boolean` | `true`. Signe aussi les DLL embarquées, isolées ou contenues dans des JAR non signés. Les lanceurs sont signés dans tous les cas |
 | `publisherName`, `azureTenantId`, `azureEndpoint`, `azureCertificateProfileName`, `azureCodeSigningAccountName` | `String?` | Azure Artifact Signing |
 
 Voir [Signature du code](/docs/packaging/code-signing).
@@ -426,7 +461,7 @@ Les valeurs par défaut viennent des propriétés Gradle `compose.desktop.linux.
 | `category` | `AppImageCategory?` | `AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility` |
 | `genericName`, `synopsis` | `String?` | |
 | `desktopEntries` | `Map<String, String>` | Clés supplémentaires de l'entrée desktop |
-| `compressionLevel` | `CompressionLevel?` | Remplace la valeur racine. `Normal` ou `Store` démarrent plus vite sous FUSE |
+| `compressionLevel` | `CompressionLevel?` | Remplace la valeur racine. `Store` produit une image gzip ; `Normal`, `Maximum` et `Ultra` produisent la même image zstd |
 
 ### `snap { }` [#linux-snap]
 
@@ -532,8 +567,8 @@ Le canal `INNOVATION` correspond désormais à `25i4` (GraalVM 25.4, JDK 25.0.4)
 | `macOS` | `minimumSystemVersion` | `Property<String>` | `"12.0"` |
 | `macOS` | `macOsSdkVersion` | `Property<String>` | `"26.0"` |
 | `windows` | `bundleCRuntime` | `Property<Boolean>` | `true` : copie les DLL du runtime MSVC à côté du `.exe` |
-| `windows` | `dlls` | `ListProperty<String>` | `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` |
-| `windows` | `sourceDir` | `DirectoryProperty` | `bin` de la toolchain |
+| `windows` | `dlls` | `ListProperty<String>` | Tout le runtime C++ : `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`, `msvcp140_1.dll`, `msvcp140_2.dll`, `concrt140.dll` |
+| `windows` | `sourceDir` | `DirectoryProperty` | Le redistributable MSVC le plus récent, sinon le `bin` de la toolchain (qui ne fournit que les trois premières DLL) |
 | `metadataRepository` | `enabled` | `Property<Boolean>` | `true` |
 | `metadataRepository` | `version` | `Property<String>` | `"1.1.4"` |
 | `metadataRepository` | `excludedModules` | `SetProperty<String>` | entrées `group:artifact` |
@@ -566,7 +601,7 @@ Le canal `INNOVATION` correspond désormais à `25i4` (GraalVM 25.4, JDK 25.0.4)
 
 ## Propriétés générées de l'application [#app-properties]
 
-Le plugin écrit `nucleus/nucleus-app.properties` dans les ressources de l'application. L'objet runtime `NucleusApp` le lit au démarrage : c'est ainsi que les valeurs du DSL parviennent aux bibliothèques runtime. Clés : `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, et `optimization.idleGc` quand l'option `idleGc` est active.
+Le plugin écrit `nucleus/nucleus-app.properties` dans les ressources de l'application. L'objet runtime `NucleusApp` le lit au démarrage : c'est ainsi que les valeurs du DSL parviennent aux bibliothèques runtime. Clés : `app.id`, `app.version`, `app.vendor`, `app.description`, `app.name`, `app.aumid`, `startup.wm.class`, `startup.task.id`, et `optimization.idleGc`, `optimization.partialRedraw` et `optimization.mallocArenaMax` quand l'option correspondante est active.
 
 ## Et ensuite
 
