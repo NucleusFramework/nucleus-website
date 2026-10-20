@@ -64,6 +64,29 @@ NUCLEUS_TAO_LINUX_RENDERER=x11 ./gradlew run
 Pour ne basculer qu'une fenêtre, passez-lui `forceX11 = true`. Voir
 [Fenêtres overlay](/docs/windows/overlay-windows#obtenir-une-surface-x11-sous-wayland).
 
+## Suivre les décorations du compositeur
+
+KWin peut demander à une fenêtre de ne dessiner aucune décoration : sous Plasma Mobile, avec une
+règle de fenêtre qui retire la barre de titre et le cadre, ou avec une règle qui impose la barre de
+titre de KWin. Les barres de titre fournies (`TitleBar`, `DialogTitleBar` et les barres des toolkits
+construites dessus) retirent alors les contrôles de la fenêtre mais gardent votre contenu : onglets,
+titre ou menus. Une barre restée vide n'occupe aucune place. `WindowScaffold` ne réserve aucun
+espace pour les contrôles, et `WindowControls` ne dessine que le bouton de sortie du plein écran.
+
+Un chrome personnalisé lit `TaoWindow.isDecorationSuppressed` pour faire de même :
+
+```kotlin
+val taoWindow = nucleusWindow.unsafe.taoWindow
+if (!taoWindow.isDecorationSuppressed) {
+    MyWindowButtons()
+}
+```
+
+La propriété est un état Compose et suit le compositeur quand il change d'avis. Elle vaut toujours
+`false` sous X11 et sur les compositeurs sans le protocole server-decoration de KDE. En plein écran,
+une barre dotée de `Modifier.newFullscreenControls()` garde son bouton de sortie du plein écran
+quand la disposition des boutons du bureau comporte un bouton d'agrandissement.
+
 ## Différences entre Wayland et X11
 
 | Aspect | Wayland natif | X11 / XWayland |
@@ -102,6 +125,7 @@ fichiers. Le HTML ne passe pas, et Nucleus ignore la sélection PRIMARY de X11 (
 |---|---|
 | `TaoWindow.canPlaceOnScreen` | `false` sur une surface Wayland native, où l'application ne peut ni lire ni fixer la position de la fenêtre. |
 | `TaoWindow.isNativeWaylandSurface` | Indique si la fenêtre tourne sur une surface Wayland native. À lire une fois la fenêtre prête. |
+| `TaoWindow.isDecorationSuppressed` | `true` tant que le compositeur demande à la fenêtre de ne dessiner aucune décoration. État Compose. |
 | `TaoWindow.outerBoundsPx()` | `[x, y, width, height]` en pixels physiques, ou `null` avant que la fenêtre existe. |
 | `Platform.isWayland` | `true` dans une session Linux où `XDG_SESSION_TYPE` vaut `wayland` ou où `WAYLAND_DISPLAY` est défini. |
 | `LinuxDesktopEnvironment.Current` | `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate` ou `Unknown`. |

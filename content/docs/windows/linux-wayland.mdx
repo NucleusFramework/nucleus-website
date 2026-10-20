@@ -64,6 +64,28 @@ NUCLEUS_TAO_LINUX_RENDERER=x11 ./gradlew run
 To move a single window, pass `forceX11 = true` to it. See
 [Overlay windows](/docs/windows/overlay-windows#take-an-x11-surface-on-wayland).
 
+## Follow the compositor's decorations
+
+KWin can tell a window to draw no decorations: on Plasma Mobile, under a "No titlebar and frame"
+window rule, or under a rule that forces KWin's own title bar. The stock title bars (`TitleBar`,
+`DialogTitleBar`, and the toolkit bars built on them) then drop the window controls but keep your
+content, such as tabs, a title or menus. A bar left empty takes no room. `WindowScaffold` reserves
+no space for the controls, and `WindowControls` draws only the exit-fullscreen button.
+
+Custom chrome reads `TaoWindow.isDecorationSuppressed` to do the same:
+
+```kotlin
+val taoWindow = nucleusWindow.unsafe.taoWindow
+if (!taoWindow.isDecorationSuppressed) {
+    MyWindowButtons()
+}
+```
+
+The property is Compose state and follows the compositor when it changes its mind. It is always
+`false` on X11 and on compositors without KDE's server-decoration protocol. In fullscreen, a bar
+with `Modifier.newFullscreenControls()` keeps its exit-fullscreen button when the desktop's button
+layout has a maximize button.
+
 ## Wayland and X11 differences
 
 | Concern | Native Wayland | X11 / XWayland |
@@ -99,6 +121,7 @@ X11 PRIMARY (middle-click) selection.
 |---|---|
 | `TaoWindow.canPlaceOnScreen` | `false` on a native Wayland surface, where the app can neither read nor set the window position. |
 | `TaoWindow.isNativeWaylandSurface` | Whether this window runs on a native Wayland surface. Read after the window is ready. |
+| `TaoWindow.isDecorationSuppressed` | `true` while the compositor asks the window to draw no decorations. Compose state. |
 | `TaoWindow.outerBoundsPx()` | `[x, y, width, height]` in physical pixels, or `null` before the window exists. |
 | `Platform.isWayland` | `true` in a Linux session where `XDG_SESSION_TYPE` is `wayland` or `WAYLAND_DISPLAY` is set. |
 | `LinuxDesktopEnvironment.Current` | `Gnome`, `KDE`, `XFCE`, `Cinnamon`, `Mate`, or `Unknown`. |
