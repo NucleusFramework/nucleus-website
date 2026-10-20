@@ -36,6 +36,8 @@ de la fonctionnalité.
 | API de fenêtres d'outils des pré-versions renommées : `SatelliteDragKind` devient `WorkspaceDragKind`, `TabDropGhost.title` devient `TabDropGhost.tab`. La famille exige un opt-in. | Renommez, puis activez `ExperimentalNucleusApi`. [Étape](#activer-les-api-de-fenêtres-doutils) | [Fenêtres d'outils](/docs/tool-windows) |
 | `TaoMouseButton.OTHER` vaut désormais `5` ; `3` et `4` sont `BACK` et `FORWARD`. | Recompilez le code qui lit les codes bruts des boutons Tao. | [Boutons de la souris](/docs/input/mouse-buttons) |
 | `macOS.appStore` et `TargetFormat.isStoreFormat` ne compilent plus. | Utilisez `macOS { pkg { appStore = … } }` et `ExecutableRuntime.isSandboxed()`. [Étape](#remplacer-les-options-store-du-pkg) | [Packaging macOS](/docs/packaging/macos) |
+| `GitHubProvider(owner, repo, token)` ne compile plus. | Retirez le token pour un dépôt public, ou utilisez `PrivateGitHubProvider(owner, repo, token)`. [Étape](#passer-les-dépôts-privés-à-privategithubprovider) | [Mise à jour automatique](/docs/packaging/auto-update#lire-les-mises-à-jour-depuis-github-releases) |
+| `TabHoverPreview.nativeLayer` est retiré. | Supprimez l'argument. Ouvrez les fenêtres d'onglets avec `nativePopupLayers = true` pour que la carte déborde de la fenêtre. [Étape](#mettre-à-jour-les-aperçus-donglet-au-survol) | [Onglets](/docs/tool-windows/tabs#dessiner-les-aperçus) |
 
 **Changements de comportement à l'exécution**
 
@@ -52,6 +54,7 @@ de la fonctionnalité.
 | Les polices du JRE sont retirées des images runtime jlink. | Gardez-les si vous dessinez du texte via AWT ou Swing. [Étape](#conserver-les-polices-du-jre-pour-le-texte-awt) | [Configuration](/docs/start/configuration) |
 | Les bibliothèques JNI de Nucleus sont livrées à côté de l'application empaquetée, plus dans ses JAR. | Chargez-les via `NativeLibraryLoader`, pas comme ressources. [Étape](#charger-les-bibliothèques-natives-nucleus-via-le-loader) | [Packaging](/docs/packaging) |
 | Les installations NSIS Windows placent le runtime et l'application dans `versions\<version>\`, et `installAndRestart` met à jour sans fermer l'application. | Ne construisez pas de chemins depuis la racine d'installation. Appelez `UpdateHandoff.signalReady()` si l'application n'affiche aucune fenêtre Nucleus. | [Mise à jour automatique](/docs/packaging/auto-update#mettre-à-jour-sans-fermer-lapplication-sous-windows) |
+| `ExecutableRuntime.isSandboxed()` renvoie `false` dans un package AppX. | Testez `ExecutableRuntime.isAppX()` pour détecter AppX. [Étape](#détecter-appx-avec-isappx) | [Type d'exécutable](/docs/lifecycle/executable-type) |
 | `TaoWindow.setOuterPosition` lève une `IllegalArgumentException` pour une position NaN, infinie ou hors limites (au-delà de ±1 000 000 dp). | Ne passez pas de valeurs sentinelles comme `Int.MIN_VALUE` en position de fenêtre. | [État de fenêtre](/docs/windows/window-state) |
 
 **Changements de build et de CI**
@@ -181,6 +184,28 @@ Dans le code, remplacez les tests `ExecutableRuntime.isPkg()` et `isStoreFormat`
 `ExecutableRuntime.isSandboxed()`. Un PKG Developer ID n'est pas sandboxé et peut donc se mettre à
 jour. Voir [Sandboxing](/docs/packaging/sandboxing).
 
+## Passer les dépôts privés à PrivateGitHubProvider
+
+En 3.0, `GitHubProvider` ne prend plus de token : `GitHubProvider(owner, repo, token)` ne compile
+plus. Pour un dépôt public, retirez le token. Pour un dépôt privé ou un GitHub Enterprise Server,
+passez à `PrivateGitHubProvider` :
+
+```diff
+-provider = GitHubProvider(owner = "myorg", repo = "myapp", token = token)
++provider = PrivateGitHubProvider(owner = "myorg", repo = "myapp", token = token)
+```
+
+Passez `host` par son nom. Voir
+[Lire les mises à jour depuis GitHub Releases](/docs/packaging/auto-update#lire-les-mises-à-jour-depuis-github-releases).
+
+## Mettre à jour les aperçus d'onglet au survol
+
+`TabHoverPreview` perd son paramètre `nativeLayer`. Supprimez l'argument. La carte s'ouvre
+désormais comme les autres popups de la fenêtre : dans les fenêtres qu'ouvre `TabWindows`, elle se
+dessine dans la fenêtre, rognée par elle. Pour qu'elle déborde sous la fenêtre, ouvrez les fenêtres
+d'onglets vous-même avec `nativePopupLayers = true`. Voir
+[Dessiner les aperçus](/docs/tool-windows/tabs#dessiner-les-aperçus).
+
 ## Passer en revue les changements de comportement
 
 Ces changements compilent sans erreur. Vérifiez chacun sur votre application.
@@ -264,6 +289,13 @@ Les applications empaquetées placent les bibliothèques JNI de Nucleus à côt�
 dans les JAR des modules. Le code qui les lisait comme ressources JAR doit appeler
 `NativeLibraryLoader.load(…)`. Vos propres bibliothèques sous `nucleus/native/` restent dans leurs
 JAR.
+
+### Détecter AppX avec isAppX
+
+Un package AppX s'exécute en confiance totale : `ExecutableRuntime.isSandboxed()` y renvoie
+désormais `false`. Le code qui s'appuyait sur `isSandboxed()` pour détecter AppX doit tester
+`ExecutableRuntime.isAppX()`. Voir
+[Construire un package AppX ou MSIX](/docs/packaging/windows#construire-un-package-appx-ou-msix).
 
 ## Mettre à jour le build et la CI
 

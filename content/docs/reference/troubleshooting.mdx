@@ -180,27 +180,18 @@ See [Provision Node.js](/docs/packaging#provision-nodejs).
 
 ## Linux packaging
 
-### AppImage takes about 60 seconds to start
+### AppImage fails to start: "error loading libfuse.so.2"
 
-**Symptom.** The app opens quickly in development but takes about a minute when packaged
-as an AppImage.
+**Symptom.** The AppImage exits at launch with `dlopen(): error loading libfuse.so.2`, typically on
+Ubuntu 22.04+ or Fedora 36+.
 
-**Cause.** `compressionLevel = CompressionLevel.Maximum` or `Ultra`. AppImage uses squashfs,
-and maximum compression triggers FUSE decompression on every launch.
+**Cause.** The AppImage was built by Nucleus 2.x, whose runtime needs the system `libfuse2`.
 
-**Fix.** Use `CompressionLevel.Normal` (the default) for AppImage. Prefer a format-local
-override so DEB/DMG can stay on a higher global level:
-
-```kotlin title="build.gradle.kts"
-nativeDistributions {
-    compressionLevel = CompressionLevel.Ultra
-    linux {
-        appImage {
-            compressionLevel = CompressionLevel.Normal
-        }
-    }
-}
-```
+**Fix.** Rebuild with Nucleus 3.0. Its AppImages run on the static AppImage runtime, which needs
+only the `fusermount` or `fusermount3` binary the distribution ships. The compression level no
+longer changes the start time: `CompressionLevel.Store` builds a gzip image, and `Normal`,
+`Maximum` and `Ultra` all build the same zstd image. See
+[Build an AppImage](/docs/packaging/linux#build-an-appimage).
 
 ### DEB or RPM fails: "Please specify project homepage"
 

@@ -32,6 +32,8 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | Pre-release tool window APIs renamed: `SatelliteDragKind` is `WorkspaceDragKind`, `TabDropGhost.title` is `TabDropGhost.tab`. The family requires an opt-in. | Rename, then opt in to `ExperimentalNucleusApi`. [Step](#opt-in-to-the-tool-window-apis) | [Tool windows](/docs/tool-windows) |
 | `TaoMouseButton.OTHER` is now `5`; `3` and `4` are `BACK` and `FORWARD`. | Recompile code that reads raw Tao mouse button codes. | [Mouse buttons](/docs/input/mouse-buttons) |
 | `macOS.appStore` and `TargetFormat.isStoreFormat` no longer compile. | Use `macOS { pkg { appStore = … } }` and `ExecutableRuntime.isSandboxed()`. [Step](#replace-the-pkg-store-flags) | [macOS packaging](/docs/packaging/macos) |
+| `GitHubProvider(owner, repo, token)` no longer compiles. | Drop the token for a public repository, or use `PrivateGitHubProvider(owner, repo, token)`. [Step](#move-private-repositories-to-privategithubprovider) | [Auto-update](/docs/packaging/auto-update#read-updates-from-github-releases) |
+| `TabHoverPreview.nativeLayer` removed. | Delete the argument. Open the tab windows with `nativePopupLayers = true` to let the card hang outside the window. [Step](#update-tab-hover-previews) | [Tabs](/docs/tool-windows/tabs#draw-previews) |
 
 **Runtime behavior changes**
 
@@ -48,6 +50,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | JRE fonts are stripped from jlink runtime images. | Keep them if you draw text through AWT or Swing. [Step](#keep-jre-fonts-for-awt-text) | [Configuration](/docs/start/configuration) |
 | Nucleus JNI libraries ship next to the packaged app, not inside its JARs. | Load them through `NativeLibraryLoader`, not as resources. [Step](#load-nucleus-native-libraries-through-the-loader) | [Packaging](/docs/packaging) |
 | Windows NSIS installs keep the runtime and app in `versions\<version>\`, and `installAndRestart` updates without closing the app. | Don't build paths from the install root. Call `UpdateHandoff.signalReady()` if the app shows no Nucleus window. | [Auto-update](/docs/packaging/auto-update#update-without-closing-the-app-on-windows) |
+| `ExecutableRuntime.isSandboxed()` returns `false` in an AppX package. | Test `ExecutableRuntime.isAppX()` to detect AppX. [Step](#detect-appx-with-isappx) | [Executable type](/docs/lifecycle/executable-type) |
 | `TaoWindow.setOuterPosition` throws `IllegalArgumentException` for NaN, infinite or out-of-range positions (beyond ±1,000,000 dp). | Don't pass sentinels such as `Int.MIN_VALUE` as a window position. | [Window state](/docs/windows/window-state) |
 
 **Build and CI changes**
@@ -175,6 +178,27 @@ In runtime code, replace `ExecutableRuntime.isPkg()` and `isStoreFormat` checks 
 `ExecutableRuntime.isSandboxed()`. A Developer ID PKG is not sandboxed, so it can update itself.
 See [Sandboxing](/docs/packaging/sandboxing).
 
+## Move private repositories to PrivateGitHubProvider
+
+`GitHubProvider` takes no token in 3.0, so `GitHubProvider(owner, repo, token)` no longer
+compiles. For a public repository, drop the token. For a private repository or a GitHub Enterprise
+Server, switch to `PrivateGitHubProvider`:
+
+```diff
+-provider = GitHubProvider(owner = "myorg", repo = "myapp", token = token)
++provider = PrivateGitHubProvider(owner = "myorg", repo = "myapp", token = token)
+```
+
+Pass `host` by name. See
+[Read updates from GitHub Releases](/docs/packaging/auto-update#read-updates-from-github-releases).
+
+## Update tab hover previews
+
+`TabHoverPreview` lost its `nativeLayer` parameter. Delete the argument. The card now opens like
+the window's other popups: in the windows `TabWindows` opens, it draws inside the window, clipped by
+it. To let it hang below the window, open the tab windows yourself with `nativePopupLayers = true`.
+See [Draw previews](/docs/tool-windows/tabs#draw-previews).
+
 ## Review runtime behavior changes
 
 These changes compile without errors. Check each one against your app.
@@ -254,6 +278,12 @@ render text through AWT or Swing, set `stripJreFonts = false` in `nativeDistribu
 Packaged apps carry Nucleus JNI libraries next to the app instead of inside the module JARs. Code
 that read them as JAR resources must call `NativeLibraryLoader.load(…)`. Your own libraries under
 `nucleus/native/` stay in their JARs.
+
+### Detect AppX with isAppX
+
+An AppX package runs with full trust, so `ExecutableRuntime.isSandboxed()` now returns `false`
+there. Code that relied on `isSandboxed()` to detect AppX must test `ExecutableRuntime.isAppX()`.
+See [Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
 
 ## Update the build and CI
 
