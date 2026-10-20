@@ -1,0 +1,103 @@
+---
+title: Tests
+description: Pilotez le contenu Compose de vraies fenêtres Nucleus depuis un test de bout en bout, et vérifiez un module Nucleus sur votre OS avec le Nucleus Lab.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`TaoRootsForTest` donne à un harnais de bout en bout exécuté dans votre application les racines
+Compose de chaque fenêtre ouverte. Vous envoyez des événements de pointeur et de clavier dans le
+pipeline d'entrée de Compose, comme `runComposeUiTest` le fait dans un hôte de test, mais sur la
+vraie fenêtre native. Utilisez-le là où les entrées de l'OS ne se scriptent pas, par exemple sous
+Wayland. Le Nucleus Lab couvre l'autre moitié : il vérifie chaque module Nucleus sur l'OS que vous
+utilisez.
+
+## Cliquer sur un nœud par son test tag
+
+```kotlin
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerButtons
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.TaoRootsForTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalNucleusApi::class, InternalComposeUiApi::class)
+suspend fun clickTag(tag: String) = withContext(Dispatchers.Main) {
+    val (root, node) = TaoRootsForTest.roots.firstNotNullOf { root ->
+        root.semanticsOwner
+            .getAllSemanticsNodes(mergingEnabled = true)
+            .firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            ?.let { root to it }
+    }
+    val center = node.boundsInRoot.center
+    root.sendPointerEvent(
+        PointerEventType.Press,
+        center,
+        buttons = PointerButtons(isPrimaryPressed = true),
+        button = PointerButton.Primary,
+    )
+    root.sendPointerEvent(
+        PointerEventType.Release,
+        center,
+        buttons = PointerButtons(),
+        button = PointerButton.Primary,
+    )
+}
+```
+
+- `roots` liste le contenu des fenêtres et chaque couche de popup, dans l'ordre de création. Une
+  racine apparaît à la création de son owner et disparaît à sa destruction.
+- Manipulez les racines sur le thread UI, via `Dispatchers.Main` ou `NucleusUiThread.post`.
+- Les positions du pointeur sont en pixels relatifs à la racine, le même repère que
+  `boundsInRoot`.
+- `sendKeyEvent(keyEvent)` envoie une touche au nœud qui a le focus. Appelez
+  `measureAndLayoutForTest()`, ou attendez que `hasPendingMeasureOrLayout` vaille `false`, avant de
+  relire l'arbre sémantique.
+- `TaoRootsForTest` est fourni avec `nucleus-application`.
+
+<Callout type="warn">
+`PlatformRootForTest` est une API interne de Compose (`@InternalComposeUiApi`). Ses membres peuvent
+changer d'une version de Compose à l'autre.
+</Callout>
+
+## Vérifier un module avec le Nucleus Lab
+
+Le [Nucleus Lab](https://github.com/NucleusFramework/Nucleus/tree/main/examples/lab) est le banc
+d'essai du dépôt Nucleus. Chaque écran est une sonde dédiée à une fonctionnalité : elle indique ce
+qui est disponible sur cet OS, propose des contrôles, affiche ce que l'OS renvoie et copie un
+rapport Markdown à coller dans une issue.
+
+Depuis un clone du dépôt Nucleus :
+
+```shell
+./gradlew :examples:lab:app:run
+./gradlew :examples:lab:app:run -Dlab.probe=shell.badge?count=5
+```
+
+- `-Dlab.probe=<id>` ouvre une sonde, avec des paramètres facultatifs. `LAB_PROBE=<id>` fait de
+  même depuis l'environnement.
+- Un Lab empaqueté enregistre le schéma `nucleus-lab://` : `nucleus-lab://probe/<id>?key=value`
+  ouvre une sonde depuis un navigateur ou un terminal. *Copy link* sur une sonde donne son lien.
+- Chaque release de Nucleus publie le Lab en application empaquetée pour macOS, Windows et Linux.
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `TaoRootsForTest.roots: List<PlatformRootForTest>` | Racines Compose vivantes de chaque fenêtre Tao et couche de popup. `@ExperimentalNucleusApi` |
+| `PlatformRootForTest.semanticsOwner` | Arbre sémantique de la racine |
+| `sendPointerEvent(eventType, position, …)` | Entrée pointeur, en pixels de la racine |
+| `sendKeyEvent(keyEvent): Boolean` | Entrée clavier vers le nœud qui a le focus |
+| `hasPendingMeasureOrLayout` / `measureAndLayoutForTest()` | État de la mise en page avant une assertion |
+
+## Et ensuite
+
+- [Threads](/docs/concepts/threading) : le thread UI sur lequel votre harnais doit tourner.
+- [Accessibilité](/docs/input/accessibility) : la sémantique que l'arbre expose aux lecteurs d'écran.
+- [Dépannage](/docs/reference/troubleshooting) : les solutions aux problèmes courants à l'exécution.

@@ -1,0 +1,100 @@
+---
+title: Testing
+description: Drive the Compose content of real Nucleus windows from an end-to-end test, and check a Nucleus module on your OS with the Nucleus Lab.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`TaoRootsForTest` gives an end-to-end harness running inside your app the Compose roots of every
+open window. You send pointer and key events through Compose's input pipeline, as
+`runComposeUiTest` does in a test host, but on the real native window. Use it where OS input
+cannot be scripted, such as on Wayland. The Nucleus Lab covers the other half: it checks each
+Nucleus module against the OS you run.
+
+## Click a node by test tag
+
+```kotlin
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerButtons
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.TaoRootsForTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalNucleusApi::class, InternalComposeUiApi::class)
+suspend fun clickTag(tag: String) = withContext(Dispatchers.Main) {
+    val (root, node) = TaoRootsForTest.roots.firstNotNullOf { root ->
+        root.semanticsOwner
+            .getAllSemanticsNodes(mergingEnabled = true)
+            .firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            ?.let { root to it }
+    }
+    val center = node.boundsInRoot.center
+    root.sendPointerEvent(
+        PointerEventType.Press,
+        center,
+        buttons = PointerButtons(isPrimaryPressed = true),
+        button = PointerButton.Primary,
+    )
+    root.sendPointerEvent(
+        PointerEventType.Release,
+        center,
+        buttons = PointerButtons(),
+        button = PointerButton.Primary,
+    )
+}
+```
+
+- `roots` lists the window content and every popup layer, in creation order. A root appears when
+  its owner is created and leaves when it is disposed.
+- Touch the roots on the UI thread, through `Dispatchers.Main` or `NucleusUiThread.post`.
+- Pointer positions are in pixels relative to the root, the same space as `boundsInRoot`.
+- `sendKeyEvent(keyEvent)` sends a key to the focused node. Call `measureAndLayoutForTest()`, or
+  wait until `hasPendingMeasureOrLayout` is `false`, before you read the semantics tree again.
+- `TaoRootsForTest` comes with `nucleus-application`.
+
+<Callout type="warn">
+`PlatformRootForTest` is internal Compose API (`@InternalComposeUiApi`). Its members can change
+with a Compose release.
+</Callout>
+
+## Check a module with the Nucleus Lab
+
+The [Nucleus Lab](https://github.com/NucleusFramework/Nucleus/tree/main/examples/lab) is the test
+bench of the Nucleus repository. Each screen is a probe for one capability: it lists what is
+available on this OS, offers controls, shows what the OS reports back, and copies a Markdown report
+you can paste into an issue.
+
+From a clone of the Nucleus repository:
+
+```shell
+./gradlew :examples:lab:app:run
+./gradlew :examples:lab:app:run -Dlab.probe=shell.badge?count=5
+```
+
+- `-Dlab.probe=<id>` opens one probe, with optional parameters. `LAB_PROBE=<id>` does the same
+  from the environment.
+- A packaged Lab registers the `nucleus-lab://` scheme: `nucleus-lab://probe/<id>?key=value`
+  opens a probe from a browser or a terminal. *Copy link* on any probe gives you its link.
+- Each Nucleus release publishes the Lab as a packaged app for macOS, Windows and Linux.
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `TaoRootsForTest.roots: List<PlatformRootForTest>` | Live Compose roots of every Tao window and popup layer. `@ExperimentalNucleusApi` |
+| `PlatformRootForTest.semanticsOwner` | Semantics tree of the root |
+| `sendPointerEvent(eventType, position, …)` | Pointer input, in root pixels |
+| `sendKeyEvent(keyEvent): Boolean` | Key input to the focused node |
+| `hasPendingMeasureOrLayout` / `measureAndLayoutForTest()` | Layout state before an assertion |
+
+## What's next
+
+- [Threading](/docs/concepts/threading): the UI thread your harness must run on.
+- [Accessibility](/docs/input/accessibility): the semantics the tree exposes to screen readers.
+- [Troubleshooting](/docs/reference/troubleshooting): fixes for common runtime problems.

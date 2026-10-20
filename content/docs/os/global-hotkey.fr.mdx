@@ -41,6 +41,64 @@ DisposableEffect(Unit) {
   Windows et Linux. Sous macOS, l'appel renvoie `-1` ; utilisez les
   [contrôles média](/docs/os/media-control).
 
+## Suivre les appuis et les relâchements
+
+Le listener à deux paramètres ci-dessus ne reçoit que les appuis, répétitions automatiques
+comprises. Passez un `HotKeyEventListener` pour recevoir chaque `HotKeyEvent` :
+
+```kotlin
+val handle = GlobalHotKeyManager.register(
+    keyCode = KeyEvent.VK_SPACE,
+    modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+    description = "Peek",
+    listener = HotKeyEventListener { event ->
+        when (event.state) {
+            HotKeyState.PRESSED -> if (!event.isRepeat) showPeek()
+            HotKeyState.RELEASED -> hidePeek()
+        }
+    },
+)
+```
+
+- Seul Linux signale `RELEASED`, sous X11 comme sous Wayland. macOS et Windows ne transmettent
+  que les appuis.
+- Sous Linux, maintenir la combinaison répète l'appui. `isRepeat` vaut alors `true`, et toujours
+  `false` sous macOS et Windows.
+- `timestamp` suit l'horloge en millisecondes de la plateforme, ou vaut `0` quand elle n'en fournit
+  pas. Comparez-le uniquement aux autres événements du même raccourci.
+- `register(MediaKey, listener)` accepte aussi un `HotKeyEventListener`.
+
+## Ramener une fenêtre au premier plan
+
+Appelez `requestFocus()` ou `toFront()` sur la fenêtre depuis le listener. Sous Wayland, le
+compositeur n'accorde le focus à une fenêtre qu'avec le jeton d'activation émis pour l'appui sur le
+raccourci, et la fenêtre utilise ce jeton d'elle-même :
+
+```kotlin
+val window = LocalNucleusWindow.current
+DisposableEffect(window) {
+    val handle = GlobalHotKeyManager.register(
+        keyCode = KeyEvent.VK_SPACE,
+        modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+        description = "Show the app",
+        listener = HotKeyEventListener { event ->
+            if (event.state == HotKeyState.PRESSED && !event.isRepeat) {
+                window.show()
+                window.requestFocus()
+            }
+        },
+    )
+    onDispose { GlobalHotKeyManager.unregister(handle) }
+}
+```
+
+- Demandez le focus depuis le listener. Le jeton ne sert qu'une fois et expire au bout de quelques
+  secondes.
+- Le portail envoie un jeton à partir de xdg-desktop-portal 1.21. Avec un portail plus ancien, le
+  compositeur peut refuser la demande de focus et signaler la fenêtre à la place.
+- `event.activationToken` expose le jeton pour une application qui le transmet elle-même, par
+  exemple à un autre processus. Il vaut `null` sous X11, macOS et Windows, qui n'en ont pas besoin.
+
 ## Enregistrements portail Linux
 
 Sous Wayland, le portail du bureau demande à l'utilisateur d'approuver vos raccourcis, une fois
@@ -66,6 +124,12 @@ restent muets tant que l'utilisateur n'a pas accepté. Ouvrez ce panneau avec
 - Le portail mémorise chaque autorisation par paire `(app_id, shortcut_id)`. Nucleus dérive
   l'identifiant de la combinaison (`nucleus_m{mods}_k{keyCode}`), qui reste donc stable d'un
   lancement à l'autre. `portalShortcutId(handle)` le renvoie, ou `null` hors Linux.
+- Les relâchements viennent du signal `Deactivated` du portail sous Wayland et du `KeyRelease` de
+  la touche capturée sous X11. GNOME réémet `Activated` à chaque répétition automatique, avec un
+  nouveau jeton à chaque fois.
+- Les raccourcis et les clics sur les notifications Linux déposent leur jeton `xdg-activation`
+  dans une boîte partagée de `core-runtime` (`ActivationToken`). La demande de focus d'une fenêtre
+  prend le plus récent.
 
 </Accordion>
 </Accordions>
@@ -75,7 +139,8 @@ restent muets tant que l'utilisateur n'a pas accepté. Ouvrez ce panneau avec
 | Symbole | Notes |
 | --- | --- |
 | `initialize()` | Charge la bibliothèque native et démarre la source d'événements |
-| `register(keyCode, modifiers = 0, description = null, listener): Long` | Existe aussi en `register(MediaKey, listener)` : `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK` |
+| `register(keyCode, modifiers = 0, description = null, listener): Long` | Existe aussi en `register(MediaKey, listener)` : `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK`. `listener` est un `HotKeyListener` (appuis) ou un `HotKeyEventListener` (tous les événements) |
+| `HotKeyEvent` | `keyCode`, `modifiers`, `state` (`HotKeyState.PRESSED` / `RELEASED`), `isRepeat`, `timestamp`, `activationToken: String?` |
 | `HotKeyModifier.ALT` / `CONTROL` / `SHIFT` / `META` | Combinez avec `+`, `0 + META` pour un seul. Sous macOS, `ALT` est Option et `META` Commande ; ailleurs, `META` est la touche Windows ou Super |
 | `commitRegistrations()` | Affiche tout de suite la boîte de dialogue du portail Wayland |
 | `isAvailable` / `lastError` | Bibliothèque native chargée ; message du dernier échec, `null` après un succès |

@@ -10,6 +10,10 @@ import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 That UI thread handles input, composition and drawing for every window, and `Dispatchers.Main`
 points at it, so `LaunchedEffect`, `rememberCoroutineScope()` and view-model scopes resume there.
 
+On macOS, AppKit requires the process's first thread. When `main` runs on another thread, the
+loop moves to the first thread and `Dispatchers.Main` follows it, so `Dispatchers.Main.immediate`
+still runs inline from UI callbacks. `main` stays blocked until the app quits.
+
 The AWT event dispatch thread (EDT) still exists, but it is a different thread. Code posted to it
 runs outside Compose's thread.
 
@@ -23,7 +27,7 @@ These modules call your code on the UI thread, so you can update Compose state d
 | `media-control` | Play, pause, next, previous, stop, seek |
 | `launcher-macos` / `launcher-linux` | Dock menu and Unity quicklist item clicks |
 | `menu-macos` | Menu actions and delegate events |
-| `global-hotkey` | Hotkey presses |
+| `global-hotkey` | Hotkey presses and releases |
 
 <Callout type="warn" title="Changed in 3.0">
 These callbacks used to run on the AWT EDT. Code that assumed the EDT, such as

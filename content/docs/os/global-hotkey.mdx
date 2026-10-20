@@ -39,6 +39,62 @@ DisposableEffect(Unit) {
 - `GlobalHotKeyManager.register(MediaKey.PLAY_PAUSE) { … }` binds a media key on Windows and
   Linux. On macOS it returns `-1`; use [media controls](/docs/os/media-control) there.
 
+## Track presses and releases
+
+The two-parameter listener above receives presses only, auto-repeats included. Pass a
+`HotKeyEventListener` to receive every `HotKeyEvent` instead:
+
+```kotlin
+val handle = GlobalHotKeyManager.register(
+    keyCode = KeyEvent.VK_SPACE,
+    modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+    description = "Peek",
+    listener = HotKeyEventListener { event ->
+        when (event.state) {
+            HotKeyState.PRESSED -> if (!event.isRepeat) showPeek()
+            HotKeyState.RELEASED -> hidePeek()
+        }
+    },
+)
+```
+
+- Only Linux reports `RELEASED`, on X11 and Wayland. macOS and Windows deliver presses only.
+- Holding the chord on Linux repeats the press. `isRepeat` is `true` for those repeats, and always
+  `false` on macOS and Windows.
+- `timestamp` is in the platform's millisecond clock, or `0` when the platform gives none. Compare
+  it only with other events of the same hotkey.
+- `register(MediaKey, listener)` accepts a `HotKeyEventListener` too.
+
+## Bring a window to the front
+
+Call `requestFocus()` or `toFront()` on the window from the listener. On Wayland, the compositor
+lets a window take focus only with the activation token it issued for the hotkey press, and the
+window uses that token on its own:
+
+```kotlin
+val window = LocalNucleusWindow.current
+DisposableEffect(window) {
+    val handle = GlobalHotKeyManager.register(
+        keyCode = KeyEvent.VK_SPACE,
+        modifiers = HotKeyModifier.CONTROL + HotKeyModifier.ALT,
+        description = "Show the app",
+        listener = HotKeyEventListener { event ->
+            if (event.state == HotKeyState.PRESSED && !event.isRepeat) {
+                window.show()
+                window.requestFocus()
+            }
+        },
+    )
+    onDispose { GlobalHotKeyManager.unregister(handle) }
+}
+```
+
+- Request focus from the listener. The token is single-use and expires after a few seconds.
+- The portal sends a token from xdg-desktop-portal 1.21 on. With an older portal, the compositor
+  can refuse the focus request and flag the window instead.
+- `event.activationToken` exposes the token for an app that hands it on itself, for example to
+  another process. It is `null` on X11, macOS and Windows, which need none.
+
 ## Linux portal registrations
 
 On Wayland, the desktop portal asks the user to approve your shortcuts, once per chord. Nucleus
@@ -62,6 +118,10 @@ pane with `x-apple.systempreferences:com.apple.preference.security?Privacy_Liste
 - The portal remembers each grant per `(app_id, shortcut_id)`. Nucleus derives the id from the
   chord (`nucleus_m{mods}_k{keyCode}`), so it stays stable across launches.
   `portalShortcutId(handle)` returns it, or `null` off Linux.
+- Releases come from the portal's `Deactivated` signal on Wayland and from the grabbed key's
+  `KeyRelease` on X11. GNOME re-emits `Activated` for each auto-repeat, each with a fresh token.
+- Hotkeys and Linux notification clicks hand their `xdg-activation` token to a shared mailbox in
+  `core-runtime` (`ActivationToken`). A window's focus request takes the latest one.
 
 </Accordion>
 </Accordions>
@@ -71,7 +131,8 @@ pane with `x-apple.systempreferences:com.apple.preference.security?Privacy_Liste
 | Symbol | Notes |
 | --- | --- |
 | `initialize()` | Loads the native library and starts the event source |
-| `register(keyCode, modifiers = 0, description = null, listener): Long` | Also `register(MediaKey, listener)`: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK` |
+| `register(keyCode, modifiers = 0, description = null, listener): Long` | Also `register(MediaKey, listener)`: `PLAY_PAUSE`, `STOP`, `NEXT_TRACK`, `PREV_TRACK`. `listener` is a `HotKeyListener` (presses) or a `HotKeyEventListener` (every event) |
+| `HotKeyEvent` | `keyCode`, `modifiers`, `state` (`HotKeyState.PRESSED` / `RELEASED`), `isRepeat`, `timestamp`, `activationToken: String?` |
 | `HotKeyModifier.ALT` / `CONTROL` / `SHIFT` / `META` | Combine with `+`; `0 + META` for one. On macOS `ALT` is Option and `META` is Command, elsewhere `META` is Windows or Super |
 | `commitRegistrations()` | Shows the Wayland portal dialog now |
 | `isAvailable` / `lastError` | Native library loaded; last failure message, `null` after a success |

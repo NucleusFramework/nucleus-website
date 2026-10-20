@@ -11,6 +11,11 @@ une application standard. Ce thread UI gère les entrées, la composition et le 
 fenêtres, et `Dispatchers.Main` pointe vers lui : `LaunchedEffect`, `rememberCoroutineScope()` et
 les scopes de view-model y reprennent.
 
+Sous macOS, AppKit exige le premier thread du processus. Quand `main` s'exécute sur un autre
+thread, la boucle passe sur le premier thread et `Dispatchers.Main` la suit : depuis les callbacks
+UI, `Dispatchers.Main.immediate` s'exécute donc toujours sans redispatch. `main` reste bloqué
+jusqu'à la fermeture de l'application.
+
 Le thread de distribution d'événements AWT (EDT) existe toujours, mais c'est un autre thread. Le
 code posté dessus s'exécute hors du thread de Compose.
 
@@ -25,7 +30,7 @@ directement.
 | `media-control` | Lecture, pause, suivant, précédent, arrêt, déplacement |
 | `launcher-macos` / `launcher-linux` | Clics dans le menu du Dock et la quicklist Unity |
 | `menu-macos` | Actions de menu et événements du délégué |
-| `global-hotkey` | Appuis sur un raccourci |
+| `global-hotkey` | Appuis et relâchements d'un raccourci |
 
 <Callout type="warn" title="Modifié en 3.0">
 Ces callbacks tournaient auparavant sur l'EDT AWT. Le code qui supposait l'EDT, comme les
