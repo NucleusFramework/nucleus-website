@@ -60,10 +60,16 @@ The plugin merges five sources, each passed through its own `-H:ConfigurationFil
    font managers, security providers and `main` (`generateGraalvmPlatformMetadata`).
 4. A bytecode scan of the runtime classpath (`analyzeGraalvmStaticMetadata`). It also catches
    `MethodHandles.Lookup.findClass()`, JNI callbacks and `@Serializable` companions. The orphan
-   detector reads the app's JVM target folders, such as `desktopMainClasses`.
+   detector reads the app's JVM target folders, such as `desktopMainClasses`. Native methods of
+   GraalVM C interop (`@CFunction`, `@CConstant`) and GraalVM word types never reach the JNI
+   metadata, since `native-image` binds them itself.
 5. Metadata inside `nucleus.graalvm-runtime`: resource globs (`**/*.svg`, `**/*.ttf`,
    `composeResources/**`, `META-INF/services/**`, …), `-H:+SharedArenaSupport`, and AWT font and
    splash-screen substitutions.
+
+The bytecode scan, `filterGraalvmLibraryMetadata` and `cleanupGraalvmMetadata` read multi-release
+JARs as the GraalVM toolchain's JDK sees them: a class replaced under `META-INF/versions/<n>` is
+read in the version that JDK loads.
 
 `cleanupGraalvmMetadata` compares your file with sources 1 to 4. It always drops the Kotlin
 phantoms the agent records (`kotlin.Any`, `FunctionN`, …) and never drops types under the

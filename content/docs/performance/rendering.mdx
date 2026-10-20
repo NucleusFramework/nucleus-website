@@ -1,0 +1,138 @@
+---
+title: Rendering performance
+description: Repaint only what changed with partial redraw, see each frame's damage with the debug overlay, count recompositions, and let idle windows give their GPU memory back.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+This page covers how a Nucleus window renders its frames: partial redraw, the debug switches that
+show what each frame repaints, and what an idle window does. Everything here comes with
+`nucleus-application` and works on macOS, Windows and Linux, on the JVM and in a native image.
+
+## Turn on partial redraw
+
+With partial redraw on, a frame repaints and presents only the part of the window that changed
+since the previous one, instead of the whole window. A blinking cursor or a spinner then repaints
+only its own area, and a window where nothing moves presents no frame at all.
+
+Partial redraw is off by default. Turn it on with the `partialRedraw` knob of the
+[startup pack](/docs/performance/startup), or with the whole pack:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+    // or: nucleusOptimization = true
+}
+```
+
+The knob patches Compose's render layers at build time, so the runtime can tell which layers
+changed, and turns the runtime on. Your source code stays the same. It applies to the `run` task,
+to packaged apps and to GraalVM native images.
+
+Pass `-Dnucleus.tao.partialRedraw=false` to repaint every frame in full for one run, or `true` to
+force it on.
+
+## See what each frame repaints
+
+The `debug { }` block turns on overlays and logs for the `run` task. Packages, `runDistributable`
+and native images never get them.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+
+    debug {
+        partialRedraw {
+            tint = true   // flash what each frame changed in red
+            stats = true  // log how much of the window frames repaint
+        }
+    }
+}
+```
+
+| Switch | Effect |
+|--------|--------|
+| `tint` | Flashes what each frame repainted in translucent red, every other frame, like Android's "Show GPU view updates". A frame repainted in full flashes the whole window. |
+| `stats` | Logs every few seconds how much of the window frames repaint and which layers damaged them, and why frames repaint in full when that reason changes. |
+| `verify` | Renders every partial frame again in full off screen and logs any pixel that differs. Slow, and turns `tint` off. |
+
+To turn a switch on for one run without editing the build, pass the comma-separated
+`nucleus.debug` Gradle property:
+
+```shell
+./gradlew run -Pnucleus.debug=tint,stats
+```
+
+A flash larger than what moved means the frame repainted more than it needed. The usual cause is
+a layer that does not clip its content or casts a shadow: its damage is then its nearest clipping
+ancestor's bounds. The partial redraw switches need partial redraw on; otherwise the build warns
+and every frame repaints in full.
+
+## Count recompositions
+
+`recomposition` logs the composables that ran the most, every few seconds, first composition
+included. It works with or without partial redraw.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    debug {
+        recomposition {
+            enabled = true
+            top = 20 // composables per report, default 10
+        }
+    }
+}
+```
+
+`-Pnucleus.debug=recomposition` turns it on for one run.
+
+## Idle windows
+
+A window renders a frame only when its content changes. A coroutine on `Dispatchers.Main`, such as
+a `delay` loop, a clock or a `withContext(Dispatchers.Main)` hop, runs between frames and does not
+render one by itself.
+
+Once a window has drawn nothing for 3 seconds, or as soon as it is minimized, Nucleus releases the
+GPU resources Skia cached for it: the textures an animation or an image-heavy screen uploaded. The
+next frame recreates what it needs. A window with a live
+[GPU render context](/docs/native-content/gpu-render-context) consumer keeps its cache. There is
+nothing to configure.
+
+## Notes
+
+- Some frames always repaint in full: the first one, a resize, a change of window background or
+  corner, a frame while a popup is open, and the frame after a layer that draws content recorded
+  elsewhere, such as a backdrop blur.
+- Under macOS and Windows, a frame whose changes cover 80 % of the window or more repaints in full,
+  which costs less there than a partial frame.
+- The build-time patch only exists in builds of the Nucleus plugin. An app started from the IDE
+  without the plugin's `run` task, or under hot reload, repaints every frame in full.
+- Compose deactivates a lazy-list item scrolled out of view after the frame instead of inside it.
+  Pass `-Dnucleus.tao.outOfFrameExecutor=false` to go back to deactivating it inside the frame.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Damage is tracked per render layer, between layout and draw. Each layer's content version,
+  properties and window footprint are compared with the previous frame. Anything uncertain
+  repaints in full.
+- Linux presents through EGL with buffer age and `eglSwapBuffersWithDamage`, so the compositor
+  receives the damaged region. Windows presents through ANGLE with `eglPostSubBufferNV`, which
+  passes the damaged rectangle to DXGI as the dirty rect. macOS tracks the damage of each Metal
+  drawable.
+- A native image reads the switch from `nucleus/nucleus-app.properties`
+  (`optimization.partialRedraw`), since it has no launcher `.cfg`. The system property wins.
+- `NUCLEUS_TAO_PARTIAL_REDRAW=0` in the environment also turns off the native side.
+- `-Dnucleus.tao.partialRedraw.verify.dump=<dir>` writes the first failing frame pairs of
+  `verify` as PNG files.
+- The GPU cache purge flushes and submits the deletes synchronously, since no frame follows to
+  submit them. On Linux it waits for the swap thread to hand the context back.
+
+</Accordion>
+</Accordions>
+
+## What's next
+
+- [Startup optimization](/docs/performance/startup): the other `nucleusOptimization` knobs.
+- [Benchmarks](/docs/performance/benchmarks): rendering ramps on the JVM and in a native image.
+- [GPU render context](/docs/native-content/gpu-render-context): render into a window with your own GPU code.

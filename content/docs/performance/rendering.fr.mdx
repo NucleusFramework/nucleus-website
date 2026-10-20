@@ -1,0 +1,144 @@
+---
+title: Performances de rendu
+description: Ne repeignez que ce qui a changé avec le redessin partiel, visualisez la zone de chaque frame avec la surcouche de débogage, comptez les recompositions et laissez les fenêtres au repos rendre leur mémoire GPU.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Cette page décrit le rendu des frames d'une fenêtre Nucleus : le redessin partiel, les options de
+débogage qui montrent ce que chaque frame repeint, et le comportement d'une fenêtre au repos. Tout
+ceci est fourni avec `nucleus-application` et fonctionne sous macOS, Windows et Linux, sur la JVM
+comme en image native.
+
+## Activer le redessin partiel
+
+Avec le redessin partiel, une frame ne repeint et ne présente que la partie de la fenêtre qui a
+changé depuis la précédente, au lieu de la fenêtre entière. Un curseur qui clignote ou un
+indicateur de chargement ne repeint alors que sa propre zone, et une fenêtre où rien ne bouge ne
+présente aucune frame.
+
+Le redessin partiel est désactivé par défaut. Activez-le avec l'option `partialRedraw` du
+[pack de démarrage](/docs/performance/startup), ou avec le pack entier :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+    // or: nucleusOptimization = true
+}
+```
+
+L'option modifie les couches de rendu de Compose au build, pour que le runtime sache quelles
+couches ont changé, puis active le runtime. Votre code source ne change pas. Elle s'applique à la
+tâche `run`, aux applications empaquetées et aux images natives GraalVM.
+
+Passez `-Dnucleus.tao.partialRedraw=false` pour repeindre chaque frame en entier le temps d'une
+exécution, ou `true` pour le forcer.
+
+## Voir ce que chaque frame repeint
+
+Le bloc `debug { }` active des surcouches et des journaux pour la tâche `run`. Les paquets,
+`runDistributable` et les images natives n'en reçoivent jamais.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { partialRedraw = true }
+
+    debug {
+        partialRedraw {
+            tint = true   // flash what each frame changed in red
+            stats = true  // log how much of the window frames repaint
+        }
+    }
+}
+```
+
+| Option | Effet |
+|--------|-------|
+| `tint` | Fait clignoter en rouge translucide ce que chaque frame a repeint, une frame sur deux, comme l'option Android « Afficher les mises à jour de vue GPU ». Une frame repeinte en entier fait clignoter toute la fenêtre. |
+| `stats` | Journalise toutes les quelques secondes la part de la fenêtre que les frames repeignent et les couches qui l'ont modifiée, ainsi que la raison pour laquelle les frames sont repeintes en entier quand elle change. |
+| `verify` | Refait chaque frame partielle en entier hors écran et journalise chaque pixel qui diffère. Lent, et désactive `tint`. |
+
+Pour activer une option le temps d'une exécution sans modifier le build, passez la propriété
+Gradle `nucleus.debug`, valeurs séparées par des virgules :
+
+```shell
+./gradlew run -Pnucleus.debug=tint,stats
+```
+
+Un flash plus grand que ce qui a bougé signifie que la frame a repeint plus que nécessaire. La
+cause habituelle est une couche qui ne découpe pas son contenu ou qui projette une ombre : sa zone
+devient alors les limites de son plus proche ancêtre qui découpe. Les options de redessin partiel
+exigent que le redessin partiel soit activé ; sinon le build affiche un avertissement et chaque
+frame est repeinte en entier.
+
+## Compter les recompositions
+
+`recomposition` journalise toutes les quelques secondes les composables qui se sont exécutés le
+plus souvent, première composition comprise. L'option fonctionne avec ou sans redessin partiel.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    debug {
+        recomposition {
+            enabled = true
+            top = 20 // composables per report, default 10
+        }
+    }
+}
+```
+
+`-Pnucleus.debug=recomposition` l'active le temps d'une exécution.
+
+## Fenêtres au repos
+
+Une fenêtre ne produit une frame que lorsque son contenu change. Une coroutine sur
+`Dispatchers.Main`, comme une boucle `delay`, une horloge ou un passage par
+`withContext(Dispatchers.Main)`, s'exécute entre les frames et n'en déclenche aucune à elle seule.
+
+Dès qu'une fenêtre n'a rien dessiné depuis 3 secondes, ou dès qu'elle est réduite, Nucleus libère
+les ressources GPU que Skia gardait en cache pour elle : les textures chargées par une animation ou
+un écran riche en images. La frame suivante recrée ce dont elle a besoin. Une fenêtre dont un
+[contexte de rendu GPU](/docs/native-content/gpu-render-context) est utilisé garde son cache. Il
+n'y a rien à configurer.
+
+## Notes
+
+- Certaines frames sont toujours repeintes en entier : la première, un redimensionnement, un
+  changement de fond ou de coins de la fenêtre, une frame pendant qu'un popup est ouvert, et la
+  frame qui suit une couche dessinant un contenu enregistré ailleurs, comme un flou d'arrière-plan.
+- Sous macOS et Windows, une frame dont les changements couvrent 80 % de la fenêtre ou plus est
+  repeinte en entier, ce qui y coûte moins cher qu'une frame partielle.
+- La modification faite au build n'existe que dans les builds du plugin Nucleus. Une application
+  lancée depuis l'IDE sans la tâche `run` du plugin, ou sous hot reload, repeint chaque frame en
+  entier.
+- Compose désactive un élément de liste lazy sorti de la vue après la frame plutôt que pendant.
+  Passez `-Dnucleus.tao.outOfFrameExecutor=false` pour revenir à une désactivation pendant la
+  frame.
+
+<Accordions>
+<Accordion title="En coulisses">
+
+- Les zones modifiées sont suivies par couche de rendu, entre la mise en page et le dessin. La
+  version du contenu, les propriétés et l'emprise dans la fenêtre de chaque couche sont comparées à
+  la frame précédente. Tout cas douteux est repeint en entier.
+- Linux présente via EGL avec le buffer age et `eglSwapBuffersWithDamage`, si bien que le
+  compositeur reçoit la zone modifiée. Windows présente via ANGLE avec `eglPostSubBufferNV`, qui
+  transmet le rectangle modifié à DXGI comme dirty rect. macOS suit la zone modifiée de chaque
+  drawable Metal.
+- Une image native lit l'option dans `nucleus/nucleus-app.properties`
+  (`optimization.partialRedraw`), faute de fichier `.cfg` de lanceur. La propriété système
+  l'emporte.
+- `NUCLEUS_TAO_PARTIAL_REDRAW=0` dans l'environnement coupe aussi la partie native.
+- `-Dnucleus.tao.partialRedraw.verify.dump=<dir>` écrit en PNG les premières paires de frames que
+  `verify` signale.
+- La purge du cache GPU vide et soumet les suppressions de façon synchrone, car aucune frame ne
+  suit pour les soumettre. Sous Linux, elle attend que le thread de swap rende le contexte.
+
+</Accordion>
+</Accordions>
+
+## Et ensuite
+
+- [Optimisation du démarrage](/docs/performance/startup) : les autres options de `nucleusOptimization`.
+- [Benchmarks](/docs/performance/benchmarks) : montées en charge du rendu sur la JVM et en image native.
+- [Contexte de rendu GPU](/docs/native-content/gpu-render-context) : dessinez dans une fenêtre avec votre propre code GPU.

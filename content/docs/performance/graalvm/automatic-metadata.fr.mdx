@@ -64,10 +64,16 @@ Le plugin fusionne cinq sources, chacune passée par son propre `-H:Configuratio
 4. Une analyse du bytecode du classpath d'exécution (`analyzeGraalvmStaticMetadata`). Elle repère
    aussi `MethodHandles.Lookup.findClass()`, les rappels JNI et les companions `@Serializable`. Le
    détecteur d'orphelines lit les dossiers de la cible JVM de l'application, comme
-   `desktopMainClasses`.
+   `desktopMainClasses`. Les méthodes natives de l'interop C de GraalVM (`@CFunction`,
+   `@CConstant`) et les word types de GraalVM n'arrivent jamais dans les métadonnées JNI, car
+   `native-image` les lie lui-même.
 5. Les métadonnées embarquées dans `nucleus.graalvm-runtime` : globs de ressources (`**/*.svg`,
    `**/*.ttf`, `composeResources/**`, `META-INF/services/**`, …), `-H:+SharedArenaSupport`, et
    substitutions AWT pour les polices et l'écran de démarrage.
+
+L'analyse du bytecode, `filterGraalvmLibraryMetadata` et `cleanupGraalvmMetadata` lisent les JAR
+multi-release comme les voit le JDK de la toolchain GraalVM : une classe remplacée sous
+`META-INF/versions/<n>` est lue dans la version que ce JDK charge.
 
 `cleanupGraalvmMetadata` compare votre fichier aux sources 1 à 4. Il retire toujours les types
 Kotlin fantômes enregistrés par l'agent (`kotlin.Any`, `FunctionN`, …) et ne retire jamais les
