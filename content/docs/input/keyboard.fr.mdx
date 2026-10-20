@@ -1,0 +1,53 @@
+---
+title: Clavier
+description: Lisez les événements clavier avec les modifiers Compose, et distinguez la répétition d'une touche maintenue d'un nouvel appui.
+---
+
+Les événements clavier arrivent dans Compose par les modifiers standard `Modifier.onKeyEvent` et
+`Modifier.onPreviewKeyEvent`, sans rien ajouter en plus de `nucleus-application`. Nucleus ajoute
+une propriété au `KeyEvent` de Compose : elle indique si un appui de touche est une répétition
+automatique.
+
+## Ignorer la répétition automatique
+
+Tant que l'utilisateur maintient une touche, l'OS envoie un appui après l'autre.
+`KeyEvent.isRepeat` vaut `true` pour ces répétitions : un raccourci maintenu n'agit qu'une fois.
+
+```kotlin
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.isRepeat
+
+@OptIn(ExperimentalNucleusApi::class)
+fun Modifier.closeTabShortcut(onClose: () -> Unit): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.key == Key.W) {
+            if (!event.isRepeat) onClose()
+            true
+        } else {
+            false
+        }
+    }
+```
+
+Sans ce test, maintenir Ctrl+W ferme un onglet à chaque répétition.
+
+- Seul un `KeyDown` peut être une répétition. Les relâchements et l'événement qui porte le
+  caractère saisi renvoient `false`, et les champs de texte répètent les caractères comme
+  d'habitude.
+- `isRepeat` vaut `false` pour un événement que Nucleus n'a pas produit, par exemple un événement
+  construit dans un test.
+- Il fonctionne dans les fenêtres et dans les popups natifs, sous macOS, Windows et Linux (X11 et
+  Wayland).
+- `isRepeat` est `@ExperimentalNucleusApi`.
+
+## Notes
+
+- Sous Linux, une fenêtre n'active sa méthode de saisie que lorsqu'un champ de texte a le focus.
+  Un compositeur Wayland doté d'un clavier virtuel, comme Plasma Mobile, n'affiche ce clavier que
+  pour la saisie de texte, et non à chaque activation d'une fenêtre.
+
+## Et ensuite
+
+- [Raccourcis globaux](/docs/os/global-hotkey) : des raccourcis actifs quand l'application est en arrière-plan.
+- [Boutons de la souris](/docs/input/mouse-buttons) : les boutons latéraux précédent et suivant.
+- [Accessibilité](/docs/input/accessibility) : exposer votre UI aux lecteurs d'écran.

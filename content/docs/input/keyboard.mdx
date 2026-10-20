@@ -1,0 +1,49 @@
+---
+title: Keyboard
+description: Read key events with the Compose key modifiers, and tell a held key's auto-repeats from a new press.
+---
+
+Key events reach Compose through the standard `Modifier.onKeyEvent` and
+`Modifier.onPreviewKeyEvent`, and you add nothing beyond `nucleus-application`. Nucleus adds one
+property to Compose's `KeyEvent`: whether a key-down is an auto-repeat.
+
+## Ignore auto-repeat
+
+While the user holds a key, the OS sends key-down after key-down. `KeyEvent.isRepeat` is `true`
+for those repeats, so a held shortcut acts once:
+
+```kotlin
+import dev.nucleusframework.window.ExperimentalNucleusApi
+import dev.nucleusframework.window.tao.isRepeat
+
+@OptIn(ExperimentalNucleusApi::class)
+fun Modifier.closeTabShortcut(onClose: () -> Unit): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.key == Key.W) {
+            if (!event.isRepeat) onClose()
+            true
+        } else {
+            false
+        }
+    }
+```
+
+Without the check, holding Ctrl+W closes one tab per repeat.
+
+- Only a `KeyDown` is ever a repeat. Key-ups and the event that carries the typed character
+  report `false`, and text fields repeat characters as usual.
+- `isRepeat` is `false` for an event Nucleus did not produce, such as one built in a test.
+- It works in windows and in native popups, on macOS, Windows and Linux (X11 and Wayland).
+- `isRepeat` is `@ExperimentalNucleusApi`.
+
+## Notes
+
+- On Linux, a window enables its input method only while a text field has focus. A Wayland
+  compositor with an on-screen keyboard, such as Plasma Mobile, shows the keyboard for text entry
+  only, not each time a window becomes active.
+
+## What's next
+
+- [Global hotkeys](/docs/os/global-hotkey): shortcuts that work while the app is in the background.
+- [Mouse buttons](/docs/input/mouse-buttons): the back and forward side buttons.
+- [Accessibility](/docs/input/accessibility): expose your UI to screen readers.

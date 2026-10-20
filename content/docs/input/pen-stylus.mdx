@@ -3,9 +3,9 @@ title: Pen and touch input
 description: Read touchscreen and pen contacts, with pressure, from Compose pointer events.
 ---
 
-Touchscreen and pen contacts reach Compose as pointers of type `PointerType.Touch`. You read them
-with the same `pointerInput` modifier as mouse input, and you add nothing beyond
-`nucleus-application`.
+Touchscreen contacts reach Compose as pointers of type `PointerType.Touch`, and a tablet pen as
+`PointerType.Stylus`, or `PointerType.Eraser` for its eraser end. You read them with the same
+`pointerInput` modifier as mouse input, and you add nothing beyond `nucleus-application`.
 
 ## Draw with pressure
 
@@ -14,7 +14,7 @@ Modifier.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             val change = awaitPointerEvent().changes.first()
-            if (change.type == PointerType.Touch) {
+            if (change.type == PointerType.Touch || change.type == PointerType.Stylus) {
                 addPoint(change.position, change.pressure)
                 change.consume()
             }
@@ -26,19 +26,46 @@ Modifier.pointerInput(Unit) {
 Gesture detectors, `consume()` and hit testing treat these contacts like any other Compose
 pointer.
 
+## Read the pointer type
+
+`PointerInputChange.type` names the tool behind each event, so one handler can draw with the pen
+tip and erase with the other end:
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            if (!change.pressed) continue
+            when (change.type) {
+                PointerType.Stylus -> addPoint(change.position, change.pressure)
+                PointerType.Eraser -> erase(change.position)
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+A pen that touches the surface presses the primary button. A pen hovering in range arrives as
+`Move` events with no button pressed. Compose sends `Enter` and `Exit` for the mouse only, so a
+pen hover never produces them.
+
 ## Platform support
 
-| Platform | Arrives as | Pressure |
-| --- | --- | --- |
-| Windows | `PointerType.Touch` | Reported when the digitizer supports it |
-| Linux (Wayland and X11) | `PointerType.Touch` | Always `1f` |
-| macOS | Mouse | Not reported |
+| Platform | Finger | Pen | Pressure |
+| --- | --- | --- | --- |
+| Windows | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Reported when the digitizer supports it |
+| Linux (Wayland and X11) | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Always `1f` for a finger, not reported for a pen |
+| macOS | No touchscreen | `PointerType.Stylus` / `Eraser` | Not reported |
 
 - Treat `pressure == 1f` as "average or unknown". Most consumer touchscreens report `1f`.
-- Nucleus never produces `PointerType.Stylus` or `PointerType.Eraser`, and `PointerInputChange`
-  carries no tilt or barrel rotation. A pen and a finger differ only by pressure, on Windows.
+- `PointerInputChange` carries no tilt or barrel rotation.
 - A finger dragged on the title bar moves the window on Windows and Linux. On Linux, a finger on a
   window edge resizes it.
+- On Linux, the gaps between `uptimeMillis` values follow the times the screen sampled the
+  contact, not the times the events reached the app, so velocity and fling stay correct after a
+  slow frame.
 
 ## What's next
 

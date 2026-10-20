@@ -3,9 +3,10 @@ title: Stylet et tactile
 description: Lisez les contacts d'écran tactile et de stylet, avec leur pression, depuis les pointer events Compose.
 ---
 
-Les contacts d'écran tactile et de stylet arrivent dans Compose sous forme de pointeurs de type
-`PointerType.Touch`. Vous les lisez avec le même modifier `pointerInput` que la souris, sans rien
-ajouter en plus de `nucleus-application`.
+Les contacts d'écran tactile arrivent dans Compose sous forme de pointeurs de type
+`PointerType.Touch`, et un stylet de tablette sous forme de `PointerType.Stylus`, ou de
+`PointerType.Eraser` pour son extrémité gomme. Vous les lisez avec le même modifier `pointerInput`
+que la souris, sans rien ajouter en plus de `nucleus-application`.
 
 ## Dessiner avec la pression
 
@@ -14,7 +15,7 @@ Modifier.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             val change = awaitPointerEvent().changes.first()
-            if (change.type == PointerType.Touch) {
+            if (change.type == PointerType.Touch || change.type == PointerType.Stylus) {
                 addPoint(change.position, change.pressure)
                 change.consume()
             }
@@ -26,21 +27,47 @@ Modifier.pointerInput(Unit) {
 Les détecteurs de gestes, `consume()` et le hit testing traitent ces contacts comme n'importe quel
 autre pointeur Compose.
 
+## Lire le type de pointeur
+
+`PointerInputChange.type` indique l'outil derrière chaque événement : un même handler peut
+dessiner avec la pointe du stylet et effacer avec l'autre extrémité.
+
+```kotlin
+Modifier.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val change = awaitPointerEvent().changes.first()
+            if (!change.pressed) continue
+            when (change.type) {
+                PointerType.Stylus -> addPoint(change.position, change.pressure)
+                PointerType.Eraser -> erase(change.position)
+                else -> Unit
+            }
+        }
+    }
+}
+```
+
+Un stylet posé sur la surface presse le bouton principal. Un stylet qui survole la surface à
+portée arrive en événements `Move`, sans bouton pressé. Compose n'envoie `Enter` et `Exit` que
+pour la souris : le survol d'un stylet n'en produit jamais.
+
 ## Prise en charge par plateforme
 
-| Plateforme | Arrive comme | Pression |
-| --- | --- | --- |
-| Windows | `PointerType.Touch` | Fournie si le digitaliseur la prend en charge |
-| Linux (Wayland et X11) | `PointerType.Touch` | Toujours `1f` |
-| macOS | Souris | Non fournie |
+| Plateforme | Doigt | Stylet | Pression |
+| --- | --- | --- | --- |
+| Windows | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Fournie si le digitaliseur la prend en charge |
+| Linux (Wayland et X11) | `PointerType.Touch` | `PointerType.Stylus` / `Eraser` | Toujours `1f` pour un doigt, non fournie pour un stylet |
+| macOS | Pas d'écran tactile | `PointerType.Stylus` / `Eraser` | Non fournie |
 
 - Traitez `pressure == 1f` comme « moyenne ou inconnue ». La plupart des écrans tactiles grand
   public renvoient `1f`.
-- Nucleus ne produit jamais `PointerType.Stylus` ni `PointerType.Eraser`, et `PointerInputChange`
-  ne porte ni inclinaison ni rotation du stylet. Un stylet et un doigt ne diffèrent que par la
-  pression, sous Windows.
+- `PointerInputChange` ne porte ni inclinaison ni rotation du stylet.
 - Un doigt glissé sur la barre de titre déplace la fenêtre sous Windows et Linux. Sous Linux, un
   doigt sur un bord de fenêtre la redimensionne.
+- Sous Linux, les écarts entre les valeurs de `uptimeMillis` suivent les instants où l'écran a
+  mesuré le contact, et non ceux où les événements ont atteint l'application : la vitesse et
+  l'inertie restent justes après une frame lente.
 
 ## Et ensuite
 

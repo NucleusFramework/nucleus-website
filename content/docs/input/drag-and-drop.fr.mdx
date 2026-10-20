@@ -53,6 +53,86 @@ Modifier.dragAndDropSource { _ ->
 Sans fichier ni texte dans le transferable, aucun glisser ne démarre. Votre fenêtre continue de se
 dessiner quand le curseur en sort.
 
+## Transporter un glisser entre fenêtres sous Wayland
+
+Sous Wayland natif, une fenêtre ne peut ni lire ni fixer sa position à l'écran
+(`TaoWindow.canPlaceOnScreen` vaut `false`) : la source d'un glisser entre deux de vos fenêtres
+ne sait donc pas au-dessus de quelle fenêtre se trouve le pointeur. L'API de glisser par transfert
+fait passer ce glisser par la session de glisser-déposer de la plateforme : la fenêtre sous le
+pointeur résout le dépôt, et la source applique le résultat. Les
+[satellites](/docs/tool-windows/satellites) et les [onglets](/docs/tool-windows/tabs) s'en servent
+pour leurs propres glissers. Utilisez-la pour une disposition de docking ou d'onglets qui vous est
+propre. Elle est `@ExperimentalNucleusApi` et se trouve dans
+`dev.nucleusframework.window.tao.workspace`.
+
+Implémentez `TransferDrag` pour la session, et gardez le glisser en cours là où toutes les
+fenêtres le voient :
+
+```kotlin
+// Un seul glisser en cours par processus, visible de toutes les fenêtres
+var currentDrag: PanelDrag? by mutableStateOf(null)
+
+@OptIn(ExperimentalNucleusApi::class)
+class PanelDrag(val panelId: String) : TransferDrag {
+    override val title = "Layers"
+    override val ghostSizePx = Size(240f, 32f)
+    override val ghostSource = TransferGhostSource.None
+    var zone: DropZone? = null
+
+    override fun end() {
+        zone?.let { movePanel(panelId, it) }
+        currentDrag = null
+    }
+
+    override fun cancel() {
+        currentDrag = null
+    }
+}
+```
+
+Placez `Modifier.transferDragHandle` sur la poignée de la source. `begin` renvoie la session, ou
+`null` pour refuser le glisser :
+
+```kotlin
+val window = LocalTaoWindow.current ?: return
+Box(
+    Modifier.transferDragHandle(
+        key = "layers",
+        window = window,
+        begin = { PanelDrag("layers").also { currentDrag = it } },
+    ),
+)
+```
+
+Dans chaque fenêtre qui accepte le dépôt, n'acceptez que pendant qu'une session est en cours, et
+résolvez `DragAndDropEvent.positionInWindowPx()` par rapport à vos zones de dépôt :
+
+```kotlin
+val target = remember {
+    object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            val drag = currentDrag ?: return false
+            drag.zone = zoneAt(event.positionInWindowPx()) ?: return false
+            return true
+        }
+    }
+}
+Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { currentDrag != null }, target = target))
+```
+
+`end()` s'exécute sur la source une fois la session de la plateforme terminée, qu'un dépôt ait eu
+lieu ou non.
+
+- `ghostSource` choisit ce que montre l'icône de glisser : `TransferGhostSource.WholeWindow`,
+  `Region(rectPx)` pour une partie de la fenêtre source, ou `None` pour une carte qui affiche
+  `title`.
+- Le paramètre `gesture` prend un `TransferDragGesture`. Son `onDrag` garde le pointeur tant qu'il
+  renvoie `false` : une barre d'onglets peut ainsi réordonner localement avant que la session ne
+  démarre. La valeur par défaut, `TransferDragGesture.Immediate`, passe la main dès que le pointeur
+  dépasse le seuil de glissement.
+- Linux uniquement. Ailleurs, la session ne démarre pas et `cancel()` est appelé. Testez
+  `canPlaceOnScreen` et déplacez de vraies fenêtres sur les autres plateformes.
+
 <Accordions>
 <Accordion title="En coulisses">
 
@@ -68,4 +148,6 @@ dessiner quand le curseur en sort.
 
 - [Icônes de pointeur](/docs/input/pointer-icons) : afficher un curseur de préhension ou d'interdiction pendant un glisser.
 - [Onglets](/docs/tool-windows/tabs) : détacher et fusionner des onglets sur la même session de glisser.
+- [Fenêtres d'outils](/docs/tool-windows#deux-façons-de-transporter-un-glissement) : comment les
+  satellites et les onglets choisissent un type de glisser.
 - [Gestes trackpad](/docs/input/trackpad-gestures) : pans et zoom par pincement.

@@ -51,6 +51,81 @@ Modifier.dragAndDropSource { _ ->
 A transferable with neither files nor text does not start a drag. Your window keeps drawing while
 the cursor is outside it.
 
+## Carry a cross-window drag on Wayland
+
+On native Wayland a window cannot read or set its screen position (`TaoWindow.canPlaceOnScreen`
+is `false`), so the source of a drag between two of your windows cannot tell which window the
+pointer is over. The transfer drag API carries such a drag on the platform's drag-and-drop
+session instead: the window under the pointer resolves the drop, and the source acts on the
+outcome. [Satellites](/docs/tool-windows/satellites) and [tabs](/docs/tool-windows/tabs) use it
+for their own drags. Use it for a docking or tab layout of your own. It is
+`@ExperimentalNucleusApi` and lives in `dev.nucleusframework.window.tao.workspace`.
+
+Implement `TransferDrag` for the session, and keep the drag in flight where every window sees it:
+
+```kotlin
+// One drag in flight per process, visible to every window
+var currentDrag: PanelDrag? by mutableStateOf(null)
+
+@OptIn(ExperimentalNucleusApi::class)
+class PanelDrag(val panelId: String) : TransferDrag {
+    override val title = "Layers"
+    override val ghostSizePx = Size(240f, 32f)
+    override val ghostSource = TransferGhostSource.None
+    var zone: DropZone? = null
+
+    override fun end() {
+        zone?.let { movePanel(panelId, it) }
+        currentDrag = null
+    }
+
+    override fun cancel() {
+        currentDrag = null
+    }
+}
+```
+
+Put `Modifier.transferDragHandle` on the grip of the source. `begin` returns the session, or
+`null` to refuse the drag:
+
+```kotlin
+val window = LocalTaoWindow.current ?: return
+Box(
+    Modifier.transferDragHandle(
+        key = "layers",
+        window = window,
+        begin = { PanelDrag("layers").also { currentDrag = it } },
+    ),
+)
+```
+
+In every window that accepts the drop, accept only while a session is in flight and resolve
+`DragAndDropEvent.positionInWindowPx()` against your drop zones:
+
+```kotlin
+val target = remember {
+    object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            val drag = currentDrag ?: return false
+            drag.zone = zoneAt(event.positionInWindowPx()) ?: return false
+            return true
+        }
+    }
+}
+Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { currentDrag != null }, target = target))
+```
+
+`end()` runs on the source once the platform session is over, whether or not anything was
+dropped.
+
+- `ghostSource` sets what the drag icon pictures: `TransferGhostSource.WholeWindow`,
+  `Region(rectPx)` for one part of the source window, or `None` for a card that shows `title`.
+- The `gesture` parameter takes a `TransferDragGesture`. Its `onDrag` keeps the pointer for as long
+  as it returns `false`, so a tab strip can reorder locally before the session starts. The
+  default, `TransferDragGesture.Immediate`, hands over once the pointer passes the touch slop.
+- Linux only. Elsewhere the session does not start and `cancel()` is called. Branch on
+  `canPlaceOnScreen` and move real windows on the other platforms.
+
 <Accordions>
 <Accordion title="Under the hood">
 
@@ -66,4 +141,6 @@ the cursor is outside it.
 
 - [Pointer icons](/docs/input/pointer-icons): show a grab or not-allowed cursor during a drag.
 - [Tabs](/docs/tool-windows/tabs): tear-off and merge built on the same drag session.
+- [Tool windows](/docs/tool-windows#two-ways-to-carry-a-drag): how satellites and tabs pick a
+  drag kind.
 - [Trackpad gestures](/docs/input/trackpad-gestures): pans and pinch-to-zoom.
