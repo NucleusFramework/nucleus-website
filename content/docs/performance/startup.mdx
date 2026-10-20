@@ -28,6 +28,7 @@ also leave the pack off and turn on a single knob.
 | `idleGc` | Collects garbage while the app sits unused. See [Idle GC](#idle-gc). |
 | `lastJdk` | Packages and runs the app with OpenJDK 27. See [Package with the latest JDK](#package-with-the-latest-jdk). |
 | `partialRedraw` | Repaints only what changed in each frame. See [Rendering performance](/docs/performance/rendering#turn-on-partial-redraw). |
+| `mallocArenas` | Linux: caps glibc's malloc arenas at 2 to lower resident memory. See [Cap glibc malloc arenas on Linux](#cap-glibc-malloc-arenas-on-linux). |
 
 The pack never replaces a value you set (`garbageCollector`, `javaHome`, `-Xms`,
 `-XX:MaxRAMPercentage`), and it does not enable the [AOT cache](/docs/performance/aot-cache) or
@@ -49,6 +50,23 @@ Idle GC runs `System.gc()` right away when a window is minimized, or 3 s after e
 lost focus. Startup never triggers one. It covers the windows `nucleusApplication` opens and works
 in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off for one run.
 
+## Cap glibc malloc arenas on Linux
+
+glibc creates up to 8 malloc arenas per CPU core, and each one keeps the memory it once held. A
+desktop app runs many threads (JVM, Skia, GPU driver, coroutines), so its resident memory ends up
+far above what it uses. `mallocArenas` caps the arenas at 2 when the app starts, in JVM apps and
+native images alike.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { mallocArenas = true }
+}
+```
+
+- `-Dnucleus.optimization.mallocArenaMax=<n>` in `jvmArgs` sets another cap, and `0` turns it off.
+- A `MALLOC_ARENA_MAX` variable, or `glibc.malloc.arena_max` in `GLIBC_TUNABLES`, always wins.
+- It has no effect on macOS, Windows, or a musl libc.
+
 <Accordions>
 <Accordion title="Under the hood">
 
@@ -57,7 +75,10 @@ in native images too. Pass `-Dnucleus.optimization.idleGc=false` to turn it off 
   `<gradle-user-home>/nucleus/jdk`. The fallback uses the full Liberica JDK, since Lite has no
   `jmods` for `jlink`. A `NUCLEUS_JDK_HOME` that is not JDK 27 or has no `bin/java` is ignored
   with a warning.
-- A native image reads idle GC from `nucleus/nucleus-app.properties`, since it has no launcher `.cfg`.
+- A native image reads idle GC and the arena cap from `nucleus/nucleus-app.properties`, since it
+  has no launcher `.cfg`.
+- `nucleusApplication` and `GraalVmInitializer.initialize()` call `mallopt(M_ARENA_MAX, n)` before
+  the app starts its threads: glibc ignores the cap once more than 8 arenas exist.
 - A native image takes its collector and heap from `graalvm { garbageCollector; maxHeapSizePercent }`.
 
 </Accordion>

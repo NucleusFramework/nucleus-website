@@ -28,6 +28,7 @@ force. Vous pouvez aussi laisser le pack désactivé et n'activer qu'une option.
 | `idleGc` | Libère la mémoire quand l'application reste inutilisée. Voir [GC au repos](#gc-au-repos). |
 | `lastJdk` | Empaquette et lance l'application avec OpenJDK 27. Voir [Empaqueter avec le dernier JDK](#empaqueter-avec-le-dernier-jdk). |
 | `partialRedraw` | Ne repeint que ce qui a changé à chaque frame. Voir [Performances de rendu](/docs/performance/rendering#activer-le-redessin-partiel). |
+| `mallocArenas` | Linux : limite les arènes malloc de glibc à 2 pour réduire la mémoire résidente. Voir [Limiter les arènes malloc de glibc sous Linux](#limiter-les-arènes-malloc-de-glibc-sous-linux). |
 
 Le pack ne remplace jamais une valeur que vous avez posée (`garbageCollector`, `javaHome`, `-Xms`,
 `-XX:MaxRAMPercentage`), et n'active ni le [cache AOT](/docs/performance/aot-cache) ni ProGuard.
@@ -50,6 +51,25 @@ toutes les fenêtres ont perdu le focus. Le démarrage n'en déclenche jamais. I
 ouvertes par `nucleusApplication` et fonctionne aussi en image native. Passez
 `-Dnucleus.optimization.idleGc=false` pour le couper le temps d'une exécution.
 
+## Limiter les arènes malloc de glibc sous Linux
+
+glibc crée jusqu'à 8 arènes malloc par cœur de processeur, et chacune garde la mémoire qu'elle a
+occupée. Une application de bureau fait tourner beaucoup de threads (JVM, Skia, pilote GPU,
+coroutines) : sa mémoire résidente finit bien au-dessus de ce qu'elle utilise. `mallocArenas`
+limite les arènes à 2 au démarrage, en application JVM comme en image native.
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nucleusOptimization { mallocArenas = true }
+}
+```
+
+- `-Dnucleus.optimization.mallocArenaMax=<n>` dans `jvmArgs` fixe une autre limite, et `0` la
+  désactive.
+- Une variable `MALLOC_ARENA_MAX`, ou `glibc.malloc.arena_max` dans `GLIBC_TUNABLES`, l'emporte
+  toujours.
+- L'option n'a aucun effet sur macOS, sur Windows ni avec une libc musl.
+
 <Accordions>
 <Accordion title="En coulisses">
 
@@ -58,8 +78,11 @@ ouvertes par `nucleusApplication` et fonctionne aussi en image native. Passez
   cache sous `<gradle-user-home>/nucleus/jdk`. Le repli prend le JDK Liberica complet, car Lite
   n'a pas de `jmods` pour `jlink`. Un `NUCLEUS_JDK_HOME` qui n'est pas un JDK 27 ou sans
   `bin/java` est ignoré avec un avertissement.
-- Une image native lit le GC au repos dans `nucleus/nucleus-app.properties`, faute de fichier
-  `.cfg` de lanceur.
+- Une image native lit le GC au repos et la limite d'arènes dans `nucleus/nucleus-app.properties`,
+  faute de fichier `.cfg` de lanceur.
+- `nucleusApplication` et `GraalVmInitializer.initialize()` appellent `mallopt(M_ARENA_MAX, n)`
+  avant que l'application lance ses threads : glibc ignore la limite dès que plus de 8 arènes
+  existent.
 - Une image native tire son collecteur et son tas de `graalvm { garbageCollector; maxHeapSizePercent }`.
 
 </Accordion>

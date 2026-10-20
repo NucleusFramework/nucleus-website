@@ -7,8 +7,8 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
 This page covers the `linux { }` block: DEB, RPM, AppImage, Pacman, Snap, and Flatpak. Linux
-formats build only on a Linux host with `rpm` and `fakeroot` (RPM), `libfuse2` (AppImage), and
-`flatpak` plus `flatpak-builder` (Flatpak). The `setup-nucleus` CI action installs them.
+formats build only on a Linux host with `rpm` and `fakeroot` (RPM), and `flatpak` plus
+`flatpak-builder` (Flatpak). The `setup-nucleus` CI action installs them.
 
 ## Configure the target formats
 
@@ -31,7 +31,9 @@ nativeDistributions {
 
 Build with `packageDeb`, `packageRpm`, or `packagePacman`. The `StartupWMClass` of the `.desktop`
 entry defaults to `mainClass` with dots replaced by hyphens; set `startupWMClass` if the window
-manager reports another class. Bump `appRelease` to re-release the same `packageVersion`.
+manager reports another class. The entry's `Name` is `appName`, while the executable and
+`/opt/<packageName>` keep a name without spaces. Bump `appRelease` to re-release the same
+`packageVersion`.
 
 ## Build an AppImage
 
@@ -48,8 +50,44 @@ linux {
 }
 ```
 
-`Maximum` and `Ultra` compression slow every AppImage launch, so keep `Normal` for the AppImage
-even when `nativeDistributions.compressionLevel` is higher. `Ultra` also recompresses the DEB.
+The image runs on the static AppImage runtime: users need no `libfuse2`, only the `fusermount` or
+`fusermount3` binary their distribution ships. `CompressionLevel.Store` builds a gzip image; every
+other level builds the same zstd image. `Ultra` still recompresses the DEB.
+
+## Integrate the AppImage with the desktop
+
+An AppImage carries its `.desktop` entry and icons, but nothing installs them, so GNOME shows a
+generic icon in the dock and leaves the app out of the application grid. `AppImageIntegration`
+installs them into the user's data directory after the user agrees. It ships in `core-runtime`,
+which comes with `nucleus-application`.
+
+```kotlin
+import dev.nucleusframework.core.runtime.AppImageIntegration
+import dev.nucleusframework.core.runtime.AppImageIntegrationResult
+import dev.nucleusframework.core.runtime.AppImageIntegrationStatus
+
+val integration = AppImageIntegration()
+
+when (integration.status()) {
+    AppImageIntegrationStatus.NotIntegrated -> {
+        // Ask the user first, then:
+        if (askUser()) integration.integrate()
+    }
+    is AppImageIntegrationStatus.Stale -> integration.integrate() // the image moved or was updated
+    else -> Unit
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `NotAppImage` | Not running from an AppImage, or not on Linux. Nothing to offer. |
+| `NotIntegrated` | No entry for this app exists. Offer to integrate. |
+| `Integrated` | The entry written by `integrate()` matches this image. |
+| `Stale` | That entry points at a moved image or another version. Refresh it without asking. |
+| `ExternallyManaged` | Another entry owns the app: a DEB or RPM, an integration tool, a hand-written file. `integrate()` refuses to touch it. |
+
+`integrate()` returns `AppImageIntegrationResult.Integrated(desktopFile)` or
+`AppImageIntegrationResult.Failed(reason, cause)`. The installed entry launches the image itself.
 
 ## Add install and remove scripts
 
@@ -133,6 +171,10 @@ nativeDistributions {
 - `afterInstall` and `afterRemove` are appended to Nucleus's template (desktop integration,
   AppArmor, polkit policy for passwordless updates). The other four go raw to fpm.
 - `Ultra` rebuilds the DEB with `xz -9e`. RPM and Pacman already use xz.
+- `AppImageIntegration` writes the image's entry to `$XDG_DATA_HOME/applications` (default
+  `~/.local/share/applications`) with `Exec=` pointing at `$APPIMAGE`, copies its hicolor icons,
+  and marks the entry with `X-Nucleus-AppImage`. Any other visible entry with the same
+  `StartupWMClass`, or a user entry that launches this image, counts as `ExternallyManaged`.
 - electron-builder builds the snap from its own template, which has no arm64 build.
 
 </Accordion>

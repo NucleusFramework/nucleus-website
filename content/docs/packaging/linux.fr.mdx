@@ -7,9 +7,8 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
 Cette page couvre le bloc `linux { }` : DEB, RPM, AppImage, Pacman, Snap et Flatpak. Les formats
-Linux se construisent uniquement sur un hôte Linux avec `rpm` et `fakeroot` (RPM), `libfuse2`
-(AppImage), et `flatpak` plus `flatpak-builder` (Flatpak). L'action CI `setup-nucleus` les
-installe.
+Linux se construisent uniquement sur un hôte Linux avec `rpm` et `fakeroot` (RPM), et `flatpak`
+plus `flatpak-builder` (Flatpak). L'action CI `setup-nucleus` les installe.
 
 ## Configurer les formats cibles
 
@@ -32,8 +31,9 @@ nativeDistributions {
 
 Construisez avec `packageDeb`, `packageRpm` ou `packagePacman`. Le `StartupWMClass` de l'entrée
 `.desktop` vaut par défaut `mainClass` avec les points remplacés par des tirets ; réglez
-`startupWMClass` si le gestionnaire de fenêtres signale une autre classe. Incrémentez `appRelease`
-pour republier le même `packageVersion`.
+`startupWMClass` si le gestionnaire de fenêtres signale une autre classe. Le `Name` de l'entrée est
+`appName`, tandis que l'exécutable et `/opt/<packageName>` gardent un nom sans espaces.
+Incrémentez `appRelease` pour republier le même `packageVersion`.
 
 ## Construire un AppImage
 
@@ -50,9 +50,45 @@ linux {
 }
 ```
 
-Les compressions `Maximum` et `Ultra` ralentissent chaque lancement de l'AppImage : gardez `Normal`
-pour l'AppImage même quand `nativeDistributions.compressionLevel` est plus élevé. `Ultra`
-recompresse aussi le DEB.
+L'image tourne sur le runtime AppImage statique : vos utilisateurs n'ont pas besoin de `libfuse2`,
+seulement du binaire `fusermount` ou `fusermount3` que fournit leur distribution.
+`CompressionLevel.Store` produit une image gzip ; tous les autres niveaux produisent la même image
+zstd. `Ultra` recompresse toujours le DEB.
+
+## Intégrer l'AppImage au bureau
+
+Un AppImage contient son entrée `.desktop` et ses icônes, mais rien ne les installe : GNOME affiche
+une icône générique dans le dock et omet l'application de la grille d'applications.
+`AppImageIntegration` les installe dans le répertoire de données de l'utilisateur, une fois que
+celui-ci a donné son accord. Il fait partie de `core-runtime`, fourni avec `nucleus-application`.
+
+```kotlin
+import dev.nucleusframework.core.runtime.AppImageIntegration
+import dev.nucleusframework.core.runtime.AppImageIntegrationResult
+import dev.nucleusframework.core.runtime.AppImageIntegrationStatus
+
+val integration = AppImageIntegration()
+
+when (integration.status()) {
+    AppImageIntegrationStatus.NotIntegrated -> {
+        // Demander d'abord à l'utilisateur, puis :
+        if (askUser()) integration.integrate()
+    }
+    is AppImageIntegrationStatus.Stale -> integration.integrate() // image déplacée ou mise à jour
+    else -> Unit
+}
+```
+
+| Statut | Signification |
+|---|---|
+| `NotAppImage` | L'application ne tourne pas depuis un AppImage, ou pas sous Linux. Rien à proposer. |
+| `NotIntegrated` | Aucune entrée n'existe pour cette application. Proposez l'intégration. |
+| `Integrated` | L'entrée écrite par `integrate()` correspond à cette image. |
+| `Stale` | Cette entrée pointe vers une image déplacée ou une autre version. Rafraîchissez-la sans demander. |
+| `ExternallyManaged` | Une autre entrée gère l'application : un DEB ou un RPM, un outil d'intégration, un fichier écrit à la main. `integrate()` refuse d'y toucher. |
+
+`integrate()` renvoie `AppImageIntegrationResult.Integrated(desktopFile)` ou
+`AppImageIntegrationResult.Failed(reason, cause)`. L'entrée installée lance l'image elle-même.
 
 ## Ajouter des scripts d'installation et de désinstallation
 
@@ -141,6 +177,11 @@ nativeDistributions {
   AppArmor, politique polkit des mises à jour sans mot de passe). Les quatre autres passent tels
   quels à fpm.
 - `Ultra` reconstruit le DEB avec `xz -9e`. RPM et Pacman utilisent déjà xz.
+- `AppImageIntegration` écrit l'entrée de l'image dans `$XDG_DATA_HOME/applications` (par défaut
+  `~/.local/share/applications`) avec un `Exec=` qui pointe vers `$APPIMAGE`, copie ses icônes
+  hicolor et marque l'entrée avec `X-Nucleus-AppImage`. Toute autre entrée visible ayant le même
+  `StartupWMClass`, ou une entrée utilisateur qui lance cette image, compte comme
+  `ExternallyManaged`.
 - electron-builder construit le snap à partir de son propre modèle, qui n'existe pas pour arm64.
 
 </Accordion>
