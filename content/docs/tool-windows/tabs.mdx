@@ -170,8 +170,8 @@ For a strip that keeps its own gestures, apply `Modifier.tabSlot(group, index)` 
 
 While a tab from another window hovers the strip, `dropGhost` holds a
 `TabDropGhost(index, width, tab)`: compose `TabDropGhostCard(ghost)` at `index`. Add
-`TabHoverPreviewPopup(preview)` once for hover cards. `jewel-tabs-demo` wraps Jewel's `TabStrip`
-this way.
+`TabHoverPreviewPopup(preview)` once for hover cards. The `workspace.tabs` probe of the
+[Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) wraps Jewel's `TabStrip` this way: pick Jewel under Strip.
 
 ## Open the tab windows yourself
 
@@ -219,9 +219,10 @@ change. You can also assign one yourself before the tab is shown. `NativeView` a
 content is missing from captures. `TabPreview(tab, modifier, contentScale, placeholder)` draws
 the thumbnail.
 
-**Hover cards.** `TabHoverPreview(delay, offset, nativeLayer, content)` describes the card.
-`delay` defaults to 650 ms; `nativeLayer = false` draws the card inside the window, clipped. The stock card is
-`TabHoverPreviewCard(modifier, subtitle = null)`:
+**Hover cards.** `TabHoverPreview(delay, offset, content)` describes the card. `delay` defaults
+to 650 ms. The card fades in, slides from tab to tab while the pointer moves along the strip, and
+fades out. Coming back to the strip right after leaving it shows the card again without the
+delay. The stock card is `TabHoverPreviewCard(modifier, subtitle = null)`:
 
 ```kotlin
 val preview = remember {
@@ -229,6 +230,11 @@ val preview = remember {
 }
 TabStrip(hoverPreview = preview)
 ```
+
+The card opens like the window's other popups. The windows `TabWindows` opens draw it inside the
+window, clipped by it. To let it hang below the window, as a browser's does,
+[open the tab windows yourself](#open-the-tab-windows-yourself) with `nativePopupLayers = true`.
+See [Open popups as native surfaces](/docs/windows/dialogs-popups#open-popups-as-native-surfaces).
 
 **Drag and drop cards.** Draw `TabWindows(dragGhost)` and `TabStrip(dropGhostCard)` with the same
 composable, built on `TabGhostCard(tab, modifier)`, so the tab lands as it travelled.
@@ -248,6 +254,26 @@ Read `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (where new tabs ope
 `groupOf(window)`, `tabsOf(group)`, `selectedTab(group)`, and the drag in flight with
 `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. A closed tab is gone: declaring it again
 creates a new tab in the active window.
+
+## Keep pinned tabs first
+
+`TabWorkspace.constrainIndex` narrows where a tab may stand in a group. It receives the tab, the
+group and the index the tab would take, and returns the index it may take instead. This keeps
+pinned tabs ahead of the others, as a browser does:
+
+```kotlin
+val workspace = rememberTabWorkspace()
+workspace.constrainIndex = { tabId, group, index ->
+    val pinnedCount = group.ids.count { it in pinned && it != tabId }
+    if (tabId in pinned) index.coerceAtMost(pinnedCount) else index.coerceAtLeast(pinnedCount)
+}
+```
+
+Every placement goes through it: `move`, `reorder`, a tab's first declaration, and the drop
+preview of a drag in its own strip, another window's or a linked workspace's. The other tabs only
+make room where the dragged tab can land, so a release never puts it anywhere else. Set it before
+the first `Tab` declaration so first placements follow it too. `null`, the default, allows any
+index.
 
 ## Drag tabs between workspaces
 
@@ -324,7 +350,8 @@ fun rememberTabGroups(workspace: TabWorkspace): List<TabWindowGroup> {
 ```
 
 Open and close those satellites from a `LaunchedEffect`, never during composition.
-`tab-satellites-demo` and `reader-dock-demo` show both setups.
+The `workspace.tab-satellites` and `workspace.reader-dock` probes of the
+[Nucleus Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab) show both setups.
 
 <Accordions>
 <Accordion title="Under the hood">

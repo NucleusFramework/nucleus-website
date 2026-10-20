@@ -55,6 +55,7 @@ Float and Close actions; dragging it moves the satellite between the two hosts.
 | `controlButtonsDirection` | `ControlButtonsDirection.Auto` | Side of the floating window's controls. Pass the main window's value, such as `SystemNative` |
 | `header` | `{ DefaultSatelliteHeader() }` | Chrome in the floating title bar and above the docked panel |
 | `floatingCaption` | `{}` | See [Floating satellites on Wayland](#floating-satellites-on-wayland) |
+| `floatingBarMovesWindow` | `false` | See [Give the whole bar to the compositor](#give-the-whole-bar-to-the-compositor) |
 | `content` | required | The body, with `SatelliteScope` as receiver |
 
 `initialPlacement` through `reorderable` apply the first time an `id` is declared, unless `restore`
@@ -106,7 +107,8 @@ Call the workspace from effects and UI callbacks, not during composition.
 ## Write a header
 
 `header` and `content` run with `SatelliteScope`: `workspace`, `satellite` (the entry),
-`isDocked`, `isCompositorPlaced`, and `dock(side)`, `undock()`, `close()`.
+`isDocked`, `isCompositorPlaced`, `floatingBarMovesWindow`, and `dock(side)`, `undock()`,
+`close()`.
 
 A custom header puts `Modifier.satelliteDragHandle(scope)` on the docked strip only. The floating
 title bar already carries the handle, and a second one would start two drags. A press without
@@ -150,6 +152,22 @@ On a compositor-placed window only the compositor can move the window. The float
 splits there: the header docks the satellite, and a 56 dp strip (`SatelliteCaptionStripWidth`)
 beside the window controls moves the window. Nucleus composes `floatingCaption` in that strip,
 only when `isCompositorPlaced` is `true`. Put a "move" glyph there, not a control.
+
+### Give the whole bar to the compositor
+
+For palettes the user moves around more often than docks, pass `floatingBarMovesWindow = true`.
+On a compositor-placed window a press anywhere on the floating title bar then moves the window,
+as on any other window, and no caption strip is reserved. The satellite docks from what the
+header marks itself: a `dock()` action, or a grip with `Modifier.satelliteDragHandle`.
+
+```kotlin
+Satellite(workspace, id = "tools", title = "Tools", floatingBarMovesWindow = true) { ToolsPanel() }
+```
+
+`DefaultSatelliteHeader` handles it: it makes its drag grip the dock handle and drops the chip. A
+custom header reads `SatelliteScope.floatingBarMovesWindow`, `true` only while floating on a
+compositor-placed window, and puts the handle on a grip in that case too. The parameter has no
+effect where the app places its windows: the whole bar drags the satellite there either way.
 
 ## Open a standalone satellite window
 

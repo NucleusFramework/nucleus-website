@@ -176,8 +176,8 @@ chaque onglet et `Modifier.tabDragHandle(workspace, tab)` à sa poignée.
 
 Quand un onglet d'une autre fenêtre survole la barre, `dropGhost` contient un
 `TabDropGhost(index, width, tab)` : composez `TabDropGhostCard(ghost)` à `index`. Ajoutez
-`TabHoverPreviewPopup(preview)` une fois pour les cartes de survol. `jewel-tabs-demo` enveloppe
-ainsi le `TabStrip` de Jewel.
+`TabHoverPreviewPopup(preview)` une fois pour les cartes de survol. La sonde `workspace.tabs` du
+[Nucleus Lab](/docs/concepts/testing#vérifier-un-module-avec-le-nucleus-lab) enveloppe ainsi le `TabStrip` de Jewel : choisissez Jewel sous Strip.
 
 ## Ouvrir les fenêtres d'onglets vous-même
 
@@ -226,9 +226,10 @@ un changement visible. Vous pouvez aussi en assigner une vous-même avant que l'
 affiché. Le contenu d'une `NativeView` ou d'une `TextureView` manque dans les captures.
 `TabPreview(tab, modifier, contentScale, placeholder)` dessine la miniature.
 
-**Cartes de survol.** `TabHoverPreview(delay, offset, nativeLayer, content)` décrit la carte.
-`delay` vaut 650 ms par défaut ; `nativeLayer = false` dessine la carte dans la fenêtre, rognée
-par elle. La carte standard est `TabHoverPreviewCard(modifier, subtitle = null)` :
+**Cartes de survol.** `TabHoverPreview(delay, offset, content)` décrit la carte. `delay` vaut
+650 ms par défaut. La carte apparaît en fondu, glisse d'un onglet à l'autre pendant que le pointeur
+longe la barre, puis disparaît en fondu. Revenir sur la barre juste après l'avoir quittée réaffiche
+la carte sans attendre le délai. La carte standard est `TabHoverPreviewCard(modifier, subtitle = null)` :
 
 ```kotlin
 val preview = remember {
@@ -236,6 +237,12 @@ val preview = remember {
 }
 TabStrip(hoverPreview = preview)
 ```
+
+La carte s'ouvre comme les autres popups de la fenêtre. Les fenêtres qu'ouvre `TabWindows` la
+dessinent dans la fenêtre, rognée par elle. Pour qu'elle déborde sous la fenêtre, comme celle d'un
+navigateur, [ouvrez les fenêtres d'onglets vous-même](#ouvrir-les-fenêtres-donglets-vous-même)
+avec `nativePopupLayers = true`. Voir
+[Ouvrir les popups dans des surfaces natives](/docs/windows/dialogs-popups#ouvrir-les-popups-dans-des-surfaces-natives).
 
 **Cartes de glissement et de dépôt.** Dessinez `TabWindows(dragGhost)` et
 `TabStrip(dropGhostCard)` avec le même composable, basé sur `TabGhostCard(tab, modifier)`, pour
@@ -256,6 +263,27 @@ Lisez `tabs`, `tab(id)`, `groups`, `group(id)`, `activeGroup` (où s'ouvrent les
 onglets), `groupOf(window)`, `tabsOf(group)`, `selectedTab(group)`, et le glissement en cours
 avec `draggedTab`, `dropPreview`, `dragGhost`, `dragKind`. Un onglet fermé disparaît : le déclarer
 à nouveau crée un nouvel onglet dans la fenêtre active.
+
+## Garder les onglets épinglés en tête
+
+`TabWorkspace.constrainIndex` restreint la place qu'un onglet peut occuper dans un groupe. Il
+reçoit l'onglet, le groupe et l'index que l'onglet prendrait, et renvoie l'index qu'il peut
+prendre à la place. Les onglets épinglés restent ainsi devant les autres, comme dans un
+navigateur :
+
+```kotlin
+val workspace = rememberTabWorkspace()
+workspace.constrainIndex = { tabId, group, index ->
+    val pinnedCount = group.ids.count { it in pinned && it != tabId }
+    if (tabId in pinned) index.coerceAtMost(pinnedCount) else index.coerceAtLeast(pinnedCount)
+}
+```
+
+Chaque placement passe par lui : `move`, `reorder`, la première déclaration d'un onglet, et
+l'aperçu de dépôt d'un glissement dans sa propre barre, dans celle d'une autre fenêtre ou d'un
+workspace lié. Les autres onglets ne s'écartent que là où l'onglet glissé peut atterrir : un
+relâchement ne le pose jamais ailleurs. Réglez-le avant la première déclaration de `Tab` pour que
+les premiers placements le respectent aussi. `null`, la valeur par défaut, autorise tout index.
 
 ## Glisser des onglets entre workspaces
 
@@ -334,7 +362,8 @@ fun rememberTabGroups(workspace: TabWorkspace): List<TabWindowGroup> {
 ```
 
 Ouvrez et fermez ces satellites depuis un `LaunchedEffect`, jamais pendant la composition.
-`tab-satellites-demo` et `reader-dock-demo` montrent les deux montages.
+Les sondes `workspace.tab-satellites` et `workspace.reader-dock` du
+[Nucleus Lab](/docs/concepts/testing#vérifier-un-module-avec-le-nucleus-lab) montrent les deux montages.
 
 <Accordions>
 <Accordion title="En coulisses">
