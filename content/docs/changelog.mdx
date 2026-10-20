@@ -16,6 +16,14 @@ The major version marks the API breaks: read the
 
 ### Breaking changes
 
+- **`GitHubProvider` takes no token** (#790). `GitHubProvider(owner, repo, token)` no longer
+  compiles; private repositories and GitHub Enterprise Server use the new
+  `PrivateGitHubProvider(owner, repo, token)`. See [Move private repositories to
+  PrivateGitHubProvider](/docs/migrate/from-2.x#move-private-repositories-to-privategithubprovider).
+- **`TabHoverPreview.nativeLayer` is removed** (#803). The hover card opens like the window's other
+  popups; to make it hang below a `TabWindows` window, open the windows yourself with
+  `nativePopupLayers = true`. See [Update tab hover
+  previews](/docs/migrate/from-2.x#update-tab-hover-previews).
 - **Tao is the only window backend** (#593). `decorated-window-awt`, `decorated-window-jbr` and
   `decorated-window-jni` are gone, along with `NucleusBackend`, `LocalNucleusBackend`,
   `nucleusApplication(backend = …)` and `NucleusApplicationScope.backend`.
@@ -40,6 +48,42 @@ The major version marks the API breaks: read the
 
 ### Behavior changes
 
+- **AppX is no longer sandboxed** (#793). It builds through the regular Windows pipeline, which adds
+  `packageGraalvmAppX`, and `ExecutableRuntime.isSandboxed()` returns `false` there; use `isAppX()`.
+  See [Build an AppX or MSIX package](/docs/packaging/windows#build-an-appx-or-msix-package).
+- **`javaHome` defaults to the JVM toolchain** (#853, #830). `run` and packaging use
+  `java.toolchain` / `jvmToolchain(...)` instead of the Gradle daemon's JDK. See [Apply the
+  plugin](/docs/start/install#apply-the-plugin).
+- **AppImages run on the static type2 runtime** (#845) and no longer need `libfuse2`; `Store` builds
+  a gzip image and every other level the same zstd image. See [Build an
+  AppImage](/docs/packaging/linux#build-an-appimage).
+- **SemVer suffixes work on macOS and Windows** (#255). `1.2.0-beta.1` packages; the app bundle gets
+  `1.2.0` and the installers keep the full version. See [Write the minimal
+  configuration](/docs/start/configuration#write-the-minimal-configuration).
+- **A modal dialog takes its owner's activation** (#869, #515). Clicking the owner, its taskbar
+  button, Alt+Tab or `toFront()` brings the dialog forward with keyboard focus. See [Block the
+  owner](/docs/windows/dialogs-popups#block-the-owner).
+- **macOS: a Cmd+Q menu item handles the shortcut** (#775, #749). A `NativeMenuBar` item bound to
+  Cmd+Q runs instead of the built-in quit, and beeps while it is disabled. See [Handle
+  Cmd+Q](/docs/os/menus/menu-bar#handle-cmdq).
+- **Focus requests take the Wayland activation token on their own** (#773, #739). `requestFocus()` /
+  `toFront()` from a global hotkey or a Linux notification action brings the window to the front.
+  See [Bring a window to the front](/docs/os/global-hotkey#bring-a-window-to-the-front).
+- **Tab hover cards animate like Chromium's** (#803). They fade in, slide from tab to tab and fade
+  out. See [Draw previews](/docs/tool-windows/tabs#draw-previews).
+- **A cancelled pinch cancels pointer input** (#789, #799, #807). On macOS and Linux, `ScaleEnd` is
+  followed by a pointer-input cancellation, and an open trackpad pan ends first. See [Zoom with a
+  pinch](/docs/input/trackpad-gestures#zoom-with-a-pinch).
+- **Idle windows give their GPU memory back** (#860, #866). Skia's resource cache is purged 3 s
+  after a window's last frame and at once on minimize. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **A `Dispatchers.Main` dispatch no longer renders a frame** (#770). On Linux and Windows, a
+  `delay` loop or a `withContext(Dispatchers.Main)` hop no longer draws a frame by itself. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **Lazy items are deactivated out of the frame** (#808). `-Dnucleus.tao.outOfFrameExecutor=false`
+  reverts this. See [Rendering notes](/docs/performance/rendering#notes).
+- **`SystemInfo.process(pid)` reads one process** (#779, #784, #797) instead of walking the process
+  table on every field. See [System info](/docs/os/system-info).
 - **Cmd+Q and Dock → Quit call `onCloseRequest`** (#696). Every open window gets the request,
   so a handler that never exits vetoes the quit. See
   [Handle a system quit](/docs/lifecycle/application#handle-a-system-quit).
@@ -70,6 +114,72 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **Partial redraw** (#756, #824). With `nucleusOptimization { partialRedraw = true }`, or the whole
+  `nucleusOptimization` pack, a frame repaints and presents only what changed, on macOS, Windows and
+  Linux, on the JVM and in native images. See [Turn on partial
+  redraw](/docs/performance/rendering#turn-on-partial-redraw).
+- **`debug { }` block for the `run` task** (#756). `partialRedraw { tint; stats; verify }` flashes
+  or logs what each frame repaints, and `recomposition { enabled; top }` logs the composables that
+  ran the most. See [See what each frame
+  repaints](/docs/performance/rendering#see-what-each-frame-repaints).
+- **`layoutPolicy` on every title bar** (#781). `TitleBar`, `DialogTitleBar` and the Material 2,
+  Material 3 and Jewel title bars accept `TitleBarLayoutPolicy.FillCenter`, which stretches the
+  centre child between the start and end items. See [Lay out the title
+  bar](/docs/windows#lay-out-the-title-bar).
+- **Title bars follow KWin's decoration mode** (#825). When the compositor asks for no decorations,
+  the built-in title bars drop their window controls but keep the app's content. Custom chrome reads
+  `TaoWindow.isDecorationSuppressed`. See [Follow the compositor's
+  decorations](/docs/windows/linux-wayland#follow-the-compositors-decorations).
+- **Touch reveals the fullscreen title bar** (#825). With `Modifier.newFullscreenControls()` on
+  Windows and Linux, a tap reveals the overlay bar and a tap outside hides it. See [Title bar
+  modifiers](/docs/windows#title-bar-modifiers).
+- **Tell a held key's repeats from a new press** (#805). `KeyEvent.isRepeat` (experimental) is
+  `true` for auto-repeated key-downs, so a held Ctrl+W acts once. See [Ignore
+  auto-repeat](/docs/input/keyboard#ignore-auto-repeat).
+- **Tablet pens arrive as `PointerType.Stylus` and `Eraser`** (#857, #859, #870) on Linux, macOS and
+  Windows. See [Read the pointer type](/docs/input/pen-stylus#read-the-pointer-type).
+- **Public transfer-drag API** (#863, experimental). `TransferDrag`, `Modifier.transferDragHandle`,
+  `TransferGhostSource` and `TransferDragGesture` let your own docking or tab layout carry
+  cross-window drags on native Wayland. See [Carry a cross-window drag on
+  Wayland](/docs/input/drag-and-drop#carry-a-cross-window-drag-on-wayland).
+- **Constrain where a tab may stand** (#804). `TabWorkspace.constrainIndex` applies to `move`,
+  `reorder`, first declaration and every drop preview, for example to keep pinned tabs first. See
+  [Keep pinned tabs first](/docs/tool-windows/tabs#keep-pinned-tabs-first).
+- **A floating satellite can give its whole title bar to the compositor** (#802). With
+  `Satellite(floatingBarMovesWindow = true)`, the whole bar moves the window on native Wayland. See
+  [Give the whole bar to the
+  compositor](/docs/tool-windows/satellites#give-the-whole-bar-to-the-compositor).
+- **Global hotkeys report releases and repeats** (#773, #739). `HotKeyEventListener` receives every
+  `HotKeyEvent` with its `state`, `isRepeat`, `timestamp` and Wayland `activationToken`. See [Track
+  presses and releases](/docs/os/global-hotkey#track-presses-and-releases).
+- **`TaoRootsForTest` exposes the Compose roots of Tao windows** (#826, experimental), so an in-app
+  end-to-end harness can drive a real native window. See
+  [Testing](/docs/concepts/testing#click-a-node-by-test-tag).
+- **The Nucleus Lab replaces the demo apps** (#795). One app of probes, one per capability, opened
+  with `-Dlab.probe=<id>` or `nucleus-lab://probe/<id>`. See [Check a module with the Nucleus
+  Lab](/docs/concepts/testing#check-a-module-with-the-nucleus-lab).
+- **Windows signing covers the app image** (#763, #748). Launchers and bundled DLLs, including those
+  inside unsigned JARs, are signed before the installer, so Smart App Control loads them. See [Sign
+  the bundled binaries](/docs/packaging/code-signing#sign-the-bundled-binaries).
+- **The whole MSVC C++ runtime ships with the app** (#834), in JVM app images (`windows {
+  bundleCRuntime }`) and GraalVM images. See [Bundle the Visual C++
+  runtime](/docs/packaging/windows#bundle-the-visual-c-runtime).
+- **ProGuard consumer rules** (#787). `proguard { consumerRules = true }` applies the
+  `META-INF/proguard/` rules of dependencies and keeps their `META-INF/services` providers. See
+  [Apply library consumer rules](/docs/reference/gradle-dsl#proguard-consumer-rules).
+- **glibc malloc arena cap** (#769, #757). `nucleusOptimization { mallocArenas = true }` caps
+  glibc's arenas at 2 on Linux. See [Cap glibc malloc arenas on
+  Linux](/docs/performance/startup#cap-glibc-malloc-arenas-on-linux).
+- **AppImage desktop integration** (#847, #848). `AppImageIntegration` installs the image's
+  `.desktop` entry and icons after the user agrees. See [Integrate the AppImage with the
+  desktop](/docs/packaging/linux#integrate-the-appimage-with-the-desktop).
+- **Localized Info.plist strings** (#854). `macOS { infoPlist { localization(...); localizationsDir
+  } }` writes `<lang>.lproj/InfoPlist.strings`. See [Localize Info.plist
+  strings](/docs/packaging/macos#localize-infoplist-strings).
+- **GitHub update lookups without the REST API** (#790). `GitHubProvider` reads public releases
+  through `releases.atom`, takes `host` and `protocol`, and picks the highest version on the
+  client's channel. See [Pick a release
+  channel](/docs/packaging/auto-update#pick-a-release-channel).
 - **Test updates without publishing a release** (#725). Simulate an update from `./gradlew run`
   (`-Pnucleus.updater.simulate=update`), point the app at your packaging output
   (`nucleus.updater.feedUrl`), or serve the next build with `serveUpdateFeed`. Installed apps
@@ -139,11 +249,41 @@ The major version marks the API breaks: read the
 
 ### Dependencies
 
+- **electron-builder 26.17.0** (#743).
 - **Kotlin 2.4.20, Compose Multiplatform 1.12.1, Jewel 0.41.0** (#723). Apps need Kotlin 2.4.20
   or later and Compose 1.12.1. See [Compatibility](/docs/start/install#compatibility).
 
 ### Bug fixes
 
+- **Wrap-content windows show at their measured size** (#868, #532) instead of flashing at the
+  fallback size. See [Size a window to its
+  content](/docs/windows/window-state#size-a-window-to-its-content).
+- **`dmg.sign = true` signs the DMG** (#855). See [Package a
+  DMG](/docs/packaging/macos#package-a-dmg).
+- **Linux desktop entries keep the display name** (#801).
+- **ProGuard release builds pass verification** (#794). The default rules turn off return-type
+  specialization, which caused `VerifyError: Bad return type`.
+- **One package rebuild per changed format** (#846).
+- **One `libGLESv2` on Windows** (#843).
+- **Updater**: SemVer build metadata is ignored (#771), `GenericProvider` allows `http` only on
+  loopback hosts (#742), manifest file names cannot escape the staging directory (#740), the DEB/RPM
+  update script quotes its paths (#741), and full downloads are hashed while written (#780).
+- **Partial redraw repaints layers a layout-phase write invalidates** (#831), and a popup closed
+  during layout no longer throws (#839).
+- **GraalVM**: images no longer embed Skiko twice (#822), static analysis reads multi-release JARs
+  for the image's JDK (#861), C interop natives stay out of JNI metadata (#862), and the Linux strip
+  no longer races its copies (#800).
+- **Windows: `cpuInfo()` reads per-CPU counters through PDH** (#867) instead of a slow WMI query.
+- **Linux**: recursive `fs-watcher` watches no longer overflow the inotify queue (#851),
+  notifications keep emoji (#849), `system-color` stops watching when the session bus disconnects
+  (#783), and no on-screen keyboard opens without a text field (#850).
+- **Linux touchscreens** (#813, #814, #815): a drag no longer registers as a tap plus a press, and
+  queued touches no longer play on after the fingers lift.
+- **Wayland: a click on a tab under its hover card stays a click** (#803).
+- **macOS: `Dispatchers.Main.immediate` runs inline from UI callbacks** (#852, #829).
+- **Windows rendering** (#761, #764, #873, #874): clean frames are paced to the display, windows
+  overhanging the desktop present through a DirectComposition mirror, animations keep running during
+  a modal move or resize, and a drag ends at the OS release point.
 - **Control-click is a secondary click on macOS** (#737), in windows and native popups, so
   `ContextMenuArea` and text-field menus open on it.
 - **AWT fonts in macOS GraalVM bundles** (#735). `java.awt.Font` no longer fails with `Problem

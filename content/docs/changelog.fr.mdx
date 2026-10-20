@@ -17,6 +17,14 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Changements incompatibles
 
+- **`GitHubProvider` ne prend plus de token** (#790). `GitHubProvider(owner, repo, token)` ne
+  compile plus ; les dépôts privés et GitHub Enterprise Server passent par le nouveau
+  `PrivateGitHubProvider(owner, repo, token)`. Voir [Passer les dépôts privés à
+  PrivateGitHubProvider](/docs/migrate/from-2.x#passer-les-dépôts-privés-à-privategithubprovider).
+- **`TabHoverPreview.nativeLayer` est supprimé** (#803). La carte de survol s'ouvre comme les autres
+  popups de la fenêtre ; pour qu'elle déborde d'une fenêtre `TabWindows`, ouvrez les fenêtres
+  vous-même avec `nativePopupLayers = true`. Voir [Mettre à jour les aperçus d'onglet au
+  survol](/docs/migrate/from-2.x#mettre-à-jour-les-aperçus-donglet-au-survol).
 - **Tao est le seul backend de fenêtrage** (#593). `decorated-window-awt`, `decorated-window-jbr`
   et `decorated-window-jni` disparaissent, avec `NucleusBackend`, `LocalNucleusBackend`,
   `nucleusApplication(backend = …)` et `NucleusApplicationScope.backend`.
@@ -42,6 +50,47 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Changements de comportement
 
+- **AppX n'est plus sandboxé** (#793). Il passe par le pipeline Windows standard, ce qui ajoute
+  `packageGraalvmAppX`, et `ExecutableRuntime.isSandboxed()` y renvoie `false` ; utilisez
+  `isAppX()`. Voir [Construire un package AppX ou
+  MSIX](/docs/packaging/windows#construire-un-package-appx-ou-msix).
+- **`javaHome` suit par défaut la toolchain JVM** (#853, #830). `run` et le packaging utilisent
+  `java.toolchain` / `jvmToolchain(...)` au lieu du JDK du daemon Gradle. Voir [Appliquer le
+  plugin](/docs/start/install#appliquer-le-plugin).
+- **Les AppImage tournent sur le runtime type2 statique** (#845) et n'ont plus besoin de `libfuse2`
+  ; `Store` produit une image gzip, tous les autres niveaux la même image zstd. Voir [Construire un
+  AppImage](/docs/packaging/linux#construire-un-appimage).
+- **Les suffixes SemVer fonctionnent sur macOS et Windows** (#255). `1.2.0-beta.1` s'empaquette ; le
+  bundle reçoit `1.2.0` et les installateurs gardent la version complète. Voir [Écrire la
+  configuration minimale](/docs/start/configuration#écrire-la-configuration-minimale).
+- **Un dialogue modal reprend l'activation de sa propriétaire** (#869, #515). Un clic sur la
+  propriétaire, son bouton dans la barre des tâches, Alt+Tab ou `toFront()` fait passer le dialogue
+  au premier plan avec le focus clavier. Voir [Bloquer la
+  propriétaire](/docs/windows/dialogs-popups#bloquer-la-propriétaire).
+- **macOS : un élément de menu lié à Cmd+Q gère le raccourci** (#775, #749). Il s'exécute à la place
+  de la fermeture intégrée, et émet un bip quand il est désactivé. Voir [Gérer
+  Cmd+Q](/docs/os/menus/menu-bar#gérer-cmdq).
+- **Les demandes de focus prennent d'elles-mêmes le jeton d'activation Wayland** (#773, #739).
+  `requestFocus()` / `toFront()` depuis un raccourci global ou une action de notification Linux
+  ramène la fenêtre au premier plan. Voir [Ramener une fenêtre au premier
+  plan](/docs/os/global-hotkey#ramener-une-fenêtre-au-premier-plan).
+- **Les cartes de survol des onglets s'animent comme celles de Chromium** (#803). Elles apparaissent
+  en fondu, glissent d'un onglet à l'autre et disparaissent en fondu. Voir [Dessiner les
+  aperçus](/docs/tool-windows/tabs#dessiner-les-aperçus).
+- **Un pincement annulé annule la saisie de pointeur** (#789, #799, #807). Sous macOS et Linux,
+  `ScaleEnd` est suivi d'une annulation de la saisie, et un pan de trackpad en cours se termine
+  d'abord. Voir [Zoomer par pincement](/docs/input/trackpad-gestures#zoomer-par-pincement).
+- **Les fenêtres au repos rendent leur mémoire GPU** (#860, #866). Le cache de ressources de Skia
+  est purgé 3 s après la dernière frame d'une fenêtre, et aussitôt quand elle est réduite. Voir
+  [Fenêtres au repos](/docs/performance/rendering#fenêtres-au-repos).
+- **Un dispatch sur `Dispatchers.Main` ne produit plus de frame** (#770). Sous Linux et Windows, une
+  boucle `delay` ou un `withContext(Dispatchers.Main)` ne dessine plus de frame à lui seul. Voir
+  [Fenêtres au repos](/docs/performance/rendering#fenêtres-au-repos).
+- **Les éléments lazy sont désactivés hors de la frame** (#808).
+  `-Dnucleus.tao.outOfFrameExecutor=false` rétablit l'ancien comportement. Voir
+  [Notes](/docs/performance/rendering#notes).
+- **`SystemInfo.process(pid)` ne lit qu'un processus** (#779, #784, #797) au lieu de parcourir la
+  table des processus pour chaque champ. Voir [Informations système](/docs/os/system-info).
 - **Cmd+Q et Dock → Quitter appellent `onCloseRequest`** (#696). Chaque fenêtre ouverte reçoit
   la demande : un gestionnaire qui ne quitte jamais bloque la fermeture. Voir
   [Gérer un quit système](/docs/lifecycle/application#gérer-un-quit-système).
@@ -73,6 +122,81 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Nouvelles fonctionnalités
 
+- **Redessin partiel** (#756, #824). Avec `nucleusOptimization { partialRedraw = true }`, ou le pack
+  `nucleusOptimization` entier, une frame ne repeint et ne présente que ce qui a changé, sous macOS,
+  Windows et Linux, sur la JVM comme en image native. Voir [Activer le redessin
+  partiel](/docs/performance/rendering#activer-le-redessin-partiel).
+- **Bloc `debug { }` pour la tâche `run`** (#756). `partialRedraw { tint; stats; verify }` fait
+  clignoter ou journalise ce que chaque frame repeint, et `recomposition { enabled; top }`
+  journalise les composables les plus exécutés. Voir [Voir ce que chaque frame
+  repeint](/docs/performance/rendering#voir-ce-que-chaque-frame-repeint).
+- **`layoutPolicy` sur toutes les barres de titre** (#781). `TitleBar`, `DialogTitleBar` et les
+  barres de titre Material 2, Material 3 et Jewel acceptent `TitleBarLayoutPolicy.FillCenter`, qui
+  étire l'enfant centré entre les éléments de début et de fin. Voir [Disposer la barre de
+  titre](/docs/windows#disposer-la-barre-de-titre).
+- **Les barres de titre suivent le mode de décoration de KWin** (#825). Quand le compositeur ne veut
+  aucune décoration, les barres de titre fournies retirent les contrôles de la fenêtre mais gardent
+  le contenu de l'application. Un chrome personnalisé lit `TaoWindow.isDecorationSuppressed`. Voir
+  [Suivre les décorations du
+  compositeur](/docs/windows/linux-wayland#suivre-les-décorations-du-compositeur).
+- **Le tactile fait apparaître la barre de titre en plein écran** (#825). Avec
+  `Modifier.newFullscreenControls()` sous Windows et Linux, un appui fait apparaître la barre et un
+  appui en dehors la masque. Voir [Modifiers de barre de
+  titre](/docs/windows#modifiers-de-barre-de-titre).
+- **Distinguer la répétition d'une touche maintenue d'un nouvel appui** (#805). `KeyEvent.isRepeat`
+  (expérimental) vaut `true` pour les appuis répétés automatiquement : un Ctrl+W maintenu n'agit
+  qu'une fois. Voir [Ignorer la répétition
+  automatique](/docs/input/keyboard#ignorer-la-répétition-automatique).
+- **Les stylets de tablette arrivent en `PointerType.Stylus` et `Eraser`** (#857, #859, #870) sous
+  Linux, macOS et Windows. Voir [Lire le type de
+  pointeur](/docs/input/pen-stylus#lire-le-type-de-pointeur).
+- **API publique de glisser par transfert** (#863, expérimentale). `TransferDrag`,
+  `Modifier.transferDragHandle`, `TransferGhostSource` et `TransferDragGesture` permettent à votre
+  propre disposition de docking ou d'onglets de transporter des glissers entre fenêtres sous Wayland
+  natif. Voir [Transporter un glisser entre fenêtres sous
+  Wayland](/docs/input/drag-and-drop#transporter-un-glisser-entre-fenêtres-sous-wayland).
+- **Restreindre la place d'un onglet** (#804). `TabWorkspace.constrainIndex` s'applique à `move`,
+  `reorder`, à la première déclaration et à chaque aperçu de dépôt, par exemple pour garder les
+  onglets épinglés en tête. Voir [Garder les onglets épinglés en
+  tête](/docs/tool-windows/tabs#garder-les-onglets-épinglés-en-tête).
+- **Un satellite flottant peut confier toute sa barre de titre au compositeur** (#802). Avec
+  `Satellite(floatingBarMovesWindow = true)`, toute la barre déplace la fenêtre sous Wayland natif.
+  Voir [Confier toute la barre au
+  compositeur](/docs/tool-windows/satellites#confier-toute-la-barre-au-compositeur).
+- **Les raccourcis globaux signalent relâchements et répétitions** (#773, #739).
+  `HotKeyEventListener` reçoit chaque `HotKeyEvent` avec son `state`, `isRepeat`, `timestamp` et
+  l'`activationToken` Wayland. Voir [Suivre les appuis et les
+  relâchements](/docs/os/global-hotkey#suivre-les-appuis-et-les-relâchements).
+- **`TaoRootsForTest` expose les racines Compose des fenêtres Tao** (#826, expérimental) : un
+  harnais de bout en bout intégré à l'application pilote une vraie fenêtre native. Voir
+  [Tests](/docs/concepts/testing#cliquer-sur-un-nœud-par-son-test-tag).
+- **Le Nucleus Lab remplace les applications de démo** (#795). Une seule application de sondes, une
+  par fonctionnalité, ouverte avec `-Dlab.probe=<id>` ou `nucleus-lab://probe/<id>`. Voir [Vérifier
+  un module avec le Nucleus Lab](/docs/concepts/testing#vérifier-un-module-avec-le-nucleus-lab).
+- **La signature Windows couvre l'image de l'application** (#763, #748). Les lanceurs et les DLL
+  embarquées, y compris celles des JAR non signés, sont signés avant l'installateur : Smart App
+  Control les charge. Voir [Signer les binaires
+  embarqués](/docs/packaging/code-signing#signer-les-binaires-embarqués).
+- **Tout le runtime C++ MSVC est livré avec l'application** (#834), dans les images JVM (`windows {
+  bundleCRuntime }`) et GraalVM. Voir [Embarquer le runtime Visual
+  C++](/docs/packaging/windows#embarquer-le-runtime-visual-c).
+- **Règles consommateur ProGuard** (#787). `proguard { consumerRules = true }` applique les règles
+  `META-INF/proguard/` des dépendances et conserve leurs fournisseurs `META-INF/services`. Voir
+  [Appliquer les règles consommateur des
+  bibliothèques](/docs/reference/gradle-dsl#proguard-consumer-rules).
+- **Limite des arènes malloc de glibc** (#769, #757). `nucleusOptimization { mallocArenas = true }`
+  limite les arènes de glibc à 2 sous Linux. Voir [Limiter les arènes malloc de glibc sous
+  Linux](/docs/performance/startup#limiter-les-arènes-malloc-de-glibc-sous-linux).
+- **Intégration de l'AppImage au bureau** (#847, #848). `AppImageIntegration` installe l'entrée
+  `.desktop` et les icônes de l'image après accord de l'utilisateur. Voir [Intégrer l'AppImage au
+  bureau](/docs/packaging/linux#intégrer-lappimage-au-bureau).
+- **Chaînes d'Info.plist localisées** (#854). `macOS { infoPlist { localization(...);
+  localizationsDir } }` écrit `<lang>.lproj/InfoPlist.strings`. Voir [Localiser les chaînes
+  d'Info.plist](/docs/packaging/macos#localiser-les-chaînes-dinfoplist).
+- **Recherche des mises à jour GitHub sans l'API REST** (#790). `GitHubProvider` lit les releases
+  publiques via `releases.atom`, accepte `host` et `protocol`, et choisit la version la plus haute
+  du canal du client. Voir [Choisir un canal de
+  release](/docs/packaging/auto-update#choisir-un-canal-de-release).
 - **Tester les mises à jour sans publier de release** (#725). Simulez une mise à jour depuis
   `./gradlew run` (`-Pnucleus.updater.simulate=update`), pointez l'application vers la sortie du
   packaging (`nucleus.updater.feedUrl`), ou servez le build suivant avec `serveUpdateFeed`. Une
@@ -151,12 +275,46 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Dépendances
 
+- **electron-builder 26.17.0** (#743).
 - **Kotlin 2.4.20, Compose Multiplatform 1.12.1, Jewel 0.41.0** (#723). Les applications ont besoin
   de Kotlin 2.4.20 ou plus récent et de Compose 1.12.1. Voir
   [Compatibilité](/docs/start/install#compatibilité).
 
 ### Corrections de bugs
 
+- **Les fenêtres adaptées au contenu s'affichent à leur taille mesurée** (#868, #532), sans passer
+  par la taille de repli. Voir [Adapter la fenêtre à son
+  contenu](/docs/windows/window-state#adapter-la-fenêtre-à-son-contenu).
+- **`dmg.sign = true` signe le DMG** (#855). Voir [Empaqueter un
+  DMG](/docs/packaging/macos#empaqueter-un-dmg).
+- **Les entrées de bureau Linux gardent le nom affiché** (#801).
+- **Les builds release ProGuard passent la vérification** (#794). Les règles par défaut désactivent
+  la spécialisation du type de retour, qui provoquait `VerifyError: Bad return type`.
+- **Un seul package reconstruit par format modifié** (#846).
+- **Un seul `libGLESv2` sous Windows** (#843).
+- **Updater** : les métadonnées de build SemVer sont ignorées (#771), `GenericProvider` n'accepte
+  `http` que sur un hôte loopback (#742), les noms de fichier du manifeste ne sortent plus du
+  répertoire de staging (#740), le script DEB/RPM protège ses chemins (#741) et les téléchargements
+  complets sont hachés pendant l'écriture (#780).
+- **Le redessin partiel repeint les couches invalidées pendant la mise en page** (#831), et un popup
+  fermé pendant la mise en page ne lève plus d'exception (#839).
+- **GraalVM** : les images n'embarquent plus Skiko en double (#822), l'analyse statique lit les JAR
+  multi-release pour le JDK de l'image (#861), les natives d'interop C restent hors des métadonnées
+  JNI (#862) et le strip Linux ne concurrence plus ses copies (#800).
+- **Windows : `cpuInfo()` lit les compteurs par CPU via PDH** (#867) au lieu d'une requête WMI
+  lente.
+- **Linux** : les watches récursifs de `fs-watcher` ne débordent plus la file inotify (#851), les
+  notifications conservent les emoji (#849), `system-color` arrête la surveillance quand le bus de
+  session se déconnecte (#783), et le clavier virtuel ne s'ouvre plus sans champ de texte (#850).
+- **Écrans tactiles sous Linux** (#813, #814, #815) : un glissement n'est plus vu comme un tap suivi
+  d'un appui, et les contacts en file ne se rejouent plus après le lever des doigts.
+- **Wayland : un clic sur un onglet sous sa carte de survol reste un clic** (#803).
+- **macOS : `Dispatchers.Main.immediate` s'exécute sans redispatch depuis les callbacks UI** (#852,
+  #829).
+- **Rendu sous Windows** (#761, #764, #873, #874) : les frames propres suivent la fréquence de
+  l'écran, une fenêtre qui déborde du bureau se présente via un miroir DirectComposition, les
+  animations continuent pendant un déplacement ou redimensionnement modal, et un glisser se termine
+  au point de relâchement de l'OS.
 - **Ctrl-clic est un clic secondaire sous macOS** (#737), dans les fenêtres et les popups natifs :
   `ContextMenuArea` et les menus des champs de texte s'ouvrent dessus.
 - **Polices AWT dans les bundles GraalVM macOS** (#735). `java.awt.Font` n'échoue plus avec
