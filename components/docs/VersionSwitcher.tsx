@@ -53,7 +53,7 @@ export function VersionSwitcher({ lang, current, versions }: Props) {
           const next = versions.find((v) => v.baseUrl === e.target.value);
           if (next) router.push(targetFor(next));
         }}
-        className="rounded-lg border bg-fd-secondary/50 p-2 text-sm text-fd-secondary-foreground transition-colors hover:bg-fd-accent"
+        className="nd-version-select rounded-lg border bg-fd-secondary/50 p-2 text-sm text-fd-secondary-foreground transition-colors hover:bg-fd-accent"
       >
         {versions.map((v) => (
           <option key={v.id} value={v.baseUrl}>

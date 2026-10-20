@@ -20,7 +20,6 @@ export function baseOptionsFor(lang: string): BaseLayoutProps {
       { text: lang === 'fr' ? 'Migrer avec l’IA' : 'Migrate with AI', url: p('/docs/migrate/ai-agent') },
       { text: 'Roadmap', url: p('/docs/roadmap') },
       { text: 'Changelog', url: p('/docs/changelog') },
-      { text: 'GitHub', url: SITE.github, external: true },
       {
         type: 'icon',
         url: SITE.slack,

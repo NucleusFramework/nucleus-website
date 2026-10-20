@@ -11,6 +11,7 @@ import { i18n } from '@/lib/i18n';
 import { baseOptionsFor } from '@/app/layout.config';
 import { Version } from '@/components/docs/Version';
 import { VersionSwitcher } from '@/components/docs/VersionSwitcher';
+import '@/styles/docs.css';
 
 interface Params {
   lang: string;
