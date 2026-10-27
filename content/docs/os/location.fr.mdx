@@ -1,0 +1,207 @@
+---
+title: Localisation
+description: Lisez la position de l'appareil depuis du code Kotlin Multiplatform, avec une seule API sous Windows, macOS, Linux, Android, iOS et le web.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`location` lit la position de l'appareil. C'est un module Kotlin Multiplatform : les mêmes appels
+fonctionnent sur desktop, Android, iOS et le web.
+
+| Plateforme | Backend |
+| --- | --- |
+| Windows | `Geolocator` WinRT |
+| macOS | Core Location |
+| Linux | Portail Location XDG, sinon GeoClue 2 |
+| Android | `LocationManager` du framework, fournisseur fused à partir de l'API 31. Sans Play services |
+| iOS | Core Location |
+| Web (`js`, `wasmJs`) | API Geolocation du W3C |
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+// commonMain in a KMP project, dependencies { } in a JVM desktop app
+implementation("dev.nucleusframework:nucleus.location:<version>")
+```
+
+`nucleus-application` ne l'apporte pas : ajoutez-le vous-même pour appeler
+`NucleusWindow.requestLocationAuthorization`.
+
+## Obtenir la position
+
+```kotlin
+import dev.nucleusframework.location.Geolocation
+
+// One fix. A fix acquired in the last 5 minutes comes back without waiting.
+val here = Geolocation.currentLocation(LocationAccuracy.Approximate, maxAge = 5.minutes)
+
+// Fixes as the device moves, until the collecting coroutine is cancelled.
+Geolocation.locationUpdates(minInterval = 2.seconds, minDistanceMeters = 10.0)
+    .collect { location -> show(location.latitude, location.longitude) }
+```
+
+- `currentLocation` mesure une nouvelle position par défaut (`maxAge = Duration.ZERO`). Un
+  `maxAge` positif laisse la plateforme répondre depuis son cache, immédiatement, avec
+  `isCached = true`. `timeout` (30 s par défaut) borne toute la requête.
+- `locationUpdates` est froid : chaque collecteur ouvre sa propre session plateforme, arrêtée à la
+  fin de la collecte. Les coupures brèves sont absorbées ; le flow échoue quand l'accès est refusé
+  ou que la localisation devient indisponible. `minInterval` et `minDistanceMeters` sont des
+  indications.
+- `Precise` utilise le GNSS quand il existe. `Approximate` se limite à la ville et répond souvent
+  à partir du Wi-Fi ou du réseau.
+- Chaque membre peut être appelé depuis n'importe quel thread.
+
+`Location` porte `latitude`, `longitude`, `timestampMillis` et `isCached`, plus `altitude`,
+`horizontalAccuracy`, `verticalAccuracy`, `bearing` et `speed`, qui valent `null` quand la
+plateforme ne les a pas mesurés.
+
+## Demander l'accès
+
+`currentLocation` et `locationUpdates` affichent la demande eux-mêmes quand l'accès n'est pas
+encore décidé, et lèvent `LocationException(LocationError.AuthorizationDenied)` en cas de refus.
+Pour choisir le moment de la demande, ou demander l'accès en arrière-plan, demandez-le d'abord :
+
+```kotlin
+when (Geolocation.requestAuthorization(LocationAccess.Foreground, LocationAccuracy.Precise)) {
+    LocationAuthorization.Foreground, LocationAuthorization.Background -> startTracking()
+    else -> explainWhyLocationHelps()
+}
+```
+
+Depuis une fenêtre Nucleus, `window.requestLocationAuthorization(access, accuracy)` attache le
+dialogue de consentement Linux à la fenêtre, via `x11:<xid>` ou un export `xdg_foreign` sous
+Wayland. Sous Windows et macOS, la demande appartient au système.
+
+| Membre | Notes |
+| --- | --- |
+| `authorization()` | `NotDetermined`, `Denied`, `Restricted`, `Foreground` ou `Background`, sans demande |
+| `authorizationUpdates(pollInterval = 1.seconds)` | La valeur courante, puis chaque changement, y compris dans les réglages système |
+| `openSettings()` | Ouvre la page système qui accorde ou retire l'accès. `false` sur le web ou un bureau Linux sans telle page |
+
+Windows et Linux renvoient `NotDetermined` tant qu'aucune requête du process courant n'a reçu de
+réponse : ils ne distinguent pas « autorisé » de « jamais demandé » sans demander. Les apps
+desktop gardent leur accès en arrière-plan, et macOS signale donc une autorisation comme
+`Background`.
+
+## Configurer chaque plateforme
+
+### macOS et iOS
+
+Core Location ne fait de demande qu'à une app dont l'`Info.plist` explique pourquoi :
+`NSLocationWhenInUseUsageDescription`, plus `NSLocationAlwaysAndWhenInUseUsageDescription` pour
+l'arrière-plan. macOS lit aussi `NSLocationUsageDescription`.
+
+```kotlin title="build.gradle.kts"
+macOS {
+    infoPlist {
+        extraKeysRawXml = """
+            <key>NSLocationUsageDescription</key>
+            <string>Shows the weather where you are.</string>
+            <key>NSLocationWhenInUseUsageDescription</key>
+            <string>Shows the weather where you are.</string>
+        """.trimIndent()
+    }
+}
+```
+
+Le hardened runtime de macOS exige aussi l'entitlement
+`com.apple.security.personal-information.location`, sandbox ou non. `entitlementsFile` remplace
+les valeurs par défaut du plugin : répétez à côté les clés de la JVM (`allow-jit`,
+`allow-unsigned-executable-memory`, `disable-library-validation`). Voir [Configurer les
+entitlements macOS](/docs/packaging/sandboxing#configurer-les-entitlements-macos).
+
+<Callout type="warn">
+Sans la description d'usage ou l'entitlement, comme dans un `./gradlew run` sans bundle,
+`requestAuthorization` renvoie aussitôt `NotDetermined` et les appels de localisation échouent
+avec `AuthorizationDenied`, en nommant ce qui manque.
+</Callout>
+
+### Windows
+
+Aucune capacité de manifeste. L'accès suit *Paramètres → Confidentialité et sécurité →
+Localisation → Autoriser les applications de bureau à accéder à votre position*. Windows 11 24H2
+et ultérieur affichent une demande à la première requête.
+
+### Linux
+
+Le portail Location XDG est utilisé dès qu'il existe, sandbox ou non : il affiche le dialogue de
+consentement du bureau. Sans portail, une app hors sandbox s'adresse à GeoClue 2, qui l'identifie
+par son id `.desktop` (l'entrée installée, sinon `NucleusApp.appId`). Un refus du portail est
+définitif : GeoClue n'est jamais essayé derrière lui. Le portail et GeoClue ne signalent aucune
+révocation : `authorizationUpdates` ne change qu'à la réponse d'une requête de ce process.
+
+### Android
+
+Déclarez les permissions que vous utilisez ; la bibliothèque n'en déclare aucune :
+
+```xml title="AndroidManifest.xml"
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<!-- LocationAccuracy.Precise -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<!-- LocationAccess.Background -->
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+```
+
+La demande a besoin d'une activité au premier plan, que la bibliothèque suit via un
+`ContentProvider` fusionné dans le manifeste. Retirer ce provider désactive la bibliothèque. À
+partir d'Android 12, une requête précise propose le choix précis ou approximatif dans un seul
+dialogue. L'accès en arrière-plan se demande à part, après une autorisation au premier plan,
+comme l'exige la plateforme.
+
+### Web
+
+La page doit être servie en HTTPS ou depuis `localhost`. Les navigateurs ne demandent qu'au moment
+où une position est requise : `requestAuthorization` en demande donc une. `authorization()` lit
+l'API Permissions et peut renvoyer `NotDetermined` à son tout premier appel. `minInterval`,
+`minDistanceMeters` et `LocationAccess.Background` sont ignorés.
+
+## Gérer les erreurs
+
+`LocationException.error` est un `LocationError` :
+
+| Valeur | Signification |
+| --- | --- |
+| `AuthorizationDenied` | L'utilisateur ou le système a refusé l'accès |
+| `TemporarilyUnavailable` | Pas de position pour l'instant ; réessayer plus tard peut réussir |
+| `PermanentlyUnavailable` | La localisation est désactivée, ou il n'y a aucun service de localisation |
+| `Network` | Le fournisseur basé sur le réseau est injoignable |
+| `Timeout` | Aucune position dans le `timeout` de la requête |
+| `Unknown` | Tout ce que la plateforme n'a pas expliqué |
+
+`Geolocation` implémente `LocationProvider`. Dépendez de l'interface pour substituer un faux dans
+les tests.
+
+<Accordions>
+<Accordion title="Sous le capot">
+
+- Le desktop passe par une bibliothèque JNI en Rust, `nucleus_location`, inspirée de
+  `robius-location`. Android, iOS et le web sont en Kotlin pur.
+- Sous macOS, chaque `CLLocationManager` vit sur un seul thread `nucleus-location` qui fait
+  tourner sa propre `CFRunLoop`, car Core Location livre sur la run loop du thread qui l'a créé.
+  Les requêtes faites pendant que l'accès est indécis attendent la réponse.
+- Sous Linux, une seule session de portail est partagée par tout le process : une requête
+  ponctuelle à côté de `locationUpdates` reçoit quand même la position courante.
+- L'artefact JVM embarque les métadonnées de reachability GraalVM.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `Geolocation.isAvailable` | Si la plateforme a un service de localisation joignable |
+| `currentLocation(accuracy = Precise, maxAge = ZERO, timeout = 30.seconds)` | `suspend`, une `Location` |
+| `locationUpdates(accuracy = Precise, minInterval = 1.seconds, minDistanceMeters = 0.0)` | `Flow<Location>` froid |
+| `requestAuthorization(access = Foreground, accuracy = Precise)` | `suspend`, renvoie `LocationAuthorization` |
+| `authorization()` / `authorizationUpdates()` | `LocationAuthorization` / `Flow<LocationAuthorization>` |
+| `openSettings(): Boolean` | Ouvre les réglages de localisation du système |
+| `NucleusWindow.requestLocationAuthorization(access, accuracy)` | Dans `nucleus-application` : rattache le dialogue de consentement Linux |
+| `Geolocation.requestAuthorization(LocationPortalParent(portalParent, keepAlive), …)` | JVM : la même chose sans `nucleus-application` |
+
+## Et ensuite
+
+- [Feuille de partage](/docs/os/share) : l'autre module Kotlin Multiplatform.
+- [Infos système](/docs/os/system-info) : connectivité et détails matériels.
+- [Sandboxing](/docs/packaging/sandboxing) : entitlements et sandbox Flatpak.
