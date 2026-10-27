@@ -100,6 +100,13 @@ next frame recreates what it needs. A window with a live
 [GPU render context](/docs/native-content/gpu-render-context) consumer keeps its cache. There is
 nothing to configure.
 
+On macOS, a window out of sight renders nothing: a hidden app, a covered window, a window on
+another Space or behind a locked screen skips its frames, animations included, and resumes when it
+shows again. The display link stops 500 ms after the last frame, the accessibility sync waits for
+an assistive client to connect, and the [single-instance](/docs/lifecycle/single-instance) watcher
+uses FSEvents instead of polling. A hidden app falls from about 14 % CPU to under 1 %, so the Mac
+can sleep.
+
 ## Notes
 
 - Some frames always repaint in full: the first one, a resize, a change of window background or
@@ -111,6 +118,12 @@ nothing to configure.
   without the plugin's `run` task, or under hot reload, repaints every frame in full.
 - Compose deactivates a lazy-list item scrolled out of view after the frame instead of inside it.
   Pass `-Dnucleus.tao.outOfFrameExecutor=false` to go back to deactivating it inside the frame.
+- On Windows, a window that overhangs the desktop, such as a maximized or fullscreen one, presents
+  through a DirectComposition mirror. GPUs below Direct3D feature level 11_0 (WDDM 1.1 drivers,
+  where the mirror turns black) repaint on move instead. Pass
+  `-Dnucleus.tao.windowsFrameMirror=false` to do the same on a driver that misbehaves above that
+  level. [`SystemInfo.renderTier()`](/docs/os/system-info#detect-a-weak-gpu) reports such GPUs as
+  `LEGACY`.
 
 <Accordions>
 <Accordion title="Under the hood">

@@ -70,7 +70,9 @@ apps n'entrent jamais en conflit, et deux utilisateurs peuvent chacun lancer l'a
 - Le verrou est un `java.nio.channels.FileLock` sur `<lockIdentifier>.lock`. Le noyau le libère
   quand la JVM se termine ou plante : un process principal tué ne bloque pas l'app.
 - Un second lancement écrit `<lockIdentifier>.restore_request` à côté. Le process principal
-  surveille le dossier avec un `WatchService` et appelle `onRestoreRequest`.
+  surveille le dossier et appelle `onRestoreRequest`. Le `WatchService` du JDK interroge le disque
+  sous macOS : `nucleusApplication` y branche donc `fs-watcher` (FSEvents) ; ailleurs, le
+  `WatchService` reste en place.
 - Un fichier de verrou périmé ou illisible est supprimé et le verrou retenté une fois. Seule une
   erreur irrécupérable fait continuer le process en tant que principal.
 
@@ -85,6 +87,7 @@ apps n'entrent jamais en conflit, et deux utilisateurs peuvent chacun lancer l'a
 | `SingleInstanceManager.configuration` | À assigner avant le premier appel à `isSingleInstance`, sinon `IllegalStateException`. |
 | `Configuration.lockFilesDir` | Dossier du verrou. Défaut : `java.io.tmpdir`. |
 | `Configuration.lockIdentifier` | Nom de base des fichiers de verrou. Défaut : l'id d'app. |
+| `SingleInstanceManager.directoryWatcher` | `((dir: Path, onCreated: (fileName: String) -> Unit) -> Unit)?`. Remplace le `WatchService`. À définir avant `isSingleInstance`. |
 | `SingleInstanceRestoreEffect(onRestore)` | Composable de `dev.nucleusframework.application`. S'exécute à chaque second lancement. |
 
 ## Et ensuite

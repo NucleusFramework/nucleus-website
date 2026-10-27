@@ -103,6 +103,14 @@ un écran riche en images. La frame suivante recrée ce dont elle a besoin. Une 
 [contexte de rendu GPU](/docs/native-content/gpu-render-context) est utilisé garde son cache. Il
 n'y a rien à configurer.
 
+Sous macOS, une fenêtre hors de vue ne rend rien : une app masquée, une fenêtre recouverte, une
+fenêtre sur un autre Space ou derrière l'écran verrouillé saute ses frames, animations comprises,
+et reprend dès qu'elle réapparaît. Le display link s'arrête 500 ms après la dernière frame, la
+synchronisation d'accessibilité attend qu'un client d'assistance se connecte, et le surveillant de
+l'[instance unique](/docs/lifecycle/single-instance) passe par FSEvents au lieu d'interroger le
+disque. Une app masquée passe d'environ 14 % de CPU à moins de 1 %, et le Mac peut se mettre en
+veille.
+
 ## Notes
 
 - Certaines frames sont toujours repeintes en entier : la première, un redimensionnement, un
@@ -116,6 +124,12 @@ n'y a rien à configurer.
 - Compose désactive un élément de liste lazy sorti de la vue après la frame plutôt que pendant.
   Passez `-Dnucleus.tao.outOfFrameExecutor=false` pour revenir à une désactivation pendant la
   frame.
+- Sous Windows, une fenêtre qui déborde du bureau, comme une fenêtre maximisée ou en plein écran,
+  présente ses frames via un miroir DirectComposition. Les GPU sous le niveau de fonctionnalité
+  Direct3D 11_0 (pilotes WDDM 1.1, où le miroir devient noir) se redessinent au déplacement à la
+  place. Passez `-Dnucleus.tao.windowsFrameMirror=false` pour faire de même avec un pilote qui se
+  comporte mal au-dessus de ce niveau. [`SystemInfo.renderTier()`](/docs/os/system-info#détecter-un-gpu-faible)
+  signale ces GPU comme `LEGACY`.
 
 <Accordions>
 <Accordion title="En coulisses">

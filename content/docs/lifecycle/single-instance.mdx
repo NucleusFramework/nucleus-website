@@ -69,7 +69,8 @@ collide and two users can each run the app.
 - The lock is a `java.nio.channels.FileLock` on `<lockIdentifier>.lock`. The kernel releases it
   when the JVM exits or crashes, so a killed primary does not lock the app out.
 - A second launch writes `<lockIdentifier>.restore_request` next to it. The primary watches the
-  directory with a `WatchService` and calls `onRestoreRequest`.
+  directory and calls `onRestoreRequest`. The JDK `WatchService` polls on macOS, so
+  `nucleusApplication` plugs in `fs-watcher` (FSEvents) there; elsewhere the `WatchService` stays.
 - A stale or unreadable lock file is deleted and retried once. Only an unrecoverable error makes
   the process continue as the primary.
 
@@ -84,6 +85,7 @@ collide and two users can each run the app.
 | `SingleInstanceManager.configuration` | Assign before the first `isSingleInstance` call, or it throws `IllegalStateException`. |
 | `Configuration.lockFilesDir` | Lock directory. Default `java.io.tmpdir`. |
 | `Configuration.lockIdentifier` | Base name of the lock files. Default: the app id. |
+| `SingleInstanceManager.directoryWatcher` | `((dir: Path, onCreated: (fileName: String) -> Unit) -> Unit)?`. Replaces the `WatchService`. Set before `isSingleInstance`. |
 | `SingleInstanceRestoreEffect(onRestore)` | Composable in `dev.nucleusframework.application`. Runs on each second launch. |
 
 ## What's next
