@@ -1,0 +1,195 @@
+---
+title: Screen capture
+description: Capture a display, a region or any window in physical pixels, without AWT, on Windows, macOS and Linux.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`screen-capture` captures a display, a region of it or a top-level window on Windows, macOS and
+Linux. Images are in physical pixels: a 4K display at 200 % captures as 3840×2160, not the
+1920×1080 `java.awt.Robot` returns. The module needs neither AWT nor Compose, and runs in a
+GraalVM native image with no extra metadata.
+
+| OS | Backend |
+| --- | --- |
+| Windows | GDI `BitBlt`; windows through `PrintWindow`, covered parts and DirectX content included |
+| macOS 14+ | ScreenCaptureKit |
+| macOS 13 and older | Core Graphics |
+| Linux X11 | `XGetImage`, RandR monitors, XComposite for covered windows |
+| Linux Wayland | The xdg-desktop-portal `Screenshot` interface |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.screen-capture:<version>")
+}
+```
+
+## Capture a display
+
+Every call blocks until the platform answers. Call it from `Dispatchers.IO`:
+
+```kotlin
+import dev.nucleusframework.screencapture.ScreenCapture
+
+val image = withContext(Dispatchers.IO) {
+    val display = ScreenCapture.primaryDisplay() ?: error("no display")
+    ScreenCapture.captureDisplay(display, includeCursor = true)
+}
+File("shot.png").writeBytes(image.toPng())
+```
+
+`displays()` lists the connected displays, primary first. Each `CaptureDisplay` has:
+
+| Property | Meaning |
+| --- | --- |
+| `id` | Stable for the session: `\\.\DISPLAY1` on Windows, the `CGDirectDisplayID` on macOS, the RandR output name on X11, `portal` on Wayland |
+| `name` | The monitor's name |
+| `bounds` | Desktop rectangle: physical px on Windows and X11, points on macOS, `null` on Wayland |
+| `widthPx` / `heightPx` | Size of a full capture, in physical pixels. `0` on Wayland until the first capture |
+| `scaleFactor` | `dpi / 96` on Windows, px per point on macOS, `1` on Linux |
+| `isPrimary` | Exactly one display is primary |
+
+### Capture a region
+
+A region is in the display's own pixels, relative to its top-left corner: the coordinates of the
+image a full capture returns, on every OS. It is clipped to the display, and a region outside it
+throws `InvalidRegion`.
+
+```kotlin
+val part = ScreenCapture.captureDisplay(display, region = CaptureRegion(x = 100, y = 50, width = 800, height = 600))
+```
+
+## Capture a window
+
+`windows()` lists the windows `captureWindow` accepts, front to back: visible, not minimized, not
+on another virtual desktop. Other apps' windows are included.
+
+```kotlin
+if (ScreenCapture.isWindowCaptureSupported) {
+    val target = ScreenCapture.windows().first { it.appName == "Google Chrome" }
+    val shot = ScreenCapture.captureWindow(target.id)
+}
+```
+
+| Property | Meaning |
+| --- | --- |
+| `id` | What `captureWindow` takes |
+| `title` | Empty when the window has none. On macOS, only with the Screen Recording permission |
+| `appName` | The process name on Windows (`chrome`), the app name on macOS (`Google Chrome`), the `WM_CLASS` on X11 |
+| `pid` | The owning process. `0` when an X11 client does not set `_NET_WM_PID` |
+| `bounds` | Same space as `CaptureDisplay.bounds` |
+
+To capture one of your own windows, pass its native id:
+
+| OS | Window id | From a Nucleus window |
+| --- | --- | --- |
+| Windows | `HWND` | `unsafe.taoWindow?.nativeHandle` |
+| macOS | `CGWindowID` | Not exposed: find it in `windows()` by pid and title |
+| X11 | XID | `unsafe.taoWindow?.x11WindowId` |
+
+Covered parts are captured on Windows and macOS, and on X11 when the window is composited. A
+minimized, hidden or unknown window throws `WindowNotFound`. Wayland has no window capture:
+`isWindowCaptureSupported` is `false` and `captureWindow` throws `Unsupported`.
+
+## Use the pixels
+
+`ScreenImage` holds opaque `0xAARRGGBB` pixels, row by row:
+
+```kotlin
+image.width; image.height; image.scaleFactor
+image.pixelAt(x, y)          // 0xAARRGGBB
+image.toArgbArray()          // a copy, in BufferedImage.TYPE_INT_ARGB layout
+image.crop(CaptureRegion(0, 0, 200, 100))
+image.toPng()                // pure Kotlin encoder, no ImageIO
+image.writePng(outputStream)
+```
+
+To show a capture in Compose, hand the BGRA bytes to Skia:
+
+```kotlin
+val bitmap = Image.makeRaster(
+    ImageInfo(image.width, image.height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE),
+    image.toBgraBytes(),
+    image.width * ScreenImage.BYTES_PER_PIXEL,
+).toComposeImageBitmap()
+```
+
+## Ask for permission
+
+```kotlin
+when (ScreenCapture.permissionStatus()) {
+    CapturePermission.Granted, CapturePermission.NotRequired -> capture()
+    CapturePermission.NotDetermined -> ScreenCapture.requestPermission()
+    CapturePermission.Denied -> showHowToEnableScreenRecording()
+}
+```
+
+- **macOS** needs the Screen Recording permission. `requestPermission()` shows the system prompt
+  once per app, and a grant takes effect after the app restarts. macOS cannot tell "never asked"
+  from "denied", so a missing grant reads as `NotDetermined`. A capture without it throws
+  `PermissionDenied`. macOS 15 and later ask the user to confirm again from time to time.
+- **Windows and X11** return `NotRequired`.
+- **Wayland**: the compositor may show its own dialog on the first capture. A refusal throws
+  `PermissionDenied`, and dismissing the dialog throws `Cancelled`.
+
+## Handle errors
+
+Every failure is a `ScreenCaptureException`, whose `failure` is one of `Unsupported`,
+`PermissionDenied`, `Cancelled`, `DisplayNotFound` (a monitor was unplugged), `WindowNotFound`,
+`InvalidRegion`, `Timeout` or `Failed`. The message carries the platform's diagnostic: a Win32
+error, an `NSError` or a D-Bus error.
+
+<Callout type="info">
+Later versions may add values to `CaptureFailure` and `CaptureBackend`. Keep an `else` branch in a
+`when` over them.
+</Callout>
+
+Every function is safe to call from several threads at once. Capturing from the UI thread works,
+your own window included, but the portal and ScreenCaptureKit can take a while to answer.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- `PrintWindow` waits forever on a window whose thread does not pump messages, including the
+  app's own UI thread while it waits for the capture. It runs on a worker with a 2 s timeout, and
+  falls back to the visible part of the window read from the screen. On the window's own thread it
+  prints inline.
+- On Windows, the list follows the Alt+Tab rules (no tool, cloaked or untitled windows), and a
+  hung window cannot block it.
+- macOS before 14 reaches `CGDisplayCreateImageForRect` and `CGWindowListCreateImage` through
+  `dlsym`, since the 15 SDK removed them. A region is captured from a 32 pt aligned rectangle and
+  cropped, so it matches a full capture bit for bit.
+- On Linux every library is loaded with `dlopen` and X errors are trapped per call: a bad XID or a
+  dying X server never takes the JVM down.
+- Linux picks the portal on a Wayland session (`XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY`
+  set), since XWayland's root window misses native Wayland windows. The portal captures the whole
+  desktop, which is then cropped. Force a backend with
+  `-Dnucleus.screencapture.linuxBackend=x11` or `=portal`.
+- `ScreenCapture.backend` reports the backend in use: `Gdi`, `ScreenCaptureKit`, `CoreGraphics`,
+  `X11`, `XdgDesktopPortal` or `Unavailable`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `ScreenCapture.isSupported` | `false` when `backend` is `Unavailable` |
+| `ScreenCapture.isWindowCaptureSupported` | `false` on Wayland |
+| `ScreenCapture.backend` | `CaptureBackend` |
+| `displays()` / `primaryDisplay()` | `List<CaptureDisplay>` / `CaptureDisplay?` |
+| `windows()` | `List<CaptureWindow>`, front to back. Empty on Wayland |
+| `captureDisplay(display, region = null, includeCursor = false)` | `ScreenImage`. `includeCursor` is ignored on Wayland |
+| `captureWindow(windowId, includeCursor = false)` | `ScreenImage` |
+| `permissionStatus()` / `requestPermission()` | `CapturePermission`: `Granted`, `NotRequired`, `NotDetermined`, `Denied` |
+| `ScreenImage` | `width`, `height`, `scaleFactor`, `pixelAt`, `crop`, `toArgbArray`, `toBgraBytes`, `toPng`, `writePng` |
+
+## What's next
+
+- [System info](/docs/os/system-info): displays, GPUs and the render tier.
+- [HiDPI](/docs/windows/hidpi): how Nucleus maps points to physical pixels.
+- [Modules](/docs/concepts/modules): every Nucleus module and its artifact.
