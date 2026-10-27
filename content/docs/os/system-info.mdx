@@ -31,7 +31,8 @@ SystemInfo.batteryInfo()?.let { battery ->
 }
 ```
 
-- Each call reads the current values and returns; nothing polls or caches. To refresh a display,
+- Each call reads the current values and returns; nothing polls or caches, except
+  `connectivityFlow()` and `renderTier()`. To refresh a display,
   call again on your own schedule, off the UI thread for the expensive ones.
 - A value the host cannot provide comes back as `null` (single values) or an empty list. No call
   throws.
@@ -39,6 +40,58 @@ SystemInfo.batteryInfo()?.let { battery ->
   `motherboard()` returns the most fields on Linux.
 - `processes()` walks the whole process table. Call `process(pid)` when you need one entry: it
   reads that process alone.
+
+## Watch connectivity
+
+`connectivityFlow()` emits the current state, then every change. All collectors share one native
+monitor: the first collector starts it and the last one stops it.
+
+```kotlin
+SystemInfo.connectivityFlow().collect { info ->
+    offlineBanner = !info.isConnected
+    syncOnCellular = info.meteredStatus != MeteredStatus.METERED
+    behindPortal = info.level == ConnectivityLevel.CAPTIVE_PORTAL
+}
+```
+
+`level` tells how far the network reaches:
+
+| Level | Meaning |
+| --- | --- |
+| `FULL` | Internet access |
+| `CAPTIVE_PORTAL` | A routed network that redirects to a login page (Windows only) |
+| `LIMITED` | A routed network without confirmed internet access |
+| `LOCAL` | The local subnet only |
+| `NONE` | No network |
+| `UNKNOWN` | The platform cannot tell |
+
+`isConnected` means a routed network, `LIMITED` and up. Identical states are dropped, and a query
+that fails mid-stream keeps the last state instead of reporting a disconnection.
+
+| OS | Source | Limits |
+| --- | --- | --- |
+| Windows | Network List Manager events, cost from `INetworkCostManager` | None |
+| macOS | `NWPathMonitor`; metered means an expensive path (cellular, hotspot) or Low Data Mode | Only `FULL`, `NONE` and `UNKNOWN`: captive portals and limited access are not detected |
+| Linux | The xdg-desktop-portal `NetworkMonitor`, else NetworkManager on the system bus | Neither available: one `UNKNOWN` state |
+
+## Detect a weak GPU
+
+`renderTier()` probes the default render device once and caches the answer. Use it to turn off
+3D scenes or heavy effects that an old or software-only GPU cannot run:
+
+```kotlin
+val lowEnd = SystemInfo.renderTier() in setOf(RenderTier.SOFTWARE, RenderTier.LEGACY)
+```
+
+| Tier | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| `SOFTWARE` | WARP / Microsoft Basic Render Driver | `GL_RENDERER` is llvmpipe, softpipe, swrast or SWR | No Metal device |
+| `LEGACY` | Direct3D feature level below 11_0 | No GL ES 3 context | Never |
+| `CAPABLE` | Feature level 11_0 or higher | A hardware GL ES 3 context | A Metal device |
+| `UNKNOWN` | The probe failed | The probe failed | The probe failed |
+
+`LEGACY` is typically 2007–2010 hardware: Intel Ironlake / GMA, GeForce 8–200, Radeon HD 2000–4000.
+`gpus()` cannot answer this: Windows leaves software adapters out of it.
 
 ![Live CPU readings: global usage, brand and per-core load](/assets/docs/os/system-info-cpu.png)
 
@@ -54,7 +107,9 @@ SystemInfo.batteryInfo()?.let { battery ->
 | `gpus()` | `List<GpuInfo>`: name, vendor and device ids, video memory, and, where the driver reports them, `driverVersion`, `temperature`, `gpuUsage`, clocks, fan speed, power draw |
 | `batteryInfo()` | `BatteryInfo?`: `stateOfCharge` (`0.0..1.0`), `state` (`Charging`, `Discharging`, `Full`, `Unknown`), `isPluggedIn`, capacities, `cycleCount`, `health`, time estimates, device identity. `null` without a battery |
 | `networks()` | `List<NetworkInterfaceInfo>` |
-| `connectivityInfo()` | `ConnectivityInfo?`: `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`) |
+| `connectivityInfo()` | `ConnectivityInfo?`: `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`), `level` (`ConnectivityLevel`) |
+| `connectivityFlow()` | `Flow<ConnectivityInfo>`: the current state, then every change |
+| `renderTier()` | `RenderTier`: `UNKNOWN`, `SOFTWARE`, `LEGACY` or `CAPABLE`, probed once |
 | `processes()` / `process(pid: Long)` | `List<ProcessInfo>` / `ProcessInfo?` |
 | `users()` | `List<UserInfo>` |
 | `components()` | `List<ComponentInfo>`: temperature sensors |

@@ -33,7 +33,7 @@ SystemInfo.batteryInfo()?.let { battery ->
 ```
 
 - Chaque appel lit les valeurs courantes et rend la main ; rien n'interroge ni ne met en cache en
-  arrière-plan. Pour rafraîchir un affichage, rappelez la méthode à votre rythme, hors du thread
+  arrière-plan, sauf `connectivityFlow()` et `renderTier()`. Pour rafraîchir un affichage, rappelez la méthode à votre rythme, hors du thread
   UI pour les plus coûteuses.
 - Une valeur que la machine ne peut pas fournir revient en `null` (valeurs simples) ou en liste
   vide. Aucun appel ne lève d'exception.
@@ -41,6 +41,61 @@ SystemInfo.batteryInfo()?.let { battery ->
   `components()`, et `motherboard()` renvoie le plus de champs sous Linux.
 - `processes()` parcourt toute la table des processus. Appelez `process(pid)` pour une seule
   entrée : il ne lit que ce processus.
+
+## Suivre la connectivité
+
+`connectivityFlow()` émet l'état courant, puis chaque changement. Tous les collecteurs partagent
+un seul moniteur natif : le premier collecteur le démarre et le dernier l'arrête.
+
+```kotlin
+SystemInfo.connectivityFlow().collect { info ->
+    offlineBanner = !info.isConnected
+    syncOnCellular = info.meteredStatus != MeteredStatus.METERED
+    behindPortal = info.level == ConnectivityLevel.CAPTIVE_PORTAL
+}
+```
+
+`level` indique jusqu'où porte le réseau :
+
+| Niveau | Signification |
+| --- | --- |
+| `FULL` | Accès à Internet |
+| `CAPTIVE_PORTAL` | Un réseau routé qui redirige vers une page de connexion (Windows uniquement) |
+| `LIMITED` | Un réseau routé sans accès à Internet confirmé |
+| `LOCAL` | Le sous-réseau local uniquement |
+| `NONE` | Aucun réseau |
+| `UNKNOWN` | La plateforme ne sait pas le dire |
+
+`isConnected` signifie un réseau routé, à partir de `LIMITED`. Les états identiques sont ignorés,
+et une requête qui échoue en cours de route garde le dernier état au lieu de signaler une
+déconnexion.
+
+| OS | Source | Limites |
+| --- | --- | --- |
+| Windows | Événements du Network List Manager, coût via `INetworkCostManager` | Aucune |
+| macOS | `NWPathMonitor` ; facturé à l'usage signifie un chemin coûteux (cellulaire, partage de connexion) ou le mode données réduites | Seulement `FULL`, `NONE` et `UNKNOWN` : ni portail captif ni accès limité |
+| Linux | Le `NetworkMonitor` de xdg-desktop-portal, sinon NetworkManager sur le bus système | Aucun des deux : un seul état `UNKNOWN` |
+
+## Détecter un GPU faible
+
+`renderTier()` sonde le périphérique de rendu par défaut une seule fois et met la réponse en
+cache. Servez-vous-en pour couper les scènes 3D ou les effets lourds qu'un GPU ancien ou purement
+logiciel ne peut pas faire tourner :
+
+```kotlin
+val lowEnd = SystemInfo.renderTier() in setOf(RenderTier.SOFTWARE, RenderTier.LEGACY)
+```
+
+| Niveau | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| `SOFTWARE` | WARP / Microsoft Basic Render Driver | `GL_RENDERER` vaut llvmpipe, softpipe, swrast ou SWR | Aucun périphérique Metal |
+| `LEGACY` | Niveau de fonctionnalité Direct3D inférieur à 11_0 | Pas de contexte GL ES 3 | Jamais |
+| `CAPABLE` | Niveau 11_0 ou plus | Un contexte GL ES 3 matériel | Un périphérique Metal |
+| `UNKNOWN` | La sonde a échoué | La sonde a échoué | La sonde a échoué |
+
+`LEGACY` correspond en général à du matériel de 2007–2010 : Intel Ironlake / GMA, GeForce 8–200,
+Radeon HD 2000–4000. `gpus()` ne peut pas répondre à cette question : Windows en exclut les
+adaptateurs logiciels.
 
 ![Mesures CPU en direct : charge globale, modèle et charge par cœur](/assets/docs/os/system-info-cpu.png)
 
@@ -56,7 +111,9 @@ SystemInfo.batteryInfo()?.let { battery ->
 | `gpus()` | `List<GpuInfo>` : nom, identifiants fabricant et appareil, mémoire vidéo et, quand le pilote les fournit, `driverVersion`, `temperature`, `gpuUsage`, fréquences, vitesse du ventilateur, consommation |
 | `batteryInfo()` | `BatteryInfo?` : `stateOfCharge` (`0.0..1.0`), `state` (`Charging`, `Discharging`, `Full`, `Unknown`), `isPluggedIn`, capacités, `cycleCount`, `health`, estimations de durée, identité de l'appareil. `null` sans batterie |
 | `networks()` | `List<NetworkInterfaceInfo>` |
-| `connectivityInfo()` | `ConnectivityInfo?` : `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`) |
+| `connectivityInfo()` | `ConnectivityInfo?` : `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`), `level` (`ConnectivityLevel`) |
+| `connectivityFlow()` | `Flow<ConnectivityInfo>` : l'état courant, puis chaque changement |
+| `renderTier()` | `RenderTier` : `UNKNOWN`, `SOFTWARE`, `LEGACY` ou `CAPABLE`, sondé une fois |
 | `processes()` / `process(pid: Long)` | `List<ProcessInfo>` / `ProcessInfo?` |
 | `users()` | `List<UserInfo>` |
 | `components()` | `List<ComponentInfo>` : capteurs de température |
