@@ -1,0 +1,144 @@
+---
+title: Proxy natif
+description: Lisez la configuration proxy du système d'exploitation, scripts PAC compris, et installez-la comme ProxySelector de toute la JVM.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`native-proxy` lit la configuration proxy du système d'exploitation sous Windows, macOS et Linux
+et l'expose en `ProxySelector`. Il suit la pile proxy de Chromium : une URL se résout vers le
+proxy qu'utiliseraient Edge, Chrome ou Safari, réglages machine et réglages gérés compris.
+
+| OS | Configuration | PAC et WPAD |
+| --- | --- | --- |
+| Windows | WinHTTP et le registre Internet Settings | Évalués via WinHTTP |
+| macOS | `SCDynamicStore` | PAC évalué via CFNetwork |
+| Linux | GSettings (`org.gnome.system.proxy`), puis `kioslaverc` de KDE, puis `http_proxy` / `no_proxy` | Non évalués |
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-proxy:<version>")
+}
+```
+
+## Faire passer la JVM par le proxy de l'OS
+
+Appelez `install()` une fois depuis `main()` :
+
+```kotlin
+import dev.nucleusframework.nativeproxy.NativeProxy
+
+NativeProxy.install()
+```
+
+Toute connexion du JDK qui consulte `ProxySelector.getDefault()`, comme `HttpURLConnection`,
+`java.net.http.HttpClient` ou OkHttp par défaut, utilise alors le proxy de l'OS. Le sélecteur
+qui était le défaut devient le repli : `http.proxyHost` et les autres propriétés proxy du JDK
+s'appliquent toujours aux URI sur lesquelles l'OS n'a pas d'avis. `install()` surveille aussi la
+configuration, et le sélecteur suit un changement des réglages de l'OS.
+
+`install()` renvoie `false` et laisse le défaut de la JVM intact quand la plateforme n'a pas de
+backend. `uninstall()` rétablit le sélecteur précédent.
+
+## Résoudre une URL
+
+```kotlin
+val proxies: List<ProxyServer> = NativeProxy.proxiesFor(URI("https://intranet.corp"))
+val javaProxies: List<Proxy> = NativeProxy.javaProxiesFor(URI("https://intranet.corp"))
+```
+
+`proxiesFor` renvoie les proxys à essayer, dans l'ordre ; une liste vide signifie une connexion
+directe. `javaProxiesFor` renvoie des proxys JDK et n'est jamais vide : une connexion directe est
+`Proxy.NO_PROXY`. Pour un client que vous configurez vous-même, `NativeProxy.selector` répond à
+partir de la seule configuration de l'OS, sans repli.
+
+Une URL se résout dans l'ordre de Chromium :
+
+1. La liste d'exclusion : une correspondance passe en direct.
+2. Le script PAC, depuis une URL explicite ou WPAD. Les résultats sont mis en cache par origine
+   et vidés à chaque changement de configuration.
+3. Les règles statiques, utilisées aussi quand le script PAC ne peut pas être évalué.
+
+## Suivre les changements
+
+```kotlin
+NativeProxy.addChangeListener { settings ->
+    println("Proxy changed: ${settings.rules}")
+}
+```
+
+Le listener s'exécute sur un thread d'arrière-plan. Windows et macOS sont prévenus par l'OS, avec
+un délai de regroupement de 2 s ; Linux interroge la configuration du bureau à intervalles.
+`removeChangeListener` arrête la surveillance quand il ne reste aucun listener et que le
+sélecteur n'est pas installé.
+
+## Lire les réglages
+
+`settings()` renvoie les `SystemProxySettings` en cache ; `refresh()` les relit.
+
+| Propriété | Signification |
+| --- | --- |
+| `autoDetect` | WPAD est actif (« Détecter automatiquement les paramètres ») |
+| `pacUrl` | L'URL explicite du script PAC, ou `null` |
+| `rules` | `ProxyRules` : une liste pour tous les schémas, ou par schéma (`http=…;https=…;socks=…`) |
+| `bypassRules` | `ProxyBypassRules` : les hôtes joints sans proxy |
+| `isDirect` | Ni WPAD, ni PAC, ni règles |
+
+`ProxyRules.parse` et `ProxyBypassRules.parse` acceptent la syntaxe de Chromium, pour une
+configuration qui ne vient pas de l'OS. Les règles d'exclusion acceptent des motifs d'hôte glob,
+un `.` initial pour tout un domaine, des restrictions `:port` et `scheme://`, des blocs CIDR,
+`<local>` pour les noms d'hôte simples et `<-loopback>`. Localhost et les adresses link-local
+contournent le proxy, sauf si `<-loopback>` est indiqué.
+
+<Callout type="warn">
+Linux n'évalue ni les scripts PAC ni WPAD, ce qui demanderait un moteur JavaScript : seules les
+règles statiques et les listes d'exclusion s'appliquent. Sous macOS, WPAD sans URL PAC explicite
+est signalé dans `autoDetect` mais pas évalué ; quand la découverte DHCP réussit, macOS inscrit
+lui-même l'URL PAC dans les réglages.
+</Callout>
+
+## Journalisation
+
+Le module journalise au niveau `FINE` sous le logger `dev.nucleusframework.nativeproxy`. Réglez
+ce logger sur `FINE`, ou passez `allowNucleusRuntimeLogging = true`
+(`dev.nucleusframework.core.runtime.tools`) depuis `main()`.
+
+<Accordions>
+<Accordion title="Sous le capot">
+
+- **Windows :** `WinHttpGetIEProxyConfigForCurrentUser` lit la configuration. Un script PAC
+  l'emporte sur WPAD (DHCP, puis DNS) ; la requête s'exécute d'abord sans connexion automatique
+  et ne réessaie avec elle que sur `ERROR_WINHTTP_LOGIN_FAILURE`. Les changements viennent de
+  `RegNotifyChangeKeyValue` sur les clés Internet Settings, Policies et Connections de HKCU et
+  HKLM.
+- **macOS :** `SCDynamicStoreCopyProxies` lit la configuration, les scripts PAC passent par
+  `CFNetworkExecuteProxyAutoConfigurationURL` avec un délai de 10 s, et les changements viennent
+  des notifications de `SCDynamicStore`.
+- **Linux :** GIO est chargé par `dlopen`, la bibliothèque n'y est donc pas liée.
+- Une règle `socks=` vaut SOCKS4 par défaut et sert les schémas qu'aucune autre règle ne nomme,
+  comme dans Chromium.
+
+</Accordion>
+</Accordions>
+
+## Référence de l'API
+
+| Symbole | Notes |
+| --- | --- |
+| `NativeProxy.isSupported` | Si la plateforme a un backend natif |
+| `install(): Boolean` / `uninstall()` | Installe ou retire le sélecteur global de la JVM |
+| `selector: ProxySelector` | Répond à partir de l'OS seul, sans repli |
+| `proxiesFor(uri): List<ProxyServer>` | Vide pour une connexion directe |
+| `javaProxiesFor(uri): List<Proxy>` | `Proxy.NO_PROXY` pour une connexion directe |
+| `settings()` / `refresh()` | `SystemProxySettings`, en cache / relus |
+| `addChangeListener` / `removeChangeListener` | `(SystemProxySettings) -> Unit`, sur un thread d'arrière-plan |
+| `ProxyServer` | `protocol` (`HTTP`, `HTTPS`, `SOCKS4`, `SOCKS5`), `host`, `port`, `toJavaProxy()` |
+
+## Et ensuite
+
+- [SSL natif](/docs/performance/native-ssl) : faire confiance aux certificats de l'OS sur les mêmes connexions.
+- [HTTP natif](/docs/performance/native-http) : des clients HTTP reliés à la confiance native.
+- [Modules](/docs/concepts/modules) : la liste complète des modules Nucleus.

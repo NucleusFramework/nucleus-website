@@ -1,0 +1,141 @@
+---
+title: Native proxy
+description: Read the operating system's proxy configuration, PAC scripts included, and install it as the JVM-wide ProxySelector.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+`native-proxy` reads the proxy configuration of the operating system on Windows, macOS and Linux
+and exposes it as a `ProxySelector`. It follows Chromium's proxy stack, so a URL resolves to the
+proxy Edge, Chrome or Safari would use, machine-wide and managed settings included.
+
+| OS | Configuration | PAC and WPAD |
+| --- | --- | --- |
+| Windows | WinHTTP and the Internet Settings registry | Evaluated through WinHTTP |
+| macOS | `SCDynamicStore` | PAC evaluated through CFNetwork |
+| Linux | GSettings (`org.gnome.system.proxy`), then KDE `kioslaverc`, then `http_proxy` / `no_proxy` | Not evaluated |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-proxy:<version>")
+}
+```
+
+## Route the JVM through the OS proxy
+
+Call `install()` once from `main()`:
+
+```kotlin
+import dev.nucleusframework.nativeproxy.NativeProxy
+
+NativeProxy.install()
+```
+
+Every JDK connection that consults `ProxySelector.getDefault()`, such as `HttpURLConnection`,
+`java.net.http.HttpClient` or OkHttp's default, then uses the OS proxy. The selector that was
+default before becomes the fallback, so `http.proxyHost` and the other JDK proxy properties still
+apply to URIs the OS has no opinion on. `install()` also watches the configuration, so the
+selector follows a change in the OS settings.
+
+`install()` returns `false` and leaves the JVM default alone when the platform has no backend.
+`uninstall()` restores the previous selector.
+
+## Resolve a URL
+
+```kotlin
+val proxies: List<ProxyServer> = NativeProxy.proxiesFor(URI("https://intranet.corp"))
+val javaProxies: List<Proxy> = NativeProxy.javaProxiesFor(URI("https://intranet.corp"))
+```
+
+`proxiesFor` returns the proxies to try, in order; an empty list means a direct connection.
+`javaProxiesFor` returns JDK proxies and is never empty: a direct connection is `Proxy.NO_PROXY`.
+For a client you configure yourself, `NativeProxy.selector` answers from the OS configuration
+alone, with no fallback.
+
+A URL resolves in Chromium's order:
+
+1. The bypass list: a match goes direct.
+2. The PAC script, from an explicit URL or WPAD. Results are cached per origin and dropped on
+   every configuration change.
+3. The static rules, also used when the PAC script cannot be evaluated.
+
+## Watch for changes
+
+```kotlin
+NativeProxy.addChangeListener { settings ->
+    println("Proxy changed: ${settings.rules}")
+}
+```
+
+The listener runs on a background thread. Windows and macOS are notified by the OS, with a 2 s
+coalescing delay; Linux polls the desktop configuration. `removeChangeListener` stops the watcher
+once no listener is left and the selector is not installed.
+
+## Read the settings
+
+`settings()` returns the cached `SystemProxySettings`; `refresh()` reads it again.
+
+| Property | Meaning |
+| --- | --- |
+| `autoDetect` | WPAD is on ("Automatically detect settings") |
+| `pacUrl` | The explicit PAC script URL, or `null` |
+| `rules` | `ProxyRules`: one list for every scheme, or per scheme (`http=…;https=…;socks=…`) |
+| `bypassRules` | `ProxyBypassRules`: hosts reached without a proxy |
+| `isDirect` | No WPAD, no PAC and no rules |
+
+`ProxyRules.parse` and `ProxyBypassRules.parse` accept the Chromium syntax, for a configuration
+that does not come from the OS. Bypass rules take glob host patterns, a leading `.` for a whole
+domain, `:port` and `scheme://` restrictions, CIDR blocks, `<local>` for simple host names and
+`<-loopback>`. Localhost and link-local addresses bypass the proxy unless `<-loopback>` says
+otherwise.
+
+<Callout type="warn">
+Linux evaluates neither PAC scripts nor WPAD, which would need a JavaScript engine: only static
+rules and bypass lists apply. On macOS, WPAD without an explicit PAC URL is reported in
+`autoDetect` but not evaluated; when DHCP discovery succeeds, macOS writes the PAC URL into the
+settings itself.
+</Callout>
+
+## Logging
+
+The module logs at `FINE` under the `dev.nucleusframework.nativeproxy` logger. Set that logger to
+`FINE`, or set `allowNucleusRuntimeLogging = true` (`dev.nucleusframework.core.runtime.tools`)
+from `main()`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- **Windows:** `WinHttpGetIEProxyConfigForCurrentUser` reads the configuration. A PAC script wins
+  over WPAD (DHCP, then DNS); the request first runs without automatic logon and retries with it
+  only on `ERROR_WINHTTP_LOGIN_FAILURE`. Changes come from `RegNotifyChangeKeyValue` on the
+  Internet Settings, Policies and Connections keys of HKCU and HKLM.
+- **macOS:** `SCDynamicStoreCopyProxies` reads the configuration, PAC scripts run through
+  `CFNetworkExecuteProxyAutoConfigurationURL` with a 10 s timeout, and changes come from
+  `SCDynamicStore` notifications.
+- **Linux:** GIO is loaded with `dlopen`, so the library does not link against it.
+- A `socks=` rule defaults to SOCKS4 and serves the schemes no other rule names, as in Chromium.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `NativeProxy.isSupported` | Whether the platform has a native backend |
+| `install(): Boolean` / `uninstall()` | Install or remove the JVM-wide selector |
+| `selector: ProxySelector` | Answers from the OS alone, with no fallback |
+| `proxiesFor(uri): List<ProxyServer>` | Empty for a direct connection |
+| `javaProxiesFor(uri): List<Proxy>` | `Proxy.NO_PROXY` for a direct connection |
+| `settings()` / `refresh()` | `SystemProxySettings`, cached / read again |
+| `addChangeListener` / `removeChangeListener` | `(SystemProxySettings) -> Unit`, on a background thread |
+| `ProxyServer` | `protocol` (`HTTP`, `HTTPS`, `SOCKS4`, `SOCKS5`), `host`, `port`, `toJavaProxy()` |
+
+## What's next
+
+- [Native SSL](/docs/performance/native-ssl): trust the OS certificates on the same connections.
+- [Native HTTP](/docs/performance/native-http): HTTP clients wired to native trust.
+- [Modules](/docs/concepts/modules): the full list of Nucleus modules.
