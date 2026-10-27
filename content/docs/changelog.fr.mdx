@@ -67,6 +67,31 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
   propriétaire, son bouton dans la barre des tâches, Alt+Tab ou `toFront()` fait passer le dialogue
   au premier plan avec le focus clavier. Voir [Bloquer la
   propriétaire](/docs/windows/dialogs-popups#bloquer-la-propriétaire).
+- **Windows : un `DecoratedDialog` désactive sa propriétaire** (#872, #832). La propriétaire refuse
+  clics, touches et barre de titre tant que le dialogue est visible, et un clic dessus fait
+  clignoter le dialogue. macOS reçoit aussi le bloqueur de pointeur dans la scène. Voir [Bloquer la
+  propriétaire](/docs/windows/dialogs-popups#bloquer-la-propriétaire).
+- **Windows : `onCloseRequest` peut s'opposer à la déconnexion et à l'arrêt** (#766, #751). La
+  déconnexion, le redémarrage, l'arrêt et les fermetures du Restart Manager suivent le même quit
+  que Cmd+Q sur macOS, et l'app ne se termine qu'une fois la fin de session confirmée par Windows.
+  Voir [Gérer un quit système](/docs/lifecycle/application#gérer-un-quit-système).
+- **Windows : les pavés tactiles de précision défilent avec des événements `Pan*`** (#871, #706).
+  Le défilement à deux doigts et le pincement passent par DirectManipulation, avec l'inertie de
+  l'OS. Les handlers qui n'écoutent que `Scroll` doivent gérer `PanMove` ;
+  `-Dnucleus.tao.directManipulation=false` rétablit l'ancienne émulation. Voir
+  [Défiler](/docs/input/trackpad-gestures#défiler).
+- **macOS : une app au repos ou masquée laisse le Mac se mettre en veille** (#877). Les fenêtres
+  hors de vue sautent leurs frames, le display link s'arrête entre les frames, et les surveillances
+  d'accessibilité et d'instance unique n'interrogent plus. Une app masquée passe d'environ 14 % de
+  CPU à moins de 1 %. Voir [Fenêtres au repos](/docs/performance/rendering#fenêtres-au-repos).
+- **Windows : plus de miroir de frame sous le niveau Direct3D 11_0** (#883). Les fenêtres maximisées
+  et en plein écran ne deviennent plus noires sur les GPU WDDM 1.1 ;
+  `-Dnucleus.tao.windowsFrameMirror=false` coupe le miroir ailleurs. Voir [Notes sur le
+  rendu](/docs/performance/rendering#notes).
+- **Linux : `desktopEntries` peut définir `Comment` et `Categories`** (#875). Les deux étaient
+  écrasés par `description` et `appCategory`, et `menuGroup` sert désormais de repli à
+  `appCategory`. Voir [Localiser l'entrée de
+  bureau](/docs/packaging/linux#localiser-lentrée-de-bureau).
 - **macOS : un élément de menu lié à Cmd+Q gère le raccourci** (#775, #749). Il s'exécute à la place
   de la fermeture intégrée, et émet un bip quand il est désactivé. Voir [Gérer
   Cmd+Q](/docs/os/menus/menu-bar#gérer-cmdq).
@@ -122,6 +147,30 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
 
 ### Nouvelles fonctionnalités
 
+- **Module `native-proxy`** (#427). Lit la configuration proxy de l'OS sous Windows, macOS et
+  Linux, scripts PAC compris sous Windows et macOS, et l'installe comme `ProxySelector` de toute la
+  JVM. Voir [Proxy natif](/docs/performance/native-proxy).
+- **Module `screen-capture`** (#730, #637). Capture un écran, une zone ou n'importe quelle fenêtre
+  en pixels physiques, sans AWT, via GDI, ScreenCaptureKit, X11 ou le portail Wayland. Voir
+  [Capture d'écran](/docs/os/screen-capture).
+- **`SystemInfo.connectivityFlow()`** (#858, #835). Émet l'état de la connectivité, puis chaque
+  changement, avec un nouveau `ConnectivityLevel` (`FULL`, `CAPTIVE_PORTAL`, `LIMITED`, `LOCAL`,
+  `NONE`). Sous Windows, `isConnected` signifie désormais un réseau routé. Voir [Suivre la
+  connectivité](/docs/os/system-info#suivre-la-connectivité).
+- **`SystemInfo.renderTier()`** (#883). Distingue un GPU logiciel ou ancien d'un GPU capable, pour
+  couper le contenu 3D lourd. Voir [Détecter un GPU
+  faible](/docs/os/system-info#détecter-un-gpu-faible).
+- **Rôle et rang des types de documents macOS** (#886, #881). Chaque type de document déclare
+  désormais un `LSHandlerRank`, ce qui lève ITMS-90788, et `macOS { fileAssociation(..., role,
+  rank) }` règle les deux clés. Voir [Déclarer les types de
+  documents](/docs/packaging/macos#déclarer-les-types-de-documents).
+- **Chemins des fichiers glissés pendant le survol** (#810). `shouldStartDragAndDrop`, `onEntered`
+  et `onMoved` voient les fichiers glissés sur tous les OS : une cible peut accepter selon
+  l'extension. Voir [Recevoir des fichiers
+  déposés](/docs/input/drag-and-drop#recevoir-des-fichiers-déposés).
+- **`SingleInstanceManager.directoryWatcher`** (#877) remplace le `WatchService` du JDK.
+  `nucleusApplication` y branche `fs-watcher` sous macOS. Voir [Instance
+  unique](/docs/lifecycle/single-instance#référence-de-lapi).
 - **Redessin partiel** (#756, #824). Avec `nucleusOptimization { partialRedraw = true }`, ou le pack
   `nucleusOptimization` entier, une frame ne repeint et ne présente que ce qui a changé, sous macOS,
   Windows et Linux, sur la JVM comme en image native. Voir [Activer le redessin
@@ -292,6 +341,10 @@ JBR et JNI. La version majeure signale des ruptures d'API : lisez le
   la spécialisation du type de retour, qui provoquait `VerifyError: Bad return type`.
 - **Un seul package reconstruit par format modifié** (#846).
 - **Un seul `libGLESv2` sous Windows** (#843).
+- **XWayland : les coins arrondis restent transparents** (#884). La surface EGL enfant reçoit un
+  visual 32 bits sous GNOME avec `GDK_BACKEND=x11`, au lieu de coins noirs.
+- **Windows : un glisser ne se termine qu'au relâchement qui l'a terminé** (#885). Un mouvement de
+  souris reçu après le relâchement ne décale plus l'endroit où un onglet est déposé.
 - **Updater** : les métadonnées de build SemVer sont ignorées (#771), `GenericProvider` n'accepte
   `http` que sur un hôte loopback (#742), les noms de fichier du manifeste ne sortent plus du
   répertoire de staging (#740), le script DEB/RPM protège ses chemins (#741) et les téléchargements

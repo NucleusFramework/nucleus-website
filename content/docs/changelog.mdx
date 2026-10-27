@@ -63,6 +63,28 @@ The major version marks the API breaks: read the
 - **A modal dialog takes its owner's activation** (#869, #515). Clicking the owner, its taskbar
   button, Alt+Tab or `toFront()` brings the dialog forward with keyboard focus. See [Block the
   owner](/docs/windows/dialogs-popups#block-the-owner).
+- **Windows: a `DecoratedDialog` disables its owner** (#872, #832). The owner refuses clicks, keys
+  and its title bar while the dialog is visible, and a click there flashes the dialog. macOS now
+  gets the in-scene pointer blocker too. See [Block the
+  owner](/docs/windows/dialogs-popups#block-the-owner).
+- **Windows: `onCloseRequest` can veto logoff and shutdown** (#766, #751). Logoff, restart,
+  shutdown and Restart Manager closes go through the same quit as macOS's Cmd+Q, and the app exits
+  only once Windows confirms. See [Handle a system
+  quit](/docs/lifecycle/application#handle-a-system-quit).
+- **Windows: precision touchpads scroll with `Pan*` events** (#871, #706). Two-finger scroll and
+  pinch go through DirectManipulation, with the OS inertia. Handlers that only listen for `Scroll`
+  must handle `PanMove`; `-Dnucleus.tao.directManipulation=false` restores the legacy emulation. See
+  [Scroll](/docs/input/trackpad-gestures#scroll).
+- **macOS: an idle or hidden app lets the Mac sleep** (#877). Occluded windows skip their frames,
+  the display link stops between frames, and the accessibility and single-instance watchers no
+  longer poll. A hidden app drops from about 14 % CPU to under 1 %. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **Windows: no frame mirror below Direct3D feature level 11_0** (#883). Maximized and fullscreen
+  windows no longer turn black on WDDM 1.1 GPUs; `-Dnucleus.tao.windowsFrameMirror=false` turns the
+  mirror off elsewhere. See [Rendering notes](/docs/performance/rendering#notes).
+- **Linux: `desktopEntries` can set `Comment` and `Categories`** (#875). Both used to be overwritten
+  by `description` and `appCategory`, and `menuGroup` now falls back for `appCategory`. See [Localize
+  the desktop entry](/docs/packaging/linux#localize-the-desktop-entry).
 - **macOS: a Cmd+Q menu item handles the shortcut** (#775, #749). A `NativeMenuBar` item bound to
   Cmd+Q runs instead of the built-in quit, and beeps while it is disabled. See [Handle
   Cmd+Q](/docs/os/menus/menu-bar#handle-cmdq).
@@ -114,6 +136,27 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **`native-proxy` module** (#427). Reads the OS proxy configuration on Windows, macOS and Linux,
+  PAC scripts included on Windows and macOS, and installs it as the JVM-wide `ProxySelector`. See
+  [Native proxy](/docs/performance/native-proxy).
+- **`screen-capture` module** (#730, #637). Captures a display, a region or any window in physical
+  pixels, without AWT, through GDI, ScreenCaptureKit, X11 or the Wayland portal. See [Screen
+  capture](/docs/os/screen-capture).
+- **`SystemInfo.connectivityFlow()`** (#858, #835). Emits the connectivity state, then every change,
+  with a new `ConnectivityLevel` (`FULL`, `CAPTIVE_PORTAL`, `LIMITED`, `LOCAL`, `NONE`). On Windows,
+  `isConnected` now means a routed network. See [Watch
+  connectivity](/docs/os/system-info#watch-connectivity).
+- **`SystemInfo.renderTier()`** (#883). Tells a software or legacy GPU from a capable one, to turn
+  off heavy 3D content. See [Detect a weak GPU](/docs/os/system-info#detect-a-weak-gpu).
+- **macOS document type role and rank** (#886, #881). Every document type now declares an
+  `LSHandlerRank`, which clears ITMS-90788, and `macOS { fileAssociation(..., role, rank) }` sets
+  both keys. See [Declare document types](/docs/packaging/macos#declare-document-types).
+- **Dragged file paths during hover** (#810). `shouldStartDragAndDrop`, `onEntered` and `onMoved`
+  see the dragged files on every OS, so a target can accept by extension. See [Receive dropped
+  files](/docs/input/drag-and-drop#receive-dropped-files).
+- **`SingleInstanceManager.directoryWatcher`** (#877) replaces the JDK `WatchService`.
+  `nucleusApplication` plugs in `fs-watcher` on macOS. See [Single
+  instance](/docs/lifecycle/single-instance#api-reference).
 - **Partial redraw** (#756, #824). With `nucleusOptimization { partialRedraw = true }`, or the whole
   `nucleusOptimization` pack, a frame repaints and presents only what changed, on macOS, Windows and
   Linux, on the JVM and in native images. See [Turn on partial
@@ -265,6 +308,10 @@ The major version marks the API breaks: read the
   specialization, which caused `VerifyError: Bad return type`.
 - **One package rebuild per changed format** (#846).
 - **One `libGLESv2` on Windows** (#843).
+- **XWayland: rounded corners stay transparent** (#884). The EGL child surface gets a 32-bit visual
+  on GNOME under `GDK_BACKEND=x11`, instead of black corners.
+- **Windows: a drag ends only at the release that ended it** (#885). A mouse move delivered after
+  the release no longer shifts where a tab drops.
 - **Updater**: SemVer build metadata is ignored (#771), `GenericProvider` allows `http` only on
   loopback hosts (#742), manifest file names cannot escape the staging directory (#740), the DEB/RPM
   update script quotes its paths (#741), and full downloads are hashed while written (#780).
