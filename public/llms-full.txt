@@ -354,7 +354,7 @@ Every breaking or behavior change in 3.0, with the step on this page and the fea
 | Cmd+Q and Dock → Quit call every window's `onCloseRequest`. | Check that your close handlers exit or close. [Step](#check-your-close-handlers) | [Application](/docs/lifecycle/application) |
 | Notification, media control, launcher and global hotkey callbacks run on the host UI thread, not the AWT EDT or a native thread. | Remove Swing assumptions in those callbacks. [Step](#move-native-callbacks-off-the-awt-edt) | [Threading](/docs/concepts/threading) |
 | Trackpad pinch arrives as `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd`. | Move pinch code to `Modifier.transformable` or a Scale listener. [Step](#handle-pinch-and-pan-events) | [Trackpad gestures](/docs/input/trackpad-gestures) |
-| macOS trackpad scrolling arrives as `PanStart` / `PanMove` / `PanEnd`. | Handle Pan in custom `Scroll` handlers. [Step](#handle-pinch-and-pan-events) | [Trackpad gestures](/docs/input/trackpad-gestures) |
+| macOS trackpad and Windows precision-touchpad scrolling arrive as `PanStart` / `PanMove` / `PanEnd`. | Handle Pan in custom `Scroll` handlers. [Step](#handle-pinch-and-pan-events) | [Trackpad gestures](/docs/input/trackpad-gestures) |
 | Single instance is off in dev runs. | Pass `enableSingleInstance = true` to test it from `run`. [Step](#test-single-instance-in-dev-runs) | [Single instance](/docs/lifecycle/single-instance) |
 | `nucleusApplication` initializes FileKit with `NucleusApp.appId`. | Check your FileKit data directory, or opt out. [Step](#check-the-filekit-initialization) | [File dialogs](/docs/os/file-dialogs) |
 | Windows: a hung event loop logs `SEVERE` with a thread dump. | Hook the callbacks or mark long work. [Step](#handle-the-event-loop-watchdog) | [Application](/docs/lifecycle/application) |
@@ -530,8 +530,8 @@ See [Application](/docs/lifecycle/application).
 ### Handle pinch and pan events
 
 A trackpad pinch or Ctrl+wheel arrives as `ScaleStart` / `ScaleChange` / `ScaleEnd`, which
-`detectTransformGestures` does not see in Compose 1.12: use `Modifier.transformable`. On macOS,
-trackpad scrolling arrives as `PanStart` / `PanMove` / `PanEnd`. `Modifier.scrollable` handles it,
+`detectTransformGestures` does not see in Compose 1.12: use `Modifier.transformable`. On macOS and
+on a Windows precision touchpad, scrolling arrives as `PanStart` / `PanMove` / `PanEnd`. `Modifier.scrollable` handles it,
 but a custom `Scroll` handler must handle Pan too:
 
 ```kotlin
@@ -981,7 +981,8 @@ repositories. See [Toolkits](/docs/toolkits).
 | Global hotkeys | `global-hotkey` |
 | Share sheet, Kotlin Multiplatform | [`share`](/docs/os/share) |
 | Media controls (Now Playing, SMTC, MPRIS) | `media-control` |
-| System info (CPU, RAM, GPU, batteries) | `system-info` |
+| System info (CPU, RAM, GPU, batteries, connectivity) | [`system-info`](/docs/os/system-info) |
+| Screen and window capture | [`screen-capture`](/docs/os/screen-capture) |
 | SF Symbols catalogue | [`sf-symbols`](/docs/os/icons/sf-symbols) |
 | FreeDesktop icon names | `freedesktop-icons` |
 
@@ -1002,6 +1003,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | Capability | Module |
 |---|---|
 | Trust manager backed by the OS certificate store | `native-ssl` |
+| OS proxy configuration as a `ProxySelector` | [`native-proxy`](/docs/performance/native-proxy) |
 | `java.net.http.HttpClient` with native trust | [`native-http`](/docs/performance/native-http) |
 | OkHttp with native trust | `native-http-okhttp` |
 | Ktor with native trust | `native-http-ktor` |
@@ -1831,6 +1833,11 @@ uncovered part, its taskbar button, Alt+Tab or `toFront()`, brings the dialog fo
 keyboard focus instead, so keystrokes never reach the blocked content. Stacked dialogs chain: each
 one takes the activation of its own owner. A dialog with `visible`, `enabled` or `focusable` set to
 `false` leaves the owner's activation alone.
+
+On Windows the owner is disabled natively while the dialog is visible, like a Win32 `DialogBox`:
+its content, title bar, caption buttons and keys refuse input, and a click there beeps and flashes
+the dialog. Closing the dialog gives the focus back to the owner with no extra click. On macOS and
+Linux an in-scene blocker stops pointer input to the owner.
 
 A dialog declared at application scope blocks pointer input in every window. For a secondary
 window the user can put behind its parent, open a second `DecoratedWindow`.
@@ -3537,15 +3544,16 @@ and `Modifier.transformable` handle them with no extra code, and you add no depe
 
 | Gesture | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Two-finger scroll | `PanStart` / `PanMove` / `PanEnd` | `Scroll` | `Scroll` |
+| Two-finger scroll | `PanStart` / `PanMove` / `PanEnd` | `PanStart` / `PanMove` / `PanEnd` (precision touchpad) | `Scroll` |
 | Mouse wheel | `Scroll` | `Scroll` | `Scroll` |
 | Pinch, Ctrl + wheel | `ScaleStart` / `ScaleChange` / `ScaleEnd` | `Scale*` | `Scale*` |
 | Rotation | two `Touch` pointers | none | two `Touch` pointers |
 
 ## Scroll
 
-Scrolling containers work as they are. Only a custom `pointerInput` handler needs care: on macOS a
-trackpad swipe arrives as `PanMove`, so a handler that listens for `Scroll` alone misses it.
+Scrolling containers work as they are. Only a custom `pointerInput` handler needs care: on macOS
+and on a Windows precision touchpad a swipe arrives as `PanMove`, so a handler that listens for
+`Scroll` alone misses it.
 
 ```kotlin
 Modifier.pointerInput(Unit) {
@@ -3565,6 +3573,9 @@ Modifier.pointerInput(Unit) {
 
 To receive every trackpad step as `Scroll` instead, start the JVM with
 `-Dnucleus.tao.trackpadPanEvents=false`.
+
+On Windows, a precision touchpad now scrolls with `Pan*` events and the OS inertia, as on macOS.
+Handlers that only listen for `Scroll` must also handle `PanMove`.
 
 ## Zoom with a pinch
 
@@ -3588,7 +3599,7 @@ fun ZoomableImage() {
 In a custom handler, read `PointerInputChange.scaleFactor` on `ScaleChange`. It is a ratio per
 event: above `1f` zooms in, below `1f` zooms out.
 
-When macOS or Linux cancels a pinch, for example because the system takes over the gesture, the
+When the OS cancels a pinch, for example because the system takes over the gesture, the
 pinch ends with `ScaleEnd` and Nucleus then cancels the window's pointer input. Gesture handlers
 see a cancellation, not a release. A trackpad pan in progress ends with `PanEnd` first, and the
 next finger movement starts a new one.
@@ -3605,7 +3616,12 @@ gesture that starts first keeps the trackpad until it ends.
 - `panOffset` uses the same 10 dp per unit that Compose Desktop applies to a wheel notch, so a pan
   and a notch scroll the same distance.
 - `PanEnd` arrives after macOS's momentum tail, so Compose does not start a second fling.
-- Ctrl + wheel has no end phase: `ScaleEnd` follows 120 ms after the last tick.
+- Ctrl + wheel has no end phase: `ScaleEnd` follows 120 ms after the last tick. During a touchpad
+  pinch on Windows, Ctrl + wheel folds into the open pinch.
+- On Windows, every window binds a DirectManipulation viewport, configured like Chromium's. It
+  claims precision-touchpad contacts only; touchscreens keep `WM_POINTER`. A sequence is a pan
+  until its scale moves, then a pinch until it ends. `-Dnucleus.tao.directManipulation=false`
+  restores the legacy wheel emulation.
 - On Linux, GDK reports scale and rotation as one gesture. It starts as a pinch, and rotation takes
   over once it has turned 10° with the zoom within ±10%.
 - `TaoWindow.onTrackpadGesture` exposes the raw stream (macOS and Windows). Registering a listener
@@ -3618,11 +3634,12 @@ gesture that starts first keeps the trackpad until it ends.
 
 | Symbol | Notes |
 | --- | --- |
-| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | macOS trackpad scroll |
+| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | macOS trackpad and Windows precision-touchpad scroll |
 | `PointerInputChange.panOffset` | Pan delta in pixels |
 | `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd` | Pinch and Ctrl + wheel |
 | `PointerInputChange.scaleFactor` | Zoom ratio per event |
 | `-Dnucleus.tao.trackpadPanEvents=false` | Send trackpad pans as `Scroll` |
+| `-Dnucleus.tao.directManipulation=false` | Windows: drop DirectManipulation, back to the legacy wheel emulation |
 
 ## What's next
 
@@ -3829,7 +3846,12 @@ Return `true` from `onDrop` to accept the data. `DataFlavor.stringFlavor` return
 joined by newlines.
 
 - Inbound drops carry files only. Text, HTML and URL drops are not delivered.
-- The file list is available in `onDrop`. The enter, move and exit callbacks receive an empty list.
+- The file list is available while the drag hovers, so `shouldStartDragAndDrop`, `onEntered` and
+  `onMoved` can accept or refuse a drag by its paths or extensions. `onDrop` reads the dropped
+  payload itself.
+- On Windows the paths arrive a moment after the drag enters. Until then the list is empty and the
+  window offers a copy; acceptance is decided once the paths arrive, or at the drop if the user
+  releases sooner.
 - [`TrayApp`](/docs/os/tray/tray-app) popups accept drops through the same modifier.
 
 ## Drag data out of the window
@@ -5467,7 +5489,8 @@ as its own Gradle artifact, so you add only the modules you use.
 | Media controls | `media-control` | yes | yes | yes |
 | Dark mode | `darkmode-detector` | yes | yes | yes |
 | Accent color and high contrast | `system-color` | yes | yes | yes |
-| Hardware and OS info | `system-info` | yes | yes | yes |
+| Hardware and OS info, connectivity | [`system-info`](/docs/os/system-info) | yes | yes | yes |
+| Screen and window capture | [`screen-capture`](/docs/os/screen-capture) | yes | yes | yes |
 | macOS menu bar | `menu-macos` | yes | no | no |
 | Spell check | `spellcheck` | yes | yes | yes |
 | SF Symbols names | `sf-symbols` | yes | no | no |
@@ -7937,7 +7960,8 @@ SystemInfo.batteryInfo()?.let { battery ->
 }
 ```
 
-- Each call reads the current values and returns; nothing polls or caches. To refresh a display,
+- Each call reads the current values and returns; nothing polls or caches, except
+  `connectivityFlow()` and `renderTier()`. To refresh a display,
   call again on your own schedule, off the UI thread for the expensive ones.
 - A value the host cannot provide comes back as `null` (single values) or an empty list. No call
   throws.
@@ -7945,6 +7969,58 @@ SystemInfo.batteryInfo()?.let { battery ->
   `motherboard()` returns the most fields on Linux.
 - `processes()` walks the whole process table. Call `process(pid)` when you need one entry: it
   reads that process alone.
+
+## Watch connectivity
+
+`connectivityFlow()` emits the current state, then every change. All collectors share one native
+monitor: the first collector starts it and the last one stops it.
+
+```kotlin
+SystemInfo.connectivityFlow().collect { info ->
+    offlineBanner = !info.isConnected
+    syncOnCellular = info.meteredStatus != MeteredStatus.METERED
+    behindPortal = info.level == ConnectivityLevel.CAPTIVE_PORTAL
+}
+```
+
+`level` tells how far the network reaches:
+
+| Level | Meaning |
+| --- | --- |
+| `FULL` | Internet access |
+| `CAPTIVE_PORTAL` | A routed network that redirects to a login page (Windows only) |
+| `LIMITED` | A routed network without confirmed internet access |
+| `LOCAL` | The local subnet only |
+| `NONE` | No network |
+| `UNKNOWN` | The platform cannot tell |
+
+`isConnected` means a routed network, `LIMITED` and up. Identical states are dropped, and a query
+that fails mid-stream keeps the last state instead of reporting a disconnection.
+
+| OS | Source | Limits |
+| --- | --- | --- |
+| Windows | Network List Manager events, cost from `INetworkCostManager` | None |
+| macOS | `NWPathMonitor`; metered means an expensive path (cellular, hotspot) or Low Data Mode | Only `FULL`, `NONE` and `UNKNOWN`: captive portals and limited access are not detected |
+| Linux | The xdg-desktop-portal `NetworkMonitor`, else NetworkManager on the system bus | Neither available: one `UNKNOWN` state |
+
+## Detect a weak GPU
+
+`renderTier()` probes the default render device once and caches the answer. Use it to turn off
+3D scenes or heavy effects that an old or software-only GPU cannot run:
+
+```kotlin
+val lowEnd = SystemInfo.renderTier() in setOf(RenderTier.SOFTWARE, RenderTier.LEGACY)
+```
+
+| Tier | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| `SOFTWARE` | WARP / Microsoft Basic Render Driver | `GL_RENDERER` is llvmpipe, softpipe, swrast or SWR | No Metal device |
+| `LEGACY` | Direct3D feature level below 11_0 | No GL ES 3 context | Never |
+| `CAPABLE` | Feature level 11_0 or higher | A hardware GL ES 3 context | A Metal device |
+| `UNKNOWN` | The probe failed | The probe failed | The probe failed |
+
+`LEGACY` is typically 2007–2010 hardware: Intel Ironlake / GMA, GeForce 8–200, Radeon HD 2000–4000.
+`gpus()` cannot answer this: Windows leaves software adapters out of it.
 
 ![Live CPU readings: global usage, brand and per-core load](/assets/docs/os/system-info-cpu.png)
 
@@ -7960,7 +8036,9 @@ SystemInfo.batteryInfo()?.let { battery ->
 | `gpus()` | `List<GpuInfo>`: name, vendor and device ids, video memory, and, where the driver reports them, `driverVersion`, `temperature`, `gpuUsage`, clocks, fan speed, power draw |
 | `batteryInfo()` | `BatteryInfo?`: `stateOfCharge` (`0.0..1.0`), `state` (`Charging`, `Discharging`, `Full`, `Unknown`), `isPluggedIn`, capacities, `cycleCount`, `health`, time estimates, device identity. `null` without a battery |
 | `networks()` | `List<NetworkInterfaceInfo>` |
-| `connectivityInfo()` | `ConnectivityInfo?`: `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`) |
+| `connectivityInfo()` | `ConnectivityInfo?`: `isConnected`, `meteredStatus` (`NOT_AVAILABLE`, `UNKNOWN`, `UNMETERED`, `METERED`), `level` (`ConnectivityLevel`) |
+| `connectivityFlow()` | `Flow<ConnectivityInfo>`: the current state, then every change |
+| `renderTier()` | `RenderTier`: `UNKNOWN`, `SOFTWARE`, `LEGACY` or `CAPABLE`, probed once |
 | `processes()` / `process(pid: Long)` | `List<ProcessInfo>` / `ProcessInfo?` |
 | `users()` | `List<UserInfo>` |
 | `components()` | `List<ComponentInfo>`: temperature sensors |
@@ -7971,6 +8049,200 @@ SystemInfo.batteryInfo()?.let { battery ->
 
 - [Energy manager](/docs/lifecycle/energy-manager): lower scheduling priority and keep the display awake.
 - [System accent color](/docs/os/theme/accent-color): read the accent and high-contrast state.
+- [Modules](/docs/concepts/modules): every Nucleus module and its artifact.
+
+---
+
+# Screen capture
+
+URL: https://nucleusframework.dev/en/docs/os/screen-capture
+
+Capture a display, a region or any window in physical pixels, without AWT, on Windows, macOS and Linux.
+
+`screen-capture` captures a display, a region of it or a top-level window on Windows, macOS and
+Linux. Images are in physical pixels: a 4K display at 200 % captures as 3840×2160, not the
+1920×1080 `java.awt.Robot` returns. The module needs neither AWT nor Compose, and runs in a
+GraalVM native image with no extra metadata.
+
+| OS | Backend |
+| --- | --- |
+| Windows | GDI `BitBlt`; windows through `PrintWindow`, covered parts and DirectX content included |
+| macOS 14+ | ScreenCaptureKit |
+| macOS 13 and older | Core Graphics |
+| Linux X11 | `XGetImage`, RandR monitors, XComposite for covered windows |
+| Linux Wayland | The xdg-desktop-portal `Screenshot` interface |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.screen-capture:<version>")
+}
+```
+
+## Capture a display
+
+Every call blocks until the platform answers. Call it from `Dispatchers.IO`:
+
+```kotlin
+import dev.nucleusframework.screencapture.ScreenCapture
+
+val image = withContext(Dispatchers.IO) {
+    val display = ScreenCapture.primaryDisplay() ?: error("no display")
+    ScreenCapture.captureDisplay(display, includeCursor = true)
+}
+File("shot.png").writeBytes(image.toPng())
+```
+
+`displays()` lists the connected displays, primary first. Each `CaptureDisplay` has:
+
+| Property | Meaning |
+| --- | --- |
+| `id` | Stable for the session: `\\.\DISPLAY1` on Windows, the `CGDirectDisplayID` on macOS, the RandR output name on X11, `portal` on Wayland |
+| `name` | The monitor's name |
+| `bounds` | Desktop rectangle: physical px on Windows and X11, points on macOS, `null` on Wayland |
+| `widthPx` / `heightPx` | Size of a full capture, in physical pixels. `0` on Wayland until the first capture |
+| `scaleFactor` | `dpi / 96` on Windows, px per point on macOS, `1` on Linux |
+| `isPrimary` | Exactly one display is primary |
+
+### Capture a region
+
+A region is in the display's own pixels, relative to its top-left corner: the coordinates of the
+image a full capture returns, on every OS. It is clipped to the display, and a region outside it
+throws `InvalidRegion`.
+
+```kotlin
+val part = ScreenCapture.captureDisplay(display, region = CaptureRegion(x = 100, y = 50, width = 800, height = 600))
+```
+
+## Capture a window
+
+`windows()` lists the windows `captureWindow` accepts, front to back: visible, not minimized, not
+on another virtual desktop. Other apps' windows are included.
+
+```kotlin
+if (ScreenCapture.isWindowCaptureSupported) {
+    val target = ScreenCapture.windows().first { it.appName == "Google Chrome" }
+    val shot = ScreenCapture.captureWindow(target.id)
+}
+```
+
+| Property | Meaning |
+| --- | --- |
+| `id` | What `captureWindow` takes |
+| `title` | Empty when the window has none. On macOS, only with the Screen Recording permission |
+| `appName` | The process name on Windows (`chrome`), the app name on macOS (`Google Chrome`), the `WM_CLASS` on X11 |
+| `pid` | The owning process. `0` when an X11 client does not set `_NET_WM_PID` |
+| `bounds` | Same space as `CaptureDisplay.bounds` |
+
+To capture one of your own windows, pass its native id:
+
+| OS | Window id | From a Nucleus window |
+| --- | --- | --- |
+| Windows | `HWND` | `unsafe.taoWindow?.nativeHandle` |
+| macOS | `CGWindowID` | Not exposed: find it in `windows()` by pid and title |
+| X11 | XID | `unsafe.taoWindow?.x11WindowId` |
+
+Covered parts are captured on Windows and macOS, and on X11 when the window is composited. A
+minimized, hidden or unknown window throws `WindowNotFound`. Wayland has no window capture:
+`isWindowCaptureSupported` is `false` and `captureWindow` throws `Unsupported`.
+
+## Use the pixels
+
+`ScreenImage` holds opaque `0xAARRGGBB` pixels, row by row:
+
+```kotlin
+image.width; image.height; image.scaleFactor
+image.pixelAt(x, y)          // 0xAARRGGBB
+image.toArgbArray()          // a copy, in BufferedImage.TYPE_INT_ARGB layout
+image.crop(CaptureRegion(0, 0, 200, 100))
+image.toPng()                // pure Kotlin encoder, no ImageIO
+image.writePng(outputStream)
+```
+
+To show a capture in Compose, hand the BGRA bytes to Skia:
+
+```kotlin
+val bitmap = Image.makeRaster(
+    ImageInfo(image.width, image.height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE),
+    image.toBgraBytes(),
+    image.width * ScreenImage.BYTES_PER_PIXEL,
+).toComposeImageBitmap()
+```
+
+## Ask for permission
+
+```kotlin
+when (ScreenCapture.permissionStatus()) {
+    CapturePermission.Granted, CapturePermission.NotRequired -> capture()
+    CapturePermission.NotDetermined -> ScreenCapture.requestPermission()
+    CapturePermission.Denied -> showHowToEnableScreenRecording()
+}
+```
+
+- **macOS** needs the Screen Recording permission. `requestPermission()` shows the system prompt
+  once per app, and a grant takes effect after the app restarts. macOS cannot tell "never asked"
+  from "denied", so a missing grant reads as `NotDetermined`. A capture without it throws
+  `PermissionDenied`. macOS 15 and later ask the user to confirm again from time to time.
+- **Windows and X11** return `NotRequired`.
+- **Wayland**: the compositor may show its own dialog on the first capture. A refusal throws
+  `PermissionDenied`, and dismissing the dialog throws `Cancelled`.
+
+## Handle errors
+
+Every failure is a `ScreenCaptureException`, whose `failure` is one of `Unsupported`,
+`PermissionDenied`, `Cancelled`, `DisplayNotFound` (a monitor was unplugged), `WindowNotFound`,
+`InvalidRegion`, `Timeout` or `Failed`. The message carries the platform's diagnostic: a Win32
+error, an `NSError` or a D-Bus error.
+
+Later versions may add values to `CaptureFailure` and `CaptureBackend`. Keep an `else` branch in a
+`when` over them.
+
+Every function is safe to call from several threads at once. Capturing from the UI thread works,
+your own window included, but the portal and ScreenCaptureKit can take a while to answer.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- `PrintWindow` waits forever on a window whose thread does not pump messages, including the
+  app's own UI thread while it waits for the capture. It runs on a worker with a 2 s timeout, and
+  falls back to the visible part of the window read from the screen. On the window's own thread it
+  prints inline.
+- On Windows, the list follows the Alt+Tab rules (no tool, cloaked or untitled windows), and a
+  hung window cannot block it.
+- macOS before 14 reaches `CGDisplayCreateImageForRect` and `CGWindowListCreateImage` through
+  `dlsym`, since the 15 SDK removed them. A region is captured from a 32 pt aligned rectangle and
+  cropped, so it matches a full capture bit for bit.
+- On Linux every library is loaded with `dlopen` and X errors are trapped per call: a bad XID or a
+  dying X server never takes the JVM down.
+- Linux picks the portal on a Wayland session (`XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY`
+  set), since XWayland's root window misses native Wayland windows. The portal captures the whole
+  desktop, which is then cropped. Force a backend with
+  `-Dnucleus.screencapture.linuxBackend=x11` or `=portal`.
+- `ScreenCapture.backend` reports the backend in use: `Gdi`, `ScreenCaptureKit`, `CoreGraphics`,
+  `X11`, `XdgDesktopPortal` or `Unavailable`.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `ScreenCapture.isSupported` | `false` when `backend` is `Unavailable` |
+| `ScreenCapture.isWindowCaptureSupported` | `false` on Wayland |
+| `ScreenCapture.backend` | `CaptureBackend` |
+| `displays()` / `primaryDisplay()` | `List<CaptureDisplay>` / `CaptureDisplay?` |
+| `windows()` | `List<CaptureWindow>`, front to back. Empty on Wayland |
+| `captureDisplay(display, region = null, includeCursor = false)` | `ScreenImage`. `includeCursor` is ignored on Wayland |
+| `captureWindow(windowId, includeCursor = false)` | `ScreenImage` |
+| `permissionStatus()` / `requestPermission()` | `CapturePermission`: `Granted`, `NotRequired`, `NotDetermined`, `Denied` |
+| `ScreenImage` | `width`, `height`, `scaleFactor`, `pixelAt`, `crop`, `toArgbArray`, `toBgraBytes`, `toPng`, `writePng` |
+
+## What's next
+
+- [System info](/docs/os/system-info): displays, GPUs and the render tier.
+- [HiDPI](/docs/windows/hidpi): how Nucleus maps points to physical pixels.
 - [Modules](/docs/concepts/modules): every Nucleus module and its artifact.
 
 ---
@@ -8056,6 +8328,12 @@ On macOS, Cmd+Q, Dock → Quit, logout, and shutdown call `onCloseRequest` on ev
 newest first, so your close-button logic covers a system quit. A window consents when its handler
 calls `exitApplication()` or closes the window. A window that stays open vetoes the quit. A
 window opened during the quit, such as a "Save changes?" dialog, delays the exit until it closes.
+
+On Windows, logoff, restart, shutdown and a Restart Manager close (an installer replacing the app)
+take the same path. A window that stays open vetoes the session end, and Windows shows the app on
+its "This app is preventing shutdown" screen while a quit is still in flight. The app exits only
+once Windows confirms the session end, after its shutdown hooks run. A window that closes itself
+during its close request stays closed if Windows then cancels.
 
 In 2.x, a system quit on macOS terminated the app without calling `onCloseRequest`. A handler
 that never calls `exitApplication()` or closes its window now cancels the quit. See
@@ -8229,7 +8507,8 @@ collide and two users can each run the app.
 - The lock is a `java.nio.channels.FileLock` on `<lockIdentifier>.lock`. The kernel releases it
   when the JVM exits or crashes, so a killed primary does not lock the app out.
 - A second launch writes `<lockIdentifier>.restore_request` next to it. The primary watches the
-  directory with a `WatchService` and calls `onRestoreRequest`.
+  directory and calls `onRestoreRequest`. The JDK `WatchService` polls on macOS, so
+  `nucleusApplication` plugs in `fs-watcher` (FSEvents) there; elsewhere the `WatchService` stays.
 - A stale or unreadable lock file is deleted and retried once. Only an unrecoverable error makes
   the process continue as the primary.
 
@@ -8244,6 +8523,7 @@ collide and two users can each run the app.
 | `SingleInstanceManager.configuration` | Assign before the first `isSingleInstance` call, or it throws `IllegalStateException`. |
 | `Configuration.lockFilesDir` | Lock directory. Default `java.io.tmpdir`. |
 | `Configuration.lockIdentifier` | Base name of the lock files. Default: the app id. |
+| `SingleInstanceManager.directoryWatcher` | `((dir: Path, onCreated: (fileName: String) -> Unit) -> Unit)?`. Replaces the `WatchService`. Set before `isSingleInstance`. |
 | `SingleInstanceRestoreEffect(onRestore)` | Composable in `dev.nucleusframework.application`. Runs on each second launch. |
 
 ## What's next
@@ -9474,6 +9754,33 @@ images need Xcode 26 selected on the build host instead.
 Build `arm64` and `x86_64` on separate runners, then merge them with the `build-macos-universal`
 action. See [CI/CD](/docs/packaging/ci-cd#merge-the-universal-macos-binary).
 
+## Declare document types
+
+Every `fileAssociation(...)` becomes a `CFBundleDocumentTypes` entry with a `CFBundleTypeRole`
+and an `LSHandlerRank`. The defaults are `Editor` and `Default`, which clears App Store Connect's
+ITMS-90788 warning. To change them, declare the association in the `macOS { }` block:
+
+```kotlin title="build.gradle.kts"
+macOS {
+    fileAssociation(
+        mimeType = "image/x-raw",
+        extension = "raw",
+        description = "RAW image",
+        role = MacOSDocumentRole.Viewer,
+        rank = MacOSHandlerRank.Alternate,
+    )
+}
+```
+
+| `role` | The app… | `rank` | Launch Services… |
+| --- | --- | --- | --- |
+| `Editor` | reads and writes the type | `Owner` | treats the app as the type's creator and primary handler |
+| `Viewer` | only reads it | `Default` | ranks the app like any other handler |
+| `Shell` | provides runtime services for it | `Alternate` | never picks the app as the default handler |
+| `None` | declares it for import or export only | `None` | never offers the app |
+
+The top-level `fileAssociation(...)` always uses `Editor` and `Default` on macOS.
+
 ## Customize Info.plist and launch agents
 
 ```kotlin title="build.gradle.kts"
@@ -9734,6 +10041,29 @@ entry defaults to `mainClass` with dots replaced by hyphens; set `startupWMClass
 manager reports another class. The entry's `Name` is `appName`, while the executable and
 `/opt/<packageName>` keep a name without spaces. Bump `appRelease` to re-release the same
 `packageVersion`.
+
+### Localize the desktop entry
+
+KDE and GNOME match type-ahead against `Name` and `Comment`. Give them an English value and
+localized variants, so users typing in a Latin layout still find the app. `desktopEntries` reaches
+the entry of every Linux format, not only the AppImage:
+
+```kotlin title="build.gradle.kts"
+linux {
+    appCategory = "Education;X-Kodesh"
+    appImage {
+        desktopEntries = mapOf(
+            "Name" to "Zayit", "Name[he]" to "זית",
+            "Comment" to "Torah study library that leads straight to the text",
+            "Comment[he]" to "ספריית הלימוד שמובילה ישר לטקסט",
+        )
+    }
+}
+```
+
+A `Comment` entry wins over `description` and also becomes the package description. A
+`Categories` entry wins over `appCategory`. Without `appCategory`, `menuGroup` sets the category,
+and the default is `Utility`.
 
 ## Build an AppImage
 
@@ -10954,7 +11284,7 @@ val isNative: Boolean = ExecutableRuntime.isGraalVmNativeImage
 - [Rendering performance](/docs/performance/rendering): partial redraw, the repaint overlay and idle windows.
 - [Benchmarks](/docs/performance/benchmarks): CPU, rendering and list-load results on the JVM, a native image and other toolkits.
 - [Native code in Kotlin](/docs/performance/native-code), [Native library loader](/docs/performance/native-library-loader),
-  [Native HTTP](/docs/performance/native-http) and [Native SSL](/docs/performance/native-ssl): native interop modules.
+  [Native HTTP](/docs/performance/native-http), [Native SSL](/docs/performance/native-ssl) and [Native proxy](/docs/performance/native-proxy): native interop modules.
 
 ---
 
@@ -11152,6 +11482,13 @@ next frame recreates what it needs. A window with a live
 [GPU render context](/docs/native-content/gpu-render-context) consumer keeps its cache. There is
 nothing to configure.
 
+On macOS, a window out of sight renders nothing: a hidden app, a covered window, a window on
+another Space or behind a locked screen skips its frames, animations included, and resumes when it
+shows again. The display link stops 500 ms after the last frame, the accessibility sync waits for
+an assistive client to connect, and the [single-instance](/docs/lifecycle/single-instance) watcher
+uses FSEvents instead of polling. A hidden app falls from about 14 % CPU to under 1 %, so the Mac
+can sleep.
+
 ## Notes
 
 - Some frames always repaint in full: the first one, a resize, a change of window background or
@@ -11163,6 +11500,12 @@ nothing to configure.
   without the plugin's `run` task, or under hot reload, repaints every frame in full.
 - Compose deactivates a lazy-list item scrolled out of view after the frame instead of inside it.
   Pass `-Dnucleus.tao.outOfFrameExecutor=false` to go back to deactivating it inside the frame.
+- On Windows, a window that overhangs the desktop, such as a maximized or fullscreen one, presents
+  through a DirectComposition mirror. GPUs below Direct3D feature level 11_0 (WDDM 1.1 drivers,
+  where the mirror turns black) repaint on move instead. Pass
+  `-Dnucleus.tao.windowsFrameMirror=false` to do the same on a driver that misbehaves above that
+  level. [`SystemInfo.renderTier()`](/docs/os/system-info#detect-a-weak-gpu) reports such GPUs as
+  `LEGACY`.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -12240,6 +12583,146 @@ logger. Set that logger to `FINE`, or set `allowNucleusRuntimeLogging = true`
 
 ---
 
+# Native proxy
+
+URL: https://nucleusframework.dev/en/docs/performance/native-proxy
+
+Read the operating system's proxy configuration, PAC scripts included, and install it as the JVM-wide ProxySelector.
+
+`native-proxy` reads the proxy configuration of the operating system on Windows, macOS and Linux
+and exposes it as a `ProxySelector`. It follows Chromium's proxy stack, so a URL resolves to the
+proxy Edge, Chrome or Safari would use, machine-wide and managed settings included.
+
+| OS | Configuration | PAC and WPAD |
+| --- | --- | --- |
+| Windows | WinHTTP and the Internet Settings registry | Evaluated through WinHTTP |
+| macOS | `SCDynamicStore` | PAC evaluated through CFNetwork |
+| Linux | GSettings (`org.gnome.system.proxy`), then KDE `kioslaverc`, then `http_proxy` / `no_proxy` | Not evaluated |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.native-proxy:<version>")
+}
+```
+
+## Route the JVM through the OS proxy
+
+Call `install()` once from `main()`:
+
+```kotlin
+import dev.nucleusframework.nativeproxy.NativeProxy
+
+NativeProxy.install()
+```
+
+Every JDK connection that consults `ProxySelector.getDefault()`, such as `HttpURLConnection`,
+`java.net.http.HttpClient` or OkHttp's default, then uses the OS proxy. The selector that was
+default before becomes the fallback, so `http.proxyHost` and the other JDK proxy properties still
+apply to URIs the OS has no opinion on. `install()` also watches the configuration, so the
+selector follows a change in the OS settings.
+
+`install()` returns `false` and leaves the JVM default alone when the platform has no backend.
+`uninstall()` restores the previous selector.
+
+## Resolve a URL
+
+```kotlin
+val proxies: List<ProxyServer> = NativeProxy.proxiesFor(URI("https://intranet.corp"))
+val javaProxies: List<Proxy> = NativeProxy.javaProxiesFor(URI("https://intranet.corp"))
+```
+
+`proxiesFor` returns the proxies to try, in order; an empty list means a direct connection.
+`javaProxiesFor` returns JDK proxies and is never empty: a direct connection is `Proxy.NO_PROXY`.
+For a client you configure yourself, `NativeProxy.selector` answers from the OS configuration
+alone, with no fallback.
+
+A URL resolves in Chromium's order:
+
+1. The bypass list: a match goes direct.
+2. The PAC script, from an explicit URL or WPAD. Results are cached per origin and dropped on
+   every configuration change.
+3. The static rules, also used when the PAC script cannot be evaluated.
+
+## Watch for changes
+
+```kotlin
+NativeProxy.addChangeListener { settings ->
+    println("Proxy changed: ${settings.rules}")
+}
+```
+
+The listener runs on a background thread. Windows and macOS are notified by the OS, with a 2 s
+coalescing delay; Linux polls the desktop configuration. `removeChangeListener` stops the watcher
+once no listener is left and the selector is not installed.
+
+## Read the settings
+
+`settings()` returns the cached `SystemProxySettings`; `refresh()` reads it again.
+
+| Property | Meaning |
+| --- | --- |
+| `autoDetect` | WPAD is on ("Automatically detect settings") |
+| `pacUrl` | The explicit PAC script URL, or `null` |
+| `rules` | `ProxyRules`: one list for every scheme, or per scheme (`http=…;https=…;socks=…`) |
+| `bypassRules` | `ProxyBypassRules`: hosts reached without a proxy |
+| `isDirect` | No WPAD, no PAC and no rules |
+
+`ProxyRules.parse` and `ProxyBypassRules.parse` accept the Chromium syntax, for a configuration
+that does not come from the OS. Bypass rules take glob host patterns, a leading `.` for a whole
+domain, `:port` and `scheme://` restrictions, CIDR blocks, `<local>` for simple host names and
+`<-loopback>`. Localhost and link-local addresses bypass the proxy unless `<-loopback>` says
+otherwise.
+
+Linux evaluates neither PAC scripts nor WPAD, which would need a JavaScript engine: only static
+rules and bypass lists apply. On macOS, WPAD without an explicit PAC URL is reported in
+`autoDetect` but not evaluated; when DHCP discovery succeeds, macOS writes the PAC URL into the
+settings itself.
+
+## Logging
+
+The module logs at `FINE` under the `dev.nucleusframework.nativeproxy` logger. Set that logger to
+`FINE`, or set `allowNucleusRuntimeLogging = true` (`dev.nucleusframework.core.runtime.tools`)
+from `main()`.
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- **Windows:** `WinHttpGetIEProxyConfigForCurrentUser` reads the configuration. A PAC script wins
+  over WPAD (DHCP, then DNS); the request first runs without automatic logon and retries with it
+  only on `ERROR_WINHTTP_LOGIN_FAILURE`. Changes come from `RegNotifyChangeKeyValue` on the
+  Internet Settings, Policies and Connections keys of HKCU and HKLM.
+- **macOS:** `SCDynamicStoreCopyProxies` reads the configuration, PAC scripts run through
+  `CFNetworkExecuteProxyAutoConfigurationURL` with a 10 s timeout, and changes come from
+  `SCDynamicStore` notifications.
+- **Linux:** GIO is loaded with `dlopen`, so the library does not link against it.
+- A `socks=` rule defaults to SOCKS4 and serves the schemes no other rule names, as in Chromium.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `NativeProxy.isSupported` | Whether the platform has a native backend |
+| `install(): Boolean` / `uninstall()` | Install or remove the JVM-wide selector |
+| `selector: ProxySelector` | Answers from the OS alone, with no fallback |
+| `proxiesFor(uri): List<ProxyServer>` | Empty for a direct connection |
+| `javaProxiesFor(uri): List<Proxy>` | `Proxy.NO_PROXY` for a direct connection |
+| `settings()` / `refresh()` | `SystemProxySettings`, cached / read again |
+| `addChangeListener` / `removeChangeListener` | `(SystemProxySettings) -> Unit`, on a background thread |
+| `ProxyServer` | `protocol` (`HTTP`, `HTTPS`, `SOCKS4`, `SOCKS5`), `host`, `port`, `toJavaProxy()` |
+
+## What's next
+
+- [Native SSL](/docs/performance/native-ssl): trust the OS certificates on the same connections.
+- [Native HTTP](/docs/performance/native-http): HTTP clients wired to native trust.
+- [Modules](/docs/concepts/modules): the full list of Nucleus modules.
+
+---
+
 # Benchmarks
 
 URL: https://nucleusframework.dev/en/docs/performance/benchmarks
@@ -12581,7 +13064,7 @@ jpackage builds `RawAppImage`, the bare app image. electron-builder builds every
 | `entitlementsFile`, `runtimeEntitlementsFile` | `RegularFileProperty` | App and JVM runtime entitlements |
 | `provisioningProfile`, `runtimeProvisioningProfile` | `RegularFileProperty` | |
 | `macOsSdkVersion` | `String?` | Default `"26.0"`. `vtool` writes it into the launcher's `LC_BUILD_VERSION`, which gates Liquid Glass |
-| `fileAssociation(mimeType, extension, description, iconFile?)` | | |
+| `fileAssociation(mimeType, extension, description, iconFile?, role?, rank?)` | | `role`: `MacOSDocumentRole` (default `Editor`), `rank`: `MacOSHandlerRank` (default `Default`). See [Declare document types](/docs/packaging/macos#declare-document-types) |
 | `signing { }`, `notarization { }`, `dmg { }` | | See below |
 | `pkg { }` | `PkgSettings` | See [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | See [`appExtensions { }`](#macos-app-extensions) |
@@ -12781,7 +13264,7 @@ See [Code signing](/docs/packaging/code-signing).
 | `iconFile` | `RegularFileProperty` | `.png` |
 | `packageName`, `packageVersion` | `String?` | |
 | `shortcut` | `Boolean` | Default `false` |
-| `appRelease`, `appCategory`, `menuGroup` | `String?` | |
+| `appRelease`, `appCategory`, `menuGroup` | `String?` | `appCategory` sets the desktop entry's `Categories`; `menuGroup` is its fallback |
 | `startupWMClass` | `String?` | `StartupWMClass` of the desktop entry |
 | `debMaintainer`, `debPackageVersion` | `String?` | |
 | `debDepends` | `List<String>` | |
@@ -12820,7 +13303,7 @@ The defaults come from the `compose.desktop.linux.sign` and `compose.desktop.lin
 | --- | --- | --- |
 | `category` | `AppImageCategory?` | `AudioVideo`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility` |
 | `genericName`, `synopsis` | `String?` | |
-| `desktopEntries` | `Map<String, String>` | Extra desktop entry keys |
+| `desktopEntries` | `Map<String, String>` | Extra desktop entry keys, for every Linux format. `Comment` and `Categories` win over `description` and `appCategory`. See [Localize the desktop entry](/docs/packaging/linux#localize-the-desktop-entry) |
 | `compressionLevel` | `CompressionLevel?` | Overrides the root value. `Store` builds a gzip image; `Normal`, `Maximum` and `Ultra` build the same zstd image |
 
 ### `snap { }` [#linux-snap]
@@ -13684,7 +14167,7 @@ No commitment and no date. Open an issue if you need one of these:
 | Module | Description |
 | --- | --- |
 | `clipboard` | HTML and RTF clipboard flavors and a change watcher. Text, images and file lists already work, see [Linux and Wayland](/docs/windows/linux-wayland). |
-| `screen-capture` | Screenshots and screen recording |
+| Screen recording | Video capture of a display or a window. Still images already work, see [Screen capture](/docs/os/screen-capture). |
 
 ## Influence the order
 
@@ -13765,6 +14248,28 @@ The major version marks the API breaks: read the
 - **A modal dialog takes its owner's activation** (#869, #515). Clicking the owner, its taskbar
   button, Alt+Tab or `toFront()` brings the dialog forward with keyboard focus. See [Block the
   owner](/docs/windows/dialogs-popups#block-the-owner).
+- **Windows: a `DecoratedDialog` disables its owner** (#872, #832). The owner refuses clicks, keys
+  and its title bar while the dialog is visible, and a click there flashes the dialog. macOS now
+  gets the in-scene pointer blocker too. See [Block the
+  owner](/docs/windows/dialogs-popups#block-the-owner).
+- **Windows: `onCloseRequest` can veto logoff and shutdown** (#766, #751). Logoff, restart,
+  shutdown and Restart Manager closes go through the same quit as macOS's Cmd+Q, and the app exits
+  only once Windows confirms. See [Handle a system
+  quit](/docs/lifecycle/application#handle-a-system-quit).
+- **Windows: precision touchpads scroll with `Pan*` events** (#871, #706). Two-finger scroll and
+  pinch go through DirectManipulation, with the OS inertia. Handlers that only listen for `Scroll`
+  must handle `PanMove`; `-Dnucleus.tao.directManipulation=false` restores the legacy emulation. See
+  [Scroll](/docs/input/trackpad-gestures#scroll).
+- **macOS: an idle or hidden app lets the Mac sleep** (#877). Occluded windows skip their frames,
+  the display link stops between frames, and the accessibility and single-instance watchers no
+  longer poll. A hidden app drops from about 14 % CPU to under 1 %. See [Idle
+  windows](/docs/performance/rendering#idle-windows).
+- **Windows: no frame mirror below Direct3D feature level 11_0** (#883). Maximized and fullscreen
+  windows no longer turn black on WDDM 1.1 GPUs; `-Dnucleus.tao.windowsFrameMirror=false` turns the
+  mirror off elsewhere. See [Rendering notes](/docs/performance/rendering#notes).
+- **Linux: `desktopEntries` can set `Comment` and `Categories`** (#875). Both used to be overwritten
+  by `description` and `appCategory`, and `menuGroup` now falls back for `appCategory`. See [Localize
+  the desktop entry](/docs/packaging/linux#localize-the-desktop-entry).
 - **macOS: a Cmd+Q menu item handles the shortcut** (#775, #749). A `NativeMenuBar` item bound to
   Cmd+Q runs instead of the built-in quit, and beeps while it is disabled. See [Handle
   Cmd+Q](/docs/os/menus/menu-bar#handle-cmdq).
@@ -13816,6 +14321,27 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **`native-proxy` module** (#427). Reads the OS proxy configuration on Windows, macOS and Linux,
+  PAC scripts included on Windows and macOS, and installs it as the JVM-wide `ProxySelector`. See
+  [Native proxy](/docs/performance/native-proxy).
+- **`screen-capture` module** (#730, #637). Captures a display, a region or any window in physical
+  pixels, without AWT, through GDI, ScreenCaptureKit, X11 or the Wayland portal. See [Screen
+  capture](/docs/os/screen-capture).
+- **`SystemInfo.connectivityFlow()`** (#858, #835). Emits the connectivity state, then every change,
+  with a new `ConnectivityLevel` (`FULL`, `CAPTIVE_PORTAL`, `LIMITED`, `LOCAL`, `NONE`). On Windows,
+  `isConnected` now means a routed network. See [Watch
+  connectivity](/docs/os/system-info#watch-connectivity).
+- **`SystemInfo.renderTier()`** (#883). Tells a software or legacy GPU from a capable one, to turn
+  off heavy 3D content. See [Detect a weak GPU](/docs/os/system-info#detect-a-weak-gpu).
+- **macOS document type role and rank** (#886, #881). Every document type now declares an
+  `LSHandlerRank`, which clears ITMS-90788, and `macOS { fileAssociation(..., role, rank) }` sets
+  both keys. See [Declare document types](/docs/packaging/macos#declare-document-types).
+- **Dragged file paths during hover** (#810). `shouldStartDragAndDrop`, `onEntered` and `onMoved`
+  see the dragged files on every OS, so a target can accept by extension. See [Receive dropped
+  files](/docs/input/drag-and-drop#receive-dropped-files).
+- **`SingleInstanceManager.directoryWatcher`** (#877) replaces the JDK `WatchService`.
+  `nucleusApplication` plugs in `fs-watcher` on macOS. See [Single
+  instance](/docs/lifecycle/single-instance#api-reference).
 - **Partial redraw** (#756, #824). With `nucleusOptimization { partialRedraw = true }`, or the whole
   `nucleusOptimization` pack, a frame repaints and presents only what changed, on macOS, Windows and
   Linux, on the JVM and in native images. See [Turn on partial
@@ -13967,6 +14493,10 @@ The major version marks the API breaks: read the
   specialization, which caused `VerifyError: Bad return type`.
 - **One package rebuild per changed format** (#846).
 - **One `libGLESv2` on Windows** (#843).
+- **XWayland: rounded corners stay transparent** (#884). The EGL child surface gets a 32-bit visual
+  on GNOME under `GDK_BACKEND=x11`, instead of black corners.
+- **Windows: a drag ends only at the release that ended it** (#885). A mouse move delivered after
+  the release no longer shifts where a tab drops.
 - **Updater**: SemVer build metadata is ignored (#771), `GenericProvider` allows `http` only on
   loopback hosts (#742), manifest file names cannot escape the staging directory (#740), the DEB/RPM
   update script quotes its paths (#741), and full downloads are hashed while written (#780).
