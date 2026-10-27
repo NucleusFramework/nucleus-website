@@ -1,7 +1,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { Atom } from '@/components/landing/Atom';
-import { type Lang, heroT, pick } from '@/lib/landing-i18n';
+import { type Lang, MODULE_COUNT, heroT, pick } from '@/lib/landing-i18n';
 import { formatStarCount } from '@/lib/site';
 
 interface HeroProps {
@@ -65,7 +65,7 @@ export function Hero({ accent, atomSpeed = 1, lang, stars = null }: HeroProps) {
             </div>
             <div className="hero-atom-label hero-label-bl">
               <span className="hero-label-key">{pick(heroT.modules, lang)}</span>
-              <span className="hero-label-val">40<span className="hero-label-unit">+</span></span>
+              <span className="hero-label-val">{MODULE_COUNT}</span>
             </div>
             <div className="hero-atom-label hero-label-br">
               <span className="hero-label-key">{pick(heroT.formats, lang)}</span>

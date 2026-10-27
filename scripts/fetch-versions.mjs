@@ -55,6 +55,27 @@ await Promise.all(
   }),
 );
 
+// Module count for the landing page: the top-level `include(":x")` entries of the
+// Nucleus settings.gradle.kts (each one is a published `nucleus.x` artifact; examples
+// are nested). Read from the release tag, else the release-line branch, else main.
+async function countModules(version) {
+  const line = version?.split('.').slice(0, 2).join('.');
+  const refs = [version && `v${version}`, line && `nucleus-${line}`, 'main'].filter(Boolean);
+  for (const ref of refs) {
+    const res = await fetch(`https://raw.githubusercontent.com/NucleusFramework/Nucleus/${ref}/settings.gradle.kts`);
+    if (!res.ok) continue;
+    const count = (await res.text()).match(/^include\(":[\w-]+"\)/gm)?.length ?? 0;
+    if (count > 0) return count;
+  }
+  throw new Error(`no settings.gradle.kts with modules at ${refs.join(', ')}`);
+}
+
+try {
+  out.modules = await countModules(out.core);
+} catch (e) {
+  console.warn(`[versions] module count failed (${e.message}); keeping ${prev.modules ?? 'none'}`);
+}
+
 // Advisory: warn when GitHub's latest core release lags or leads NUCLEUS_VERSION.
 try {
   const githubCore = await latest('Nucleus');

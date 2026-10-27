@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { createMDX } from 'fumadocs-mdx/next';
 
 const withMDX = createMDX();
@@ -5,10 +6,22 @@ const withMDX = createMDX();
 const isExport = process.env.NEXT_OUTPUT === 'export';
 const basePath = process.env.NEXT_BASE_PATH ?? '';
 
+// Written by scripts/fetch-versions.mjs (predev / prebuild); inlined for the landing page.
+function readModuleCount() {
+  try {
+    return JSON.parse(fs.readFileSync('lib/versions.json', 'utf8')).modules ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
   poweredByHeader: false,
+  env: {
+    NUCLEUS_MODULE_COUNT: String(readModuleCount()),
+  },
   compress: true,
   outputFileTracingRoot: process.cwd(),
   experimental: {

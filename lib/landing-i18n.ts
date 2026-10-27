@@ -16,6 +16,9 @@ export function isLang(v: unknown): v is Lang {
   return v === 'en' || v === 'fr';
 }
 
+/** Nucleus module count, from scripts/fetch-versions.mjs through next.config.mjs. */
+export const MODULE_COUNT = Number(process.env.NUCLEUS_MODULE_COUNT) || 40;
+
 // =====================================================================
 // TopNav
 // =====================================================================
@@ -150,7 +153,7 @@ export const kmpT = {
   webDist: { en: 'Push to any CDN', fr: 'Push sur n\'importe quel CDN' } as Bi<string>,
 
   // Desktop
-  desktopApis: { en: '40+ Kotlin modules · Native Access via Kotlin/Native', fr: '40+ modules Kotlin · accès natif via Kotlin/Native' } as Bi<string>,
+  desktopApis: { en: `${MODULE_COUNT} Kotlin modules · Native Access via Kotlin/Native`, fr: `${MODULE_COUNT} modules Kotlin · accès natif via Kotlin/Native` } as Bi<string>,
   desktopUi: { en: 'macOS · Fluent · Yaru in Compose + native overlay', fr: 'macOS · Fluent · Yaru en Compose + overlay natif' } as Bi<string>,
   desktopInput: { en: 'Mouse · keyboard · multi-touch · pen · Wayland gestures', fr: 'Souris · clavier · multi-touch · stylet · gestes Wayland' } as Bi<string>,
   desktopOpt: { en: 'GraalVM closed-world · JIT + AOT cache · native-lib stripping', fr: 'GraalVM closed-world · cache JIT + AOT · stripping des libs natives' } as Bi<string>,
@@ -169,14 +172,14 @@ export const oneLangT = {
   } as Bi<string>,
   usTag: { en: 'Compose + Nucleus', fr: 'Compose + Nucleus' } as Bi<string>,
   usCap: {
-    en: 'Same Compose UI — plus native decorated windows, 40+ Kotlin OS modules, 18 packaging formats, auto-update, and store-ready CI. Drop-in on the JetBrains plugin.',
-    fr: 'La même UI Compose — plus fenêtres décorées natives, 40+ modules OS Kotlin, 18 formats de packaging, auto-update et CI prête pour les stores. Drop-in sur le plugin JetBrains.',
+    en: `Same Compose UI — plus native decorated windows, ${MODULE_COUNT} Kotlin OS modules, 18 packaging formats, auto-update, and store-ready CI. Drop-in on the JetBrains plugin.`,
+    fr: `La même UI Compose — plus fenêtres décorées natives, ${MODULE_COUNT} modules OS Kotlin, 18 formats de packaging, auto-update et CI prête pour les stores. Drop-in sur le plugin JetBrains.`,
   } as Bi<string>,
   themPill1: { en: 'No touch / pen', fr: 'Pas de tactile / stylet' } as Bi<string>,
   themPill2: { en: 'Legacy tray', fr: 'Tray obsolète' } as Bi<string>,
   themPill3: { en: 'Not production-ready', fr: 'Inutilisable en prod' } as Bi<string>,
   usPill1: { en: 'Native chrome', fr: 'Chrome natif' } as Bi<string>,
-  usPill2: { en: '40+ OS modules', fr: '40+ modules OS' } as Bi<string>,
+  usPill2: { en: `${MODULE_COUNT} OS modules`, fr: `${MODULE_COUNT} modules OS` } as Bi<string>,
   usPill3: { en: 'Ship & stores', fr: 'Ship & stores' } as Bi<string>,
 };
 
@@ -212,13 +215,13 @@ export const featuresT = {
   eyebrow: { en: 'Runtime', fr: 'Runtime' } as Bi<string>,
   title: {
     en: React.createElement(React.Fragment, null,
-      '40+ modules. ',
+      `${MODULE_COUNT} modules. `,
       React.createElement('br'),
       'Every OS feature, ',
       React.createElement('span', { className: 'hero-grad' }, 'first-class.'),
     ),
     fr: React.createElement(React.Fragment, null,
-      '40+ modules. ',
+      `${MODULE_COUNT} modules. `,
       React.createElement('br'),
       'Chaque fonctionnalité OS, ',
       React.createElement('span', { className: 'hero-grad' }, 'citoyenne de première classe.'),
