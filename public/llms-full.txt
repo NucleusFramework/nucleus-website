@@ -981,6 +981,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | Global hotkeys | `global-hotkey` |
 | Share sheet, Kotlin Multiplatform | [`share`](/docs/os/share) |
 | Geolocation, Kotlin Multiplatform | [`location`](/docs/os/location) |
+| Speech-to-text, Kotlin Multiplatform | [`speech-recognition`](/docs/os/speech-recognition) |
 | Media controls (Now Playing, SMTC, MPRIS) | `media-control` |
 | System info (CPU, RAM, GPU, batteries, connectivity) | [`system-info`](/docs/os/system-info) |
 | Screen and window capture | [`screen-capture`](/docs/os/screen-capture) |
@@ -5488,6 +5489,7 @@ as its own Gradle artifact, so you add only the modules you use.
 | Global hotkeys | `global-hotkey` | yes | yes | yes |
 | Share sheet (also Android, iOS, web) | [`share`](/docs/os/share) | yes | yes | yes |
 | Location (also Android, iOS, web) | [`location`](/docs/os/location) | yes | yes | yes |
+| Speech recognition (also Android, iOS) | [`speech-recognition`](/docs/os/speech-recognition) | yes | yes | no |
 | Media controls | `media-control` | yes | yes | yes |
 | Dark mode | `darkmode-detector` | yes | yes | yes |
 | Accent color and high contrast | `system-color` | yes | yes | yes |
@@ -7593,6 +7595,199 @@ may report `NotDetermined` on its very first call. `minInterval`, `minDistanceMe
 - [Share sheet](/docs/os/share): the other Kotlin Multiplatform module.
 - [System info](/docs/os/system-info): connectivity and hardware details.
 - [Sandboxing](/docs/packaging/sandboxing): entitlements and the Flatpak sandbox.
+
+---
+
+# Speech recognition
+
+URL: https://nucleusframework.dev/en/docs/os/speech-recognition
+
+Stream native speech-to-text from Kotlin Multiplatform code on Windows, macOS, Android and iOS, and dictate into a text field.
+
+`speech-recognition` streams speech-to-text from the platform's own recognizer. It is a Kotlin
+Multiplatform module: the same calls work on desktop, Android and iOS.
+
+| Platform | Recognizer |
+| --- | --- |
+| Windows | SAPI dictation, on-device |
+| macOS 11+ | `SFSpeechRecognizer` with `AVAudioEngine` |
+| Linux | None: `isSupported` is `false` |
+| Android 8.0+ (API 26) | `SpeechRecognizer` |
+| iOS | `SFSpeechRecognizer` with `AVAudioEngine` |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+// commonMain in a KMP project, dependencies { } in a JVM desktop app
+implementation("dev.nucleusframework:nucleus.speech-recognition:<version>")
+```
+
+## Start a session
+
+```kotlin
+import dev.nucleusframework.speech.SpeechRecognition
+
+if (SpeechRecognition.isSupported) {
+    val session = SpeechRecognition.start(SpeechRecognitionOptions(locale = "en-US")) { event ->
+        when (event) {
+            SpeechEvent.Started -> println("recording")
+            is SpeechEvent.Transcript -> println("${event.text} (final: ${event.isFinal})")
+            is SpeechEvent.AudioLevel -> meter.value = event.level
+            SpeechEvent.Stopped -> println("done")
+            is SpeechEvent.Error -> println("${event.message} (${event.kind})")
+        }
+    }
+    // Later:
+    session.stop()   // close the microphone; the last words still arrive, then Stopped
+    session.cancel() // or discard everything; no event follows
+}
+```
+
+- `start` returns at once and asks for the permissions itself. `Started` means the microphone is
+  recording; a refusal arrives as `Error(PermissionDenied)`.
+- A session reports `Started`, then any number of `Transcript` and `AudioLevel` events, then
+  exactly one terminal event: `Stopped` or `Error`. A cancelled session reports nothing more.
+- A partial transcript replaces the current utterance, and a final one commits it. Recognition
+  carries on across utterances until stopped. Speech stays plain text: saying "enter" types
+  "enter".
+- One session runs at a time: a second `start` throws `SpeechException(Busy)`.
+  `SpeechRecognition.cancelAll()` ends every session, for example when the app quits.
+- `SpeechSession` is `AutoCloseable`: `close()` cancels it. `isActive` tells whether it has ended.
+
+The listener runs on a platform thread: the main thread on Android and Apple platforms, a SAPI
+worker thread on Windows. Hop to the UI thread before touching UI state.
+
+`SpeechRecognitionOptions` takes a BCP-47 `locale` (`null` for the system's speech language) and
+`preferOnDevice` (default `true`), which uses on-device recognition where the platform has it.
+Windows is always on-device.
+
+`AudioLevel.level` is the microphone amplitude between 0 and 1, for a level meter.
+
+## Dictate into a text field
+
+`Dictation` turns transcripts into text edits without knowing any UI toolkit. Offsets are UTF-16
+indices, like `String` and Compose's `TextRange`:
+
+```kotlin
+var field by remember { mutableStateOf(TextFieldValue()) }
+val scope = rememberCoroutineScope()
+
+fun dictate() {
+    val dictation = Dictation(field.text, field.selection.start, field.selection.end)
+    SpeechRecognition.start { event ->
+        if (event !is SpeechEvent.Transcript) return@start
+        scope.launch { // back on the UI thread
+            dictation.transcript(event.text, event.isFinal)?.let { edit ->
+                val text = field.text.replaceRange(edit.start, edit.end, edit.text)
+                field = TextFieldValue(text, TextRange(edit.start + edit.text.length))
+                dictation.applied()
+            }
+        }
+    }
+}
+```
+
+Speech replaces the selection passed to the constructor and goes on from there. Partials revise
+the current utterance in place, and a space separates dictated words from typed text, except
+before punctuation, after an opening bracket and between CJK characters.
+
+When the user is about to edit the field, with a keystroke or a click that moves the caret, call
+`interrupt()` first, then `settle(text, selectionStart, selectionEnd)` once the edit has landed.
+Dictation resumes at the caret without losing or repeating a word. Treat an IME composition as an
+interruption, and settle only once it commits. `Replacement.continues` tells a revision of the
+previous edit from a new one, to group undo steps. `Dictation` is not thread-safe: use it from the
+UI thread.
+
+## Set up each platform
+
+### macOS
+
+Recognition needs an app bundle that declares both usage descriptions; a plain `./gradlew run`
+reports `PermissionDenied`. A hardened-runtime app, which every notarized app is, also needs the
+`com.apple.security.device.audio-input` entitlement, which the plugin's defaults do not grant:
+
+```kotlin title="build.gradle.kts"
+macOS {
+    infoPlist {
+        extraKeysRawXml = """
+            <key>NSMicrophoneUsageDescription</key>
+            <string>Dictation uses the microphone.</string>
+            <key>NSSpeechRecognitionUsageDescription</key>
+            <string>Dictation transcribes your speech.</string>
+        """.trimIndent()
+    }
+    entitlementsFile.set(project.file("entitlements.plist")) // + device.audio-input
+}
+```
+
+`entitlementsFile` replaces the defaults, so keep the JVM keys next to the new one. See [Configure
+macOS entitlements](/docs/packaging/sandboxing#configure-macos-entitlements). Events arrive on the
+main dispatch queue, which the Tao event loop drains: a headless app without a Cocoa run loop on
+the main thread receives none.
+
+### Windows
+
+Install a Windows speech recognition language and allow microphone access for desktop apps in
+*Settings → Privacy & security → Microphone*. No package identity is needed.
+
+### Android
+
+The library manifest declares `RECORD_AUDIO` and the `RecognitionService` query, and handles the
+runtime permission prompt. A session ends when its activity pauses.
+
+### iOS
+
+Declare `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`; both
+permissions are requested for you. Recognition prefers on-device models and restarts its task
+before Apple's one-minute limit.
+
+## Handle errors
+
+`SpeechEvent.Error.kind` and `SpeechException.kind` are a `SpeechErrorKind`. An `Error` message
+comes from the platform and is already worded for end users.
+
+| Value | Meaning |
+| --- | --- |
+| `PermissionDenied` | Permission refused, or the app lacks the usage descriptions needed to ask. Point the user to the privacy settings |
+| `Unavailable` | No audio input or recognizer here; retrying will not help |
+| `Language` | The recognizer does not support the requested locale |
+| `Audio` | The microphone is missing, busy or changed mid-session; starting again likely works |
+| `Busy` | Another session is active |
+| `Other` | Anything else the platform reported |
+
+<Accordions>
+<Accordion title="Under the hood">
+
+- Windows and macOS go through a Rust JNI library built on a vendored copy of `robius-speech`.
+  Android and iOS are pure Kotlin ports of its backends, and Linux ships no native library.
+- The session rules and the `SFSpeechRecognizer` segment tracking live in common code.
+- Before installing its audio tap, the macOS and iOS capture checks the input node's hardware
+  format, so a machine without an input device ends the session with an `Audio` error instead of
+  aborting.
+- `SpeechRecognition.engineName` names the recognizer in use, such as `windows-sapi` or
+  `apple-sfspeech`, for logs and bug reports.
+
+</Accordion>
+</Accordions>
+
+## API reference
+
+| Symbol | Notes |
+| --- | --- |
+| `SpeechRecognition.isSupported` | Cheap and permission-free: hide a dictation button when `false` |
+| `SpeechRecognition.engineName` | Short, stable recognizer name |
+| `SpeechRecognition.start(options, listener): SpeechSession` | Throws `SpeechException` when the session cannot begin |
+| `SpeechRecognition.cancelAll()` | Cancels every active session |
+| `SpeechSession.stop()` / `cancel()` / `close()` / `isActive` | Stop with the last result / discard / same as `cancel` / still running |
+| `SpeechEvent` | `Started`, `Transcript(text, isFinal)`, `AudioLevel(level)`, `Stopped`, `Error(kind, message)` |
+| `Dictation(text, selectionStart, selectionEnd)` | `transcript`, `applied`, `interrupt`, `settle`, `isInterrupted` |
+| `Replacement` | `start`, `end`, `text`, `continues` |
+
+## What's next
+
+- [Location](/docs/os/location): the device's position, from the same KMP code.
+- [Share sheet](/docs/os/share): the system share sheet.
+- [Sandboxing](/docs/packaging/sandboxing): macOS entitlements.
 
 ---
 
@@ -14348,7 +14543,6 @@ real apps. See [Tool windows](/docs/tool-windows).
 
 | Work | Description |
 | --- | --- |
-| `speech-recognition` | Native streaming speech-to-text, Kotlin Multiplatform |
 | Platform-decorated windows | `Window` and `DialogWindow` with the OS's own title bar and frame |
 | Linux desktop entry matching | Wayland `app_id` and X11 `WM_CLASS` that match the `.desktop` entry, dev runs included |
 | Faster differential updates | Smaller and sturdier delta downloads in the updater |
@@ -14372,6 +14566,8 @@ real apps. See [Tool windows](/docs/tool-windows).
 - **macOS window id for capture.** Tao does not expose a window's `CGWindowID`, so
   [screen capture](/docs/os/screen-capture#capture-a-window) of your own window looks it up in
   `windows()`.
+- **Speech recognition on Linux.** [`speech-recognition`](/docs/os/speech-recognition) has no
+  Linux recognizer: `isSupported` is `false` there.
 - **Occlusion on Windows and Linux.** A covered or hidden window stops rendering on macOS only.
   See [Idle windows](/docs/performance/rendering#idle-windows).
 
@@ -14547,6 +14743,9 @@ The major version marks the API breaks: read the
 
 ### New features
 
+- **`speech-recognition` module** (#724). Streams native speech-to-text on Windows, macOS,
+  Android and iOS, and `Dictation` turns transcripts into text field edits. See [Speech
+  recognition](/docs/os/speech-recognition).
 - **`location` module** (#726). Reads the device's position from Kotlin Multiplatform code on
   Windows, macOS, Linux, Android, iOS and the web, with one-shot fixes, a flow of updates and
   authorization requests. See [Location](/docs/os/location).
