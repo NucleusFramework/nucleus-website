@@ -151,6 +151,33 @@ images need Xcode 26 selected on the build host instead.
 Build `arm64` and `x86_64` on separate runners, then merge them with the `build-macos-universal`
 action. See [CI/CD](/docs/packaging/ci-cd#merge-the-universal-macos-binary).
 
+## Declare document types
+
+Every `fileAssociation(...)` becomes a `CFBundleDocumentTypes` entry with a `CFBundleTypeRole`
+and an `LSHandlerRank`. The defaults are `Editor` and `Default`, which clears App Store Connect's
+ITMS-90788 warning. To change them, declare the association in the `macOS { }` block:
+
+```kotlin title="build.gradle.kts"
+macOS {
+    fileAssociation(
+        mimeType = "image/x-raw",
+        extension = "raw",
+        description = "RAW image",
+        role = MacOSDocumentRole.Viewer,
+        rank = MacOSHandlerRank.Alternate,
+    )
+}
+```
+
+| `role` | The app… | `rank` | Launch Services… |
+| --- | --- | --- | --- |
+| `Editor` | reads and writes the type | `Owner` | treats the app as the type's creator and primary handler |
+| `Viewer` | only reads it | `Default` | ranks the app like any other handler |
+| `Shell` | provides runtime services for it | `Alternate` | never picks the app as the default handler |
+| `None` | declares it for import or export only | `None` | never offers the app |
+
+The top-level `fileAssociation(...)` always uses `Editor` and `Default` on macOS.
+
 ## Customize Info.plist and launch agents
 
 ```kotlin title="build.gradle.kts"

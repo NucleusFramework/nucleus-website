@@ -157,6 +157,34 @@ exigent plutôt Xcode 26 sélectionné sur l'hôte de build.
 Construisez `arm64` et `x86_64` sur deux runners, puis fusionnez-les avec l'action
 `build-macos-universal`. Voir [CI/CD](/docs/packaging/ci-cd#fusionner-le-binaire-macos-universel).
 
+## Déclarer les types de documents
+
+Chaque `fileAssociation(...)` devient une entrée `CFBundleDocumentTypes` avec un
+`CFBundleTypeRole` et un `LSHandlerRank`. Les valeurs par défaut sont `Editor` et `Default`, ce
+qui lève l'avertissement ITMS-90788 d'App Store Connect. Pour les changer, déclarez l'association
+dans le bloc `macOS { }` :
+
+```kotlin title="build.gradle.kts"
+macOS {
+    fileAssociation(
+        mimeType = "image/x-raw",
+        extension = "raw",
+        description = "RAW image",
+        role = MacOSDocumentRole.Viewer,
+        rank = MacOSHandlerRank.Alternate,
+    )
+}
+```
+
+| `role` | L'app… | `rank` | Launch Services… |
+| --- | --- | --- | --- |
+| `Editor` | lit et écrit le type | `Owner` | considère l'app comme créatrice et gestionnaire principal du type |
+| `Viewer` | le lit seulement | `Default` | classe l'app comme n'importe quel autre gestionnaire |
+| `Shell` | lui fournit des services d'exécution | `Alternate` | ne choisit jamais l'app comme gestionnaire par défaut |
+| `None` | le déclare pour l'import ou l'export seulement | `None` | ne propose jamais l'app |
+
+Le `fileAssociation(...)` de premier niveau utilise toujours `Editor` et `Default` sous macOS.
+
 ## Personnaliser Info.plist et les launch agents
 
 ```kotlin title="build.gradle.kts"
