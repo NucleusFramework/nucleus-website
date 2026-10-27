@@ -14,15 +14,16 @@ and `Modifier.transformable` handle them with no extra code, and you add no depe
 
 | Gesture | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Two-finger scroll | `PanStart` / `PanMove` / `PanEnd` | `Scroll` | `Scroll` |
+| Two-finger scroll | `PanStart` / `PanMove` / `PanEnd` | `PanStart` / `PanMove` / `PanEnd` (precision touchpad) | `Scroll` |
 | Mouse wheel | `Scroll` | `Scroll` | `Scroll` |
 | Pinch, Ctrl + wheel | `ScaleStart` / `ScaleChange` / `ScaleEnd` | `Scale*` | `Scale*` |
 | Rotation | two `Touch` pointers | none | two `Touch` pointers |
 
 ## Scroll
 
-Scrolling containers work as they are. Only a custom `pointerInput` handler needs care: on macOS a
-trackpad swipe arrives as `PanMove`, so a handler that listens for `Scroll` alone misses it.
+Scrolling containers work as they are. Only a custom `pointerInput` handler needs care: on macOS
+and on a Windows precision touchpad a swipe arrives as `PanMove`, so a handler that listens for
+`Scroll` alone misses it.
 
 ```kotlin
 Modifier.pointerInput(Unit) {
@@ -42,6 +43,11 @@ Modifier.pointerInput(Unit) {
 
 To receive every trackpad step as `Scroll` instead, start the JVM with
 `-Dnucleus.tao.trackpadPanEvents=false`.
+
+<Callout type="warn" title="Changed in 3.0">
+On Windows, a precision touchpad now scrolls with `Pan*` events and the OS inertia, as on macOS.
+Handlers that only listen for `Scroll` must also handle `PanMove`.
+</Callout>
 
 ## Zoom with a pinch
 
@@ -67,7 +73,7 @@ fun ZoomableImage() {
 In a custom handler, read `PointerInputChange.scaleFactor` on `ScaleChange`. It is a ratio per
 event: above `1f` zooms in, below `1f` zooms out.
 
-When macOS or Linux cancels a pinch, for example because the system takes over the gesture, the
+When the OS cancels a pinch, for example because the system takes over the gesture, the
 pinch ends with `ScaleEnd` and Nucleus then cancels the window's pointer input. Gesture handlers
 see a cancellation, not a release. A trackpad pan in progress ends with `PanEnd` first, and the
 next finger movement starts a new one.
@@ -84,7 +90,12 @@ gesture that starts first keeps the trackpad until it ends.
 - `panOffset` uses the same 10 dp per unit that Compose Desktop applies to a wheel notch, so a pan
   and a notch scroll the same distance.
 - `PanEnd` arrives after macOS's momentum tail, so Compose does not start a second fling.
-- Ctrl + wheel has no end phase: `ScaleEnd` follows 120 ms after the last tick.
+- Ctrl + wheel has no end phase: `ScaleEnd` follows 120 ms after the last tick. During a touchpad
+  pinch on Windows, Ctrl + wheel folds into the open pinch.
+- On Windows, every window binds a DirectManipulation viewport, configured like Chromium's. It
+  claims precision-touchpad contacts only; touchscreens keep `WM_POINTER`. A sequence is a pan
+  until its scale moves, then a pinch until it ends. `-Dnucleus.tao.directManipulation=false`
+  restores the legacy wheel emulation.
 - On Linux, GDK reports scale and rotation as one gesture. It starts as a pinch, and rotation takes
   over once it has turned 10° with the zoom within ±10%.
 - `TaoWindow.onTrackpadGesture` exposes the raw stream (macOS and Windows). Registering a listener
@@ -97,11 +108,12 @@ gesture that starts first keeps the trackpad until it ends.
 
 | Symbol | Notes |
 | --- | --- |
-| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | macOS trackpad scroll |
+| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | macOS trackpad and Windows precision-touchpad scroll |
 | `PointerInputChange.panOffset` | Pan delta in pixels |
 | `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd` | Pinch and Ctrl + wheel |
 | `PointerInputChange.scaleFactor` | Zoom ratio per event |
 | `-Dnucleus.tao.trackpadPanEvents=false` | Send trackpad pans as `Scroll` |
+| `-Dnucleus.tao.directManipulation=false` | Windows: drop DirectManipulation, back to the legacy wheel emulation |
 
 ## What's next
 

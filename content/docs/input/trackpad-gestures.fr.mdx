@@ -14,7 +14,7 @@ supplémentaire, et vous n'ajoutez aucune dépendance en plus de `nucleus-applic
 
 | Geste | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Défilement à deux doigts | `PanStart` / `PanMove` / `PanEnd` | `Scroll` | `Scroll` |
+| Défilement à deux doigts | `PanStart` / `PanMove` / `PanEnd` | `PanStart` / `PanMove` / `PanEnd` (pavé tactile de précision) | `Scroll` |
 | Molette de souris | `Scroll` | `Scroll` | `Scroll` |
 | Pincement, Ctrl + molette | `ScaleStart` / `ScaleChange` / `ScaleEnd` | `Scale*` | `Scale*` |
 | Rotation | deux pointeurs `Touch` | aucun | deux pointeurs `Touch` |
@@ -22,8 +22,8 @@ supplémentaire, et vous n'ajoutez aucune dépendance en plus de `nucleus-applic
 ## Défiler
 
 Les conteneurs défilants fonctionnent tels quels. Seul un handler `pointerInput` maison demande
-de l'attention : sur macOS, un balayage au trackpad arrive en `PanMove`, et un handler qui n'écoute
-que `Scroll` le manque.
+de l'attention : sur macOS et sur un pavé tactile de précision Windows, un balayage arrive en
+`PanMove`, et un handler qui n'écoute que `Scroll` le manque.
 
 ```kotlin
 Modifier.pointerInput(Unit) {
@@ -43,6 +43,12 @@ Modifier.pointerInput(Unit) {
 
 Pour recevoir chaque pas de trackpad en `Scroll`, lancez la JVM avec
 `-Dnucleus.tao.trackpadPanEvents=false`.
+
+<Callout type="warn" title="Modifié en 3.0">
+Sous Windows, un pavé tactile de précision défile désormais avec des événements `Pan*` et
+l'inertie de l'OS, comme sur macOS. Les handlers qui n'écoutent que `Scroll` doivent aussi gérer
+`PanMove`.
+</Callout>
 
 ## Zoomer par pincement
 
@@ -69,7 +75,7 @@ fun ZoomableImage() {
 Dans un handler maison, lisez `PointerInputChange.scaleFactor` sur `ScaleChange`. C'est un ratio
 par événement : au-dessus de `1f` le contenu grossit, en dessous il rétrécit.
 
-Quand macOS ou Linux annule un pincement, par exemple parce que le système reprend le geste, le
+Quand l'OS annule un pincement, par exemple parce que le système reprend le geste, le
 pincement se termine par `ScaleEnd`, puis Nucleus annule la saisie de pointeur de la fenêtre. Les
 handlers de gestes voient une annulation, et non un relâchement. Un pan de trackpad en cours se
 termine d'abord par `PanEnd`, et le mouvement de doigts suivant en ouvre un nouveau.
@@ -87,7 +93,13 @@ fin.
 - `panOffset` utilise les 10 dp par unité que Compose Desktop applique à un cran de molette : un
   pan et un cran déplacent le contenu de la même distance.
 - `PanEnd` arrive après la queue d'inertie de macOS, et Compose ne lance pas une seconde inertie.
-- Ctrl + molette n'a pas de phase de fin : `ScaleEnd` suit 120 ms après le dernier cran.
+- Ctrl + molette n'a pas de phase de fin : `ScaleEnd` suit 120 ms après le dernier cran. Pendant
+  un pincement au pavé tactile sous Windows, Ctrl + molette rejoint le pincement en cours.
+- Sous Windows, chaque fenêtre lie un viewport DirectManipulation, configuré comme celui de
+  Chromium. Il ne capte que les contacts du pavé tactile de précision ; les écrans tactiles
+  gardent `WM_POINTER`. Une séquence est un pan jusqu'à ce que son échelle bouge, puis un
+  pincement jusqu'à sa fin. `-Dnucleus.tao.directManipulation=false` rétablit l'ancienne émulation
+  par la molette.
 - Sous Linux, GDK signale l'échelle et la rotation comme un seul geste. Il s'ouvre en pincement,
   et la rotation prend la main dès qu'il a tourné de 10° avec un zoom resté dans ±10 %.
 - `TaoWindow.onTrackpadGesture` expose le flux brut (macOS et Windows). Enregistrer un listener
@@ -101,11 +113,12 @@ fin.
 
 | Symbole | Notes |
 | --- | --- |
-| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | Défilement au trackpad sur macOS |
+| `PointerEventType.PanStart` / `PanMove` / `PanEnd` | Défilement au trackpad sur macOS et au pavé tactile de précision sous Windows |
 | `PointerInputChange.panOffset` | Delta du pan en pixels |
 | `PointerEventType.ScaleStart` / `ScaleChange` / `ScaleEnd` | Pincement et Ctrl + molette |
 | `PointerInputChange.scaleFactor` | Ratio de zoom par événement |
 | `-Dnucleus.tao.trackpadPanEvents=false` | Envoie les pans du trackpad en `Scroll` |
+| `-Dnucleus.tao.directManipulation=false` | Windows : abandonne DirectManipulation et revient à l'ancienne émulation par la molette |
 
 ## Et ensuite
 
