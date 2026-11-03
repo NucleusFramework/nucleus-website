@@ -1,0 +1,207 @@
+---
+title: Soumettre depuis la CI
+description: Envoyez chaque version taguée d'une application Nucleus au Microsoft Store depuis GitHub Actions avec le Microsoft Store Developer CLI, de la configuration Entra initiale jusqu'au workflow et à ses erreurs.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le workflow de release qui construit votre MSIX peut aussi le soumettre à Partner Center. À chaque
+tag, le
+[Microsoft Store Developer CLI](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/overview)
+(`msstore`) crée une soumission à partir de la version présente sur le Store, remplace son package
+par le nouveau, conserve la fiche et la valide pour la certification. Vous n'ouvrez plus Partner
+Center pour les mises à jour.
+
+Avant de commencer, publiez l'application une première fois à la main : `msstore` met à jour une
+fiche existante, il n'en crée pas. Voir [Vendre sur le Microsoft Store](/docs/microsoft-store/selling).
+
+## Configurer l'accès une fois pour toutes
+
+GitHub se connecte à Partner Center en tant qu'application Microsoft Entra dotée du rôle
+**Manager**. Votre compte Partner Center a besoin pour cela d'un tenant Entra, même pour un compte
+individuel.
+
+<Callout title="Une configuration pour toutes vos applications">
+L'application Entra et ses quatre secrets fonctionnent pour toutes les applications du compte
+Partner Center. Configurez-les une fois, puis copiez les secrets dans chaque dépôt.
+</Callout>
+
+### 1. Obtenir un tenant Entra
+
+Ouvrez **Account settings**, **Tenants**. Si un tenant y figure, passez à l'étape 3.
+
+Sur un compte individuel connecté avec un compte Microsoft personnel, **Create Microsoft Entra
+ID** reste désactivé. Ouvrez plutôt un compte Azure gratuit avec le même compte Microsoft, sur
+[azure.microsoft.com/free](https://azure.microsoft.com/pricing/purchase-options/azure-account) :
+l'inscription crée un tenant nommé *Default Directory* (`<you>.onmicrosoft.com`). Le compte
+gratuit demande un téléphone et une carte pour vous vérifier, et ne facture rien tant que vous ne
+le passez pas vous-même à une offre payante. Partner Center n'a besoin que du tenant : ne créez
+aucune ressource Azure.
+
+Si l'inscription se termine sur une page d'erreur, vérifiez **Microsoft Entra ID**, **Manage
+tenants** dans le [portail Azure](https://portal.azure.com) avant de réessayer : le tenant existe
+souvent quand même.
+
+### 2. Créer un administrateur dans le tenant
+
+Partner Center refuse d'associer un tenant via un compte Microsoft personnel (Gmail, Outlook). Dans
+le portail Azure, ouvrez **Microsoft Entra ID**, **Users**, **New user**, **Create user** :
+nommez-le `admin@<you>.onmicrosoft.com`, et donnez-lui le rôle **Global Administrator** sous
+**Assignments**. Conservez son mot de passe.
+
+### 3. Associer le tenant à Partner Center
+
+Dans Partner Center, **Account settings**, **Tenants**, **Associate Microsoft Entra ID**.
+Connectez-vous avec l'administrateur du tenant (`admin@…`), changez son mot de passe temporaire et
+confirmez l'association.
+
+Pour gérer les utilisateurs, Partner Center vous demande ensuite de vous connecter avec cet
+administrateur et de configurer l'authentification multifacteur avec Microsoft Authenticator.
+
+### 4. Créer l'application Entra
+
+Dans **Account settings**, **User management**, **Microsoft Entra applications**, choisissez **Add
+Microsoft Entra application**, **Create Microsoft Entra application** :
+
+- **Name** : `GitHub Actions Store Publisher`.
+- **Reply URL** : n'importe quelle URL HTTPS, par exemple celle de votre dépôt.
+- **Role** : **Manager (Windows)**.
+
+La liste affiche ensuite l'application avec son id : le **client ID**.
+
+### 5. Créer son client secret
+
+Dans le portail Azure, **App registrations**, **All applications**, ouvrez l'application, puis
+**Certificates & secrets**, **New client secret**, **Add**. Copiez tout de suite la colonne
+**Value** : le portail ne l'affiche qu'une fois. Le **Secret ID** à côté n'est pas le secret.
+
+Notez la date d'expiration : un client secret dure au plus deux ans. Avant qu'il expire, créez-en
+un nouveau et mettez à jour les secrets du dépôt.
+
+### 6. Stocker les quatre valeurs dans GitHub
+
+| Secret | Où le trouver |
+| --- | --- |
+| `PARTNER_CENTER_TENANT_ID` | Portail Azure, **Microsoft Entra ID**, **Overview**, **Tenant ID** |
+| `PARTNER_CENTER_SELLER_ID` | Partner Center, **Account settings**, **Legal info**, **Developer**, **Seller ID** |
+| `PARTNER_CENTER_CLIENT_ID` | L'id de l'application, sous **Microsoft Entra applications** |
+| `PARTNER_CENTER_CLIENT_SECRET` | La **Value** du secret, obtenue à l'étape 5 |
+
+```bash
+gh secret set PARTNER_CENTER_CLIENT_SECRET --repo <owner>/<app>
+```
+
+`gh secret set` demande la valeur sans l'afficher. Recommencez pour les trois autres secrets et
+pour chaque dépôt.
+
+## Ajouter le workflow
+
+Soumettez depuis un job dédié qui s'exécute après le build, sur les push de tag uniquement. Un
+échec côté Store ne bloque alors jamais la GitHub Release, et un lancement manuel ne soumet
+jamais rien.
+
+```yaml title=".github/workflows/release.yaml"
+jobs:
+  build:
+    # … your matrix; in the Windows x64 job, after the other packages:
+    steps:
+      - name: Build the Microsoft Store package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./gradlew :app:packageGraalvmAppX   # or packageAppX / packageReleaseAppX for the JVM app
+          New-Item -ItemType Directory -Force msstore | Out-Null
+          # msstore takes .msix or .msixupload; an .appx is the same format
+          Get-ChildItem app/build/compose/binaries/main/graalvm-appx/*.appx |
+            Copy-Item -Destination { "msstore/$($_.BaseName).msix" }
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'Windows'
+        with:
+          name: msstore
+          path: msstore/*.msix
+
+  msstore:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: msstore
+          path: msstore
+      - uses: microsoft/setup-msstore-cli@v1
+      - name: Submit to the Microsoft Store
+        shell: pwsh
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID `
+            --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msix = Get-ChildItem msstore/*.msix | Select-Object -First 1
+          msstore publish $msix.FullName --appId 9MV8ZRKS4KT4 # your Store ID
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        env:
+          TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+```
+
+Pour une application qui se construit sur un seul runner Windows, placez les deux étapes
+`msstore` à la fin de ce job, derrière `if: startsWith(github.ref, 'refs/tags/v')`.
+
+La version du package vient du tag (`v1.2.0` donne `1.2.0.0`), et le Store refuse une version
+inférieure ou égale à celle qu'il a. Un tag poussé pendant qu'une soumission précédente est encore
+en certification remplace cette soumission.
+
+## Indiquer le prix
+
+`msstore publish` recopie le prix de base de la version présente sur le Store dans la nouvelle
+soumission. Quand ce prix a été saisi dans une devise locale (`150 ₪`), l'API renvoie `Base` au
+lieu d'un palier, et le CLI s'arrête :
+
+```text
+Could not preserve this product's price.
+The Store returned a base price of 'Base', which the submission API rejects on update.
+```
+
+Passez le prix sous forme de palier avec `--priceId`. Partner Center le convertit dans la devise de
+chaque marché :
+
+```powershell
+msstore publish $msix.FullName --appId 9MX2955KD2SF --priceId Tier1202 # $59.99
+```
+
+| Paliers | Prix US | Pas |
+| --- | --- | --- |
+| `Tier1012` à `Tier1102` | $0.99 à $9.99 | $0.10 |
+| `Tier1103` à `Tier1282` | $10.49 à $99.99 | $0.50 |
+| `Tier1283` à `Tier1382` | $100.99 à $199.99 | $1.00 |
+| `Tier1383` à `Tier1402` | $209.99 à $399.99 | $10.00 |
+
+`Tier1162` vaut $39.99, `Tier1242` vaut $79.99. `--priceId` fixe un prix de base unique pour tous
+les marchés et supprime les prix par marché. Les applications gratuites n'ont pas besoin de
+`--priceId`.
+
+## Lire le résultat
+
+Une exécution réussie se termine par `Submission commit success!` et les packages de la
+soumission. Les packages déjà publiés restent dans la soumission à côté du nouveau ; le Store
+donne à chaque PC la version la plus élevée qu'il peut exécuter. L'avertissement `runFullTrust`
+s'affiche à chaque soumission et ne demande aucune action.
+
+| Message | Cause | Correction |
+| --- | --- | --- |
+| `Really failed to auth.` | Un client secret erroné (souvent le **Secret ID** collé à la place de la **Value**), expiré, ou un id d'un autre tenant | Créez un nouveau client secret et redéfinissez `PARTNER_CENTER_CLIENT_SECRET` |
+| `Could not preserve this product's price` | Un prix de base saisi dans une devise locale | [Indiquer le prix](#indiquer-le-prix) |
+| `cannot upload msix … that targets Windows MinVersion <= 10.0.17134.0` | `appx { minVersion }` est antérieur à Windows 10 1809 | Définissez `minVersion = "10.0.17763.0"` |
+| La version est refusée | La version du package n'est pas supérieure à celle du Store | Poussez un tag plus élevé |
+
+<Callout type="warn" title="x64 et ARM64">
+`msstore publish` soumet un seul fichier, et chaque exécution part de la version présente sur le
+Store : deux runners qui soumettraient chacun leur package remplaceraient la soumission l'un de
+l'autre. Pour livrer les deux architectures, fusionnez-les d'abord en un seul `.msixbundle`
+(l'action
+[`build-windows-appxbundle`](/docs/packaging/ci-cd#regrouper-windows-pour-le-microsoft-store)),
+puis soumettez le bundle dans un `.msixupload`. Nucleus n'a vérifié jusqu'ici que des soumissions
+mono-architecture ; en attendant, les PC ARM64 exécutent le package x64 en émulation.
+</Callout>

@@ -1,0 +1,77 @@
+---
+title: Mises à jour de l'application
+description: Cherchez une version plus récente d'une application Nucleus sur le Microsoft Store, installez-la depuis l'application avec sa progression, gérez les mises à jour obligatoires et faites relancer l'application.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le Store met à jour les applications installées de lui-même, en arrière-plan, sauf si
+l'utilisateur a désactivé cette option. `MicrosoftStore.updates` installe une version plus récente
+tout de suite, et applique les mises à jour que Partner Center marque comme obligatoires.
+
+L'[updater Nucleus](/docs/packaging/auto-update) ne s'applique pas aux installations du Store : il
+les signale comme gérées par le Store.
+
+## Chercher une mise à jour
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+import dev.nucleusframework.store.microsoft.StoreUpdateCheck
+
+when (val check = MicrosoftStore.updates.check()) {
+    is StoreUpdateCheck.Available -> offerUpdate(check.version, mandatory = check.isMandatory)
+    StoreUpdateCheck.UpToDate -> Unit
+}
+```
+
+`check()` n'affiche rien. `Available.version` est le `major.minor.build.revision` du nouveau
+package, quand le Store l'indique, et `isMandatory` reflète la case cochée dans la section
+**Packages** de la soumission : l'application ne devrait pas continuer à tourner sans elle.
+
+Une application sans fiche publiée reçoit ici `StoreErrorCode.Platform` (`0x803F6101`).
+
+## L'installer
+
+```kotlin
+MicrosoftStore.updates
+    .install { windows { ownerWindowHandle = hwnd } }
+    .collect { progress ->
+        when (progress.state) {
+            StoreUpdateState.Pending, StoreUpdateState.Downloading, StoreUpdateState.Installing ->
+                showProgress(progress.progress) // 0.0 to 1.0, download and install together
+            StoreUpdateState.Completed -> Unit
+            StoreUpdateState.UpToDate -> Unit   // nothing to install
+            StoreUpdateState.Cancelled -> Unit  // the user declined the Store's dialog
+        }
+    }
+```
+
+- `install()` affiche le dialogue du Store par-dessus votre fenêtre. `install { silent = true }`
+  n'affiche rien ; Windows peut refuser une installation silencieuse (stratégie, connexion
+  limitée), et le flow échoue alors au lieu de demander.
+- `StoreUpdateProgress` porte `state`, `progress`, `bytesDownloaded` et `bytesTotal` (`0` tant que
+  le Store ne connaît pas la taille).
+- Le flow se termine après `Completed`, `UpToDate` ou `Cancelled`. Annuler la collecte annule le
+  téléchargement.
+- Il échoue avec `StoreErrorCode.UpdateBlocked` tant que le Store attend un chargeur ou le Wi-Fi.
+
+## Relancer après la mise à jour
+
+Windows ferme l'application pour installer la nouvelle version. Avant d'installer, `install()`
+enregistre l'application avec `RegisterApplicationRestart`, pour les mises à jour seulement :
+c'est par ce biais que Microsoft fait relancer une application mise à jour.
+
+<Callout type="warn" title="60 secondes">
+Windows ne relance qu'une application qui a tourné au moins 60 secondes avant la mise à jour. Une
+mise à jour lancée juste après le démarrage ferme l'application pour de bon. La relance ne reçoit
+aucun argument de ligne de commande.
+</Callout>
+
+## Envoyer l'utilisateur sur le Store
+
+```kotlin
+MicrosoftStore.updates.openStorePage()
+```
+
+`openStorePage()` ouvre la page de l'application dans l'app Store, où l'utilisateur la met à jour,
+lit les notes de version ou la note.

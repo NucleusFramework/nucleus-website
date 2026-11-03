@@ -1,0 +1,201 @@
+---
+title: Submit from CI
+description: Send every tagged version of a Nucleus app to the Microsoft Store from GitHub Actions with the Microsoft Store Developer CLI, from the one-time Entra setup to the workflow and its errors.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The release workflow that builds your MSIX can also submit it to Partner Center. On each tag, the
+[Microsoft Store Developer CLI](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/overview)
+(`msstore`) creates a submission from the version on the Store, replaces its package with the new
+one, keeps the listing, and commits it for certification. You stop opening Partner Center for
+updates.
+
+Before you start, publish the app once by hand: `msstore` updates an existing listing, it does
+not create one. See [Sell on the Microsoft Store](/docs/microsoft-store/selling).
+
+## Set up access once
+
+GitHub signs in to Partner Center as a Microsoft Entra application that holds the **Manager**
+role. Your Partner Center account needs an Entra tenant for that, even an individual account.
+
+<Callout title="One setup for all your apps">
+The application and its four secrets work for every app of the Partner Center account. Set them
+up once, then copy the secrets into each repository.
+</Callout>
+
+### 1. Get an Entra tenant
+
+Open **Account settings**, **Tenants**. If a tenant is listed, skip to step 3.
+
+On an individual account signed in with a personal Microsoft account, **Create Microsoft Entra
+ID** stays disabled. Open a free Azure account with the same Microsoft account instead, at
+[azure.microsoft.com/free](https://azure.microsoft.com/pricing/purchase-options/azure-account):
+the sign-up creates a tenant called *Default Directory*
+(`<you>.onmicrosoft.com`). The free account asks for a phone and a card to verify you, and
+charges nothing unless you upgrade it yourself. Partner Center only needs the tenant: create no
+Azure resources.
+
+If the sign-up ends on an error page, check **Microsoft Entra ID**, **Manage tenants** in the
+[Azure portal](https://portal.azure.com) before you retry: the tenant often exists anyway.
+
+### 2. Create an administrator in the tenant
+
+Partner Center refuses to associate a tenant through a personal Microsoft account (Gmail,
+Outlook). In the Azure portal, open **Microsoft Entra ID**, **Users**, **New user**, **Create
+user**: name it `admin@<you>.onmicrosoft.com`, and give it the **Global Administrator** role under
+**Assignments**. Keep its password.
+
+### 3. Associate the tenant with Partner Center
+
+In Partner Center, **Account settings**, **Tenants**, **Associate Microsoft Entra ID**. Sign in
+with the tenant's administrator (`admin@…`), change its temporary password, and confirm the
+association.
+
+To manage users, Partner Center then asks you to sign in with that administrator and to set up
+multi-factor authentication with Microsoft Authenticator.
+
+### 4. Create the application
+
+In **Account settings**, **User management**, **Microsoft Entra applications**, choose **Add
+Microsoft Entra application**, **Create Microsoft Entra application**:
+
+- **Name**: `GitHub Actions Store Publisher`.
+- **Reply URL**: any HTTPS URL, such as your repository's.
+- **Role**: **Manager (Windows)**.
+
+The list then shows the application with its id: the **client ID**.
+
+### 5. Create its client secret
+
+In the Azure portal, **App registrations**, **All applications**, open the application,
+**Certificates & secrets**, **New client secret**, **Add**. Copy the **Value** column right away:
+the portal shows it once. The **Secret ID** next to it is not the secret.
+
+Note the expiry date: a client secret lasts up to two years. Before it expires, create a new one
+and update the repository secrets.
+
+### 6. Store the four values in GitHub
+
+| Secret | Where to find it |
+| --- | --- |
+| `PARTNER_CENTER_TENANT_ID` | Azure portal, **Microsoft Entra ID**, **Overview**, **Tenant ID** |
+| `PARTNER_CENTER_SELLER_ID` | Partner Center, **Account settings**, **Legal info**, **Developer**, **Seller ID** |
+| `PARTNER_CENTER_CLIENT_ID` | The application's id, under **Microsoft Entra applications** |
+| `PARTNER_CENTER_CLIENT_SECRET` | The secret's **Value**, from step 5 |
+
+```bash
+gh secret set PARTNER_CENTER_CLIENT_SECRET --repo <owner>/<app>
+```
+
+`gh secret set` asks for the value without echoing it. Repeat for the three other secrets and for
+each repository.
+
+## Add the workflow
+
+Submit from a job of its own that runs after the build, on tag pushes only. A Store failure then
+never holds back the GitHub release, and a manual run never submits.
+
+```yaml title=".github/workflows/release.yaml"
+jobs:
+  build:
+    # … your matrix; in the Windows x64 job, after the other packages:
+    steps:
+      - name: Build the Microsoft Store package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./gradlew :app:packageGraalvmAppX   # or packageAppX / packageReleaseAppX for the JVM app
+          New-Item -ItemType Directory -Force msstore | Out-Null
+          # msstore takes .msix or .msixupload; an .appx is the same format
+          Get-ChildItem app/build/compose/binaries/main/graalvm-appx/*.appx |
+            Copy-Item -Destination { "msstore/$($_.BaseName).msix" }
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'Windows'
+        with:
+          name: msstore
+          path: msstore/*.msix
+
+  msstore:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: msstore
+          path: msstore
+      - uses: microsoft/setup-msstore-cli@v1
+      - name: Submit to the Microsoft Store
+        shell: pwsh
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID `
+            --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msix = Get-ChildItem msstore/*.msix | Select-Object -First 1
+          msstore publish $msix.FullName --appId 9MV8ZRKS4KT4 # your Store ID
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        env:
+          TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+```
+
+For an app that builds on one Windows runner, put the two `msstore` steps at the end of that job,
+behind `if: startsWith(github.ref, 'refs/tags/v')`.
+
+The package's version comes from the tag (`v1.2.0` gives `1.2.0.0`), and the Store refuses a
+version lower than or equal to the one it has. A tag pushed while a previous submission is still
+in certification replaces that submission.
+
+## State the price
+
+`msstore publish` copies the base price of the version on the Store into the new submission. When
+that price was typed in a local currency (`150 ₪`), the API returns `Base` instead of a tier, and
+the CLI stops:
+
+```text
+Could not preserve this product's price.
+The Store returned a base price of 'Base', which the submission API rejects on update.
+```
+
+Pass the price as a tier with `--priceId`. Partner Center converts it into every market's
+currency:
+
+```powershell
+msstore publish $msix.FullName --appId 9MX2955KD2SF --priceId Tier1202 # $59.99
+```
+
+| Tiers | US price | Step |
+| --- | --- | --- |
+| `Tier1012` to `Tier1102` | $0.99 to $9.99 | $0.10 |
+| `Tier1103` to `Tier1282` | $10.49 to $99.99 | $0.50 |
+| `Tier1283` to `Tier1382` | $100.99 to $199.99 | $1.00 |
+| `Tier1383` to `Tier1402` | $209.99 to $399.99 | $10.00 |
+
+`Tier1162` is $39.99, `Tier1242` is $79.99. `--priceId` sets one base price for every market and
+drops per-market prices. Free apps need no `--priceId`.
+
+## Read the result
+
+A successful run ends with `Submission commit success!` and the submission's packages. The
+packages already published stay in the submission next to the new one; the Store gives each PC
+the highest version it can run. The `runFullTrust` warning shows on every submission and needs no
+action.
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `Really failed to auth.` | A wrong client secret (often the **Secret ID** pasted instead of the **Value**), an expired one, or an id from another tenant | Create a new client secret and set `PARTNER_CENTER_CLIENT_SECRET` again |
+| `Could not preserve this product's price` | A base price typed in a local currency | [State the price](#state-the-price) |
+| `cannot upload msix … that targets Windows MinVersion <= 10.0.17134.0` | `appx { minVersion }` is older than Windows 10 1809 | Set `minVersion = "10.0.17763.0"` |
+| The version is refused | The package version is not higher than the Store's | Push a higher tag |
+
+<Callout type="warn" title="x64 and ARM64">
+`msstore publish` submits one file, and each run starts from the version on the Store: two
+runners submitting their own package would replace each other's submission. To ship both
+architectures, merge them into one `.msixbundle` first (the
+[`build-windows-appxbundle`](/docs/packaging/ci-cd#bundle-windows-for-the-microsoft-store)
+action), then submit the bundle inside an `.msixupload`. Nucleus has only verified
+single-architecture submissions so far; ARM64 PCs run the x64 package under emulation meanwhile.
+</Callout>

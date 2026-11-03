@@ -1,0 +1,85 @@
+---
+title: App license and free trial
+description: Read the Microsoft Store license of a paid Nucleus app, run a free trial, sell the full version from inside the app, and follow license changes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Give the app a price and a free trial in Partner Center (see
+[Price the app](/docs/microsoft-store/selling#price-the-app)). The Store then installs it as a
+trial, and your app reads its own license to decide what to unlock.
+
+## Read the license at launch
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+
+val license = MicrosoftStore.purchases.appLicense()
+when {
+    license.isFullLicense -> unlockEverything()
+    license.isTrial && license.isActive -> showTrialBanner(license.trialTimeRemaining)
+    else -> showTrialOver() // offer purchaseApp()
+}
+```
+
+`appLicense()` reads the license Windows keeps on the device: it answers fast, works offline,
+and shows no UI. Call it at every launch.
+
+| `AppLicense` | Meaning |
+| --- | --- |
+| `isFullLicense` | The customer bought the app. Gate on this one. |
+| `isActive` | The customer may use the app: bought, or a trial not over yet |
+| `isTrial` | The license is a trial, over or not |
+| `expirationTime` | When the trial ends; `null` for a license that never ends |
+| `trialTimeRemaining` | What is left of a time-limited trial; `null` outside a trial and for an unlimited one |
+| `skuStoreId` | The licensed SKU (`9MV8ZRKS4KT4/0010`); `null` when the Store did not license this install |
+| `isTrialOwnedByThisUser`, `trialUniqueId` | Usage-limited trials only; `false` and `null` for a trial of N days |
+
+<Callout type="warn" title="Gate on isFullLicense">
+An install the Store did not license (a development build, a sideloaded MSIX, a package without
+a listing) reads as active and not a trial, with no `skuStoreId`. `isActive && !isTrial` would
+unlock it; `isFullLicense` checks the SKU and does not.
+</Callout>
+
+## End the trial yourself
+
+The Store does not stop a trial app from running. When the trial ends, `isActive` turns `false`
+and the app decides what to lock: everything, saving, export. The Store reports no event as the
+trial time runs down, so read `appLicense()` again at launch, or schedule a check on
+`trialTimeRemaining`.
+
+The Store ties a time-limited trial to the customer's Microsoft account: reinstalling the app
+does not restart it.
+
+## Sell the full version
+
+```kotlin
+when (val result = MicrosoftStore.purchases.purchaseApp { windows { ownerWindowHandle = hwnd } }) {
+    is PurchaseResult.Success -> unlockEverything()
+    PurchaseResult.Pending -> showAwaitingApproval()
+    PurchaseResult.Cancelled -> Unit
+    is PurchaseResult.Failed -> showError(result.error)
+}
+```
+
+`purchaseApp()` shows the Store's dialog for the app itself. On success, the purchase's
+`productId` is the app's Store ID; read `appLicense()` again for the new license.
+
+When this device already holds the full license, `purchaseApp()` returns
+`Success(alreadyOwned = true)` and shows nothing. The Store was seen offering an owned app for
+sale again, so the module checks first. A device whose licenses have not synced yet still gets
+the Store's dialog: hide the buy button while `isFullLicense` is `true`.
+
+## Follow license changes
+
+```kotlin
+scope.launch {
+    MicrosoftStore.purchases.appLicenseUpdates.collect { license ->
+        if (license.isFullLicense) unlockEverything()
+    }
+}
+```
+
+`appLicenseUpdates` emits when the license changes while the app runs: a trial converted to a
+full license, a license granted or revoked from outside the app. Collect it for the life of the
+app. It stays empty outside the Store.

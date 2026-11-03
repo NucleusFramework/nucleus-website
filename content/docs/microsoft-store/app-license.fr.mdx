@@ -1,0 +1,87 @@
+---
+title: Licence et essai gratuit
+description: Lisez la licence Microsoft Store d'une application Nucleus payante, proposez un essai gratuit, vendez la version complète depuis l'application et suivez les changements de licence.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Donnez à l'application un prix et un essai gratuit dans Partner Center (voir
+[Fixer le prix](/docs/microsoft-store/selling#fixer-le-prix)). Le Store l'installe alors en
+version d'essai, et votre application lit sa propre licence pour décider quoi débloquer.
+
+## Lire la licence au lancement
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+
+val license = MicrosoftStore.purchases.appLicense()
+when {
+    license.isFullLicense -> unlockEverything()
+    license.isTrial && license.isActive -> showTrialBanner(license.trialTimeRemaining)
+    else -> showTrialOver() // offer purchaseApp()
+}
+```
+
+`appLicense()` lit la licence que Windows conserve sur l'appareil : il répond vite, fonctionne hors
+ligne et n'affiche aucune interface. Appelez-le à chaque lancement.
+
+| `AppLicense` | Signification |
+| --- | --- |
+| `isFullLicense` | Le client a acheté l'application. C'est sur celui-ci qu'il faut se baser. |
+| `isActive` | Le client peut utiliser l'application : achetée, ou essai pas encore terminé |
+| `isTrial` | La licence est un essai, terminé ou non |
+| `expirationTime` | La fin de l'essai ; `null` pour une licence sans fin |
+| `trialTimeRemaining` | Le temps restant d'un essai limité dans le temps ; `null` hors essai et pour un essai illimité |
+| `skuStoreId` | Le SKU sous licence (`9MV8ZRKS4KT4/0010`) ; `null` quand le Store n'a pas accordé de licence à cette installation |
+| `isTrialOwnedByThisUser`, `trialUniqueId` | Essais limités à l'usage uniquement ; `false` et `null` pour un essai de N jours |
+
+<Callout type="warn" title="Basez-vous sur isFullLicense">
+Une installation à laquelle le Store n'a pas accordé de licence (un build de développement, un MSIX
+en sideload, un package sans fiche) apparaît active et hors essai, sans `skuStoreId`.
+`isActive && !isTrial` la débloquerait ; `isFullLicense` vérifie le SKU et ne la débloque pas.
+</Callout>
+
+## Terminer l'essai vous-même
+
+Le Store n'empêche pas une application en essai de tourner. Quand l'essai prend fin, `isActive`
+passe à `false` et l'application décide quoi verrouiller : tout, l'enregistrement, l'export. Le
+Store ne signale aucun événement pendant que le temps d'essai s'écoule : relisez `appLicense()` au
+lancement, ou planifiez une vérification d'après `trialTimeRemaining`.
+
+Le Store lie un essai limité dans le temps au compte Microsoft du client : réinstaller
+l'application ne le relance pas.
+
+## Vendre la version complète
+
+```kotlin
+when (val result = MicrosoftStore.purchases.purchaseApp { windows { ownerWindowHandle = hwnd } }) {
+    is PurchaseResult.Success -> unlockEverything()
+    PurchaseResult.Pending -> showAwaitingApproval()
+    PurchaseResult.Cancelled -> Unit
+    is PurchaseResult.Failed -> showError(result.error)
+}
+```
+
+`purchaseApp()` affiche le dialogue du Store pour l'application elle-même. En cas de succès, le
+`productId` de l'achat est le Store ID de l'application ; relisez `appLicense()` pour obtenir la
+nouvelle licence.
+
+Quand cet appareil détient déjà la licence complète, `purchaseApp()` renvoie
+`Success(alreadyOwned = true)` et n'affiche rien. Le Store a déjà été vu remettre en vente une
+application possédée, d'où cette vérification préalable du module. Un appareil dont les licences
+ne sont pas encore synchronisées reçoit quand même le dialogue du Store : masquez le bouton d'achat
+tant que `isFullLicense` vaut `true`.
+
+## Suivre les changements de licence
+
+```kotlin
+scope.launch {
+    MicrosoftStore.purchases.appLicenseUpdates.collect { license ->
+        if (license.isFullLicense) unlockEverything()
+    }
+}
+```
+
+`appLicenseUpdates` émet quand la licence change pendant que l'application tourne : un essai
+converti en licence complète, une licence accordée ou révoquée hors de l'application. Collectez-le
+pendant toute la vie de l'application. Il reste vide hors du Store.

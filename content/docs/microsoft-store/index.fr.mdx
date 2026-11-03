@@ -1,0 +1,120 @@
+---
+title: Microsoft Store
+description: "Vendez une application Nucleus sur le Microsoft Store depuis Kotlin : la licence et l'essai gratuit de l'application, les add-ons, les mises à jour depuis l'application et les soumissions depuis la CI."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module `microsoft-store` dialogue avec le Microsoft Store (`Windows.Services.Store`) depuis
+l'application que le Store a installée. Un seul objet, `MicrosoftStore`, couvre ce que vous vendez
+et la façon dont l'application se met à jour :
+
+| Point d'entrée | Rôle |
+| --- | --- |
+| `MicrosoftStore.purchases` | La licence et l'essai gratuit de l'application elle-même, les add-ons (durables, consommables, abonnements) et les changements de licence que le Store signale |
+| `MicrosoftStore.updates` | Cherche une version plus récente sur le Store et l'installe depuis l'application |
+
+Le Lab, le banc d'essai de Nucleus, est publié sur le Microsoft Store avec ce module : une
+application payante avec un essai de 7 jours et quatre add-ons. Ses probes `system.purchases` et
+`system.store-updates` appellent toutes les fonctions de cette page.
+
+| Page | Contenu |
+| --- | --- |
+| [Vendre sur le Microsoft Store](/docs/microsoft-store/selling) | Réserver l'application dans Partner Center, l'empaqueter, la soumettre, la tester |
+| [Licence et essai gratuit](/docs/microsoft-store/app-license) | Vendre l'application elle-même, proposer un essai, le convertir depuis l'application |
+| [Add-ons](/docs/microsoft-store/add-ons) | Durables, consommables et abonnements achetés dans l'application |
+| [Mises à jour de l'application](/docs/microsoft-store/updates) | Trouver une version plus récente sur le Store et l'installer sans quitter l'application |
+| [Soumettre depuis la CI](/docs/microsoft-store/ci) | Envoyer chaque version taguée à Partner Center depuis GitHub Actions |
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.microsoft-store:<version>")
+}
+```
+
+## Où il fonctionne
+
+Le Store ne répond qu'à une application qu'il a installée : un package MSIX/AppX dont l'identité
+correspond à une fiche Partner Center. Construisez-le avec `TargetFormat.AppX` (voir
+[Vendre sur le Microsoft Store](/docs/microsoft-store/selling)).
+
+| Où tourne l'application | `availability()` | Appels au Store |
+| --- | --- | --- |
+| Installée depuis le Store, ou depuis son MSIX avec l'identité de la fiche | `Available` | Fonctionnent |
+| NSIS, MSI, Portable ou `./gradlew run` | `NotPackaged` | Échouent avec `StoreErrorCode.NotPackaged` |
+| macOS, Linux | `Unsupported` | Échouent avec `StoreErrorCode.Unsupported` |
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+import dev.nucleusframework.store.microsoft.StoreAvailability
+
+if (MicrosoftStore.availability() == StoreAvailability.Available) {
+    if (MicrosoftStore.purchases.appLicense().isFullLicense) unlockEverything()
+}
+```
+
+`MicrosoftStore.isSupported` vaut `true` sous Windows quand le bridge natif s'est chargé. Il
+n'indique rien sur le package : vérifiez `availability()` avant d'afficher la moindre interface du
+Store.
+
+## Appels, threads et annulation
+
+- Chaque appel suspend sans bloquer de thread, et vous pouvez l'appeler depuis n'importe quel
+  thread, thread UI compris.
+- Annuler la coroutine annule l'opération du Store qu'elle porte.
+- Les échecs du Store lèvent une `StoreException`, sauf pour `purchase()` et `purchaseApp()`, qui
+  les renvoient sous forme de `PurchaseResult.Failed`.
+- Les dialogues du Store (achat, mise à jour) ont besoin d'une fenêtre sur laquelle s'afficher.
+  Passez le handle de votre fenêtre, ou laissez le module prendre la fenêtre de premier plan de
+  l'application :
+
+```kotlin
+import dev.nucleusframework.application.LocalNucleusWindow
+
+@Composable
+fun BuyButton() {
+    val hwnd = LocalNucleusWindow.current.unsafe.taoWindow?.nativeHandle
+    val scope = rememberCoroutineScope()
+    Button(onClick = {
+        scope.launch {
+            MicrosoftStore.purchases.purchase("pro") { windows { ownerWindowHandle = hwnd } }
+        }
+    }) { Text("Buy Pro") }
+}
+```
+
+Le Store garde la première fenêtre reçue pendant toute la vie du processus.
+
+## Erreurs
+
+`StoreException.code` indique ce qui a échoué ; `platformCode` porte le `HRESULT` Windows quand
+l'échec vient de l'API du Store.
+
+| `StoreErrorCode` | Signification |
+| --- | --- |
+| `Unsupported` | Pas de Microsoft Store sur cet OS, ou le bridge natif n'a pas pu se charger |
+| `NotPackaged` | Le processus n'a pas d'identité de package (NSIS, MSI, Portable, `run`) |
+| `NotAssociated` | Le Store n'a aucune fiche pour ce package (`0x803F6107`) : l'application n'est pas encore publiée, ou son identité diffère de la réservation Partner Center |
+| `NoOwnerWindow` | Aucune fenêtre visible de l'application pour afficher le dialogue du Store |
+| `ProductNotFound` | Aucun add-on avec cet id de produit pour cette application |
+| `Network`, `Server` | Le service du Store était injoignable, ou a répondu par une erreur |
+| `InsufficientQuantity` | Un consommable géré par le Store a moins d'unités restantes que vous n'en consommez |
+| `InvalidArgument` | Un id de produit vide, une quantité nulle, un jeton de consommation étranger |
+| `UpdateBlocked` | Le Store retient une mise à jour de l'application jusqu'à ce que l'appareil soit en charge ou en Wi-Fi |
+| `Platform` | Toute autre erreur du Store ; voir `platformCode` |
+| `Internal` | Un bug du module ou de son bridge natif |
+
+## Logs
+
+Le module journalise via `java.util.logging` sous `dev.nucleusframework.store.microsoft`. Au niveau
+`FINE`, il journalise chaque changement de licence que le Store signale, avec la licence de
+l'application et les add-ons qu'elle couvre. Passez ce logger en `FINE` pour les voir, ou
+définissez `allowNucleusRuntimeLogging = true` (`dev.nucleusframework.core.runtime.tools`).
+
+<Callout title="Autres stores">
+`microsoft-store` ne couvre que le Microsoft Store. Le Mac App Store et Flathub fonctionnent assez
+différemment pour avoir leurs propres modules ; en attendant qu'ils existent, `MicrosoftStore`
+renvoie `Unsupported` sous macOS et Linux et votre application tourne sans lui.
+</Callout>

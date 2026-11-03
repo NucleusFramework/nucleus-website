@@ -1,0 +1,169 @@
+---
+title: Sell on the Microsoft Store
+description: Reserve a Nucleus app in Partner Center, give the package its Store identity, set a price and a trial, add add-ons, submit for certification, and test purchases.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+This page takes a Nucleus app from nothing to a listing that sells, as the Lab went through it.
+You need a [Partner Center](https://partner.microsoft.com/dashboard/apps-and-games/overview)
+developer account (individual or company).
+
+## Reserve the app
+
+1. In Partner Center, open **Apps and games**, **New product**, **MSIX or PWA app**, and reserve a
+   name. Reserve every name you will use: one per language, and the one the package shows under
+   its icon. The package's display name must be one of them, or certification fails.
+2. Open **Product management**, **Product identity**. Note four values:
+
+| Partner Center | Where it goes |
+| --- | --- |
+| `Package/Identity/Name` (`KdroidFilter.NucleusLab`) | `appx { identityName }` |
+| `Package/Identity/Publisher` (`CN=D541E802-…`) | `appx { publisher }` |
+| `Package/Properties/PublisherDisplayName` | `appx { publisherDisplayName }` |
+| Store ID (`9MV8ZRKS4KT4`) | Your app's Store links, and `msstore publish --appId` in [CI](/docs/microsoft-store/ci) |
+
+Copy them exactly: Partner Center compares them case-sensitively (`KdroidFilter`, not
+`KDroidFilter`).
+
+## Give the package its Store identity
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.AppX /* , your other formats */)
+        packageVersion = "1.0.4" // each submission needs a higher one
+
+        windows {
+            appx {
+                identityName = "KdroidFilter.NucleusLab"
+                publisher = "CN=D541E802-6D30-446A-864E-2E8ABD2DAA5E"
+                publisherDisplayName = "KdroidFilter"
+                displayName = "Nucleus Lab"        // one of the reserved names
+                applicationId = "NucleusLab"
+                languages = listOf("en-US")
+                minVersion = "10.0.17763.0"        // see below
+                maxVersionTested = "10.0.26100.0"
+                storeLogo.set(project.file("packaging/appx/StoreLogo.png"))
+                square44x44Logo.set(project.file("packaging/appx/Square44x44Logo.png"))
+                square150x150Logo.set(project.file("packaging/appx/Square150x150Logo.png"))
+                wide310x150Logo.set(project.file("packaging/appx/Wide310x150Logo.png"))
+            }
+        }
+    }
+}
+```
+
+- **Version**: the package version is `packageVersion` plus a fourth number, `0`. The Store
+  requires that `0`, and refuses a version lower than or equal to the one it already has.
+- **`minVersion`**: keep it at `10.0.17763.0` (Windows 10 1809) or higher. Partner Center accepts
+  an older one in a hand-uploaded `.appx`, but refuses it in an `.msix`, the format CI submits.
+- **Logos**: give sources of 1024 px or more. Nucleus generates every scale and target size
+  from them.
+
+Build the package:
+
+| Task | Package |
+| --- | --- |
+| `packageAppX` | The JVM app, in `build/compose/binaries/main/appx/` |
+| `packageReleaseAppX` | The JVM app through ProGuard, in `build/compose/binaries/main-release/appx/` |
+| `packageGraalvmAppX` | The GraalVM native image, in `build/compose/binaries/main/graalvm-appx/` |
+
+Leave the package unsigned: the Store signs what you upload. To install a build on your machine
+before submitting it, turn on Windows Developer Mode and run `runAppX`.
+
+<Callout type="warn" title="One architecture per package">
+A runner builds the package for its own architecture: `windows-latest` gives x64,
+`windows-11-arm` gives ARM64. GraalVM does not build Windows ARM64 images: ship the JVM build
+there, or let ARM64 PCs run the x64 package under emulation.
+</Callout>
+
+## Fill in the first submission
+
+Open the reservation and **Start submission**. Each section has to read *Complete*:
+
+| Section | What to set |
+| --- | --- |
+| **Pricing and availability** | Markets, visibility, the base price, the free trial. See [Price the app](#price-the-app). |
+| **Properties** | The category, the privacy policy URL, the system requirements. Give a privacy policy URL when the app collects personal data; the Lab gives one for its purchases. |
+| **Age ratings** | The IARC questionnaire; the ratings follow from your answers. |
+| **Packages** | Drop the `.msix` or `.appx`, and keep **Windows 10/11 Desktop** checked. |
+| **Store listings** | Per language: the description, at least one screenshot, the logos for the listing. |
+| **Submission options** | The justification for `runFullTrust`, the restricted capability every Nucleus package declares: "a desktop app packaged as MSIX, running as a full-trust Win32 process". |
+
+Then **Submit to the Store**. Certification takes from a few hours to three business days. The
+"restricted capabilities require approval" warning about `runFullTrust` is expected on every
+submission.
+
+<Callout title="Test before you go public">
+Under **Visibility**, pick **Private audience**, or keep the listing public with **Make this
+product available but not discoverable**, **Direct link only**. You install the app from its
+Store link like a customer would, and the license, trial and add-ons work for real.
+</Callout>
+
+## Price the app
+
+In **Pricing and availability**, **Pricing**:
+
+- **Free**, or a **base price**. Partner Center converts the base price into each market's
+  currency.
+- **Free trial**: none, 1, 7, 15 or 30 days, or unlimited. The app reads it through
+  [`appLicense()`](/docs/microsoft-store/app-license) and decides what to lock when it ends.
+
+Pick the base price from Microsoft's tiers in US dollars (`$39.99`). Partner Center also lets you
+type a price in a local currency (`150 ₪`), but the submission API cannot carry such a price over,
+so a [CI submission](/docs/microsoft-store/ci#state-the-price) has to restate it as a tier.
+
+## Add add-ons
+
+Open **Add-ons**, **Create a new add-on**:
+
+| Type | Kotlin `ProductType` | For |
+| --- | --- | --- |
+| Durable | `NonConsumable` | A one-time unlock ("Pro"). Set its lifetime to **Forever**. |
+| Developer-managed consumable | `Consumable` | Coins or credits you count yourself: one at a time, consumed before the next purchase. |
+| Store-managed consumable | `Consumable` | A balance the Store counts: several units per purchase, consumed in any amount. |
+| Subscription | `AutoRenewableSubscription` | A monthly or yearly plan, with an optional free trial period. |
+
+The **Product ID** you type is the id your code uses: `purchase("pro")`. Then fill in the
+add-on's submission: its pricing, its listing (title and description, shown in the purchase
+dialog), and, for an add-on sold from the app only, **Hidden in the Store**.
+
+<Callout type="warn" title="Add-ons wait for the app">
+Partner Center refuses to submit an add-on until its app is published. Submit the app first,
+wait for it to go live, then submit the add-ons. Until they are live, `products()` does not list
+them.
+</Callout>
+
+See [Add-ons](/docs/microsoft-store/add-ons) for the code.
+
+## Test purchases
+
+The Microsoft Store has no sandbox. To test:
+
+1. Publish the app to a private audience or as direct link only, with its add-ons.
+2. Install it from its Store link on a test PC, signed in with your Microsoft account.
+3. Buy for real, or redeem **promo codes**: Partner Center generates them for the app and for
+   each add-on.
+
+A build you install yourself, through `runAppX` or a sideloaded MSIX, has no Store license:
+`appLicense().isFullLicense` is `false` and its `skuStoreId` is `null`. That is the expected
+answer for a development build.
+
+## Ship updates
+
+Each new version needs a higher `packageVersion` and a new submission: open the app,
+**Update your product**, replace the package under **Packages**, and submit. The Store updates
+installed copies in the background; your app can also install the update itself with
+[`MicrosoftStore.updates`](/docs/microsoft-store/updates). To submit from GitHub Actions instead
+of Partner Center, see [Submit from CI](/docs/microsoft-store/ci).
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| `StoreErrorCode.NotAssociated` (`0x803F6107`) on every call | The app is not published yet, or the package's `identityName` or `publisher` differs from **Product identity** |
+| `StoreAvailability.NotPackaged` | The app runs from an NSIS, MSI or Portable build, or from `./gradlew run` |
+| `products()` is empty | The add-ons are not published yet, or the ids differ from their **Product ID** |
+| The GraalVM package dies at launch with `UnsatisfiedLinkError: javaaccessbridge` | A plugin older than `3.0.0-dev-202610312124`: it left `jawt.dll` out of the executable's folder. Update the plugin. |
+| Certification rejects the display name | `appx { displayName }` is not one of the reserved names |

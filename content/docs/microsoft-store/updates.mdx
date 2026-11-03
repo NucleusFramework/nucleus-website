@@ -1,0 +1,76 @@
+---
+title: App updates
+description: Check the Microsoft Store for a newer version of a Nucleus app, install it from inside the app with progress, handle mandatory updates, and get the app relaunched.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Store updates installed apps on its own, in the background, unless the user turned that off.
+`MicrosoftStore.updates` installs a newer version right away, and enforces the updates Partner
+Center marks mandatory.
+
+The [Nucleus updater](/docs/packaging/auto-update) does not apply to Store installs: it reports
+them as Store-managed.
+
+## Check for an update
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+import dev.nucleusframework.store.microsoft.StoreUpdateCheck
+
+when (val check = MicrosoftStore.updates.check()) {
+    is StoreUpdateCheck.Available -> offerUpdate(check.version, mandatory = check.isMandatory)
+    StoreUpdateCheck.UpToDate -> Unit
+}
+```
+
+`check()` shows nothing. `Available.version` is the new package's `major.minor.build.revision`,
+when the Store says, and `isMandatory` is the box you ticked in the submission's **Packages**
+section: the app should not run on without it.
+
+An app with no published listing gets `StoreErrorCode.Platform` (`0x803F6101`) here.
+
+## Install it
+
+```kotlin
+MicrosoftStore.updates
+    .install { windows { ownerWindowHandle = hwnd } }
+    .collect { progress ->
+        when (progress.state) {
+            StoreUpdateState.Pending, StoreUpdateState.Downloading, StoreUpdateState.Installing ->
+                showProgress(progress.progress) // 0.0 to 1.0, download and install together
+            StoreUpdateState.Completed -> Unit
+            StoreUpdateState.UpToDate -> Unit   // nothing to install
+            StoreUpdateState.Cancelled -> Unit  // the user declined the Store's dialog
+        }
+    }
+```
+
+- `install()` shows the Store's dialog over your window. `install { silent = true }` shows
+  nothing; Windows may refuse a silent install (policy, metered connection), and the flow then
+  fails instead of asking.
+- `StoreUpdateProgress` carries `state`, `progress`, `bytesDownloaded` and `bytesTotal` (`0`
+  while the Store does not know the size).
+- The flow completes after `Completed`, `UpToDate` or `Cancelled`. Cancelling the collection
+  cancels the download.
+- It fails with `StoreErrorCode.UpdateBlocked` while the Store waits for a charger or Wi-Fi.
+
+## Relaunch after the update
+
+Windows closes the app to install the new version. Before installing, `install()` registers the
+app with `RegisterApplicationRestart`, for updates only: that is how Microsoft gets an updated
+app relaunched.
+
+<Callout type="warn" title="60 seconds">
+Windows only relaunches an app that ran for at least 60 seconds before the update. An update
+started right after launch closes the app for good. The relaunch gets no command-line arguments.
+</Callout>
+
+## Send the user to the Store
+
+```kotlin
+MicrosoftStore.updates.openStorePage()
+```
+
+`openStorePage()` opens the app's page in the Store app, where the user updates it, reads the
+release notes or rates it.

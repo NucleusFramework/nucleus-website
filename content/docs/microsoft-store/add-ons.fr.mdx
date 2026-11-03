@@ -1,0 +1,121 @@
+---
+title: Add-ons
+description: Vendez des add-ons Microsoft Store depuis une application Nucleus (durables, consommables et abonnements), vérifiez les droits, livrez les consommables en toute sécurité et suivez les renouvellements et les remboursements.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Les add-ons sont les produits que vous vendez dans l'application. Créez-les d'abord dans Partner
+Center (voir [Ajouter des add-ons](/docs/microsoft-store/selling#ajouter-des-add-ons)) ; l'id de
+produit que vous leur donnez là-bas est celui que vous utilisez dans le code.
+
+## Débloquer les fonctionnalités au lancement
+
+```kotlin
+import dev.nucleusframework.store.microsoft.MicrosoftStore
+
+if (MicrosoftStore.purchases.entitlement("pro").isActive) unlockPro()
+```
+
+`entitlement()` lit les licences que Windows conserve sur l'appareil : rapide, hors ligne, sans
+interface. `EntitlementStatus.state` vaut `Active`, `Expired`, `Revoked` ou `NotOwned`, avec
+l'`expirationTime` de l'abonnement et le `purchase` derrière un droit actif. Les consommables ne
+sont jamais des droits : une fois consommés, ils valent `NotOwned`.
+
+## Lister ce que vous vendez
+
+```kotlin
+val products = MicrosoftStore.purchases.products("pro", "coins", "sub_monthly")
+val pro = MicrosoftStore.purchases.product("pro") // null when the Store does not sell it
+```
+
+`products()` renvoie les produits dans l'ordre demandé et omet les ids inconnus.
+
+| `StoreProduct` | Contenu |
+| --- | --- |
+| `id` | Votre id de produit (le **Product ID** de Partner Center) |
+| `title`, `description` | Tirés de la fiche de l'add-on, dans la langue du client |
+| `type` | `NonConsumable` (durable), `Consumable`, `AutoRenewableSubscription` |
+| `displayPrice` | Le prix à afficher, formaté selon la locale et la devise du client |
+| `price`, `currencyCode` | Le même montant en `BigDecimal`, quand la chaîne du Store se lit comme tel |
+| `subscription` | La `period` de facturation et l'`introductoryOffer` que ce client peut encore utiliser, comme une semaine gratuite |
+| `platformId` | Le `StoreId` propre à Microsoft pour l'add-on |
+
+## Acheter
+
+```kotlin
+when (val result = MicrosoftStore.purchases.purchase("pro") { windows { ownerWindowHandle = hwnd } }) {
+    is PurchaseResult.Success -> grant(result.purchase)
+    PurchaseResult.Pending -> showAwaitingApproval() // the outcome arrives through purchaseUpdates
+    PurchaseResult.Cancelled -> Unit                  // the customer closed the dialog
+    is PurchaseResult.Failed -> showError(result.error)
+}
+```
+
+- `purchase()` prend un `StoreProduct` ou un id de produit. `windows { skuStoreId = "…" }` achète
+  un SKU précis de l'add-on au lieu de celui par défaut.
+- Les échecs du Store reviennent sous forme de `PurchaseResult.Failed`, jamais d'exception.
+- Un durable ou un abonnement pour lequel cet appareil a déjà une licence renvoie
+  `Success(alreadyOwned = true)` sans aucun dialogue. Le Store a déjà été vu remettre en vente un
+  durable possédé, d'où cette vérification préalable du module. Sur un appareil dont les licences
+  ne sont pas encore synchronisées, le Store décide quand même : masquez le bouton d'achat tant que
+  `entitlement()` est actif.
+
+## Livrer les consommables
+
+```kotlin
+// At launch, and after each successful purchase of a consumable:
+for (purchase in MicrosoftStore.purchases.list()) {
+    if (purchase.productType == ProductType.Consumable) {
+        addCoins(100 * purchase.quantity) // grant first
+        MicrosoftStore.purchases.consume(purchase) // then tell the Store
+    }
+}
+```
+
+Un consommable reste en attente jusqu'à ce que vous le consommiez avec `consume()`. `list()`
+continue de le renvoyer, lancement après lancement, tant que vous ne l'avez pas fait. Accordez
+d'abord, consommez ensuite : un crash entre les deux ne fait rien perdre, et le lancement suivant
+le livre à nouveau. Relancer `consume()` sur le même achat ne pose aucun risque, car
+l'identifiant de traitement est fixe pour chaque achat.
+
+Pour un consommable géré par le Store, `consume(purchase, quantity)` accepte n'importe quel nombre
+d'unités jusqu'au solde ; au-delà, l'appel échoue avec `StoreErrorCode.InsufficientQuantity`.
+
+## Lister et restaurer les achats
+
+```kotlin
+val owned = MicrosoftStore.purchases.list()     // silent, offline
+val restored = MicrosoftStore.purchases.restore() // for a "Restore purchases" button
+```
+
+`list()` renvoie les durables et abonnements actifs, plus les consommables pas encore consommés.
+Le Microsoft Store synchronise lui-même les licences avec le compte du client : `restore()`
+renvoie donc la même liste.
+
+Le Microsoft Store ne fournit ni id de transaction, ni date d'achat, ni reçu signé pour les
+add-ons. Le module laisse ces champs de `Purchase` à `null` plutôt que de les deviner.
+
+## Suivre les renouvellements et les remboursements
+
+```kotlin
+scope.launch {
+    MicrosoftStore.purchases.purchaseUpdates.collect { update ->
+        when (update) {
+            is PurchaseUpdate.Purchased -> grant(update.purchase)
+            is PurchaseUpdate.Revoked -> revoke(update.purchase)
+        }
+    }
+}
+```
+
+`purchaseUpdates` signale les changements que votre application n'a pas initiés : un
+renouvellement d'abonnement, un remboursement, un achat fait sur un autre appareil ou dans l'app
+Store. Collectez-le dès le lancement, pendant toute la vie de l'application. Les achats faits via
+`purchase()` n'y apparaissent pas une seconde fois.
+
+<Callout title="Quand le Store signale un changement">
+Windows signale les changements de licence par lots, et le Store en envoie un dès que son dialogue
+d'achat s'ouvre. Le module compare les licences avant et après chaque signal et n'émet que les
+vrais changements.
+</Callout>
