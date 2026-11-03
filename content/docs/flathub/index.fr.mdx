@@ -1,0 +1,114 @@
+---
+title: Flathub
+description: "Publiez une application Nucleus sur Flathub sans ouvrir son code, et installez ses mises à jour depuis l'application avec le module flatpak."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Ici, Flathub ne compile rien depuis vos sources : son manifeste réempaquette le `tar.gz` Linux que
+votre release publie déjà, la voie d'une application au code fermé. Le plugin écrit ce manifeste
+et ses métadonnées de store, et le module `flatpak` dialogue avec le portail Flatpak depuis
+l'application installée :
+
+| Point d'entrée | Rôle |
+| --- | --- |
+| `linux { flathub { } }` + `generateFlathubRepository` | Écrit le dépôt Flathub de l'application : manifeste, metainfo AppStream, entrée de bureau, icône, types MIME |
+| `Flatpak.updates` | Suit le dépôt distant de l'application, installe une version plus récente depuis l'application et redémarre dessus |
+
+Le Lab, le banc d'essai de Nucleus, a suivi cette procédure sous l'id `dev.nucleusframework.Lab`.
+Sa probe `system.flatpak-updates` appelle toutes les fonctions du module.
+
+| Page | Contenu |
+| --- | --- |
+| [Publier sur Flathub](/docs/flathub/publishing) | Décrire l'application, générer son dépôt, le tester en local, le soumettre, livrer les mises à jour |
+| [Mises à jour de l'application](/docs/flathub/updates) | Trouver une version plus récente sur le dépôt distant, l'installer et redémarrer sans quitter l'application |
+
+## Ajouter la dépendance
+
+Côté plugin, rien à ajouter. Pour les mises à jour depuis l'application :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.flatpak:<version>")
+}
+```
+
+## Où il fonctionne
+
+Le portail ne répond qu'à un processus qui tourne dans un bac à sable Flatpak : l'application
+installée depuis Flathub, depuis un autre dépôt distant ou depuis un dépôt local.
+
+| Où tourne l'application | `availability()` | Appels Flatpak |
+| --- | --- | --- |
+| Installée en Flatpak, portail en version 2 ou plus (flatpak 1.6) | `Available` | Fonctionnent |
+| Installée en Flatpak, portail trop ancien ou absent | `PortalMissing` | Échouent avec `FlatpakErrorCode.PortalMissing` |
+| DEB, RPM, AppImage, Pacman, Snap ou `./gradlew run` | `NotFlatpak` | Échouent avec `FlatpakErrorCode.NotFlatpak` |
+| macOS, Windows | `Unsupported` | Échouent avec `FlatpakErrorCode.Unsupported` |
+
+```kotlin
+import dev.nucleusframework.flatpak.Flatpak
+import dev.nucleusframework.flatpak.FlatpakAvailability
+
+if (Flatpak.availability() == FlatpakAvailability.Available) {
+    showUpdatesMenu()
+}
+```
+
+`Flatpak.isSupported` vaut `true` sous Linux quand le pont natif s'est chargé, et `Flatpak.appId`
+est le `FLATPAK_ID` du bac à sable (`null` en dehors). Aucun des deux ne dit si le portail peut
+vous servir : vérifiez `availability()` avant d'afficher une interface de mise à jour.
+
+`ExecutableRuntime.type()` renvoie aussi `FLATPAK` pour l'archive réempaquetée : Nucleus lit
+`/.flatpak-info`, que Flatpak monte dans chaque bac à sable, avant le marqueur de l'archive.
+L'[updater Nucleus](/docs/packaging/auto-update) se tient à l'écart : `isUpdateSupported()` vaut
+`false`.
+
+## Appels, threads et annulation
+
+- Chaque appel suspend ou renvoie un `Flow`, et vous pouvez l'appeler depuis n'importe quel
+  thread, y compris le thread UI.
+- Annuler la collecte de `install()` annule la mise à jour.
+- Les échecs lèvent `FlatpakException`.
+- Les dialogues du portail (le consentement à la mise à jour, la page du store) se posent sur une
+  fenêtre que vous passez en `FlatpakParentWindow`. Résolvez-la hors du thread UI : sous Wayland,
+  l'export attend la boucle d'événements.
+
+```kotlin
+import dev.nucleusframework.flatpak.FlatpakParentWindow
+
+suspend fun TaoWindow.flatpakParent(): FlatpakParentWindow? =
+    withContext(Dispatchers.IO) { xdgPortalParent() }
+        ?.let { FlatpakParentWindow(it.portalParent, keepAlive = it as? AutoCloseable) }
+```
+
+Récupérez la `TaoWindow` avec `LocalNucleusWindow.current.unsafe.taoWindow`. `keepAlive` garde
+l'export Wayland ouvert jusqu'à la fin de l'appel qui l'a emprunté ; le module le ferme.
+
+## Erreurs
+
+`FlatpakException.code` indique ce qui a échoué ; `portalError` porte le nom de l'erreur D-Bus
+quand l'échec vient du portail. Les messages du portail sont traduits : distinguez les erreurs par
+leur code, jamais par leur message.
+
+| `FlatpakErrorCode` | Signification |
+| --- | --- |
+| `Unsupported` | Pas sous Linux, ou le pont natif n'a pas pu se charger |
+| `NotFlatpak` | Le processus tourne hors d'un bac à sable Flatpak |
+| `PortalMissing` | Pas de portail Flatpak en version 2 ou plus, ou pas de portail Access pour son dialogue de mise à jour |
+| `UpdateDenied` | L'utilisateur a répondu **Refuser** au dialogue « Mettre à jour … ? ». Flatpak s'en souvient ; l'utilisateur le change dans les réglages de confidentialité du bureau (GNOME : **Applications**, la page de l'application) |
+| `NewPermissionsRequired` | La nouvelle version demande des permissions que l'installée n'a pas : seuls le store ou `flatpak update` peuvent les accorder |
+| `InProgress` | `install()` tourne déjà dans ce processus |
+| `Platform` | Toute autre erreur du portail ; voir `portalError` |
+| `Internal` | Un bug du module ou de son pont natif |
+
+## Journalisation
+
+Le module journalise via `java.util.logging` sous `dev.nucleusframework.flatpak`. Montez le niveau
+de ce logger, ou activez `allowNucleusRuntimeLogging = true`
+(`dev.nucleusframework.core.runtime.tools`).
+
+<Callout title="flatpak { } n'est pas Flathub">
+`linux { flatpak { } }` construit un bundle `.flatpak` en un seul fichier via electron-builder,
+pour une installation manuelle. Flathub n'accepte pas les bundles : il construit depuis un
+manifeste, que `linux { flathub { } }` écrit. Les deux blocs sont indépendants.
+</Callout>

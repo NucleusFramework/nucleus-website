@@ -1,0 +1,258 @@
+---
+title: Publish on Flathub
+description: "Take a closed-source Nucleus app to Flathub: publish its tar.gz, describe it with linux { flathub { } }, generate its repository, test it with Flathub's own checks, submit it, verify the app id, and ship updates."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+This page takes a Nucleus app from a GitHub release to a Flathub listing, as the Lab went through
+it. Flathub compiles nothing: the manifest the plugin writes downloads your released `tar.gz` and
+installs it unchanged, so your source stays closed.
+
+You need:
+
+- A place that serves your releases at stable URLs, such as GitHub releases.
+- A domain or a code-hosting account you control, for the app id.
+- A GitHub account, to fork Flathub's repository.
+- `flatpak` on a Linux machine, with the Flathub remote, to test the build:
+
+```shell
+flatpak install --user flathub org.flatpak.Builder
+```
+
+## Choose the app id
+
+The app id is the reverse DNS of something you control, plus the app's name:
+`dev.nucleusframework.Lab` for the domain `nucleusframework.dev`, `io.github.<user>.<App>` for a
+GitHub account. Flathub verifies it against that domain or account, and it never changes once the
+app is published: pick it carefully.
+
+## Publish the tar.gz
+
+Add `TargetFormat.Tar` to the formats your release builds on Linux:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.Tar /* , your other formats */)
+    }
+}
+```
+
+| Task | Archive |
+| --- | --- |
+| `packageTar` | The JVM app, in `build/compose/binaries/main/tar.gz/` |
+| `packageGraalvmTar` | The GraalVM native image, in `build/compose/binaries/main/graalvm-tar.gz/` |
+
+The archive is named `<packageName>-<version>-linux-<arch>.tar.gz`, with `x64` or `arm64`. A
+runner builds its own architecture: build on an x64 and an ARM64 Linux runner (`ubuntu-latest`,
+`ubuntu-24.04-arm`) and attach both archives to the release. Flathub builds both architectures by
+default; to ship x64 only, set `arches = setOf(FlathubArch.X86_64)` below.
+
+## Describe the app
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        linux {
+            flathub {
+                appId = "com.example.Editor"
+                summary = "Edit example documents"
+                projectLicense = "LicenseRef-proprietary"
+                archiveUrl =
+                    "https://github.com/example/editor/releases/download/v{version}/editor-{version}-linux-{arch}.tar.gz"
+                categories = listOf("Office")
+                keywords = listOf("editor", "documents")
+                bugtrackerUrl = "https://github.com/example/editor/issues"
+                brandingLight = "#c7d0f0"
+                brandingDark = "#242d55"
+                iconFile.set(project.file("packaging/flathub/com.example.Editor.png"))
+                screenshot(
+                    "https://raw.githubusercontent.com/example/editor/v1.4.0/packaging/flathub/main.png",
+                    "The main window",
+                )
+            }
+        }
+    }
+}
+```
+
+- **`archiveUrl`**: `{version}` becomes the package version, `{arch}` becomes `x64` or `arm64`.
+- **`summary`**: one line under the name in the store, 35 characters at most, no trailing period.
+- **`projectLicense`**: an SPDX id, or `LicenseRef-proprietary` for a closed-source app.
+- **`iconFile`**: a square PNG of 256 px or more. Default: `linux.iconFile`.
+- **`screenshot()`**: public URLs that stay up. Flathub mirrors them at build time. Pointing them
+  at a release tag, as above, keeps each version's screenshots.
+- **`finishArgs`**: the sandbox permissions. The default gives a Tao window what it needs
+  (`ipc`, `wayland`, `fallback-x11`, `dri`). Add what your app uses, such as `--share=network`,
+  and nothing more: reviewers ask about every permission.
+- **`runtime`**: keep `org.gnome.Platform`. Tao links GTK 3, which only the GNOME runtime carries.
+
+The rest comes from the DSL you already have: the name, the description
+(`nativeDistributions.description`, or `flathub { description }`), the vendor as developer name,
+the homepage, `fileAssociation()` as MIME types and `protocol()` as URL schemes.
+
+## Generate the repository
+
+```shell
+./gradlew :app:generateFlathubRepository
+```
+
+The task downloads each archive once to hash it, so run it after the release is published. It
+writes `build/flathub/<appId>/`, the content of the app's future Flathub repository:
+
+| File | Content |
+| --- | --- |
+| `<appId>.yml` | The manifest: the runtime, the permissions, the archives and their SHA-256 |
+| `<appId>.metainfo.xml` | The store listing: summary, description, screenshots, release, branding |
+| `<appId>.desktop`, `<appId>.png` | The desktop entry and the icon |
+| `<appId>.mime.xml` | The file types, when the app declares `fileAssociation()` |
+| `flathub.json` | The architectures, when the app ships only some |
+
+Before writing, the task checks what Flathub would refuse (an app id that is not reverse DNS, a
+summary too long, a missing license or screenshot, a malformed branding color, a small icon) and
+fails with every problem at once.
+
+| Property | Effect |
+| --- | --- |
+| `-Pnucleus.flathub.outputDir=<dir>` | Writes there instead, for example into a clone of Flathub's repository. Only the generated files are replaced; `.git` and your own files stay |
+| `-Pnucleus.flathub.localArchive=<tar.gz>` | Uses a local archive instead of downloading one, for the host's architecture only |
+| `-Pnucleus.flathub.releaseDate=YYYY-MM-DD` | The release date in the metainfo. Default: today, UTC |
+
+## Test it locally
+
+Build and lint the generated repository the way Flathub's CI does, with the builder Flathub
+publishes. Run from the generated directory:
+
+```shell
+cd app/build/flathub/com.example.Editor
+flatpak run --filesystem="$PWD" --share=network --command=flathub-build \
+  org.flatpak.Builder com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable manifest com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable repo repo
+```
+
+`REPO` matters: the linter applies the rules for new submissions only when it points at
+`flathub/flathub`. Without it, a lint passes builds the CI refuses.
+
+Then install the build and run it like a user would:
+
+```shell
+flatpak remote-add --user --no-gpg-verify editor-test "$PWD/repo"
+flatpak install --user editor-test com.example.Editor
+flatpak run com.example.Editor
+```
+
+<Callout title="Before the release exists">
+To try the sandbox on a build of your machine, pass
+`-Pnucleus.flathub.localArchive=app/build/compose/binaries/main/graalvm-tar.gz/<archive>.tar.gz`
+and build with plain `flatpak-builder --user --install-deps-from=flathub --force-clean
+--install build com.example.Editor.yml`. The lint still needs reachable screenshots.
+</Callout>
+
+## Ship a pre-release version
+
+Flathub's stable remote refuses a release whose version contains `alpha`, `beta`, `rc`, `pre` or
+`dev` (`appstream-latest-release-is-prerelease`, a rule with no exception), and
+`generateFlathubRepository` refuses it first. Give the store a version of its own; the archive
+URL keeps the package version:
+
+```kotlin title="build.gradle.kts"
+flathub {
+    releaseVersion = "2026.11.01" // the Lab dates its dev builds this way
+}
+```
+
+The `beta` channel accepts pre-releases, but only once the app is published.
+
+## Submit the app
+
+Flathub's review happens in a pull request on [flathub/flathub](https://github.com/flathub/flathub),
+against its `new-pr` branch.
+
+1. Fork `flathub/flathub` with all its branches, clone the fork, and start from `new-pr`:
+
+   ```shell
+   gh repo fork flathub/flathub --clone
+   cd flathub
+   git checkout --track origin/new-pr
+   git checkout -b add-com.example.Editor
+   ```
+
+2. Generate the repository into the clone, then commit and push:
+
+   ```shell
+   ./gradlew -p ~/editor :app:generateFlathubRepository -Pnucleus.flathub.outputDir="$PWD"
+   git add .
+   git commit -m "Add com.example.Editor"
+   git push -u origin add-com.example.Editor
+   ```
+
+3. Open the pull request against `new-pr`, titled `Add com.example.Editor`. Fill in the template:
+   its checklist, and a link to a short video of the app running.
+
+<Callout type="warn" title="Write the submission yourself">
+Flathub's policy forbids AI tools from opening or automating submission pull requests, and from
+writing their description, commit messages or replies to reviewers. Write those yourself.
+</Callout>
+
+## Verify the app id
+
+Within an hour, a bot comments with the domain it verifies the app id against. For
+`dev.nucleusframework.Lab` it asked for an empty file at:
+
+```text
+https://nucleusframework.dev/.well-known/org.flathub.VerifiedApps.txt
+```
+
+Serve it over HTTPS with status 200. On a Next.js site, an empty
+`public/.well-known/org.flathub.VerifiedApps.txt` does it. An app id under `io.github.<user>` is
+verified through the GitHub account instead. See Flathub's
+[verification guide](https://docs.flathub.org/docs/for-app-authors/verification).
+
+## Pass the test build
+
+The bot then builds the submission for both architectures. A failure links to the build log; fix
+the issue, push to the same branch, and comment `bot, build` to start again. A success gives an
+install command for the test repository and a preview of the store page:
+
+```shell
+flatpak install --user https://dl.flathub.org/build-repo/<build>/com.example.Editor.flatpakref
+```
+
+Install it, check the listing, then wait for a reviewer. Answer their comments in the pull request
+and push the fixes to the same branch.
+
+## Ship updates
+
+Once the submission is merged, Flathub creates `github.com/flathub/<appId>` with your files and
+gives you write access; the app appears on Flathub after its first build there. For each version:
+
+1. Publish the new release with its archives.
+2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs, their hashes and
+   the metainfo release:
+
+   ```shell
+   ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
+   ```
+
+3. Push a branch and open a pull request. Flathub test-builds it, and merging it publishes the
+   update.
+
+Installed copies update through GNOME Software, KDE Discover or `flatpak update`. Your app can also
+install the update itself with [`Flatpak.updates`](/docs/flathub/updates).
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| `appstream-latest-release-is-prerelease` in the CI | A release version with `alpha`, `beta`, `rc`, `pre` or `dev`. See [Ship a pre-release version](#ship-a-pre-release-version) |
+| The local lint passes, the CI fails | The lint ran without `REPO=https://github.com/flathub/flathub` |
+| `appstream-screenshots-not-mirrored-in-ostree` | The repository was built with plain `flatpak-builder`. Lint a `flathub-build` repository |
+| The lint fails on TLS behind a corporate proxy | The builder's sandbox does not see the host's certificates. Add `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
+| `flathub-build` fails on `rofiles-fuse` | FUSE does not work inside the sandbox on this machine. Add `--disable-rofiles-fuse` |
+| The window has no minimize or maximize button | Nucleus older than `3.0.0`: GSettings inside a Flatpak does not see the host's `button-layout`. Update Nucleus |

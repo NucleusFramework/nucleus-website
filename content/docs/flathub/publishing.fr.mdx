@@ -1,0 +1,267 @@
+---
+title: Publier sur Flathub
+description: "Amenez une application Nucleus au code fermé sur Flathub : publiez son tar.gz, décrivez-la avec linux { flathub { } }, générez son dépôt, testez-le avec les contrôles de Flathub, soumettez-la, vérifiez l'id de l'application et livrez les mises à jour."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Cette page mène une application Nucleus d'une release GitHub à une fiche Flathub, en suivant le
+parcours du Lab. Flathub ne compile rien : le manifeste que le plugin écrit télécharge votre
+`tar.gz` publié et l'installe tel quel, et votre code reste fermé.
+
+Il vous faut :
+
+- Un endroit qui sert vos releases à des URL stables, comme les releases GitHub.
+- Un domaine ou un compte d'hébergement de code que vous contrôlez, pour l'id de l'application.
+- Un compte GitHub, pour forker le dépôt de Flathub.
+- `flatpak` sur une machine Linux, avec le dépôt distant Flathub, pour tester le build :
+
+```shell
+flatpak install --user flathub org.flatpak.Builder
+```
+
+## Choisir l'id de l'application
+
+L'id est le DNS inversé de quelque chose que vous contrôlez, suivi du nom de l'application :
+`dev.nucleusframework.Lab` pour le domaine `nucleusframework.dev`, `io.github.<user>.<App>` pour
+un compte GitHub. Flathub le vérifie auprès de ce domaine ou de ce compte, et il ne change plus une
+fois l'application publiée : choisissez-le avec soin.
+
+## Publier le tar.gz
+
+Ajoutez `TargetFormat.Tar` aux formats que votre release construit sous Linux :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.Tar /* , vos autres formats */)
+    }
+}
+```
+
+| Tâche | Archive |
+| --- | --- |
+| `packageTar` | L'application JVM, dans `build/compose/binaries/main/tar.gz/` |
+| `packageGraalvmTar` | L'image native GraalVM, dans `build/compose/binaries/main/graalvm-tar.gz/` |
+
+L'archive s'appelle `<packageName>-<version>-linux-<arch>.tar.gz`, avec `x64` ou `arm64`. Un
+runner construit sa propre architecture : construisez sur un runner Linux x64 et un runner ARM64
+(`ubuntu-latest`, `ubuntu-24.04-arm`) et joignez les deux archives à la release. Flathub construit
+les deux architectures par défaut ; pour ne livrer que x64, réglez
+`arches = setOf(FlathubArch.X86_64)` ci-dessous.
+
+## Décrire l'application
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        linux {
+            flathub {
+                appId = "com.example.Editor"
+                summary = "Edit example documents"
+                projectLicense = "LicenseRef-proprietary"
+                archiveUrl =
+                    "https://github.com/example/editor/releases/download/v{version}/editor-{version}-linux-{arch}.tar.gz"
+                categories = listOf("Office")
+                keywords = listOf("editor", "documents")
+                bugtrackerUrl = "https://github.com/example/editor/issues"
+                brandingLight = "#c7d0f0"
+                brandingDark = "#242d55"
+                iconFile.set(project.file("packaging/flathub/com.example.Editor.png"))
+                screenshot(
+                    "https://raw.githubusercontent.com/example/editor/v1.4.0/packaging/flathub/main.png",
+                    "The main window",
+                )
+            }
+        }
+    }
+}
+```
+
+- **`archiveUrl`** : `{version}` devient la version du package, `{arch}` devient `x64` ou
+  `arm64`.
+- **`summary`** : une ligne sous le nom dans le store, 35 caractères au plus, sans point final.
+- **`projectLicense`** : un identifiant SPDX, ou `LicenseRef-proprietary` pour une application au
+  code fermé.
+- **`iconFile`** : un PNG carré de 256 px ou plus. Par défaut : `linux.iconFile`.
+- **`screenshot()`** : des URL publiques qui restent en ligne. Flathub les copie au moment du
+  build. Les faire pointer vers un tag de release, comme ci-dessus, garde les captures de chaque
+  version.
+- **`finishArgs`** : les permissions du bac à sable. Le défaut donne à une fenêtre Tao ce dont
+  elle a besoin (`ipc`, `wayland`, `fallback-x11`, `dri`). Ajoutez ce que votre application
+  utilise, comme `--share=network`, et rien de plus : les relecteurs interrogent chaque
+  permission.
+- **`runtime`** : gardez `org.gnome.Platform`. Tao lie GTK 3, que seul le runtime GNOME embarque.
+
+Le reste vient du DSL que vous avez déjà : le nom, la description
+(`nativeDistributions.description`, ou `flathub { description }`), le vendor comme nom de
+développeur, la page d'accueil, `fileAssociation()` comme types MIME et `protocol()` comme
+schémas d'URL.
+
+## Générer le dépôt
+
+```shell
+./gradlew :app:generateFlathubRepository
+```
+
+La tâche télécharge chaque archive une fois pour la hacher : lancez-la une fois la release
+publiée. Elle écrit `build/flathub/<appId>/`, le contenu du futur dépôt Flathub de l'application :
+
+| Fichier | Contenu |
+| --- | --- |
+| `<appId>.yml` | Le manifeste : le runtime, les permissions, les archives et leur SHA-256 |
+| `<appId>.metainfo.xml` | La fiche du store : résumé, description, captures, release, couleurs |
+| `<appId>.desktop`, `<appId>.png` | L'entrée de bureau et l'icône |
+| `<appId>.mime.xml` | Les types de fichiers, quand l'application déclare `fileAssociation()` |
+| `flathub.json` | Les architectures, quand l'application n'en livre qu'une partie |
+
+Avant d'écrire, la tâche vérifie ce que Flathub refuserait (un id qui n'est pas un DNS inversé, un
+résumé trop long, une licence ou une capture manquante, une couleur mal formée, une icône trop
+petite) et échoue avec tous les problèmes d'un coup.
+
+| Propriété | Effet |
+| --- | --- |
+| `-Pnucleus.flathub.outputDir=<dir>` | Écrit là à la place, par exemple dans un clone du dépôt de Flathub. Seuls les fichiers générés sont remplacés ; `.git` et vos propres fichiers restent |
+| `-Pnucleus.flathub.localArchive=<tar.gz>` | Utilise une archive locale au lieu de la télécharger, pour l'architecture de la machine uniquement |
+| `-Pnucleus.flathub.releaseDate=YYYY-MM-DD` | La date de la release dans la metainfo. Par défaut : aujourd'hui, en UTC |
+
+## Le tester en local
+
+Construisez et vérifiez le dépôt généré comme la CI de Flathub, avec le builder que Flathub
+publie. Depuis le dossier généré :
+
+```shell
+cd app/build/flathub/com.example.Editor
+flatpak run --filesystem="$PWD" --share=network --command=flathub-build \
+  org.flatpak.Builder com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable manifest com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable repo repo
+```
+
+`REPO` compte : le linter n'applique les règles des nouvelles soumissions que lorsqu'il pointe vers
+`flathub/flathub`. Sans lui, un lint laisse passer des builds que la CI refuse.
+
+Installez ensuite le build et lancez-le comme un utilisateur :
+
+```shell
+flatpak remote-add --user --no-gpg-verify editor-test "$PWD/repo"
+flatpak install --user editor-test com.example.Editor
+flatpak run com.example.Editor
+```
+
+<Callout title="Avant que la release existe">
+Pour essayer le bac à sable sur un build de votre machine, passez
+`-Pnucleus.flathub.localArchive=app/build/compose/binaries/main/graalvm-tar.gz/<archive>.tar.gz`
+et construisez avec `flatpak-builder --user --install-deps-from=flathub --force-clean
+--install build com.example.Editor.yml`. Le lint a quand même besoin de captures accessibles.
+</Callout>
+
+## Livrer une préversion
+
+Le dépôt stable de Flathub refuse une release dont la version contient `alpha`, `beta`, `rc`,
+`pre` ou `dev` (`appstream-latest-release-is-prerelease`, une règle sans exception), et
+`generateFlathubRepository` la refuse avant lui. Donnez au store une version à part ; l'URL de
+l'archive garde la version du package :
+
+```kotlin title="build.gradle.kts"
+flathub {
+    releaseVersion = "2026.11.01" // le Lab date ainsi ses builds dev
+}
+```
+
+Le canal `beta` accepte les préversions, mais seulement une fois l'application publiée.
+
+## Soumettre l'application
+
+La relecture de Flathub se fait dans une pull request sur
+[flathub/flathub](https://github.com/flathub/flathub), vers sa branche `new-pr`.
+
+1. Forkez `flathub/flathub` avec toutes ses branches, clonez le fork et partez de `new-pr` :
+
+   ```shell
+   gh repo fork flathub/flathub --clone
+   cd flathub
+   git checkout --track origin/new-pr
+   git checkout -b add-com.example.Editor
+   ```
+
+2. Générez le dépôt dans le clone, puis commitez et poussez :
+
+   ```shell
+   ./gradlew -p ~/editor :app:generateFlathubRepository -Pnucleus.flathub.outputDir="$PWD"
+   git add .
+   git commit -m "Add com.example.Editor"
+   git push -u origin add-com.example.Editor
+   ```
+
+3. Ouvrez la pull request vers `new-pr`, intitulée `Add com.example.Editor`. Remplissez le
+   modèle : sa checklist, et le lien d'une courte vidéo de l'application en marche.
+
+<Callout type="warn" title="Rédigez la soumission vous-même">
+La politique de Flathub interdit aux outils d'IA d'ouvrir ou d'automatiser les pull requests de
+soumission, et d'en rédiger la description, les messages de commit ou les réponses aux relecteurs.
+Écrivez-les vous-même.
+</Callout>
+
+## Vérifier l'id de l'application
+
+Dans l'heure, un bot indique en commentaire le domaine sur lequel il vérifie l'id. Pour
+`dev.nucleusframework.Lab`, il a demandé un fichier vide à cette adresse :
+
+```text
+https://nucleusframework.dev/.well-known/org.flathub.VerifiedApps.txt
+```
+
+Servez-le en HTTPS avec le statut 200. Sur un site Next.js, un fichier vide
+`public/.well-known/org.flathub.VerifiedApps.txt` suffit. Un id sous `io.github.<user>` se vérifie
+par le compte GitHub. Voir le
+[guide de vérification](https://docs.flathub.org/docs/for-app-authors/verification) de Flathub.
+
+## Passer le build de test
+
+Le bot construit ensuite la soumission pour les deux architectures. Un échec renvoie au journal du
+build ; corrigez, poussez sur la même branche et commentez `bot, build` pour relancer. Un succès
+donne une commande d'installation depuis le dépôt de test et un aperçu de la page du store :
+
+```shell
+flatpak install --user https://dl.flathub.org/build-repo/<build>/com.example.Editor.flatpakref
+```
+
+Installez-la, vérifiez la fiche, puis attendez un relecteur. Répondez à ses commentaires dans la
+pull request et poussez les corrections sur la même branche.
+
+## Livrer les mises à jour
+
+Une fois la soumission fusionnée, Flathub crée `github.com/flathub/<appId>` avec vos fichiers et
+vous y donne l'accès en écriture ; l'application apparaît sur Flathub après son premier build.
+Pour chaque version :
+
+1. Publiez la nouvelle release avec ses archives.
+2. Clonez `flathub/<appId>` et générez dedans, ce qui met à jour les URL des archives, leurs hachés
+   et la release de la metainfo :
+
+   ```shell
+   ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
+   ```
+
+3. Poussez une branche et ouvrez une pull request. Flathub la construit en test, et la fusionner
+   publie la mise à jour.
+
+Les copies installées se mettent à jour via GNOME Logiciels, KDE Discover ou `flatpak update`.
+Votre application peut aussi installer la mise à jour elle-même avec
+[`Flatpak.updates`](/docs/flathub/updates).
+
+## Dépannage
+
+| Symptôme | Cause |
+| --- | --- |
+| `appstream-latest-release-is-prerelease` dans la CI | Une version de release avec `alpha`, `beta`, `rc`, `pre` ou `dev`. Voir [Livrer une préversion](#livrer-une-préversion) |
+| Le lint local passe, la CI échoue | Le lint a tourné sans `REPO=https://github.com/flathub/flathub` |
+| `appstream-screenshots-not-mirrored-in-ostree` | Le dépôt a été construit avec `flatpak-builder` seul. Vérifiez un dépôt `flathub-build` |
+| Le lint échoue en TLS derrière un proxy d'entreprise | Le bac à sable du builder ne voit pas les certificats de la machine. Ajoutez `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
+| `flathub-build` échoue sur `rofiles-fuse` | FUSE ne marche pas dans le bac à sable sur cette machine. Ajoutez `--disable-rofiles-fuse` |
+| La fenêtre n'a pas de bouton réduire ni agrandir | Nucleus antérieur à `3.0.0` : GSettings dans un Flatpak ne voit pas le `button-layout` de la machine. Mettez Nucleus à jour |

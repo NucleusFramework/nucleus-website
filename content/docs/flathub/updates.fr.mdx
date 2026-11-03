@@ -1,0 +1,103 @@
+---
+title: Mises à jour de l'application
+description: Suivez le dépôt Flatpak d'une application Nucleus, installez une version plus récente depuis l'application avec sa progression, redémarrez dessus, et envoyez l'utilisateur au store quand la mise à jour demande de nouvelles permissions.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+GNOME Logiciels et KDE Discover mettent les Flatpaks à jour en arrière-plan, à leur rythme.
+`Flatpak.updates` installe une version plus récente depuis l'application, via le portail Flatpak,
+pour n'importe quel dépôt distant : Flathub, le vôtre, ou un dépôt de test local.
+
+L'[updater Nucleus](/docs/packaging/auto-update) ne s'applique pas aux installations Flatpak :
+`isUpdateSupported()` y vaut `false`.
+
+## Suivre le dépôt distant
+
+```kotlin
+import dev.nucleusframework.flatpak.Flatpak
+import dev.nucleusframework.flatpak.FlatpakUpdateStatus
+
+Flatpak.updates.status.collect { status ->
+    when (status) {
+        is FlatpakUpdateStatus.Available -> offerUpdate()
+        is FlatpakUpdateStatus.Installed -> offerRestart()
+        is FlatpakUpdateStatus.UpToDate -> Unit
+    }
+}
+```
+
+| Statut | Signification |
+| --- | --- |
+| `Available` | Le dépôt distant a un commit plus récent que celui installé |
+| `Installed` | Un commit plus récent est installé, par `install()`, le store ou `flatpak update`, mais ce processus exécute l'ancien |
+| `UpToDate` | Ce processus exécute le dernier commit du dépôt distant |
+
+Chaque statut porte les commits OSTree : `runningCommit`, et `installedCommit` / `remoteCommit`
+quand ils diffèrent.
+
+<Callout type="warn" title="Pas de vérification immédiate">
+Le portail n'a pas de « vérifier maintenant ». Il vérifie toutes les applications sur un même
+minuteur, toutes les 30 minutes, et le premier statut arrive au premier tic après le début de la
+collecte : jusqu'à 30 minutes plus tard. Ensuite, il ne signale que les changements de commit.
+Collectez `status` pendant toute la vie de l'application, pas derrière un bouton.
+</Callout>
+
+Chaque collecte lance son propre moniteur, fermé à la fin de la collecte.
+
+## L'installer
+
+```kotlin
+import dev.nucleusframework.flatpak.FlatpakUpdateState
+
+Flatpak.updates
+    .install(parent) // une FlatpakParentWindow, voir la page Flathub
+    .collect { progress ->
+        when (progress.state) {
+            FlatpakUpdateState.Installing -> showProgress(progress.progress) // 0.0 à 1.0
+            FlatpakUpdateState.Completed -> offerRestart()
+            FlatpakUpdateState.UpToDate -> Unit // rien à installer
+        }
+    }
+```
+
+- La première installation affiche le dialogue « Mettre à jour … ? » du portail au-dessus de
+  `parent`. Flatpak retient la réponse : après **Refuser**, cette installation et toutes les
+  suivantes échouent avec `FlatpakErrorCode.UpdateDenied`.
+- `progress` couvre toute la mise à jour. Une mise à jour peut aussi tirer un runtime ou une
+  extension, chacun étant une opération : `operation` compte à partir de `0` sur
+  `operationCount`.
+- Le flow se termine après `Completed` ou `UpToDate`. Annuler la collecte annule la mise à jour.
+- Une nouvelle version qui demande plus de permissions échoue avec
+  `FlatpakErrorCode.NewPermissionsRequired` : seul le store peut les accorder.
+  [Envoyez l'utilisateur au store](#envoyer-lutilisateur-au-store).
+
+## Redémarrer dessus
+
+Le processus continue d'exécuter l'ancienne version après `install()`, et après une mise à jour
+par le store (`Installed`). `restart()` lance la nouvelle et quitte :
+
+```kotlin
+Flatpak.updates.restart()
+```
+
+Le nouveau processus reçoit les arguments de celui-ci, ou ceux que vous passez. Nucleus transmet
+d'abord le verrou d'instance unique, pour que le nouveau processus ne prenne pas l'ancien pour une
+instance en cours. Si le portail refuse de le lancer, `restart()` lève une exception et ce
+processus continue.
+
+## Envoyer l'utilisateur au store
+
+```kotlin
+Flatpak.updates.openStorePage(parent)
+```
+
+`openStorePage()` ouvre `appstream://<app id>` dans le store du bureau, GNOME Logiciels ou
+Discover, où l'utilisateur met l'application à jour, nouvelles permissions comprises.
+
+<Callout title="Tester sans publier">
+Construisez deux versions dans un dépôt local et installez la première : la seconde en est une mise
+à jour. Relancez le portail avec `/usr/libexec/flatpak-portal --replace --poll-timeout=10` pour
+obtenir un statut toutes les 10 secondes au lieu de 30 minutes. Voir
+[Le tester en local](/docs/flathub/publishing#le-tester-en-local).
+</Callout>

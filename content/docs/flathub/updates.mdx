@@ -1,0 +1,99 @@
+---
+title: App updates
+description: Follow a Nucleus app's Flatpak remote for a newer version, install it from inside the app with progress, restart into it, and send the user to the store when the update needs new permissions.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+GNOME Software and KDE Discover update Flatpaks in the background, on their own schedule.
+`Flatpak.updates` installs a newer version from inside the app, through the Flatpak portal, for
+any remote: Flathub, your own, or a local test repository.
+
+The [Nucleus updater](/docs/packaging/auto-update) does not apply to Flatpak installs:
+`isUpdateSupported()` is `false` there.
+
+## Follow the remote
+
+```kotlin
+import dev.nucleusframework.flatpak.Flatpak
+import dev.nucleusframework.flatpak.FlatpakUpdateStatus
+
+Flatpak.updates.status.collect { status ->
+    when (status) {
+        is FlatpakUpdateStatus.Available -> offerUpdate()
+        is FlatpakUpdateStatus.Installed -> offerRestart()
+        is FlatpakUpdateStatus.UpToDate -> Unit
+    }
+}
+```
+
+| Status | Meaning |
+| --- | --- |
+| `Available` | The remote has a newer commit than the installed one |
+| `Installed` | A newer commit is installed, by `install()`, the store or `flatpak update`, but this process runs the old one |
+| `UpToDate` | This process runs the remote's latest commit |
+
+Each status carries the OSTree commits: `runningCommit`, and `installedCommit` / `remoteCommit`
+where they differ.
+
+<Callout type="warn" title="No check now">
+The portal has no "check now". It checks every app on one timer, every 30 minutes, and the first
+status arrives on the first tick after you start collecting: up to 30 minutes later. Then it
+reports only when a commit changes. Collect `status` for the life of the app, not behind a button.
+</Callout>
+
+Each collection runs a monitor of its own, closed when the collection ends.
+
+## Install it
+
+```kotlin
+import dev.nucleusframework.flatpak.FlatpakUpdateState
+
+Flatpak.updates
+    .install(parent) // a FlatpakParentWindow, see the Flathub page
+    .collect { progress ->
+        when (progress.state) {
+            FlatpakUpdateState.Installing -> showProgress(progress.progress) // 0.0 to 1.0
+            FlatpakUpdateState.Completed -> offerRestart()
+            FlatpakUpdateState.UpToDate -> Unit // nothing to install
+        }
+    }
+```
+
+- The first install shows the portal's "Update …?" dialog over `parent`. Flatpak remembers the
+  answer: after **Deny**, this and every later install fail with `FlatpakErrorCode.UpdateDenied`.
+- `progress` covers the whole update. An update may also pull a runtime or an extension, each its
+  own operation: `operation` counts from `0` out of `operationCount`.
+- The flow completes after `Completed` or `UpToDate`. Cancelling the collection cancels the
+  update.
+- A new version that asks for more permissions fails with
+  `FlatpakErrorCode.NewPermissionsRequired`: only the store may grant them.
+  [Send the user there](#send-the-user-to-the-store).
+
+## Restart into it
+
+The process keeps running the old version after `install()`, and after the store updated it
+(`Installed`). `restart()` starts the new one and exits:
+
+```kotlin
+Flatpak.updates.restart()
+```
+
+The new process gets this process's arguments, or the ones you pass. Nucleus hands the
+single-instance lock over first, so the new process does not take the old one for a running
+instance. If the portal refuses to start it, `restart()` throws and this process runs on.
+
+## Send the user to the store
+
+```kotlin
+Flatpak.updates.openStorePage(parent)
+```
+
+`openStorePage()` opens `appstream://<app id>` in the desktop's store, GNOME Software or Discover,
+where the user updates the app, new permissions included.
+
+<Callout title="Test without publishing">
+Build two versions into a local repository and install the first: the second is an update of it.
+Restart the portal with `/usr/libexec/flatpak-portal --replace --poll-timeout=10` to get a status
+every 10 seconds instead of 30 minutes. See [Test it locally](/docs/flathub/publishing#test-it-locally).
+</Callout>
