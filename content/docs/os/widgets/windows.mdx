@@ -1,0 +1,118 @@
+---
+title: Windows widgets
+description: Show Nucleus widgets on the Windows 11 widgets board, with text entry, customization and web widgets.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-windows` hosts the [widget API](/docs/os/widgets) on the Windows 11 widgets board. It also
+binds `Microsoft.Windows.Widgets.Providers` (Windows App SDK) one to one, and adds what only the
+board offers: text and number entry, customization and web widgets.
+
+The board renders each widget as an Adaptive Card; your app is its COM provider.
+
+<Callout type="warn" title="AppX / MSIX only">
+Widgets need package identity: they work in the AppX / MSIX format only. In NSIS, MSI, portable
+and ZIP builds they are inert, with no error.
+</Callout>
+
+## Declare the widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        windows {
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    icon.set(file("widgets/icon.png"))
+                    preview.set(file("widgets/preview.png")) // 300 x 304, the medium widget
+                    customizable = true
+                }
+            }
+        }
+    }
+}
+```
+
+| Member | Notes |
+| --- | --- |
+| `windowsAppSdkVersion` | The Windows App SDK release the AppX depends on, `major.minor`. Default `"1.8"`, at least `"1.2"` |
+| `widget(id) { }` | The id `widgets { widget(id) { … } }` registers at run time. Letters, digits and `_` |
+| `displayName`, `description` | Shown in the board's picker |
+| `sizes` | `WindowsWidgetSize` values; all three by default |
+| `customizable` | Adds *Customize widget* to the widget's menu |
+| `allowMultiple` | Whether the user may pin several instances. Default `true` |
+| `icon`, `preview` | Required. The preview is a static PNG of the medium widget |
+| `previewDark`, `previewLight` | Optional theme variants of the preview |
+| `webRequestFilter` | For a web widget: the requests of its page routed to `onWebRequest` |
+
+The plugin writes the whole AppX side: the widget definitions, the COM server, the Windows App SDK
+dependency and a CLSID derived from the package identity. Without a `widget(…)`, the AppX is
+unchanged. Test with `./gradlew runAppX`.
+
+## Text entry and customization
+
+```kotlin
+import dev.nucleusframework.widget.windows.NumberField
+import dev.nucleusframework.widget.windows.TextField
+import dev.nucleusframework.widget.windows.actionFinishCustomization
+import dev.nucleusframework.widget.windows.isCustomizing
+
+provideContent {
+    if (isCustomizing()) {
+        Column {
+            TextField(City, label = "City", placeholder = "Paris")
+            NumberField(Days, label = "Days", min = 1.0, max = 7.0)
+            Button("Done", onClick = actionFinishCustomization())
+        }
+    } else {
+        Forecast()
+    }
+}
+```
+
+- `TextField` and `NumberField` submit their value with the next action that runs app code; the
+  value is in the state when that action runs. Only fields the user changed are written, so a
+  value the app set after the card was drawn is not reverted.
+- `isCustomizing()` is `true` after *Customize widget*, until `actionFinishCustomization()` or
+  `WidgetStateHandle.finishCustomization()`. It survives a restart.
+
+These calls exist on Windows only: in shared code, keep them behind a Windows check.
+
+## Web widgets
+
+A widget that also implements `WindowsWebWidget` shows a web page where the board supports it;
+the composed content is the fallback elsewhere.
+
+```kotlin
+class NewsWidget : NucleusWidget(), WindowsWebWidget {
+    override suspend fun provideWidget(id: WidgetId) = provideContent { Text("Latest news") }
+
+    override fun webUrl(id: WidgetId, state: WidgetState) = "https://news.example.com/widget"
+
+    override suspend fun onWebMessage(id: WidgetId, message: String) {
+        sendWebWidgetMessage(id, "echo: $message")
+    }
+}
+```
+
+`onWebRequest` answers the page's requests that match the definition's `webRequestFilter`, so
+a page can be served by the app itself, with no network.
+
+## Process lifetime
+
+A click on an action while the app is closed makes the board start it through COM. The process
+stays windowless while `isWidgetHostOnly()` is `true`, and exits once no widget has been visible
+for its `idleExit`.
+
+## The `WidgetManager` API
+
+`WidgetManager.getDefault()` mirrors the Windows App SDK class: `getWidgetInfos()`,
+`updateWidget(…)`, `deleteWidget(id)`, `sendMessageToContent(id, message)`. Most apps never need
+it: the widget API drives it.
+
+<Callout type="info">
+An open board keeps an unpinned card on screen until it is reopened: Windows does not refresh it.
+</Callout>

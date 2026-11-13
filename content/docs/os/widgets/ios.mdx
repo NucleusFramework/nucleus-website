@@ -1,0 +1,122 @@
+---
+title: iOS widgets
+description: Show the same Nucleus widgets on the iOS home screen with WidgetKit, from a Kotlin Multiplatform app.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+`widget-ios` hosts the [widget API](/docs/os/widgets) on the iOS home screen with WidgetKit
+(iOS 17 and later). It is a Kotlin Multiplatform module (`iosArm64`, `iosSimulatorArm64`), and it
+binds WidgetKit's app-side API one to one: `WidgetCenter` and `ControlCenter` (iOS 18).
+
+An iOS app does not run in the background, so the widgets compose **inside the widget
+extension**: it links your Kotlin framework and runs your widget code for every render and every
+click. The app is never started for a widget.
+
+## Set up the framework
+
+Your shared module's framework must export `widget-ios`: the extension finds its entry points by
+name.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    listOf(iosArm64(), iosSimulatorArm64()).forEach {
+        it.binaries.framework {
+            baseName = "Shared"
+            export("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+    sourceSets {
+        iosMain.dependencies {
+            api("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+}
+```
+
+Declare the widgets in Kotlin; the app and the extension both call this function first:
+
+```kotlin title="shared/src/iosMain/kotlin/Widgets.kt"
+fun startWidgets() = startIosWidgets {
+    widget("Counter") { CounterWidget() }
+}
+```
+
+## Set up Xcode
+
+<Steps>
+<Step>
+
+### Share an App Group
+
+Add the same App Group capability to the app and the widget extension, and its id under
+`NucleusWidgetsAppGroup` in both `Info.plist` files (or pass it to
+`startIosWidgets(appGroup = …)`). The widget state lives there.
+
+</Step>
+<Step>
+
+### Add the Swift sources
+
+From the Nucleus repository, add to the **widget extension** target:
+`widget-runtime/src/main/native/swiftui/NucleusWidgetUI.swift` (the renderer),
+`widget-ios/src/swift/NucleusWidgetKit.swift` and `widget-ios/src/swift/NucleusWidgetCenter.swift`.
+Add `NucleusWidgetCenter.swift` to the **app** target too: it is how Kotlin reaches WidgetKit,
+which is Swift-only.
+
+</Step>
+<Step>
+
+### Declare the widgets in Swift
+
+```swift
+import Shared
+import SwiftUI
+import WidgetKit
+
+@main
+struct AppWidgets: WidgetBundle {
+    init() { WidgetsKt.startWidgets() }
+
+    var body: some Widget {
+        NucleusWidget(kind: "Counter", displayName: "Counter", families: [.systemSmall, .systemMedium])
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Start the widgets in the app
+
+Call `WidgetsKt.startWidgets()` at launch, before the app touches a widget.
+
+</Step>
+</Steps>
+
+## Update a widget from the app
+
+The app changes the state like on desktop, then reloads the widget; the extension composes it
+again from the new state:
+
+```kotlin
+updateWidgetState(WidgetId("Counter/systemSmall")) { it[Count] = 42 }
+CounterWidget().update(WidgetId("Counter/systemSmall"))
+```
+
+A widget id is `<kind>/<family>`: WidgetKit gives no instance identity without a configuration
+intent, so two widgets of the same kind and size share their state.
+
+<Callout type="info">
+The simulator runs widget clicks in any build. On a device, as on macOS, an AppIntent runs only in
+an app signed with a Team ID.
+</Callout>
+
+## The WidgetKit API
+
+`WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()`, `currentConfigurations()`,
+`invalidateConfigurationRecommendations()` and `invalidateRelevance(kind)`, and
+`ControlCenter.reloadControls(kind)`, `reloadAllControls()` and `currentControls()`. They block
+until WidgetKit answers: call them off the main thread. Without `NucleusWidgetCenter.swift` in the
+target, `WidgetCenter.isAvailable` is `false` and the calls do nothing.

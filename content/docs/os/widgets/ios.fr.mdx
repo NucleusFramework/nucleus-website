@@ -1,0 +1,125 @@
+---
+title: Widgets iOS
+description: Affichez les mêmes widgets Nucleus sur l'écran d'accueil iOS avec WidgetKit, depuis une app Kotlin Multiplatform.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+`widget-ios` héberge l'[API widget](/docs/os/widgets) sur l'écran d'accueil iOS avec WidgetKit
+(iOS 17 et plus). C'est un module Kotlin Multiplatform (`iosArm64`, `iosSimulatorArm64`), qui
+expose aussi l'API de WidgetKit côté app en un pour un : `WidgetCenter` et `ControlCenter`
+(iOS 18).
+
+Une app iOS ne tourne pas en arrière-plan, donc les widgets se composent **dans l'extension de
+widget** : elle embarque votre framework Kotlin et exécute votre code de widget à chaque rendu et à
+chaque clic. L'app n'est jamais lancée pour un widget.
+
+## Configurer le framework
+
+Le framework de votre module partagé doit exporter `widget-ios` : l'extension trouve ses points
+d'entrée par leur nom.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    listOf(iosArm64(), iosSimulatorArm64()).forEach {
+        it.binaries.framework {
+            baseName = "Shared"
+            export("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+    sourceSets {
+        iosMain.dependencies {
+            api("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+}
+```
+
+Déclarez les widgets en Kotlin ; l'app et l'extension appellent toutes deux cette fonction en
+premier :
+
+```kotlin title="shared/src/iosMain/kotlin/Widgets.kt"
+fun startWidgets() = startIosWidgets {
+    widget("Counter") { CounterWidget() }
+}
+```
+
+## Configurer Xcode
+
+<Steps>
+<Step>
+
+### Partager un App Group
+
+Ajoutez la même capacité App Group à l'app et à l'extension de widget, et son identifiant sous
+`NucleusWidgetsAppGroup` dans les deux `Info.plist` (ou passez-le à
+`startIosWidgets(appGroup = …)`). L'état des widgets y est stocké.
+
+</Step>
+<Step>
+
+### Ajouter les sources Swift
+
+Depuis le dépôt Nucleus, ajoutez à la cible de l'**extension de widget** :
+`widget-runtime/src/main/native/swiftui/NucleusWidgetUI.swift` (le rendu),
+`widget-ios/src/swift/NucleusWidgetKit.swift` et `widget-ios/src/swift/NucleusWidgetCenter.swift`.
+Ajoutez aussi `NucleusWidgetCenter.swift` à la cible de l'**app** : c'est par lui que Kotlin
+atteint WidgetKit, qui n'existe qu'en Swift.
+
+</Step>
+<Step>
+
+### Déclarer les widgets en Swift
+
+```swift
+import Shared
+import SwiftUI
+import WidgetKit
+
+@main
+struct AppWidgets: WidgetBundle {
+    init() { WidgetsKt.startWidgets() }
+
+    var body: some Widget {
+        NucleusWidget(kind: "Counter", displayName: "Counter", families: [.systemSmall, .systemMedium])
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Démarrer les widgets dans l'app
+
+Appelez `WidgetsKt.startWidgets()` au lancement, avant que l'app ne touche à un widget.
+
+</Step>
+</Steps>
+
+## Mettre à jour un widget depuis l'app
+
+L'app modifie l'état comme sur desktop, puis recharge le widget ; l'extension le recompose à partir
+du nouvel état :
+
+```kotlin
+updateWidgetState(WidgetId("Counter/systemSmall")) { it[Count] = 42 }
+CounterWidget().update(WidgetId("Counter/systemSmall"))
+```
+
+Un identifiant de widget s'écrit `<kind>/<family>` : WidgetKit ne donne pas d'identité propre sans
+intent de configuration, donc deux widgets du même type et de la même taille partagent leur état.
+
+<Callout type="info">
+Le simulateur exécute les clics sur les widgets quelle que soit la build. Sur un appareil, comme
+sur macOS, un AppIntent ne s'exécute que dans une app signée avec un Team ID.
+</Callout>
+
+## L'API WidgetKit
+
+`WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()`, `currentConfigurations()`,
+`invalidateConfigurationRecommendations()` et `invalidateRelevance(kind)`, ainsi que
+`ControlCenter.reloadControls(kind)`, `reloadAllControls()` et `currentControls()`. Ces appels
+bloquent jusqu'à la réponse de WidgetKit : appelez-les hors du thread principal. Sans
+`NucleusWidgetCenter.swift` dans la cible, `WidgetCenter.isAvailable` vaut `false` et les appels
+ne font rien.

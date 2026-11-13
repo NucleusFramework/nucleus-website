@@ -1,0 +1,80 @@
+---
+title: macOS widgets
+description: Show Nucleus widgets on the macOS desktop and in Notification Center with WidgetKit, from a JVM or GraalVM app.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-macos` hosts the [widget API](/docs/os/widgets) with WidgetKit, on the desktop and in
+Notification Center (macOS 14 and later). It also binds WidgetKit's app-side API one to one:
+`WidgetCenter`, `ControlCenter` (macOS 26) and Darwin notifications.
+
+WidgetKit runs widgets in a sandboxed extension that only runs Swift. Nucleus ships a prebuilt
+extension that draws what your app composes: you write no Swift.
+
+## Declare the widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        macOS {
+            bundleID = "com.example.app"
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    families = listOf(MacWidgetFamily.Small, MacWidgetFamily.Medium)
+                }
+            }
+        }
+    }
+}
+```
+
+| Member | Notes |
+| --- | --- |
+| `widget(kind) { }` | The kind `widgets { widget(kind) { … } }` registers at run time. 16 widgets at most |
+| `displayName`, `description` | Shown in the widget gallery |
+| `families` | `Small`, `Medium`, `Large`, `ExtraLarge`. Default: the first three |
+| `appGroup` | The App Group the app and the extension share their files through. Required for a sandboxed (Mac App Store) app, which must list it in its own entitlements |
+
+The plugin builds `Contents/PlugIns/NucleusWidgets.appex` from the `widget-macos` JAR and signs
+it with its sandbox entitlements, in the JVM, electron-builder and GraalVM pipelines. The extension
+exists only in a bundle: test with `runDistributable`, not `run`.
+
+## How it works
+
+1. The app composes each widget and writes it to a folder it shares with the extension:
+   `~/Library/Application Support/<bundle id>/NucleusWidgets`, or the App Group container.
+2. It asks WidgetKit to reload the widget; the extension draws the tree with SwiftUI.
+3. A click goes back through an AppIntent: the extension wakes the app, or starts it without a
+   window, and waits for the new render.
+
+`Switch` flips and each `ChoiceField` option writes its value when clicked: WidgetKit has no
+text entry and no picker. `actionOpenUrl` opens its link.
+
+<Callout type="warn" title="Clicks need a team-signed build">
+macOS runs a widget button's AppIntent only in an app signed with a Team ID (Apple Development or
+Developer ID). Ad-hoc builds show and update their widgets, but clicks on them do nothing.
+</Callout>
+
+A widget without a configuration intent has no instance identity in WidgetKit: two widgets of the
+same kind and size show the same content and share their state.
+
+## The WidgetKit API
+
+| Call | Mirrors |
+| --- | --- |
+| `WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()` | `WidgetCenter.shared` |
+| `WidgetCenter.currentConfigurations()` | The widgets on screen, as `WidgetInfo(kind, family)` |
+| `WidgetCenter.invalidateConfigurationRecommendations()`, `invalidateRelevance(kind)` | macOS 13 and 15 |
+| `ControlCenter.reloadControls(kind)`, `currentControls()` | macOS 26 |
+| `DarwinNotificationCenter.post(name)`, `addObserver(name) { }` | `notify(3)` |
+
+## Troubleshooting
+
+- **The gallery shows an old version of the widget.** WidgetKit keeps a running extension and its
+  cached descriptors. Quit the `NucleusWidgets` process, or install a build with a new version.
+- **Clicks fail with `There is no metadata for NucleusWidgetAction`.** Several builds with the same
+  bundle id are registered (worktrees, old copies) and macOS reads another one. Test under a unique
+  bundle id, or unregister the other copies with `lsregister -u`.

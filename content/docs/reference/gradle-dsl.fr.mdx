@@ -223,6 +223,7 @@ jpackage construit `RawAppImage`, l'image d'application brute. electron-builder 
 | `signing { }`, `notarization { }`, `dmg { }` | | Voir plus bas |
 | `pkg { }` | `PkgSettings` | Voir [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | Voir [`appExtensions { }`](#macos-app-extensions) |
+| `widgets { }` | `MacWidgetsSettings` | Widgets WidgetKit. Voir [`widgets { }`](#macos-widgets) |
 | `launchAgents { }` | `LaunchAgentSettings` | Voir [`launchAgents { }`](#macos-launch-agents) |
 | `infoPlist { }` | `InfoPlistSettings` | `extraKeysRawXml` : clés supplémentaires, en XML brut. `localization(language, strings)` : écrit `<language>.lproj/InfoPlist.strings`. `localizationsDir` : un `File?` dont les répertoires `<lang>.lproj` sont copiés dans `Contents/Resources`. Voir [Localiser les chaînes d'Info.plist](/docs/packaging/macos#localiser-les-chaînes-dinfoplist) |
 
@@ -278,6 +279,17 @@ macOS {
 ```
 
 Chaque extension est signée avec ses propres entitlements, puis l'application est scellée sans `--deep`. L'extension n'existe que dans un `.app` signé : utilisez `runDistributable`, pas `run`. Voir [Intégrer des extensions d'application](/docs/packaging/macos#intégrer-des-extensions-dapplication).
+
+### `widgets { }` [#macos-widgets]
+
+`MacWidgetsSettings` embarque l'extension WidgetKit de Nucleus (`Contents/PlugIns/NucleusWidgets.appex`) et liste les widgets que l'app rend à l'exécution. Demande `nucleus.widget-macos` dans le classpath d'exécution, et macOS 14. Expérimental.
+
+| Membre | Remarques |
+| --- | --- |
+| `widget(kind) { }` | Déclare un `MacWidgetSettings` : `displayName`, `description`, `families` (`MacWidgetFamily` : `Small`, `Medium`, `Large`, `ExtraLarge`). 16 widgets au plus |
+| `appGroup` | `String?`. L'App Group partagé par l'app et l'extension. Obligatoire pour une app sandboxée ; sans lui, elles partagent `~/Library/Application Support/<bundle id>/NucleusWidgets` |
+
+Voir [Widgets macOS](/docs/os/widgets/macos).
 
 ### `signing { }` [#macos-signing]
 
@@ -342,6 +354,7 @@ Chaque extension est signée avec ses propres entitlements, puis l'application e
 | `perUserInstall` | `Boolean` | `false` | Déprécié. Sens inversé : `true` équivaut à `msi { perMachine = false }`. Appliqué seulement tant que `msi.perMachine` n'est pas défini |
 | `fileAssociation(...)` | | | |
 | `nsis { }`, `msi { }`, `appx { }`, `portable { }`, `signing { }` | | | Voir plus bas |
+| `widgets { }` | `WindowsWidgetsSettings` | | Widgets Windows 11, AppX uniquement. Voir [`widgets { }`](#windows-widgets) |
 
 ### `msi { }` [#windows-msi]
 
@@ -391,6 +404,17 @@ Chaque extension est signée avec ses propres entitlements, puis l'application e
 | `showNameOnTiles`, `setBuildNumber` | `Boolean` (`false`) | |
 | `minVersion`, `maxVersionTested` | `String?` | |
 | `storeLogo`, `square44x44Logo`, `square150x150Logo`, `wide310x150Logo` | `RegularFileProperty` | |
+
+### `widgets { }` [#windows-widgets]
+
+`WindowsWidgetsSettings` ajoute à l'AppX le fournisseur du panneau de widgets : définitions des widgets, serveur COM et dépendance au Windows App SDK. Inerte dans tous les autres formats. Expérimental.
+
+| Membre | Remarques |
+| --- | --- |
+| `windowsAppSdkVersion` | `String`, par défaut `"1.8"` (au moins `"1.2"`) |
+| `widget(id) { }` | Déclare un `WindowsWidgetSettings` : `displayName`, `description`, `sizes` (`WindowsWidgetSize`), `customizable`, `allowMultiple` (par défaut `true`), `webRequestFilter`, et les images `icon`, `preview` (obligatoires), `previewDark`, `previewLight` |
+
+Voir [Widgets Windows](/docs/os/widgets/windows).
 
 ### `portable { }` [#windows-portable]
 

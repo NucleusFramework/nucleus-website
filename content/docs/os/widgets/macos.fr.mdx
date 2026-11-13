@@ -1,0 +1,83 @@
+---
+title: Widgets macOS
+description: Affichez les widgets Nucleus sur le bureau macOS et dans le Centre de notifications avec WidgetKit, depuis une app JVM ou GraalVM.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-macos` héberge l'[API widget](/docs/os/widgets) avec WidgetKit, sur le bureau et dans le
+Centre de notifications (macOS 14 et plus). Il expose aussi l'API de WidgetKit côté app en un pour
+un : `WidgetCenter`, `ControlCenter` (macOS 26) et les notifications Darwin.
+
+WidgetKit exécute les widgets dans une extension sandboxée qui ne fait tourner que du Swift.
+Nucleus fournit une extension précompilée qui dessine ce que votre app compose : vous n'écrivez pas
+de Swift.
+
+## Déclarer les widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        macOS {
+            bundleID = "com.example.app"
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    families = listOf(MacWidgetFamily.Small, MacWidgetFamily.Medium)
+                }
+            }
+        }
+    }
+}
+```
+
+| Membre | Remarques |
+| --- | --- |
+| `widget(kind) { }` | Le type que `widgets { widget(kind) { … } }` enregistre à l'exécution. 16 widgets au plus |
+| `displayName`, `description` | Affichés dans la galerie de widgets |
+| `families` | `Small`, `Medium`, `Large`, `ExtraLarge`. Par défaut : les trois premières |
+| `appGroup` | L'App Group par lequel l'app et l'extension partagent leurs fichiers. Obligatoire pour une app sandboxée (Mac App Store), qui doit le lister dans ses propres entitlements |
+
+Le plugin construit `Contents/PlugIns/NucleusWidgets.appex` à partir du JAR `widget-macos` et le
+signe avec ses entitlements de sandbox, dans les pipelines JVM, electron-builder et GraalVM.
+L'extension n'existe que dans un bundle : testez avec `runDistributable`, pas `run`.
+
+## Fonctionnement
+
+1. L'app compose chaque widget et l'écrit dans un dossier partagé avec l'extension :
+   `~/Library/Application Support/<bundle id>/NucleusWidgets`, ou le conteneur de l'App Group.
+2. Elle demande à WidgetKit de recharger le widget ; l'extension dessine l'arbre en SwiftUI.
+3. Un clic repasse par un AppIntent : l'extension réveille l'app, ou la lance sans fenêtre, et
+   attend le nouveau rendu.
+
+Un `Switch` bascule et chaque option d'un `ChoiceField` écrit sa valeur au clic : WidgetKit n'a ni
+saisie de texte ni liste déroulante. `actionOpenUrl` ouvre son lien.
+
+<Callout type="warn" title="Les clics demandent une build signée par une équipe">
+macOS n'exécute l'AppIntent d'un bouton de widget que dans une app signée avec un Team ID (Apple
+Development ou Developer ID). Les builds ad hoc affichent et mettent à jour leurs widgets, mais les
+clics dessus ne font rien.
+</Callout>
+
+Un widget sans intent de configuration n'a pas d'identité propre dans WidgetKit : deux widgets du
+même type et de la même taille affichent le même contenu et partagent leur état.
+
+## L'API WidgetKit
+
+| Appel | Reflète |
+| --- | --- |
+| `WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()` | `WidgetCenter.shared` |
+| `WidgetCenter.currentConfigurations()` | Les widgets à l'écran, sous forme de `WidgetInfo(kind, family)` |
+| `WidgetCenter.invalidateConfigurationRecommendations()`, `invalidateRelevance(kind)` | macOS 13 et 15 |
+| `ControlCenter.reloadControls(kind)`, `currentControls()` | macOS 26 |
+| `DarwinNotificationCenter.post(name)`, `addObserver(name) { }` | `notify(3)` |
+
+## Dépannage
+
+- **La galerie montre une ancienne version du widget.** WidgetKit garde une extension en marche et
+  ses descripteurs en cache. Quittez le processus `NucleusWidgets`, ou installez une build avec une
+  nouvelle version.
+- **Les clics échouent avec `There is no metadata for NucleusWidgetAction`.** Plusieurs builds avec
+  le même bundle id sont enregistrées (worktrees, anciennes copies) et macOS en lit une autre.
+  Testez sous un bundle id unique, ou désinscrivez les autres copies avec `lsregister -u`.

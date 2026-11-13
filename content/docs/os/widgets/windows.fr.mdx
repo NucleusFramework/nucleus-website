@@ -1,0 +1,122 @@
+---
+title: Widgets Windows
+description: Affichez les widgets Nucleus dans le panneau de widgets de Windows 11, avec saisie de texte, personnalisation et widgets web.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-windows` héberge l'[API widget](/docs/os/widgets) dans le panneau de widgets de Windows 11.
+Il expose aussi `Microsoft.Windows.Widgets.Providers` (Windows App SDK) en un pour un, et ajoute ce
+que seul le panneau propose : saisie de texte et de nombres, personnalisation et widgets web.
+
+Le panneau rend chaque widget sous forme d'Adaptive Card ; votre app en est le fournisseur COM.
+
+<Callout type="warn" title="AppX / MSIX uniquement">
+Les widgets ont besoin d'une identité de package : ils ne fonctionnent qu'au format AppX / MSIX.
+Dans les builds NSIS, MSI, portable et ZIP, ils sont inertes, sans erreur.
+</Callout>
+
+## Déclarer les widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        windows {
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    icon.set(file("widgets/icon.png"))
+                    preview.set(file("widgets/preview.png")) // 300 x 304, the medium widget
+                    customizable = true
+                }
+            }
+        }
+    }
+}
+```
+
+| Membre | Remarques |
+| --- | --- |
+| `windowsAppSdkVersion` | La version du Windows App SDK dont dépend l'AppX, `majeure.mineure`. Par défaut `"1.8"`, au moins `"1.2"` |
+| `widget(id) { }` | L'identifiant que `widgets { widget(id) { … } }` enregistre à l'exécution. Lettres, chiffres et `_` |
+| `displayName`, `description` | Affichés dans le sélecteur du panneau |
+| `sizes` | Des valeurs `WindowsWidgetSize` ; les trois par défaut |
+| `customizable` | Ajoute *Personnaliser le widget* au menu du widget |
+| `allowMultiple` | Si l'utilisateur peut épingler plusieurs instances. Par défaut `true` |
+| `icon`, `preview` | Obligatoires. L'aperçu est un PNG statique du widget moyen |
+| `previewDark`, `previewLight` | Variantes facultatives de l'aperçu selon le thème |
+| `webRequestFilter` | Pour un widget web : les requêtes de sa page envoyées à `onWebRequest` |
+
+Le plugin écrit toute la partie AppX : les définitions de widgets, le serveur COM, la dépendance
+au Windows App SDK et un CLSID dérivé de l'identité du package. Sans `widget(…)`, l'AppX ne change
+pas. Testez avec `./gradlew runAppX`.
+
+## Saisie de texte et personnalisation
+
+```kotlin
+import dev.nucleusframework.widget.windows.NumberField
+import dev.nucleusframework.widget.windows.TextField
+import dev.nucleusframework.widget.windows.actionFinishCustomization
+import dev.nucleusframework.widget.windows.isCustomizing
+
+provideContent {
+    if (isCustomizing()) {
+        Column {
+            TextField(City, label = "City", placeholder = "Paris")
+            NumberField(Days, label = "Days", min = 1.0, max = 7.0)
+            Button("Done", onClick = actionFinishCustomization())
+        }
+    } else {
+        Forecast()
+    }
+}
+```
+
+- `TextField` et `NumberField` envoient leur valeur avec la prochaine action qui exécute du code de
+  l'app ; la valeur est dans l'état quand cette action s'exécute. Seuls les champs modifiés par
+  l'utilisateur sont écrits, pour ne pas écraser une valeur que l'app a changée après le dessin de
+  la carte.
+- `isCustomizing()` vaut `true` après *Personnaliser le widget*, jusqu'à
+  `actionFinishCustomization()` ou `WidgetStateHandle.finishCustomization()`. Il survit à un
+  redémarrage.
+
+Ces appels n'existent que sur Windows : dans du code partagé, gardez-les derrière un test de
+plateforme.
+
+## Widgets web
+
+Un widget qui implémente aussi `WindowsWebWidget` affiche une page web là où le panneau le permet ;
+le contenu composé sert de repli ailleurs.
+
+```kotlin
+class NewsWidget : NucleusWidget(), WindowsWebWidget {
+    override suspend fun provideWidget(id: WidgetId) = provideContent { Text("Latest news") }
+
+    override fun webUrl(id: WidgetId, state: WidgetState) = "https://news.example.com/widget"
+
+    override suspend fun onWebMessage(id: WidgetId, message: String) {
+        sendWebWidgetMessage(id, "echo: $message")
+    }
+}
+```
+
+`onWebRequest` répond aux requêtes de la page qui correspondent au `webRequestFilter` de la
+définition : une page peut ainsi être servie par l'app elle-même, sans réseau.
+
+## Cycle de vie du processus
+
+Un clic sur une action alors que l'app est fermée la fait lancer par le panneau via COM. Le
+processus reste sans fenêtre tant que `isWidgetHostOnly()` vaut `true`, et se ferme quand aucun
+widget n'a été visible pendant son `idleExit`.
+
+## L'API `WidgetManager`
+
+`WidgetManager.getDefault()` reflète la classe du Windows App SDK : `getWidgetInfos()`,
+`updateWidget(…)`, `deleteWidget(id)`, `sendMessageToContent(id, message)`. La plupart des apps
+n'en ont jamais besoin : l'API widget la pilote.
+
+<Callout type="info">
+Un panneau ouvert garde à l'écran une carte désépinglée jusqu'à sa réouverture : Windows ne la
+rafraîchit pas.
+</Callout>

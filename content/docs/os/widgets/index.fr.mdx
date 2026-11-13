@@ -1,0 +1,164 @@
+---
+title: Widgets
+description: Écrivez un widget une seule fois en Kotlin, à la manière de Glance, et affichez-le dans le panneau de widgets de Windows 11, sur le bureau macOS et sur l'écran d'accueil iOS.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-runtime` permet de décrire un widget une seule fois, en Kotlin, avec des composables
+inspirés de Jetpack Glance. Un module de plateforme l'affiche avec l'hôte de widgets du système :
+
+| Plateforme | Module | Hôte | Format |
+| --- | --- | --- | --- |
+| Windows 11 | [`widget-windows`](/docs/os/widgets/windows) | Panneau de widgets (Windows App SDK) | AppX / MSIX uniquement |
+| macOS 14+ | [`widget-macos`](/docs/os/widgets/macos) | WidgetKit : bureau et Centre de notifications | N'importe quel bundle `.app` |
+| iOS 17+ | [`widget-ios`](/docs/os/widgets/ios) | WidgetKit : écran d'accueil | Votre app Xcode et son extension de widget |
+
+Un widget est un instantané, pas une interface vivante : chaque rendu compose votre contenu une
+fois, à partir de l'état sauvegardé du widget, en un arbre que l'hôte dessine nativement (une
+Adaptive Card sur Windows, du SwiftUI sur les plateformes Apple). Les clics exécutent votre code
+Kotlin, modifient l'état, et le widget est redessiné.
+
+<Callout type="warn" title="Expérimental">
+Toute l'API widget est marquée `@ExperimentalNucleusWidgetApi` et peut changer sans période de
+dépréciation. Activez l'opt-in pour tout le module :
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    compilerOptions {
+        optIn.add("dev.nucleusframework.widget.ExperimentalNucleusWidgetApi")
+    }
+}
+```
+</Callout>
+
+## Ajouter la dépendance
+
+Ajoutez le module de plateforme, qui apporte `widget-runtime` :
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.widget-windows:<version>")
+    implementation("dev.nucleusframework:nucleus.widget-macos:<version>")
+}
+```
+
+Chaque module trouve son hôte à l'exécution et reste inerte ailleurs : embarquer les deux dans une
+app de bureau ne pose pas de problème. Pour iOS, voir [Widgets iOS](/docs/os/widgets/ios).
+
+## Écrire un widget
+
+```kotlin
+private val Count = intStateKey("count")
+
+class CounterWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        // Load data here, before provideContent: the content itself is not suspending.
+        provideContent {
+            val state = currentWidgetState()
+            val count = state[Count] ?: 0
+            Column(horizontalAlignment = Alignment.Horizontal.CenterHorizontally) {
+                Text("$count", style = TextStyle(fontSize = TextSize.ExtraLarge, fontWeight = FontWeight.Bold))
+                Row(spacing = Spacing.Small) {
+                    Button("Reset", enabled = count != 0, onClick = { state.update { it[Count] = 0 } })
+                    Button("+1", onClick = { state.update { it[Count] = count + 1 } })
+                }
+            }
+        }
+    }
+}
+```
+
+Déclarez-le en haut de `nucleusApplication`. L'identifiant doit correspondre à celui du plugin
+Gradle (`windows { widgets { } }`, `macOS { widgets { } }`) :
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    widgets {
+        widget("Counter") { CounterWidget() }
+    }
+    if (!isWidgetHostOnly()) {
+        DecoratedWindow(onCloseRequest = ::exitApplication) { /* … */ }
+    }
+}
+```
+
+`remember` et `mutableStateOf` ne survivent pas d'un rendu à l'autre : gardez dans l'état du
+widget tout ce qui doit durer.
+
+## Composables
+
+| Composable | Remarques |
+| --- | --- |
+| `Column`, `Row` | `spacing` (`Spacing`), `horizontalAlignment` / `verticalAlignment` |
+| `Text` | `style = TextStyle(fontSize, fontWeight, color)`, `maxLines` |
+| `Button` | Un libellé et une action (une lambda ou une `Action`), `enabled` |
+| `Image` | `ImageProvider(bytes)`, `ImageProvider(url)` ou `ImageProvider.appResource(path)`, `size` (`ImageSize`) |
+| `Spacer` | Un espace fixe, ou toute la place restante avec `fillMaxHeight()` / `fillMaxWidth()` |
+| `Switch` | Une valeur on/off liée à une `booleanStateKey` |
+| `ChoiceField` | Un choix parmi des `Choice(title, value)`, lié à une `stringStateKey` |
+
+Les couleurs et les tailles sont sémantiques, résolues par l'hôte selon son thème : `TextSize`
+(de `Small` à `ExtraLarge`), `WidgetColor` (`Default`, `Subtle`, `Accent`, `Good`, `Warning`,
+`Attention`), `WidgetBackground` pour les conteneurs. `WidgetModifier` propose `fillMaxWidth()`,
+`fillMaxHeight()`, `fillMaxSize()`, `weight(n)`, `background(…)` et `clickable(…)`.
+
+Préférez `ImageProvider.appResource("widget/logo.png")`, un fichier du dossier de ressources de
+l'app (`appResourcesRootDir`) : des octets encodés voyagent dans chaque mise à jour.
+
+La saisie de texte et de nombres, la personnalisation et les widgets web n'existent que sur
+Windows, dans `widget-windows`. Voir [Widgets Windows](/docs/os/widgets/windows).
+
+## État
+
+Les clés d'état sont typées : `intStateKey`, `longStateKey`, `doubleStateKey`, `booleanStateKey`,
+`stringStateKey`. Chaque widget épinglé garde son propre état, sauvegardé par l'hôte.
+
+| Appel | Usage |
+| --- | --- |
+| `currentWidgetState()`, `currentState(key)` | Lire l'état pendant la composition ; `update { }` le modifie depuis un clic |
+| `updateWidgetState(id) { }` | Modifier l'état d'un widget depuis n'importe où dans l'app |
+| `widget.update(id)`, `widget.updateAll()` | Redessiner un widget après un changement de ses données |
+| `getWidgetState(id)` | Lire l'état d'un widget hors d'un rendu |
+| `LocalSize.current`, `LocalWidgetId.current` | La taille du widget épinglé (`Small`, `Medium`, `Large`) et son identifiant |
+
+```kotlin
+// A background update: a new message arrived.
+updateWidgetState(id) { it[Unread] = (it[Unread] ?: 0) + 1 }
+InboxWidget().update(id)
+```
+
+## Actions
+
+| Action | Exécute |
+| --- | --- |
+| `onClick = { … }` | Une lambda, avec l'état du widget cliqué |
+| `actionRunCallback(callback, actionParametersOf(Key to value))` | Un `ActionCallback` avec des paramètres. Une instance, pas une classe : Nucleus reste sans réflexion pour GraalVM |
+| `actionOpenUrl(url)` | Ouvre une page web ou un des liens profonds de l'app |
+
+```kotlin
+object ToggleTask : ActionCallback {
+    val Index = ActionParameters.Key<Int>("index")
+    override suspend fun onAction(id: WidgetId, parameters: ActionParameters) {
+        updateWidgetState(id) { state -> /* flip task parameters[Index] */ }
+    }
+}
+
+Row(modifier = WidgetModifier.clickable(actionRunCallback(ToggleTask, actionParametersOf(ToggleTask.Index to 2)))) {
+    Text("Buy milk")
+}
+```
+
+Un clic sur un widget dessiné à partir d'un état plus ancien ne s'exécute que si son action
+désigne toujours le même élément ; sinon il est ignoré, pour qu'un clic périmé ne s'applique
+jamais à la mauvaise ligne.
+
+## Cycle de vie du processus
+
+Sur Windows et macOS, un clic sur un widget peut lancer l'app quand elle ne tourne pas.
+`isWidgetHostOnly()` vaut `true` pour un tel lancement, jusqu'à ce que l'utilisateur ouvre l'app
+ou un de ses liens profonds, et l'app se ferme quand aucun widget n'a été visible pendant
+`idleExit` (30 s par défaut). N'ouvrez pas la fenêtre principale tant qu'il vaut `true`.
+
+`NucleusWidgets.events` rapporte les épinglages, suppressions, rendus, clics et échecs, et
+`NucleusWidgets.pinnedWidgets()` liste les widgets à l'écran.

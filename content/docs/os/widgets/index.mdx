@@ -1,0 +1,162 @@
+---
+title: Widgets
+description: Write a desktop or home screen widget once in Kotlin, Glance style, and show it on the Windows 11 widgets board, the macOS desktop and the iOS home screen.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-runtime` lets you describe a widget once, in Kotlin, with composables modeled on Jetpack
+Glance. A platform module shows it with the operating system's own widget host:
+
+| Platform | Module | Host | Format |
+| --- | --- | --- | --- |
+| Windows 11 | [`widget-windows`](/docs/os/widgets/windows) | Widgets board (Windows App SDK) | AppX / MSIX only |
+| macOS 14+ | [`widget-macos`](/docs/os/widgets/macos) | WidgetKit: desktop and Notification Center | Any `.app` bundle |
+| iOS 17+ | [`widget-ios`](/docs/os/widgets/ios) | WidgetKit: home screen | Your Xcode app and its widget extension |
+
+A widget is a snapshot, not a live UI: each render composes your content once, from the widget's
+saved state, into a tree the host draws natively (an Adaptive Card on Windows, SwiftUI on Apple
+platforms). Clicks run your Kotlin code, change the state, and the widget is drawn again.
+
+<Callout type="warn" title="Experimental">
+The whole widget API is marked `@ExperimentalNucleusWidgetApi` and may change without a
+deprecation cycle. Opt in module-wide:
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    compilerOptions {
+        optIn.add("dev.nucleusframework.widget.ExperimentalNucleusWidgetApi")
+    }
+}
+```
+</Callout>
+
+## Add the dependency
+
+Add the platform module, which brings `widget-runtime`:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.widget-windows:<version>")
+    implementation("dev.nucleusframework:nucleus.widget-macos:<version>")
+}
+```
+
+Each module finds its host at run time and stays inert elsewhere: shipping both in a desktop app
+is fine. For iOS, see [iOS widgets](/docs/os/widgets/ios).
+
+## Write a widget
+
+```kotlin
+private val Count = intStateKey("count")
+
+class CounterWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        // Load data here, before provideContent: the content itself is not suspending.
+        provideContent {
+            val state = currentWidgetState()
+            val count = state[Count] ?: 0
+            Column(horizontalAlignment = Alignment.Horizontal.CenterHorizontally) {
+                Text("$count", style = TextStyle(fontSize = TextSize.ExtraLarge, fontWeight = FontWeight.Bold))
+                Row(spacing = Spacing.Small) {
+                    Button("Reset", enabled = count != 0, onClick = { state.update { it[Count] = 0 } })
+                    Button("+1", onClick = { state.update { it[Count] = count + 1 } })
+                }
+            }
+        }
+    }
+}
+```
+
+Declare it at the top of `nucleusApplication`. The id must match the one in the Gradle plugin
+(`windows { widgets { } }`, `macOS { widgets { } }`):
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    widgets {
+        widget("Counter") { CounterWidget() }
+    }
+    if (!isWidgetHostOnly()) {
+        DecoratedWindow(onCloseRequest = ::exitApplication) { /* … */ }
+    }
+}
+```
+
+`remember` and `mutableStateOf` do not survive between renders: keep everything that must last
+in the widget state.
+
+## Composables
+
+| Composable | Notes |
+| --- | --- |
+| `Column`, `Row` | `spacing` (`Spacing`), `horizontalAlignment` / `verticalAlignment` |
+| `Text` | `style = TextStyle(fontSize, fontWeight, color)`, `maxLines` |
+| `Button` | A label and an action (a lambda or an `Action`), `enabled` |
+| `Image` | `ImageProvider(bytes)`, `ImageProvider(url)` or `ImageProvider.appResource(path)`, `size` (`ImageSize`) |
+| `Spacer` | A fixed gap, or all the room left with `fillMaxHeight()` / `fillMaxWidth()` |
+| `Switch` | An on/off value bound to a `booleanStateKey` |
+| `ChoiceField` | A choice among `Choice(title, value)`, bound to a `stringStateKey` |
+
+Colors and sizes are semantic, resolved by the host for its theme: `TextSize` (`Small` to
+`ExtraLarge`), `WidgetColor` (`Default`, `Subtle`, `Accent`, `Good`, `Warning`, `Attention`),
+`WidgetBackground` for containers. `WidgetModifier` offers `fillMaxWidth()`, `fillMaxHeight()`,
+`fillMaxSize()`, `weight(n)`, `background(…)` and `clickable(…)`.
+
+Prefer `ImageProvider.appResource("widget/logo.png")`, a file of the app's resources directory
+(`appResourcesRootDir`): encoded bytes travel inside every update.
+
+Text and number entry, customization and web widgets exist on Windows only, in `widget-windows`.
+See [Windows widgets](/docs/os/widgets/windows).
+
+## State
+
+State keys are typed: `intStateKey`, `longStateKey`, `doubleStateKey`, `booleanStateKey`,
+`stringStateKey`. Each pinned widget keeps its own state, saved by the host.
+
+| Call | Use |
+| --- | --- |
+| `currentWidgetState()`, `currentState(key)` | Read the state while composing; `update { }` changes it from a click |
+| `updateWidgetState(id) { }` | Change a widget's state from anywhere in the app |
+| `widget.update(id)`, `widget.updateAll()` | Draw a widget again after its data changed |
+| `getWidgetState(id)` | Read a widget's state outside a render |
+| `LocalSize.current`, `LocalWidgetId.current` | The size the widget is pinned at (`Small`, `Medium`, `Large`) and its id |
+
+```kotlin
+// A background update: a new message arrived.
+updateWidgetState(id) { it[Unread] = (it[Unread] ?: 0) + 1 }
+InboxWidget().update(id)
+```
+
+## Actions
+
+| Action | Runs |
+| --- | --- |
+| `onClick = { … }` | A lambda, with the state of the widget that was clicked |
+| `actionRunCallback(callback, actionParametersOf(Key to value))` | An `ActionCallback` with parameters. An instance, not a class: Nucleus stays reflection-free for GraalVM |
+| `actionOpenUrl(url)` | Opens a web page or one of the app's deep links |
+
+```kotlin
+object ToggleTask : ActionCallback {
+    val Index = ActionParameters.Key<Int>("index")
+    override suspend fun onAction(id: WidgetId, parameters: ActionParameters) {
+        updateWidgetState(id) { state -> /* flip task parameters[Index] */ }
+    }
+}
+
+Row(modifier = WidgetModifier.clickable(actionRunCallback(ToggleTask, actionParametersOf(ToggleTask.Index to 2)))) {
+    Text("Buy milk")
+}
+```
+
+A click on a widget drawn from an older state runs only if its action still names the same
+element; otherwise it is dropped, so a stale click never runs on the wrong row.
+
+## Process lifetime
+
+On Windows and macOS, a click on a widget can start the app when it is not running.
+`isWidgetHostOnly()` is `true` for such a launch, until the user opens the app or one of its deep
+links, and the app exits once no widget has been visible for `idleExit` (30 s by default). Skip
+the main window while it is `true`.
+
+`NucleusWidgets.events` reports pins, removals, renders, clicks and failures, and
+`NucleusWidgets.pinnedWidgets()` lists the widgets on screen.
