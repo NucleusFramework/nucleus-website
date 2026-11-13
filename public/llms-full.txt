@@ -980,6 +980,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | System accent color | `system-color` |
 | Global hotkeys | `global-hotkey` |
 | Share sheet, Kotlin Multiplatform | [`share`](/docs/os/share) |
+| Widgets (Windows 11 board, macOS and iOS WidgetKit), experimental | [`widget-runtime`, `widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) |
 | Geolocation, Kotlin Multiplatform | [`location`](/docs/os/location) |
 | Speech-to-text, Kotlin Multiplatform | [`speech-recognition`](/docs/os/speech-recognition) |
 | Media controls (Now Playing, SMTC, MPRIS) | `media-control` |
@@ -1000,6 +1001,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | Efficiency mode and screen wake locks | `energy-manager` |
 | Auto-update | [`updater-runtime`](/docs/packaging/auto-update) |
 | Microsoft Store: app license and trial, add-ons, in-app updates | [`microsoft-store`](/docs/microsoft-store) |
+| Flatpak: in-app updates from Flathub or any remote | [`flatpak`](/docs/flathub) |
 
 ## Performance and networking modules
 
@@ -5489,6 +5491,7 @@ as its own Gradle artifact, so you add only the modules you use.
 | Tray popup apps | `composenativetray-app` | yes | yes | yes |
 | Global hotkeys | `global-hotkey` | yes | yes | yes |
 | Share sheet (also Android, iOS, web) | [`share`](/docs/os/share) | yes | yes | yes |
+| Widgets (also iOS) | [`widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) | yes | yes | no |
 | Location (also Android, iOS, web) | [`location`](/docs/os/location) | yes | yes | yes |
 | Speech recognition (also Android, iOS) | [`speech-recognition`](/docs/os/speech-recognition) | yes | yes | no |
 | Media controls | `media-control` | yes | yes | yes |
@@ -6748,6 +6751,485 @@ On Linux, both set the `urgent` flag.
 - [Linux launcher](/docs/os/dock-taskbar/linux): badges, urgency, and quicklists.
 - [macOS Dock menu](/docs/os/dock-taskbar/macos): the Dock menu.
 - [Energy manager](/docs/lifecycle/energy-manager): keep the machine awake during long work.
+
+---
+
+# Widgets
+
+URL: https://nucleusframework.dev/en/docs/os/widgets
+
+Write a desktop or home screen widget once in Kotlin, Glance style, and show it on the Windows 11 widgets board, the macOS desktop and the iOS home screen.
+
+`widget-runtime` lets you describe a widget once, in Kotlin, with composables modeled on Jetpack
+Glance. A platform module shows it with the operating system's own widget host:
+
+| Platform | Module | Host | Format |
+| --- | --- | --- | --- |
+| Windows 11 | [`widget-windows`](/docs/os/widgets/windows) | Widgets board (Windows App SDK) | AppX / MSIX only |
+| macOS 14+ | [`widget-macos`](/docs/os/widgets/macos) | WidgetKit: desktop and Notification Center | Any `.app` bundle |
+| iOS 17+ | [`widget-ios`](/docs/os/widgets/ios) | WidgetKit: home screen | Your Xcode app and its widget extension |
+
+A widget is a snapshot, not a live UI: each render composes your content once, from the widget's
+saved state, into a tree the host draws natively (an Adaptive Card on Windows, SwiftUI on Apple
+platforms). Clicks run your Kotlin code, change the state, and the widget is drawn again.
+
+The whole widget API is marked `@ExperimentalNucleusWidgetApi` and may change without a
+deprecation cycle. Opt in module-wide:
+
+```kotlin title="build.gradle.kts"
+kotlin {
+    compilerOptions {
+        optIn.add("dev.nucleusframework.widget.ExperimentalNucleusWidgetApi")
+    }
+}
+```
+
+## Add the dependency
+
+Add the platform module, which brings `widget-runtime`:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.widget-windows:<version>")
+    implementation("dev.nucleusframework:nucleus.widget-macos:<version>")
+}
+```
+
+Each module finds its host at run time and stays inert elsewhere: shipping both in a desktop app
+is fine. For iOS, see [iOS widgets](/docs/os/widgets/ios).
+
+## Write a widget
+
+```kotlin
+private val Count = intStateKey("count")
+
+class CounterWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        // Load data here, before provideContent: the content itself is not suspending.
+        provideContent {
+            val state = currentWidgetState()
+            val count = state[Count] ?: 0
+            Column(horizontalAlignment = Alignment.Horizontal.CenterHorizontally) {
+                Text("$count", style = TextStyle(fontSize = TextSize.ExtraLarge, fontWeight = FontWeight.Bold))
+                Row(spacing = Spacing.Small) {
+                    Button("Reset", enabled = count != 0, onClick = { state.update { it[Count] = 0 } })
+                    Button("+1", onClick = { state.update { it[Count] = count + 1 } })
+                }
+            }
+        }
+    }
+}
+```
+
+Declare it at the top of `nucleusApplication`. The id must match the one in the Gradle plugin
+(`windows { widgets { } }`, `macOS { widgets { } }`):
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args) {
+    widgets {
+        widget("Counter") { CounterWidget() }
+    }
+    if (!isWidgetHostOnly()) {
+        DecoratedWindow(onCloseRequest = ::exitApplication) { /* … */ }
+    }
+}
+```
+
+`remember` and `mutableStateOf` do not survive between renders: keep everything that must last
+in the widget state.
+
+## Composables
+
+| Composable | Notes |
+| --- | --- |
+| `Column`, `Row` | `spacing` (`Spacing`), `horizontalAlignment` / `verticalAlignment` |
+| `Text` | `style = TextStyle(fontSize, fontWeight, color)`, `maxLines` |
+| `Button` | A label and an action (a lambda or an `Action`), `enabled` |
+| `Image` | `ImageProvider(bytes)`, `ImageProvider(url)` or `ImageProvider.appResource(path)`, `size` (`ImageSize`) |
+| `Spacer` | A fixed gap, or all the room left with `fillMaxHeight()` / `fillMaxWidth()` |
+| `Switch` | An on/off value bound to a `booleanStateKey` |
+| `ChoiceField` | A choice among `Choice(title, value)`, bound to a `stringStateKey` |
+
+Colors and sizes are semantic, resolved by the host for its theme: `TextSize` (`Small` to
+`ExtraLarge`), `WidgetColor` (`Default`, `Subtle`, `Accent`, `Good`, `Warning`, `Attention`),
+`WidgetBackground` for containers. `WidgetModifier` offers `fillMaxWidth()`, `fillMaxHeight()`,
+`fillMaxSize()`, `weight(n)`, `background(…)` and `clickable(…)`.
+
+Prefer `ImageProvider.appResource("widget/logo.png")`, a file of the app's resources directory
+(`appResourcesRootDir`): encoded bytes travel inside every update.
+
+Text and number entry, customization and web widgets exist on Windows only, in `widget-windows`.
+See [Windows widgets](/docs/os/widgets/windows).
+
+## State
+
+State keys are typed: `intStateKey`, `longStateKey`, `doubleStateKey`, `booleanStateKey`,
+`stringStateKey`. Each pinned widget keeps its own state, saved by the host.
+
+| Call | Use |
+| --- | --- |
+| `currentWidgetState()`, `currentState(key)` | Read the state while composing; `update { }` changes it from a click |
+| `updateWidgetState(id) { }` | Change a widget's state from anywhere in the app |
+| `widget.update(id)`, `widget.updateAll()` | Draw a widget again after its data changed |
+| `getWidgetState(id)` | Read a widget's state outside a render |
+| `LocalSize.current`, `LocalWidgetId.current` | The size the widget is pinned at (`Small`, `Medium`, `Large`) and its id |
+
+```kotlin
+// A background update: a new message arrived.
+updateWidgetState(id) { it[Unread] = (it[Unread] ?: 0) + 1 }
+InboxWidget().update(id)
+```
+
+## Actions
+
+| Action | Runs |
+| --- | --- |
+| `onClick = { … }` | A lambda, with the state of the widget that was clicked |
+| `actionRunCallback(callback, actionParametersOf(Key to value))` | An `ActionCallback` with parameters. An instance, not a class: Nucleus stays reflection-free for GraalVM |
+| `actionOpenUrl(url)` | Opens a web page or one of the app's deep links |
+
+```kotlin
+object ToggleTask : ActionCallback {
+    val Index = ActionParameters.Key<Int>("index")
+    override suspend fun onAction(id: WidgetId, parameters: ActionParameters) {
+        updateWidgetState(id) { state -> /* flip task parameters[Index] */ }
+    }
+}
+
+Row(modifier = WidgetModifier.clickable(actionRunCallback(ToggleTask, actionParametersOf(ToggleTask.Index to 2)))) {
+    Text("Buy milk")
+}
+```
+
+A click on a widget drawn from an older state runs only if its action still names the same
+element; otherwise it is dropped, so a stale click never runs on the wrong row.
+
+## Process lifetime
+
+On Windows and macOS, a click on a widget can start the app when it is not running.
+`isWidgetHostOnly()` is `true` for such a launch, until the user opens the app or one of its deep
+links, and the app exits once no widget has been visible for `idleExit` (30 s by default). Skip
+the main window while it is `true`.
+
+`NucleusWidgets.events` reports pins, removals, renders, clicks and failures, and
+`NucleusWidgets.pinnedWidgets()` lists the widgets on screen.
+
+---
+
+# Windows widgets
+
+URL: https://nucleusframework.dev/en/docs/os/widgets/windows
+
+Show Nucleus widgets on the Windows 11 widgets board, with text entry, customization and web widgets.
+
+`widget-windows` hosts the [widget API](/docs/os/widgets) on the Windows 11 widgets board. It also
+binds `Microsoft.Windows.Widgets.Providers` (Windows App SDK) one to one, and adds what only the
+board offers: text and number entry, customization and web widgets.
+
+The board renders each widget as an Adaptive Card; your app is its COM provider.
+
+Widgets need package identity: they work in the AppX / MSIX format only. In NSIS, MSI, portable
+and ZIP builds they are inert, with no error.
+
+## Declare the widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        windows {
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    icon.set(file("widgets/icon.png"))
+                    preview.set(file("widgets/preview.png")) // 300 x 304, the medium widget
+                    customizable = true
+                }
+            }
+        }
+    }
+}
+```
+
+| Member | Notes |
+| --- | --- |
+| `windowsAppSdkVersion` | The Windows App SDK release the AppX depends on, `major.minor`. Default `"1.8"`, at least `"1.2"` |
+| `widget(id) { }` | The id `widgets { widget(id) { … } }` registers at run time. Letters, digits and `_` |
+| `displayName`, `description` | Shown in the board's picker |
+| `sizes` | `WindowsWidgetSize` values; all three by default |
+| `customizable` | Adds *Customize widget* to the widget's menu |
+| `allowMultiple` | Whether the user may pin several instances. Default `true` |
+| `icon`, `preview` | Required. The preview is a static PNG of the medium widget |
+| `previewDark`, `previewLight` | Optional theme variants of the preview |
+| `webRequestFilter` | For a web widget: the requests of its page routed to `onWebRequest` |
+
+The plugin writes the whole AppX side: the widget definitions, the COM server, the Windows App SDK
+dependency and a CLSID derived from the package identity. Without a `widget(…)`, the AppX is
+unchanged. Test with `./gradlew runAppX`.
+
+## Text entry and customization
+
+```kotlin
+import dev.nucleusframework.widget.windows.NumberField
+import dev.nucleusframework.widget.windows.TextField
+import dev.nucleusframework.widget.windows.actionFinishCustomization
+import dev.nucleusframework.widget.windows.isCustomizing
+
+provideContent {
+    if (isCustomizing()) {
+        Column {
+            TextField(City, label = "City", placeholder = "Paris")
+            NumberField(Days, label = "Days", min = 1.0, max = 7.0)
+            Button("Done", onClick = actionFinishCustomization())
+        }
+    } else {
+        Forecast()
+    }
+}
+```
+
+- `TextField` and `NumberField` submit their value with the next action that runs app code; the
+  value is in the state when that action runs. Only fields the user changed are written, so a
+  value the app set after the card was drawn is not reverted.
+- `isCustomizing()` is `true` after *Customize widget*, until `actionFinishCustomization()` or
+  `WidgetStateHandle.finishCustomization()`. It survives a restart.
+
+These calls exist on Windows only: in shared code, keep them behind a Windows check.
+
+## Web widgets
+
+A widget that also implements `WindowsWebWidget` shows a web page where the board supports it;
+the composed content is the fallback elsewhere.
+
+```kotlin
+class NewsWidget : NucleusWidget(), WindowsWebWidget {
+    override suspend fun provideWidget(id: WidgetId) = provideContent { Text("Latest news") }
+
+    override fun webUrl(id: WidgetId, state: WidgetState) = "https://news.example.com/widget"
+
+    override suspend fun onWebMessage(id: WidgetId, message: String) {
+        sendWebWidgetMessage(id, "echo: $message")
+    }
+}
+```
+
+`onWebRequest` answers the page's requests that match the definition's `webRequestFilter`, so
+a page can be served by the app itself, with no network.
+
+## Process lifetime
+
+A click on an action while the app is closed makes the board start it through COM. The process
+stays windowless while `isWidgetHostOnly()` is `true`, and exits once no widget has been visible
+for its `idleExit`.
+
+## The `WidgetManager` API
+
+`WidgetManager.getDefault()` mirrors the Windows App SDK class: `getWidgetInfos()`,
+`updateWidget(…)`, `deleteWidget(id)`, `sendMessageToContent(id, message)`. Most apps never need
+it: the widget API drives it.
+
+An open board keeps an unpinned card on screen until it is reopened: Windows does not refresh it.
+
+---
+
+# macOS widgets
+
+URL: https://nucleusframework.dev/en/docs/os/widgets/macos
+
+Show Nucleus widgets on the macOS desktop and in Notification Center with WidgetKit, from a JVM or GraalVM app.
+
+`widget-macos` hosts the [widget API](/docs/os/widgets) with WidgetKit, on the desktop and in
+Notification Center (macOS 14 and later). It also binds WidgetKit's app-side API one to one:
+`WidgetCenter`, `ControlCenter` (macOS 26) and Darwin notifications.
+
+WidgetKit runs widgets in a sandboxed extension that only runs Swift. Nucleus ships a prebuilt
+extension that draws what your app composes: you write no Swift.
+
+## Declare the widgets
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        macOS {
+            bundleID = "com.example.app"
+            widgets {
+                widget("Counter") {
+                    displayName = "Counter"
+                    description = "A live counter"
+                    families = listOf(MacWidgetFamily.Small, MacWidgetFamily.Medium)
+                }
+            }
+        }
+    }
+}
+```
+
+| Member | Notes |
+| --- | --- |
+| `widget(kind) { }` | The kind `widgets { widget(kind) { … } }` registers at run time. 16 widgets at most |
+| `displayName`, `description` | Shown in the widget gallery |
+| `families` | `Small`, `Medium`, `Large`, `ExtraLarge`. Default: the first three |
+| `appGroup` | The App Group the app and the extension share their files through. Required for a sandboxed (Mac App Store) app, which must list it in its own entitlements |
+
+The plugin builds `Contents/PlugIns/NucleusWidgets.appex` from the `widget-macos` JAR and signs
+it with its sandbox entitlements, in the JVM, electron-builder and GraalVM pipelines. The extension
+exists only in a bundle: test with `runDistributable`, not `run`.
+
+## How it works
+
+1. The app composes each widget and writes it to a folder it shares with the extension:
+   `~/Library/Application Support/<bundle id>/NucleusWidgets`, or the App Group container.
+2. It asks WidgetKit to reload the widget; the extension draws the tree with SwiftUI.
+3. A click goes back through an AppIntent: the extension wakes the app, or starts it without a
+   window, and waits for the new render.
+
+`Switch` flips and each `ChoiceField` option writes its value when clicked: WidgetKit has no
+text entry and no picker. `actionOpenUrl` opens its link.
+
+macOS runs a widget button's AppIntent only in an app signed with a Team ID (Apple Development or
+Developer ID). Ad-hoc builds show and update their widgets, but clicks on them do nothing.
+
+A widget without a configuration intent has no instance identity in WidgetKit: two widgets of the
+same kind and size show the same content and share their state.
+
+## The WidgetKit API
+
+| Call | Mirrors |
+| --- | --- |
+| `WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()` | `WidgetCenter.shared` |
+| `WidgetCenter.currentConfigurations()` | The widgets on screen, as `WidgetInfo(kind, family)` |
+| `WidgetCenter.invalidateConfigurationRecommendations()`, `invalidateRelevance(kind)` | macOS 13 and 15 |
+| `ControlCenter.reloadControls(kind)`, `currentControls()` | macOS 26 |
+| `DarwinNotificationCenter.post(name)`, `addObserver(name) { }` | `notify(3)` |
+
+## Troubleshooting
+
+- **The gallery shows an old version of the widget.** WidgetKit keeps a running extension and its
+  cached descriptors. Quit the `NucleusWidgets` process, or install a build with a new version.
+- **Clicks fail with `There is no metadata for NucleusWidgetAction`.** Several builds with the same
+  bundle id are registered (worktrees, old copies) and macOS reads another one. Test under a unique
+  bundle id, or unregister the other copies with `lsregister -u`.
+
+---
+
+# iOS widgets
+
+URL: https://nucleusframework.dev/en/docs/os/widgets/ios
+
+Show the same Nucleus widgets on the iOS home screen with WidgetKit, from a Kotlin Multiplatform app.
+
+`widget-ios` hosts the [widget API](/docs/os/widgets) on the iOS home screen with WidgetKit
+(iOS 17 and later). It is a Kotlin Multiplatform module (`iosArm64`, `iosSimulatorArm64`), and it
+binds WidgetKit's app-side API one to one: `WidgetCenter` and `ControlCenter` (iOS 18).
+
+An iOS app does not run in the background, so the widgets compose **inside the widget
+extension**: it links your Kotlin framework and runs your widget code for every render and every
+click. The app is never started for a widget.
+
+## Set up the framework
+
+Your shared module's framework must export `widget-ios`: the extension finds its entry points by
+name.
+
+```kotlin title="shared/build.gradle.kts"
+kotlin {
+    listOf(iosArm64(), iosSimulatorArm64()).forEach {
+        it.binaries.framework {
+            baseName = "Shared"
+            export("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+    sourceSets {
+        iosMain.dependencies {
+            api("dev.nucleusframework:nucleus.widget-ios:<version>")
+        }
+    }
+}
+```
+
+Declare the widgets in Kotlin; the app and the extension both call this function first:
+
+```kotlin title="shared/src/iosMain/kotlin/Widgets.kt"
+fun startWidgets() = startIosWidgets {
+    widget("Counter") { CounterWidget() }
+}
+```
+
+## Set up Xcode
+
+<Steps>
+<Step>
+
+### Share an App Group
+
+Add the same App Group capability to the app and the widget extension, and its id under
+`NucleusWidgetsAppGroup` in both `Info.plist` files (or pass it to
+`startIosWidgets(appGroup = …)`). The widget state lives there.
+
+</Step>
+<Step>
+
+### Add the Swift sources
+
+From the Nucleus repository, add to the **widget extension** target:
+`widget-runtime/src/main/native/swiftui/NucleusWidgetUI.swift` (the renderer),
+`widget-ios/src/swift/NucleusWidgetKit.swift` and `widget-ios/src/swift/NucleusWidgetCenter.swift`.
+Add `NucleusWidgetCenter.swift` to the **app** target too: it is how Kotlin reaches WidgetKit,
+which is Swift-only.
+
+</Step>
+<Step>
+
+### Declare the widgets in Swift
+
+```swift
+import Shared
+import SwiftUI
+import WidgetKit
+
+@main
+struct AppWidgets: WidgetBundle {
+    init() { WidgetsKt.startWidgets() }
+
+    var body: some Widget {
+        NucleusWidget(kind: "Counter", displayName: "Counter", families: [.systemSmall, .systemMedium])
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Start the widgets in the app
+
+Call `WidgetsKt.startWidgets()` at launch, before the app touches a widget.
+
+</Step>
+</Steps>
+
+## Update a widget from the app
+
+The app changes the state like on desktop, then reloads the widget; the extension composes it
+again from the new state:
+
+```kotlin
+updateWidgetState(WidgetId("Counter/systemSmall")) { it[Count] = 42 }
+CounterWidget().update(WidgetId("Counter/systemSmall"))
+```
+
+A widget id is `<kind>/<family>`: WidgetKit gives no instance identity without a configuration
+intent, so two widgets of the same kind and size share their state.
+
+The simulator runs widget clicks in any build. On a device, as on macOS, an AppIntent runs only in
+an app signed with a Team ID.
+
+## The WidgetKit API
+
+`WidgetCenter.reloadTimelines(kind)`, `reloadAllTimelines()`, `currentConfigurations()`,
+`invalidateConfigurationRecommendations()` and `invalidateRelevance(kind)`, and
+`ControlCenter.reloadControls(kind)`, `reloadAllControls()` and `currentControls()`. They block
+until WidgetKit answers: call them off the main thread. Without `NucleusWidgetCenter.swift` in the
+target, `WidgetCenter.isAvailable` is `false` and the calls do nothing.
 
 ---
 
@@ -10564,7 +11046,7 @@ linux {
 Build with `packageSnap`; the host needs no `snapcraft`. Setting `plugs` replaces the default list.
 Snap packaging skips arm64 hosts.
 
-## Publish to Flathub with Flatpak
+## Build a Flatpak bundle
 
 ```kotlin title="build.gradle.kts"
 linux {
@@ -10580,6 +11062,9 @@ linux {
 Build with `packageFlatpak`. `finishArgs` declares the sandbox permissions and replaces the
 defaults (`--share=ipc`, `--socket=x11`, `--socket=wayland`, `--socket=pulseaudio`,
 `--device=dri`). Without `flatpak` on the host, the task skips the format.
+
+The bundle is a single `.flatpak` file to install by hand. Flathub does not accept bundles: to
+publish there, see [Publish on Flathub](/docs/flathub/publishing).
 
 ## Register deep links and file associations
 
@@ -10898,7 +11383,7 @@ linux {
 }
 ```
 
-See [Building for Linux](/docs/packaging/linux#publish-to-flathub-with-flatpak) for the other
+See [Building for Linux](/docs/packaging/linux#build-a-flatpak-bundle) for the other
 Flatpak options.
 
 ## Detect the sandbox at runtime
@@ -11434,7 +11919,9 @@ Store builds skip `publish { }`. Upload the store format through the vendor:
   [Sell on the Microsoft Store](/docs/microsoft-store/selling), and
   [Submit from CI](/docs/microsoft-store/ci) to submit each tag from GitHub Actions.
 - **Snap Store**: `snapcraft upload` from CI. `classic` confinement needs Snap Store approval.
-- **Flathub**: a manifest pull request on the [Flathub repository](https://github.com/flathub/flathub).
+- **Flathub**: a manifest pull request on the [Flathub repository](https://github.com/flathub/flathub),
+  generated from the released `tar.gz` by `generateFlathubRepository`. See
+  [Publish on Flathub](/docs/flathub/publishing).
 
 ## What's next
 
@@ -11728,9 +12215,9 @@ The module logs through `java.util.logging` under `dev.nucleusframework.store.mi
 it covers. Raise that logger's level to see them, or set `allowNucleusRuntimeLogging = true`
 (`dev.nucleusframework.core.runtime.tools`).
 
-`microsoft-store` covers the Microsoft Store only. The Mac App Store and Flathub work differently
-enough to get their own modules; until they exist, `MicrosoftStore` reports `Unsupported` on
-macOS and Linux and your app runs without it.
+`microsoft-store` covers the Microsoft Store only, and `MicrosoftStore` reports `Unsupported` on
+macOS and Linux. Flathub has its own section, [Flathub](/docs/flathub); the Mac App Store has no
+module yet.
 
 ---
 
@@ -12374,6 +12861,472 @@ architectures, merge them into one `.msixbundle` first (the
 [`build-windows-appxbundle`](/docs/packaging/ci-cd#bundle-windows-for-the-microsoft-store)
 action), then submit the bundle inside an `.msixupload`. Nucleus has only verified
 single-architecture submissions so far; ARM64 PCs run the x64 package under emulation meanwhile.
+
+---
+
+# Flathub
+
+URL: https://nucleusframework.dev/en/docs/flathub
+
+Publish a Nucleus app on Flathub without opening its source, and install its updates from inside the app with the flatpak module.
+
+Flathub builds nothing from your source here: its manifest repackages the Linux `tar.gz` your
+release already publishes, the path a closed-source app takes. The plugin writes that manifest and
+its store metadata, and the `flatpak` module talks to the Flatpak portal from the installed app:
+
+| Entry point | What it does |
+| --- | --- |
+| `linux { flathub { } }` + `generateFlathubRepository` | Writes the Flathub repository of the app: manifest, AppStream metainfo, desktop entry, icon, MIME types |
+| `Flatpak.updates` | Follows the app's remote for a newer version, installs it from inside the app, and restarts into it |
+
+The Lab, Nucleus's test bench, went through this procedure as `dev.nucleusframework.Lab`. Its
+probe `system.flatpak-updates` calls every function of the module.
+
+| Page | Covers |
+| --- | --- |
+| [Publish on Flathub](/docs/flathub/publishing) | Describe the app, generate its repository, test it locally, submit it, ship updates |
+| [App updates](/docs/flathub/updates) | Find a newer version on the remote, install it and restart without leaving the app |
+
+## Add the dependency
+
+The plugin side needs nothing. For in-app updates:
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.flatpak:<version>")
+}
+```
+
+## Where it works
+
+The portal only answers a process that runs inside a Flatpak sandbox: the app installed from
+Flathub, from any other remote, or from a local repository.
+
+| Where the app runs | `availability()` | Flatpak calls |
+| --- | --- | --- |
+| Installed as a Flatpak, portal version 2 or later (flatpak 1.6) | `Available` | Work |
+| Installed as a Flatpak, older or missing portal | `PortalMissing` | Fail with `FlatpakErrorCode.PortalMissing` |
+| DEB, RPM, AppImage, Pacman, Snap, or `./gradlew run` | `NotFlatpak` | Fail with `FlatpakErrorCode.NotFlatpak` |
+| macOS, Windows | `Unsupported` | Fail with `FlatpakErrorCode.Unsupported` |
+
+```kotlin
+import dev.nucleusframework.flatpak.Flatpak
+import dev.nucleusframework.flatpak.FlatpakAvailability
+
+if (Flatpak.availability() == FlatpakAvailability.Available) {
+    showUpdatesMenu()
+}
+```
+
+`Flatpak.isSupported` is `true` on Linux when the native bridge loaded, and `Flatpak.appId` is the
+sandbox's `FLATPAK_ID` (`null` outside one). Neither says whether the portal can serve you: check
+`availability()` before you show any update UI.
+
+`ExecutableRuntime.type()` reports `FLATPAK` for the repackaged archive too: Nucleus reads
+`/.flatpak-info`, which Flatpak mounts in every sandbox, before the archive's own marker. The
+[Nucleus updater](/docs/packaging/auto-update) stays out of the way there: `isUpdateSupported()`
+is `false`.
+
+## Calls, threads and cancellation
+
+- Every call suspends or returns a `Flow`, and you may call it from any thread, the UI thread
+  included.
+- Cancelling the collection of `install()` cancels the update.
+- Failures throw `FlatpakException`.
+- The portal's dialogs (the update consent, the store page) sit on a window you pass as a
+  `FlatpakParentWindow`. Resolve it off the UI thread: on Wayland the export waits on the event
+  loop.
+
+```kotlin
+import dev.nucleusframework.flatpak.FlatpakParentWindow
+
+suspend fun TaoWindow.flatpakParent(): FlatpakParentWindow? =
+    withContext(Dispatchers.IO) { xdgPortalParent() }
+        ?.let { FlatpakParentWindow(it.portalParent, keepAlive = it as? AutoCloseable) }
+```
+
+Get the `TaoWindow` from `LocalNucleusWindow.current.unsafe.taoWindow`. `keepAlive` holds the
+Wayland export open until the call that borrowed it is over; the module closes it.
+
+## Errors
+
+`FlatpakException.code` tells you what failed; `portalError` carries the D-Bus error name when the
+failure came from the portal. The portal's messages are translated: tell errors apart by code,
+never by message.
+
+| `FlatpakErrorCode` | Meaning |
+| --- | --- |
+| `Unsupported` | Not Linux, or the native bridge failed to load |
+| `NotFlatpak` | The process runs outside a Flatpak sandbox |
+| `PortalMissing` | No Flatpak portal of version 2 or later, or no Access portal for its update dialog |
+| `UpdateDenied` | The user answered **Deny** to the "Update …?" dialog. Flatpak remembers it; the user changes it in the desktop's privacy settings (GNOME: **Apps**, the app's page) |
+| `NewPermissionsRequired` | The new version asks for permissions the installed one lacks: only the store or `flatpak update` may grant them |
+| `InProgress` | `install()` is already running in this process |
+| `Platform` | Any other portal error; see `portalError` |
+| `Internal` | A bug in the module or its native bridge |
+
+## Logging
+
+The module logs through `java.util.logging` under `dev.nucleusframework.flatpak`. Raise that
+logger's level, or set `allowNucleusRuntimeLogging = true`
+(`dev.nucleusframework.core.runtime.tools`).
+
+`linux { flatpak { } }` builds a single-file `.flatpak` bundle through electron-builder, for
+sideloading. Flathub does not accept bundles: it builds from a manifest, which
+`linux { flathub { } }` writes. The two blocks are independent.
+
+---
+
+# Publish on Flathub
+
+URL: https://nucleusframework.dev/en/docs/flathub/publishing
+
+Take a closed-source Nucleus app to Flathub: publish its tar.gz, describe it with linux { flathub { } }, generate its repository, test it with Flathub's own checks, submit it, verify the app id, and ship updates.
+
+This page takes a Nucleus app from a GitHub release to a Flathub listing, as the Lab went through
+it. Flathub compiles nothing: the manifest the plugin writes downloads your released `tar.gz` and
+installs it unchanged, so your source stays closed.
+
+You need:
+
+- A place that serves your releases at stable URLs, such as GitHub releases.
+- A domain or a code-hosting account you control, for the app id.
+- A GitHub account, to fork Flathub's repository.
+- `flatpak` on a Linux machine, with the Flathub remote, to test the build:
+
+```shell
+flatpak install --user flathub org.flatpak.Builder
+```
+
+## Choose the app id
+
+The app id is the reverse DNS of something you control, plus the app's name:
+`dev.nucleusframework.Lab` for the domain `nucleusframework.dev`, `io.github.<user>.<App>` for a
+GitHub account. Flathub verifies it against that domain or account, and it never changes once the
+app is published: pick it carefully.
+
+## Publish the tar.gz
+
+Add `TargetFormat.Tar` to the formats your release builds on Linux:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.Tar /* , your other formats */)
+    }
+}
+```
+
+| Task | Archive |
+| --- | --- |
+| `packageTar` | The JVM app, in `build/compose/binaries/main/tar.gz/` |
+| `packageGraalvmTar` | The GraalVM native image, in `build/compose/binaries/main/graalvm-tar.gz/` |
+
+The archive is named `<packageName>-<version>-linux-<arch>.tar.gz`, with `x64` or `arm64`. A
+runner builds its own architecture: build on an x64 and an ARM64 Linux runner (`ubuntu-latest`,
+`ubuntu-24.04-arm`) and attach both archives to the release. Flathub builds both architectures by
+default; to ship x64 only, set `arches = setOf(FlathubArch.X86_64)` below.
+
+## Describe the app
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        linux {
+            flathub {
+                appId = "com.example.Editor"
+                summary = "Edit example documents"
+                projectLicense = "LicenseRef-proprietary"
+                archiveUrl =
+                    "https://github.com/example/editor/releases/download/v{version}/editor-{version}-linux-{arch}.tar.gz"
+                categories = listOf("Office")
+                keywords = listOf("editor", "documents")
+                bugtrackerUrl = "https://github.com/example/editor/issues"
+                brandingLight = "#c7d0f0"
+                brandingDark = "#242d55"
+                iconFile.set(project.file("packaging/flathub/com.example.Editor.png"))
+                screenshot(
+                    "https://raw.githubusercontent.com/example/editor/v1.4.0/packaging/flathub/main.png",
+                    "The main window",
+                )
+            }
+        }
+    }
+}
+```
+
+- **`archiveUrl`**: `{version}` becomes the package version, `{arch}` becomes `x64` or `arm64`.
+- **`summary`**: one line under the name in the store, 35 characters at most, no trailing period.
+- **`projectLicense`**: an SPDX id, or `LicenseRef-proprietary` for a closed-source app.
+- **`iconFile`**: a square PNG of 256 px or more. Default: `linux.iconFile`.
+- **`screenshot()`**: public URLs that stay up. Flathub mirrors them at build time. Pointing them
+  at a release tag, as above, keeps each version's screenshots.
+- **`finishArgs`**: the sandbox permissions. The default gives a Tao window what it needs
+  (`ipc`, `wayland`, `fallback-x11`, `dri`). Add what your app uses, such as `--share=network`,
+  and nothing more: reviewers ask about every permission.
+- **`runtime`**: keep `org.gnome.Platform`. Tao links GTK 3, which only the GNOME runtime carries.
+
+The rest comes from the DSL you already have: the name, the description
+(`nativeDistributions.description`, or `flathub { description }`), the vendor as developer name,
+the homepage, `fileAssociation()` as MIME types and `protocol()` as URL schemes.
+
+## Generate the repository
+
+```shell
+./gradlew :app:generateFlathubRepository
+```
+
+The task downloads each archive once to hash it, so run it after the release is published. It
+writes `build/flathub/<appId>/`, the content of the app's future Flathub repository:
+
+| File | Content |
+| --- | --- |
+| `<appId>.yml` | The manifest: the runtime, the permissions, the archives and their SHA-256 |
+| `<appId>.metainfo.xml` | The store listing: summary, description, screenshots, release, branding |
+| `<appId>.desktop`, `<appId>.png` | The desktop entry and the icon |
+| `<appId>.mime.xml` | The file types, when the app declares `fileAssociation()` |
+| `flathub.json` | The architectures, when the app ships only some |
+
+Before writing, the task checks what Flathub would refuse (an app id that is not reverse DNS, a
+summary too long, a missing license or screenshot, a malformed branding color, a small icon) and
+fails with every problem at once.
+
+| Property | Effect |
+| --- | --- |
+| `-Pnucleus.flathub.outputDir=<dir>` | Writes there instead, for example into a clone of Flathub's repository. Only the generated files are replaced; `.git` and your own files stay |
+| `-Pnucleus.flathub.localArchive=<tar.gz>` | Uses a local archive instead of downloading one, for the host's architecture only |
+| `-Pnucleus.flathub.releaseDate=YYYY-MM-DD` | The release date in the metainfo. Default: today, UTC |
+
+## Test it locally
+
+Build and lint the generated repository the way Flathub's CI does, with the builder Flathub
+publishes. Run from the generated directory:
+
+```shell
+cd app/build/flathub/com.example.Editor
+flatpak run --filesystem="$PWD" --share=network --command=flathub-build \
+  org.flatpak.Builder com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable manifest com.example.Editor.yml
+flatpak run --filesystem="$PWD" --env=REPO=https://github.com/flathub/flathub \
+  --command=flatpak-builder-lint org.flatpak.Builder \
+  --exceptions --exceptions-repo stable repo repo
+```
+
+`REPO` matters: the linter applies the rules for new submissions only when it points at
+`flathub/flathub`. Without it, a lint passes builds the CI refuses.
+
+Then install the build and run it like a user would:
+
+```shell
+flatpak remote-add --user --no-gpg-verify editor-test "$PWD/repo"
+flatpak install --user editor-test com.example.Editor
+flatpak run com.example.Editor
+```
+
+To try the sandbox on a build of your machine, pass
+`-Pnucleus.flathub.localArchive=app/build/compose/binaries/main/graalvm-tar.gz/<archive>.tar.gz`
+and build with plain `flatpak-builder --user --install-deps-from=flathub --force-clean
+--install build com.example.Editor.yml`. The lint still needs reachable screenshots.
+
+## Ship a pre-release version
+
+Flathub's stable remote refuses a release whose version contains `alpha`, `beta`, `rc`, `pre` or
+`dev` (`appstream-latest-release-is-prerelease`, a rule with no exception), and
+`generateFlathubRepository` refuses it first. Give the store a version of its own; the archive
+URL keeps the package version:
+
+```kotlin title="build.gradle.kts"
+flathub {
+    releaseVersion = "2026.11.01" // the Lab dates its dev builds this way
+}
+```
+
+The `beta` channel accepts pre-releases, but only once the app is published.
+
+## Submit the app
+
+Flathub's review happens in a pull request on [flathub/flathub](https://github.com/flathub/flathub),
+against its `new-pr` branch.
+
+1. Fork `flathub/flathub` with all its branches, clone the fork, and start from `new-pr`:
+
+   ```shell
+   gh repo fork flathub/flathub --clone
+   cd flathub
+   git checkout --track origin/new-pr
+   git checkout -b add-com.example.Editor
+   ```
+
+2. Generate the repository into the clone, then commit and push:
+
+   ```shell
+   ./gradlew -p ~/editor :app:generateFlathubRepository -Pnucleus.flathub.outputDir="$PWD"
+   git add .
+   git commit -m "Add com.example.Editor"
+   git push -u origin add-com.example.Editor
+   ```
+
+3. Open the pull request against `new-pr`, titled `Add com.example.Editor`. Fill in the template:
+   its checklist, and a link to a short video of the app running.
+
+Flathub's policy forbids AI tools from opening or automating submission pull requests, and from
+writing their description, commit messages or replies to reviewers. Write those yourself.
+
+## Verify the app id
+
+Within an hour, a bot comments with the domain it verifies the app id against. For
+`dev.nucleusframework.Lab` it asked for an empty file at:
+
+```text
+https://nucleusframework.dev/.well-known/org.flathub.VerifiedApps.txt
+```
+
+Serve it over HTTPS with status 200. On a Next.js site, an empty
+`public/.well-known/org.flathub.VerifiedApps.txt` does it. An app id under `io.github.<user>` is
+verified through the GitHub account instead. See Flathub's
+[verification guide](https://docs.flathub.org/docs/for-app-authors/verification).
+
+## Pass the test build
+
+The bot then builds the submission for both architectures. A failure links to the build log; fix
+the issue, push to the same branch, and comment `bot, build` to start again. A success gives an
+install command for the test repository and a preview of the store page:
+
+```shell
+flatpak install --user https://dl.flathub.org/build-repo/<build>/com.example.Editor.flatpakref
+```
+
+Install it, check the listing, then wait for a reviewer. Answer their comments in the pull request
+and push the fixes to the same branch.
+
+## Ship updates
+
+Once the submission is merged, Flathub creates `github.com/flathub/<appId>` with your files and
+gives you write access; the app appears on Flathub after its first build there. For each version:
+
+1. Publish the new release with its archives.
+2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs, their hashes and
+   the metainfo release:
+
+   ```shell
+   ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
+   ```
+
+3. Push a branch and open a pull request. Flathub test-builds it, and merging it publishes the
+   update.
+
+Installed copies update through GNOME Software, KDE Discover or `flatpak update`. Your app can also
+install the update itself with [`Flatpak.updates`](/docs/flathub/updates).
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| `appstream-latest-release-is-prerelease` in the CI | A release version with `alpha`, `beta`, `rc`, `pre` or `dev`. See [Ship a pre-release version](#ship-a-pre-release-version) |
+| The local lint passes, the CI fails | The lint ran without `REPO=https://github.com/flathub/flathub` |
+| `appstream-screenshots-not-mirrored-in-ostree` | The repository was built with plain `flatpak-builder`. Lint a `flathub-build` repository |
+| The lint fails on TLS behind a corporate proxy | The builder's sandbox does not see the host's certificates. Add `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
+| `flathub-build` fails on `rofiles-fuse` | FUSE does not work inside the sandbox on this machine. Add `--disable-rofiles-fuse` |
+| The window has no minimize or maximize button | Nucleus older than `3.0.0`: GSettings inside a Flatpak does not see the host's `button-layout`. Update Nucleus |
+
+---
+
+# App updates
+
+URL: https://nucleusframework.dev/en/docs/flathub/updates
+
+Follow a Nucleus app's Flatpak remote for a newer version, install it from inside the app with progress, restart into it, and send the user to the store when the update needs new permissions.
+
+GNOME Software and KDE Discover update Flatpaks in the background, on their own schedule.
+`Flatpak.updates` installs a newer version from inside the app, through the Flatpak portal, for
+any remote: Flathub, your own, or a local test repository.
+
+The [Nucleus updater](/docs/packaging/auto-update) does not apply to Flatpak installs:
+`isUpdateSupported()` is `false` there.
+
+## Follow the remote
+
+```kotlin
+import dev.nucleusframework.flatpak.Flatpak
+import dev.nucleusframework.flatpak.FlatpakUpdateStatus
+
+Flatpak.updates.status.collect { status ->
+    when (status) {
+        is FlatpakUpdateStatus.Available -> offerUpdate()
+        is FlatpakUpdateStatus.Installed -> offerRestart()
+        is FlatpakUpdateStatus.UpToDate -> Unit
+    }
+}
+```
+
+| Status | Meaning |
+| --- | --- |
+| `Available` | The remote has a newer commit than the installed one |
+| `Installed` | A newer commit is installed, by `install()`, the store or `flatpak update`, but this process runs the old one |
+| `UpToDate` | This process runs the remote's latest commit |
+
+Each status carries the OSTree commits: `runningCommit`, and `installedCommit` / `remoteCommit`
+where they differ.
+
+The portal has no "check now". It checks every app on one timer, every 30 minutes, and the first
+status arrives on the first tick after you start collecting: up to 30 minutes later. Then it
+reports only when a commit changes. Collect `status` for the life of the app, not behind a button.
+
+Each collection runs a monitor of its own, closed when the collection ends.
+
+## Install it
+
+```kotlin
+import dev.nucleusframework.flatpak.FlatpakUpdateState
+
+Flatpak.updates
+    .install(parent) // a FlatpakParentWindow, see the Flathub page
+    .collect { progress ->
+        when (progress.state) {
+            FlatpakUpdateState.Installing -> showProgress(progress.progress) // 0.0 to 1.0
+            FlatpakUpdateState.Completed -> offerRestart()
+            FlatpakUpdateState.UpToDate -> Unit // nothing to install
+        }
+    }
+```
+
+- The first install shows the portal's "Update …?" dialog over `parent`. Flatpak remembers the
+  answer: after **Deny**, this and every later install fail with `FlatpakErrorCode.UpdateDenied`.
+- `progress` covers the whole update. An update may also pull a runtime or an extension, each its
+  own operation: `operation` counts from `0` out of `operationCount`.
+- The flow completes after `Completed` or `UpToDate`. Cancelling the collection cancels the
+  update.
+- A new version that asks for more permissions fails with
+  `FlatpakErrorCode.NewPermissionsRequired`: only the store may grant them.
+  [Send the user there](#send-the-user-to-the-store).
+
+## Restart into it
+
+The process keeps running the old version after `install()`, and after the store updated it
+(`Installed`). `restart()` starts the new one and exits:
+
+```kotlin
+Flatpak.updates.restart()
+```
+
+The new process gets this process's arguments, or the ones you pass. Nucleus hands the
+single-instance lock over first, so the new process does not take the old one for a running
+instance. If the portal refuses to start it, `restart()` throws and this process runs on.
+
+## Send the user to the store
+
+```kotlin
+Flatpak.updates.openStorePage(parent)
+```
+
+`openStorePage()` opens `appstream://<app id>` in the desktop's store, GNOME Software or Discover,
+where the user updates the app, new permissions included.
+
+Build two versions into a local repository and install the first: the second is an update of it.
+Restart the portal with `/usr/libexec/flatpak-portal --replace --poll-timeout=10` to get a status
+every 10 seconds instead of 30 minutes. See [Test it locally](/docs/flathub/publishing#test-it-locally).
 
 ---
 
@@ -14232,6 +15185,7 @@ jpackage builds `RawAppImage`, the bare app image. electron-builder builds every
 | `signing { }`, `notarization { }`, `dmg { }` | | See below |
 | `pkg { }` | `PkgSettings` | See [`pkg { }`](#macos-pkg) |
 | `appExtensions { }` | `MacAppExtensionSettings` | See [`appExtensions { }`](#macos-app-extensions) |
+| `widgets { }` | `MacWidgetsSettings` | WidgetKit widgets. See [`widgets { }`](#macos-widgets) |
 | `launchAgents { }` | `LaunchAgentSettings` | See [`launchAgents { }`](#macos-launch-agents) |
 | `infoPlist { }` | `InfoPlistSettings` | `extraKeysRawXml`: extra keys, as raw XML. `localization(language, strings)`: writes `<language>.lproj/InfoPlist.strings`. `localizationsDir`: a `File?` whose `<lang>.lproj` directories are copied into `Contents/Resources`. See [Localize Info.plist strings](/docs/packaging/macos#localize-infoplist-strings) |
 
@@ -14285,6 +15239,17 @@ macOS {
 ```
 
 Each extension is signed with its own entitlements, then the app is sealed without `--deep`. The extension exists only inside a signed `.app`: use `runDistributable`, not `run`. See [Embed app extensions](/docs/packaging/macos#embed-app-extensions).
+
+### `widgets { }` [#macos-widgets]
+
+`MacWidgetsSettings` embeds the Nucleus WidgetKit extension (`Contents/PlugIns/NucleusWidgets.appex`) and lists the widgets the app renders at run time. Needs `nucleus.widget-macos` on the runtime classpath, and macOS 14. Experimental.
+
+| Member | Notes |
+| --- | --- |
+| `widget(kind) { }` | Declares one `MacWidgetSettings`: `displayName`, `description`, `families` (`MacWidgetFamily`: `Small`, `Medium`, `Large`, `ExtraLarge`). 16 widgets at most |
+| `appGroup` | `String?`. The App Group the app and the extension share. Required for a sandboxed app; unset, they share `~/Library/Application Support/<bundle id>/NucleusWidgets` |
+
+See [macOS widgets](/docs/os/widgets/macos).
 
 ### `signing { }` [#macos-signing]
 
@@ -14349,6 +15314,7 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `perUserInstall` | `Boolean` | `false` | Deprecated. Inverted: `true` equals `msi { perMachine = false }`. Applied only while `msi.perMachine` is unset |
 | `fileAssociation(...)` | | | |
 | `nsis { }`, `msi { }`, `appx { }`, `portable { }`, `signing { }` | | | See below |
+| `widgets { }` | `WindowsWidgetsSettings` | | Windows 11 widgets, AppX only. See [`widgets { }`](#windows-widgets) |
 
 ### `msi { }` [#windows-msi]
 
@@ -14398,6 +15364,17 @@ Each extension is signed with its own entitlements, then the app is sealed witho
 | `showNameOnTiles`, `setBuildNumber` | `Boolean` (`false`) | |
 | `minVersion`, `maxVersionTested` | `String?` | |
 | `storeLogo`, `square44x44Logo`, `square150x150Logo`, `wide310x150Logo` | `RegularFileProperty` | |
+
+### `widgets { }` [#windows-widgets]
+
+`WindowsWidgetsSettings` adds the widgets board provider to the AppX: widget definitions, the COM server and the Windows App SDK dependency. Inert in every other format. Experimental.
+
+| Member | Notes |
+| --- | --- |
+| `windowsAppSdkVersion` | `String`, default `"1.8"` (at least `"1.2"`) |
+| `widget(id) { }` | Declares one `WindowsWidgetSettings`: `displayName`, `description`, `sizes` (`WindowsWidgetSize`), `customizable`, `allowMultiple` (default `true`), `webRequestFilter`, and the images `icon`, `preview` (required), `previewDark`, `previewLight` |
+
+See [Windows widgets](/docs/os/widgets/windows).
 
 ### `portable { }` [#windows-portable]
 
@@ -15514,6 +16491,15 @@ The major version marks the API breaks: read the
   app, sells the full version and add-ons (durables, consumables, subscriptions) from inside the
   app, follows renewals and refunds, and installs Store updates from the app. See
   [Microsoft Store](/docs/microsoft-store).
+- **Flathub from the released `tar.gz`** (#900, #898). `linux { flathub { } }` and
+  `generateFlathubRepository` write an app's Flathub repository (manifest, AppStream metainfo,
+  desktop entry, icon, MIME types) around its released archive, so a closed-source app ships on
+  Flathub without a source build. The new `flatpak` module follows the app's remote, installs
+  updates from inside the app and restarts into them. See [Flathub](/docs/flathub).
+- **Widgets** (#911), experimental. Write a widget once in Kotlin, Glance style (`widget-runtime`),
+  and show it on the Windows 11 widgets board (`widget-windows`, AppX / MSIX), the macOS desktop
+  (`widget-macos`, WidgetKit) and the iOS home screen (`widget-ios`). The Gradle plugin's
+  `windows { widgets { } }` and `macOS { widgets { } }` package them. See [Widgets](/docs/os/widgets).
 - **`speech-recognition` module** (#724). Streams native speech-to-text on Windows, macOS,
   Android and iOS, and `Dictation` turns transcripts into text field edits. See [Speech
   recognition](/docs/os/speech-recognition).
@@ -15682,6 +16668,9 @@ The major version marks the API breaks: read the
 
 ### Bug fixes
 
+- **A Nucleus app inside a Flatpak behaves as one** (#897). `ExecutableRuntime.type()` reports
+  `FLATPAK` for a repackaged archive, the Wayland `app_id` is the Flatpak app id, and the title bar
+  keeps the desktop's minimize and maximize buttons. See [Flathub](/docs/flathub#where-it-works).
 - **Wrap-content windows show at their measured size** (#868, #532) instead of flashing at the
   fallback size. See [Size a window to its
   content](/docs/windows/window-state#size-a-window-to-its-content).
