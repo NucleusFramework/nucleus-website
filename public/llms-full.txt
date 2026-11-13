@@ -980,7 +980,7 @@ repositories. See [Toolkits](/docs/toolkits).
 | System accent color | `system-color` |
 | Global hotkeys | `global-hotkey` |
 | Share sheet, Kotlin Multiplatform | [`share`](/docs/os/share) |
-| Widgets (Windows 11 board, macOS and iOS WidgetKit), experimental | [`widget-runtime`, `widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) |
+| Widgets (Windows 11 board, macOS and iOS WidgetKit, Android app widgets), experimental | [`widget-runtime`, `widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) |
 | Geolocation, Kotlin Multiplatform | [`location`](/docs/os/location) |
 | Speech-to-text, Kotlin Multiplatform | [`speech-recognition`](/docs/os/speech-recognition) |
 | Media controls (Now Playing, SMTC, MPRIS) | `media-control` |
@@ -5491,7 +5491,7 @@ as its own Gradle artifact, so you add only the modules you use.
 | Tray popup apps | `composenativetray-app` | yes | yes | yes |
 | Global hotkeys | `global-hotkey` | yes | yes | yes |
 | Share sheet (also Android, iOS, web) | [`share`](/docs/os/share) | yes | yes | yes |
-| Widgets (also iOS) | [`widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) | yes | yes | no |
+| Widgets (also iOS, Android) | [`widget-windows`, `widget-macos`, `widget-ios`](/docs/os/widgets) | yes | yes | no |
 | Location (also Android, iOS, web) | [`location`](/docs/os/location) | yes | yes | yes |
 | Speech recognition (also Android, iOS) | [`speech-recognition`](/docs/os/speech-recognition) | yes | yes | no |
 | Media controls | `media-control` | yes | yes | yes |
@@ -6758,7 +6758,7 @@ On Linux, both set the `urgent` flag.
 
 URL: https://nucleusframework.dev/en/docs/os/widgets
 
-Write a desktop or home screen widget once in Kotlin, Glance style, and show it on the Windows 11 widgets board, the macOS desktop and the iOS home screen.
+Write a widget once in Kotlin, Glance style, and show it on the Windows 11 widgets board, the macOS desktop, and the iOS and Android home screens.
 
 `widget-runtime` lets you describe a widget once, in Kotlin, with composables modeled on Jetpack
 Glance. A platform module shows it with the operating system's own widget host:
@@ -6768,10 +6768,11 @@ Glance. A platform module shows it with the operating system's own widget host:
 | Windows 11 | [`widget-windows`](/docs/os/widgets/windows) | Widgets board (Windows App SDK) | AppX / MSIX only |
 | macOS 14+ | [`widget-macos`](/docs/os/widgets/macos) | WidgetKit: desktop and Notification Center | Any `.app` bundle |
 | iOS 17+ | [`widget-ios`](/docs/os/widgets/ios) | WidgetKit: home screen | Your Xcode app and its widget extension |
+| Android 6+ | [`widget-runtime`](/docs/os/widgets/android) itself | App widgets (`RemoteViews`) | Any app |
 
 A widget is a snapshot, not a live UI: each render composes your content once, from the widget's
 saved state, into a tree the host draws natively (an Adaptive Card on Windows, SwiftUI on Apple
-platforms). Clicks run your Kotlin code, change the state, and the widget is drawn again.
+platforms, `RemoteViews` on Android). Clicks run your Kotlin code, change the state, and the widget is drawn again.
 
 The whole widget API is marked `@ExperimentalNucleusWidgetApi` and may change without a
 deprecation cycle. Opt in module-wide:
@@ -6796,7 +6797,8 @@ dependencies {
 ```
 
 Each module finds its host at run time and stays inert elsewhere: shipping both in a desktop app
-is fine. For iOS, see [iOS widgets](/docs/os/widgets/ios).
+is fine. For iOS, see [iOS widgets](/docs/os/widgets/ios). On Android, `widget-runtime` is the host: see
+[Android widgets](/docs/os/widgets/android).
 
 ## Write a widget
 
@@ -7230,6 +7232,98 @@ an app signed with a Team ID.
 `ControlCenter.reloadControls(kind)`, `reloadAllControls()` and `currentControls()`. They block
 until WidgetKit answers: call them off the main thread. Without `NucleusWidgetCenter.swift` in the
 target, `WidgetCenter.isAvailable` is `false` and the calls do nothing.
+
+---
+
+# Android widgets
+
+URL: https://nucleusframework.dev/en/docs/os/widgets/android
+
+Show the same Nucleus widgets on the Android home screen as app widgets, from Kotlin Multiplatform code.
+
+`widget-runtime` hosts the [widget API](/docs/os/widgets) on Android home screens itself, through
+its Android target: there is no separate module, no native code and no Gradle plugin step. Each
+render is drawn as `RemoteViews`, the views Android app widgets are made of.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+// commonMain or androidMain of a KMP project, dependencies { } of an Android app
+implementation("dev.nucleusframework:nucleus.widget-runtime:<version>")
+```
+
+Android 6.0 (API 23) and later.
+
+## Declare the widgets
+
+Declare them in `Application.onCreate`: Android starts the app's process for a widget alone, and
+that is the only app code that runs before the widget's receiver.
+
+```kotlin
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        NucleusWidgets.start { widget("Counter") { CounterWidget() } }
+    }
+}
+```
+
+Android tells widget kinds apart by their receiver class, so each widget needs one, empty:
+
+```kotlin
+class CounterWidgetReceiver : NucleusWidgetReceiver("Counter")
+```
+
+```xml title="AndroidManifest.xml"
+<receiver android:name=".CounterWidgetReceiver" android:exported="false">
+    <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+    </intent-filter>
+    <meta-data android:name="android.appwidget.provider" android:resource="@xml/counter_widget" />
+</receiver>
+```
+
+```xml title="res/xml/counter_widget.xml"
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/nucleus_widget_root"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0" />
+```
+
+`initialLayout` is the library's empty widget frame, shown while the app's process starts. A
+receiver whose id is not declared logs an error on the `NucleusWidgets` tag and draws nothing.
+
+## How it renders
+
+| API | On Android |
+| --- | --- |
+| `WidgetId` | The `appWidgetId`: every placed widget has its own state |
+| `LocalSize` | From the widget's size in portrait: narrow is `Small`, wide and short is `Medium`, else `Large`. Resizing renders again |
+| `Switch`, `ChoiceField` | Write their value when tapped. Real switches and radio buttons on Android 12+, a tappable line with a check glyph before |
+| `ImageProvider.appResource(path)` | Read from the app's `assets/<path>` |
+| `ImageProvider(url)` | Downloaded once and cached; needs the `INTERNET` permission. SVG is left out |
+| `actionOpenUrl` | Opens the link from the launcher, without running app code |
+
+State lives in the app's `SharedPreferences`, written before the launcher shows the new render,
+so a process killed in between never comes back with an older state. Removing a widget removes its
+state.
+
+A widget that throws while composing, or nests more than ten levels of `Column` and `Row` (the
+limit of `RemoteViews`), shows a one-line notice instead, and the failure is reported on
+`NucleusWidgets.events`.
+
+## Update a widget from the app
+
+```kotlin
+updateWidgetState(id) { it[Count] = 42 }
+CounterWidget().update(id)
+```
+
+`NucleusWidgets.pinnedWidgets()` and `updateAll()` find the placed widgets of every receiver that
+already ran once, which is every receiver with a widget on screen.
 
 ---
 
@@ -16496,9 +16590,10 @@ The major version marks the API breaks: read the
   desktop entry, icon, MIME types) around its released archive, so a closed-source app ships on
   Flathub without a source build. The new `flatpak` module follows the app's remote, installs
   updates from inside the app and restarts into them. See [Flathub](/docs/flathub).
-- **Widgets** (#911), experimental. Write a widget once in Kotlin, Glance style (`widget-runtime`),
+- **Widgets** (#911, #927), experimental. Write a widget once in Kotlin, Glance style (`widget-runtime`),
   and show it on the Windows 11 widgets board (`widget-windows`, AppX / MSIX), the macOS desktop
-  (`widget-macos`, WidgetKit) and the iOS home screen (`widget-ios`). The Gradle plugin's
+  (`widget-macos`, WidgetKit), the iOS home screen (`widget-ios`) and Android home screens
+  (`widget-runtime` itself, as app widgets). The Gradle plugin's
   `windows { widgets { } }` and `macOS { widgets { } }` package them. See [Widgets](/docs/os/widgets).
 - **`speech-recognition` module** (#724). Streams native speech-to-text on Windows, macOS,
   Android and iOS, and `Dictation` turns transcripts into text field edits. See [Speech
