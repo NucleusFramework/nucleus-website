@@ -1,0 +1,92 @@
+---
+title: Android widgets
+description: Show the same Nucleus widgets on the Android home screen as app widgets, from Kotlin Multiplatform code.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`widget-runtime` hosts the [widget API](/docs/os/widgets) on Android home screens itself, through
+its Android target: there is no separate module, no native code and no Gradle plugin step. Each
+render is drawn as `RemoteViews`, the views Android app widgets are made of.
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+// commonMain or androidMain of a KMP project, dependencies { } of an Android app
+implementation("dev.nucleusframework:nucleus.widget-runtime:<version>")
+```
+
+Android 6.0 (API 23) and later.
+
+## Declare the widgets
+
+Declare them in `Application.onCreate`: Android starts the app's process for a widget alone, and
+that is the only app code that runs before the widget's receiver.
+
+```kotlin
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        NucleusWidgets.start { widget("Counter") { CounterWidget() } }
+    }
+}
+```
+
+Android tells widget kinds apart by their receiver class, so each widget needs one, empty:
+
+```kotlin
+class CounterWidgetReceiver : NucleusWidgetReceiver("Counter")
+```
+
+```xml title="AndroidManifest.xml"
+<receiver android:name=".CounterWidgetReceiver" android:exported="false">
+    <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+    </intent-filter>
+    <meta-data android:name="android.appwidget.provider" android:resource="@xml/counter_widget" />
+</receiver>
+```
+
+```xml title="res/xml/counter_widget.xml"
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/nucleus_widget_root"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0" />
+```
+
+`initialLayout` is the library's empty widget frame, shown while the app's process starts. A
+receiver whose id is not declared logs an error on the `NucleusWidgets` tag and draws nothing.
+
+## How it renders
+
+| API | On Android |
+| --- | --- |
+| `WidgetId` | The `appWidgetId`: every placed widget has its own state |
+| `LocalSize` | From the widget's size in portrait: narrow is `Small`, wide and short is `Medium`, else `Large`. Resizing renders again |
+| `Switch`, `ChoiceField` | Write their value when tapped. Real switches and radio buttons on Android 12+, a tappable line with a check glyph before |
+| `ImageProvider.appResource(path)` | Read from the app's `assets/<path>` |
+| `ImageProvider(url)` | Downloaded once and cached; needs the `INTERNET` permission. SVG is left out |
+| `actionOpenUrl` | Opens the link from the launcher, without running app code |
+
+State lives in the app's `SharedPreferences`, written before the launcher shows the new render,
+so a process killed in between never comes back with an older state. Removing a widget removes its
+state.
+
+<Callout type="info">
+A widget that throws while composing, or nests more than ten levels of `Column` and `Row` (the
+limit of `RemoteViews`), shows a one-line notice instead, and the failure is reported on
+`NucleusWidgets.events`.
+</Callout>
+
+## Update a widget from the app
+
+```kotlin
+updateWidgetState(id) { it[Count] = 42 }
+CounterWidget().update(id)
+```
+
+`NucleusWidgets.pinnedWidgets()` and `updateAll()` find the placed widgets of every receiver that
+already ran once, which is every receiver with a widget on screen.
