@@ -1,0 +1,91 @@
+---
+title: Licence de l'application
+description: Vérifiez qu'une application Nucleus payante du Mac App Store a été achetée par ce client, sur ce Mac, et décidez quoi faire hors ligne.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le Mac App Store ne chiffre pas les applications et ne délivre pas de licence : un bundle `.app`
+copié tourne sur n'importe quel Mac. Il fournit en revanche à l'application une preuve d'achat,
+l'`AppTransaction`, signée par Apple. `appLicense()` la vérifie, pour qu'une application payante
+distingue une copie achetée d'une copie dupliquée.
+
+## Vérifier la licence au lancement
+
+```kotlin
+import dev.nucleusframework.store.mac.AppLicenseStatus
+import dev.nucleusframework.store.mac.MacAppStore
+
+when (MacAppStore.appLicense().status) {
+    AppLicenseStatus.Valid -> rememberLicensed()                       // gardez la date
+    AppLicenseStatus.Unavailable -> if (!licensedRecently()) showOfflineNotice()
+    AppLicenseStatus.Revoked, AppLicenseStatus.Invalid -> showBuyPrompt()
+}
+```
+
+`appLicense()` demande macOS 13. Il n'affiche aucune interface et ne lève jamais d'exception : tout
+ce qui empêche la vérification revient sous forme de `Unavailable`.
+
+| `AppLicenseStatus` | Signification |
+| --- | --- |
+| `Valid` | Signée par l'App Store pour cette application, sur ce Mac, et non remboursée |
+| `Revoked` | Apple a remboursé ou révoqué l'application |
+| `Invalid` | Une preuve existe mais échoue à une vérification : sa signature, faite pour une autre application ou pour un autre Mac. Traitez la copie comme non achetée |
+| `Unavailable` | Aucune preuve vérifiable pour l'instant : premier lancement hors ligne, pas de compte App Store, macOS 12, hors d'un bundle d'application |
+
+`AppLicense.reason` explique pourquoi le statut n'est pas `Valid`, pour vos journaux.
+`AppLicense.appTransaction` est la preuve elle-même quand StoreKit en a renvoyé une.
+
+## Ce qui est vérifié
+
+Chaque vérification s'exécute sur l'appareil ; ce sont celles qu'Apple documente pour une
+`AppTransaction` :
+
+1. **La signature.** StoreKit vérifie qu'Apple a signé la preuve.
+2. **L'application.** Le bundle id de la preuve doit être celui de l'application en cours.
+3. **Le Mac.** La preuve contient un hash de l'identifiant de ce Mac pour l'éditeur
+   (`AppStore.deviceVerificationID`). Une preuve copiée depuis un autre Mac, avec le conteneur de
+   l'application, ne lui correspond pas.
+4. **Le remboursement.** Une application remboursée porte une date de révocation.
+
+<Callout title="Vérification côté serveur">
+Pour une vérification plus forte, envoyez `appTransaction.signedAppTransaction` (un JWS) à votre
+serveur et vérifiez-le avec l'[App Store Server API](https://developer.apple.com/documentation/appstoreserverapi).
+</Callout>
+
+## Hors ligne
+
+StoreKit conserve la preuve après le premier lancement : un Mac qui a été en ligne une fois continue
+de répondre `Valid` hors ligne. Un premier lancement sans réseau n'a pas encore de preuve :
+`Unavailable`.
+
+`Unavailable` ne prouve pas qu'il s'agit d'une copie. Enregistrez la date du dernier `Valid` et
+choisissez combien de temps elle reste valable, plutôt que de bloquer un client hors ligne.
+
+## Lire l'achat de l'application elle-même
+
+`appTransaction()` renvoie la preuve sans la juger, et lève une exception quand il n'y en a pas :
+
+```kotlin
+val app = MacAppStore.appTransaction()
+if (app.originalAppVersion.toInt() < FREEMIUM_BUILD) unlockEverything() // achetée avant de devenir gratuite
+```
+
+| `AppTransactionInfo` | Signification |
+| --- | --- |
+| `bundleId` | L'application pour laquelle la preuve a été faite |
+| `appId` | L'identifiant Apple de l'application dans App Store Connect ; `null` dans StoreKit Testing |
+| `appVersion`, `originalAppVersion` | Le `CFBundleVersion` en cours, et celui que le client a obtenu en premier |
+| `originalPurchaseTime`, `preorderTime` | Quand le client a obtenu l'application, et l'a précommandée |
+| `revocationTime` | Quand Apple l'a remboursée ou révoquée |
+| `environment` | `Production`, `Sandbox`, `Xcode` (StoreKit Testing) |
+| `signedAppTransaction` | Le JWS, pour une vérification côté serveur |
+
+`originalAppVersion` permet à une application passée du modèle payant au modèle gratuit avec achats
+intégrés de tout laisser débloqué pour les clients qui l'ont payée.
+
+## La tester
+
+Dans la Sandbox, un build de l'application signé pour le développement obtient `Valid` une fois le
+testeur Sandbox connecté (voir [Tester dans la Sandbox](/docs/mac-app-store/selling#tester-dans-la-sandbox)).
+La sonde `system.macAppStore` du Lab a un bouton *App license* qui affiche le statut et sa raison.

@@ -1,0 +1,97 @@
+---
+title: StoreKit Testing
+description: Développez les achats Mac App Store d'une application Nucleus avec un fichier .storekit et ./gradlew runStoreKit, sans compte Apple ni Xcode, et jouez le côté App Store depuis l'application.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+StoreKit Testing sert les produits d'un fichier `.storekit` dans le processus de votre
+application : achats, renouvellements, remboursements et Ask to Buy, sans compte Apple, sans
+certificat et sans configuration App Store Connect. Nucleus le fait tourner hors de Xcode.
+
+## Lancer l'application avec un fichier .storekit
+
+Créez le fichier dans Xcode (*File › New › File › StoreKit Configuration File*), ajoutez vos
+produits avec les identifiants utilisés par votre code, puis déclarez-le :
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        macOS {
+            bundleID = "com.example.myapp"
+            storeKitConfiguration.set(file("packaging/macos/Products.storekit"))
+        }
+    }
+}
+```
+
+```bash
+./gradlew runStoreKit
+```
+
+`runStoreKit` remplace `run`. Son premier lancement construit un `.app` de développement sous
+`build/nucleus/storekit-app` (une coquille jpackage avec le JDK, une douzaine de secondes) ; les
+lancements suivants le pointent simplement vers le classpath et les arguments JVM du moment, le
+re-signent et le démarrent : une modification du code ne repackage jamais. Xcode doit être
+installé : StoreKitTest est livré avec lui.
+
+`MacAppStore.testing.isActive` vaut `true`, et chaque `Purchase.environment` vaut `Xcode`.
+
+<Callout title="Sans le plugin">
+Lancez n'importe quel bundle d'application avec
+`-Dnucleus.macAppStore.storeKitConfiguration=/chemin/vers/Products.storekit`. StoreKit Testing ne
+sert qu'un bundle installé pour le développement : signé avec l'entitlement
+`com.apple.security.get-task-allow` (une signature ad hoc suffit), connu de LaunchServices (ouvert
+une fois, ou `lsregister -f`), sur un Mac où Xcode est installé. `runStoreKit` s'occupe des trois.
+</Callout>
+
+## Jouer le côté App Store
+
+`MacAppStore.testing` pilote la session depuis l'application, depuis un menu de debug ou un test
+automatisé :
+
+```kotlin
+import dev.nucleusframework.store.mac.RenewalRate
+
+val testing = MacAppStore.testing
+if (testing.isActive) {
+    testing.setPurchaseSheetsEnabled(false)    // les achats aboutissent aussitôt
+    testing.refund("pro")                      // → PurchaseUpdate.Revoked
+    testing.forceRenewal("premium.monthly")    // → PurchaseUpdate.Purchased
+    testing.setBillingRetryOnRenewal(true)     // le prochain renouvellement échoue : InBillingRetry
+    testing.setBillingGracePeriod(true)        // ... ou InGracePeriod
+    testing.setAskToBuyEnabled(true)           // purchase() → Pending
+    testing.approveAskToBuy("coins")           // → PurchaseUpdate.Purchased
+    testing.buyOutsideApp("coins")             // comme acheté sur un autre Mac
+    testing.setRenewalRate(RenewalRate.OneRenewalEveryTenSeconds)
+}
+```
+
+| Fonction | Rôle |
+| --- | --- |
+| `setPurchaseSheetsEnabled` | Affiche ou saute la feuille d'achat |
+| `setAskToBuyEnabled`, `approveAskToBuy` | Ask to Buy : les achats attendent, puis un parent approuve |
+| `setBillingRetryOnRenewal`, `setBillingGracePeriod`, `resolveBillingIssue` | Renouvellements en échec, avec ou sans délai de grâce |
+| `setInterruptedPurchasesEnabled` | Achats qui demandent une étape supplémentaire au client |
+| `setRenewalRate` | La vitesse de renouvellement des abonnements, du temps réel à toutes les deux secondes |
+| `setStorefront` | Le pays du client, en code à trois lettres (`FRA`) |
+| `refund`, `forceRenewal`, `expireSubscription`, `setAutoRenew` | Événements côté store sur un produit |
+| `buyOutsideApp` | Un achat fait hors de l'application |
+| `clearTransactions` | Efface l'historique des achats |
+| `settings()` | Relit les réglages actuels |
+
+- Les réglages survivent à l'application : StoreKit les garde par bundle id. Relisez-les avec
+  `settings()` plutôt que de supposer les valeurs par défaut.
+- Une expiration n'atteint `entitlement()` qu'environ 15 secondes plus tard.
+- Il n'y a pas de `declineAskToBuy` : StoreKit Testing signale un Ask to Buy refusé comme un achat
+  terminé.
+
+Hors d'une session StoreKit Testing, chaque fonction échoue avec `StoreErrorCode.InvalidArgument`.
+
+## Sortir de StoreKit Testing
+
+macOS conserve la configuration du bundle id après la fermeture de l'application : un lancement
+ultérieur du même bundle id, même un build destiné à la Sandbox, obtiendrait encore les produits du
+fichier `.storekit`. Le module la supprime, comme Xcode, au premier appel au store d'un build de
+développement (avec `get-task-allow`) lancé sans fichier `.storekit`. Un build qui ne peut pas la
+supprimer affiche un avertissement quand une transaction vient encore de l'environnement `Xcode`.

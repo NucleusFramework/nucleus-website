@@ -46,6 +46,39 @@ nativeDistributions {
 Sur le Mac App Store, ce chargement peut encore échouer à la validation des bibliothèques. Préférez
 une option de la bibliothèque qui accepte un chemin externe quand elle existe.
 
+## Images natives GraalVM
+
+Une application GraalVM obtient son PKG Mac App Store depuis une seconde image native, sandboxée,
+construite à côté de l'image normale uniquement quand `targetFormats` contient un PKG App Store. Le
+DMG, le ZIP et le PKG Developer ID gardent l'image normale, inchangée.
+
+```bash
+./gradlew packageGraalvmPkg                              # le PKG App Store, depuis l'image sandboxée
+./gradlew runSandboxedGraalvmNativeDistributable          # lancer l'application sandboxée sur ce Mac
+```
+
+L'image sandboxée diffère de l'image normale sur trois points, tous gérés par le plugin et par
+`GraalVmInitializer` :
+
+- **Les bibliothèques natives** que les JAR des dépendances extraient à l'exécution (JNA,
+  zstd-kmp, une WebView, une tray) sont extraites à la compilation, signées dans
+  `Contents/Frameworks/` et chargées depuis cet emplacement, comme dans le pipeline JVM sandboxé.
+- **`user.home`** pointe vers le conteneur de l'application
+  (`~/Library/Containers/<bundle id>/Data`), comme sur la JVM, et non vers le dossier personnel du
+  compte.
+- **La gestion des signaux** : l'image tourne sans la gestion des signaux de Substrate, dont l'App
+  Sandbox refuse le sémaphore nommé. SIGINT, SIGTERM et SIGHUP exécutent toujours les shutdown
+  hooks et terminent avec le code `128 + signal`, comme la JVM. Ce qui ne fonctionne pas, ce sont vos
+  propres `sun.misc.Signal.handle` pour d'autres signaux (SIGUSR1, ...).
+
+`sandboxing { keepNativeLibsInJars(...) }` ne s'applique pas à l'image native, compilée depuis un
+seul JAR : toutes les bibliothèques natives sont redirigées vers `Contents/Frameworks/`.
+
+<Callout title="Lancez-la depuis son bundle">
+Une application sandboxée doit tourner depuis son `.app`, comme la lancent le Finder, `open` et le
+Dock. Démarrée via un lien symbolique vers son binaire, elle est arrêtée par AppKit au lancement.
+</Callout>
+
 ## Configurer les entitlements macOS
 
 | Entitlement par défaut | DMG, ZIP, PKG Developer ID | PKG App Store |
@@ -110,6 +143,10 @@ tourne en processus Win32 full trust. Pour ce dernier, testez `ExecutableRuntime
 - Il définit `java.library.path`, `jna.library.path`, `jna.boot.library.path`, `jna.nounpack=true`
   et `jna.nosys=true`. L'image arrive dans `app-sandboxed/`, à côté de `app/`.
 - Sur macOS, `isSandboxed()` lit `APP_SANDBOX_CONTAINER_ID`.
+- Une image GraalVM sandboxée est reconnue à l'exécution par `Contents/Resources/nucleus-sandbox-manifest.properties` ;
+  ses tâches sont `stripGraalvmNativeLibsForSandboxing`, `extractGraalvmNativeLibsForSandboxing`,
+  `nativeImageCompileSandboxed` et `createSandboxedGraalvmNativeDistributable`, dont le résultat
+  arrive dans `graalvm-app-sandboxed/`.
 
 </Accordion>
 </Accordions>

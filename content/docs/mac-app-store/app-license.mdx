@@ -1,0 +1,89 @@
+---
+title: App licence
+description: Check that a paid Nucleus app on the Mac App Store was bought by this customer, on this Mac, and decide what to do offline.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Mac App Store neither encrypts apps nor issues a licence: a copied `.app` bundle runs on any
+Mac. What it gives the app is a proof of purchase, the `AppTransaction`, signed by Apple.
+`appLicense()` checks it, so a paid app can tell a bought copy from a copied one.
+
+## Check the licence at launch
+
+```kotlin
+import dev.nucleusframework.store.mac.AppLicenseStatus
+import dev.nucleusframework.store.mac.MacAppStore
+
+when (MacAppStore.appLicense().status) {
+    AppLicenseStatus.Valid -> rememberLicensed()                       // keep the date
+    AppLicenseStatus.Unavailable -> if (!licensedRecently()) showOfflineNotice()
+    AppLicenseStatus.Revoked, AppLicenseStatus.Invalid -> showBuyPrompt()
+}
+```
+
+`appLicense()` needs macOS 13. It shows no UI and never throws: anything that prevents the check
+comes back as `Unavailable`.
+
+| `AppLicenseStatus` | Meaning |
+| --- | --- |
+| `Valid` | Signed by the App Store for this app, on this Mac, and not refunded |
+| `Revoked` | Apple refunded or revoked the app |
+| `Invalid` | A proof exists but fails a check: its signature, made for another app, or made for another Mac. Treat the copy as not bought |
+| `Unavailable` | No proof can be checked now: the first launch offline, no App Store account, macOS 12, outside an app bundle |
+
+`AppLicense.reason` says why the status is not `Valid`, for your logs. `AppLicense.appTransaction`
+is the proof itself when StoreKit returned one.
+
+## What is checked
+
+Every check runs on the device, the ones Apple documents for an `AppTransaction`:
+
+1. **The signature.** StoreKit verifies that Apple signed the proof.
+2. **The app.** The proof's bundle id must be the running app's.
+3. **The Mac.** The proof carries a hash of this Mac's identifier for the vendor
+   (`AppStore.deviceVerificationID`). A proof copied from another Mac, with the app's container,
+   does not match it.
+4. **The refund.** A refunded app carries a revocation date.
+
+<Callout title="Server-side check">
+For a stronger check, send `appTransaction.signedAppTransaction` (a JWS) to your server and verify
+it there with the [App Store Server API](https://developer.apple.com/documentation/appstoreserverapi).
+</Callout>
+
+## Offline
+
+StoreKit caches the proof after the first launch, so a Mac that was online once keeps answering
+`Valid` offline. A first launch with no network has no proof yet: `Unavailable`.
+
+`Unavailable` is not evidence of a copy. Store the date of the last `Valid` and choose how long it
+holds, rather than locking out a customer who is offline.
+
+## Read the app's own purchase
+
+`appTransaction()` returns the proof without judging it, and throws when there is none:
+
+```kotlin
+val app = MacAppStore.appTransaction()
+if (app.originalAppVersion.toInt() < FREEMIUM_BUILD) unlockEverything() // bought before the app went free
+```
+
+| `AppTransactionInfo` | Meaning |
+| --- | --- |
+| `bundleId` | The app the proof was made for |
+| `appId` | The app's Apple ID in App Store Connect; `null` in StoreKit Testing |
+| `appVersion`, `originalAppVersion` | The `CFBundleVersion` running now, and the one the customer first got |
+| `originalPurchaseTime`, `preorderTime` | When the customer first got the app, and preordered it |
+| `revocationTime` | When Apple refunded or revoked it |
+| `environment` | `Production`, `Sandbox`, `Xcode` (StoreKit Testing) |
+| `signedAppTransaction` | The JWS, for a server-side check |
+
+`originalAppVersion` is how an app that moved from paid to free with in-app purchases keeps
+everything unlocked for the customers who paid for it.
+
+## Test it
+
+Against the Sandbox, a development-signed build of the app gets `Valid` once the Sandbox tester has
+signed in (see [Test against the Sandbox](/docs/mac-app-store/selling#test-against-the-sandbox)).
+The Lab's `system.macAppStore` probe has an *App license* button that shows the status and its
+reason.

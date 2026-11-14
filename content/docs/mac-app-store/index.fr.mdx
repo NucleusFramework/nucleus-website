@@ -1,0 +1,104 @@
+---
+title: Mac App Store
+description: "Vendez une application Nucleus sur le Mac App Store, depuis Kotlin : achats intégrés et abonnements avec StoreKit 2, licence de l'application et développement sans compte Apple."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Le module `mac-app-store` dialogue avec le Mac App Store via StoreKit 2, depuis l'application qu'il
+a vendue. Un seul objet, `MacAppStore`, couvre ce que vous vendez et la preuve que le client a
+acheté l'application :
+
+| Point d'entrée | Rôle |
+| --- | --- |
+| `MacAppStore.purchases` | Les produits intégrés (non consommables, consommables, abonnements) : les acheter, ce que le client possède et les changements envoyés par l'App Store |
+| `MacAppStore.appLicense()` | Si cette copie d'une application payante a été achetée, sur ce Mac |
+| `MacAppStore.appTransaction()` | La preuve signée par l'App Store que le client a obtenu l'application elle-même |
+| `MacAppStore.openStorePage()` | La page de l'application dans l'app App Store |
+| `MacAppStore.testing` | Le côté App Store de StoreKit Testing : remboursements, renouvellements, Ask to Buy, pendant le développement |
+
+Le Lab, le banc d'essai de Nucleus, vend trois produits via ce module : un non consommable, un
+consommable et un abonnement mensuel avec une semaine gratuite. Sa sonde `system.macAppStore`
+appelle chaque fonction de cette page.
+
+| Page | Contenu |
+| --- | --- |
+| [Vendre sur le Mac App Store](/docs/mac-app-store/selling) | App Store Connect, certificats et profils, le PKG App Store (JVM ou GraalVM), tester avec un compte Sandbox |
+| [Licence de l'application](/docs/mac-app-store/app-license) | Vérifier qu'une application payante a été achetée, sur ce Mac |
+| [Achats intégrés](/docs/mac-app-store/purchases) | Produits, achats, consommables, abonnements et mises à jour envoyées par l'App Store |
+| [StoreKit Testing](/docs/mac-app-store/storekit-testing) | Développer et tester les achats avec un fichier `.storekit`, sans compte Apple ni Xcode |
+
+## Ajouter la dépendance
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.mac-app-store:<version>")
+}
+```
+
+## Où ça fonctionne
+
+StoreKit ne répond qu'à un bundle d'application. Construisez le PKG Mac App Store (voir
+[Vendre sur le Mac App Store](/docs/mac-app-store/selling)), ou lancez un bundle de développement
+avec `./gradlew runStoreKit` (voir [StoreKit Testing](/docs/mac-app-store/storekit-testing)).
+
+| Où tourne l'application | `availability()` | Appels au store |
+| --- | --- | --- |
+| Un bundle d'application sous macOS 12+ (App Store, TestFlight, build de développement, `runStoreKit`) | `Available` | Fonctionnent |
+| Idem, avec les achats bloqués par le contrôle parental ou un profil d'appareil | `PaymentsRestricted` | Les lectures fonctionnent ; `purchase()` échoue |
+| `./gradlew run`, un lancement `java` nu | `NotBundled` | Échouent avec `StoreErrorCode.NotBundled` |
+| Windows, Linux | `Unsupported` | Échouent avec `StoreErrorCode.Unsupported` |
+
+```kotlin
+import dev.nucleusframework.store.mac.MacAppStore
+import dev.nucleusframework.store.mac.StoreAvailability
+
+when (MacAppStore.availability()) {
+    StoreAvailability.Available -> showStore()
+    StoreAvailability.PaymentsRestricted -> hideBuyButtons()
+    StoreAvailability.NotBundled, StoreAvailability.Unsupported -> Unit
+}
+```
+
+`MacAppStore.isSupported` vaut `true` sous macOS quand le pont natif s'est chargé.
+`appTransaction()` et `appLicense()` demandent macOS 13.
+
+## Appels, threads et annulation
+
+- Chaque appel suspend sans bloquer de thread, et peut être fait depuis n'importe quel thread, y
+  compris le thread UI.
+- Annuler la coroutine annule l'opération StoreKit correspondante, sauf la feuille d'achat, qui
+  reste au client (voir [Acheter un produit](/docs/mac-app-store/purchases#acheter-un-produit)).
+- Les échecs du store lèvent `StoreException`, sauf `purchase()`, qui les renvoie sous forme de
+  `PurchaseResult.Failed`, et `appLicense()`, qui ne lève jamais d'exception.
+- Seules les transactions vérifiées par StoreKit parviennent à votre code.
+
+## Erreurs
+
+`StoreException.code` indique ce qui a échoué ; `platformCode` porte le code StoreKit quand il y en
+a un.
+
+| `StoreErrorCode` | Signification |
+| --- | --- |
+| `Unsupported` | Pas macOS, ou le pont natif n'a pas pu se charger |
+| `NotBundled` | Le processus n'est pas un bundle d'application (`run`, un lancement `java` nu) |
+| `ProductNotFound` | L'App Store ne vend aucun produit avec cet identifiant à cette application |
+| `NotAvailableInStorefront` | Le produit n'est pas vendu dans la boutique du pays du client |
+| `PurchaseNotAllowed` | Ce client ne peut pas acheter : contrôle parental, profil d'appareil |
+| `VerificationFailed` | StoreKit n'a pas pu vérifier une signature ; n'accordez rien |
+| `Network` | L'App Store est injoignable |
+| `InvalidArgument` | Un appel mal formé, ou un fichier `.storekit` illisible |
+| `Platform` | Toute autre erreur StoreKit ; voir `platformCode` |
+| `Internal` | Un bug du module ou de son pont natif |
+
+## Journalisation
+
+Le module journalise via `java.util.logging` sous `dev.nucleusframework.store.mac`. Augmentez le
+niveau de ce logger, ou activez `allowNucleusRuntimeLogging = true`
+(`dev.nucleusframework.core.runtime.tools`).
+
+<Callout title="Autres stores">
+`mac-app-store` ne couvre que le Mac App Store et renvoie `Unsupported` sous Windows et Linux. Le
+Microsoft Store a son propre module, [Microsoft Store](/docs/microsoft-store), de même forme ; les
+deux ne partagent pas de code.
+</Callout>

@@ -1,0 +1,157 @@
+---
+title: In-app purchases
+description: Load Mac App Store products, buy them from a Nucleus app, gate features on entitlements, consume consumables and follow renewals and refunds with StoreKit 2.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`MacAppStore.purchases` sells the products you created in App Store Connect (see
+[Create the products](/docs/mac-app-store/selling#create-the-products)): non-consumables,
+consumables, and auto-renewable subscriptions.
+
+## Load products
+
+```kotlin
+import dev.nucleusframework.store.mac.MacAppStore
+
+val products = MacAppStore.purchases.products("pro", "coins", "premium.monthly")
+val pro = MacAppStore.purchases.product("pro") ?: return // null: not sold to this app
+showBuyButton(pro.title, pro.displayPrice)
+```
+
+`products()` keeps the order asked for and leaves out ids the App Store does not sell.
+
+| `StoreProduct` | Meaning |
+| --- | --- |
+| `id`, `type` | The product id; `NonConsumable`, `Consumable`, `AutoRenewableSubscription`, `NonRenewingSubscription` |
+| `title`, `description` | The display name and description, localized for the customer |
+| `displayPrice` | The price as the store formats it (`$4.99`, `4,99 €`). Show this one |
+| `price`, `currencyCode` | The price as a `BigDecimal`, for arithmetic |
+| `subscription` | For a subscription: `groupId`, `period`, and `introductoryOffer` |
+
+`subscription.introductoryOffer` is set only while this customer can still redeem it (a free week
+they have not used):
+
+```kotlin
+MacAppStore.purchases.product("premium.monthly")?.subscription?.introductoryOffer?.let { offer ->
+    showTrial("${offer.periodCount} × ${offer.period.value} ${offer.period.unit}", offer.paymentMode)
+}
+```
+
+## Buy a product
+
+```kotlin
+import dev.nucleusframework.application.LocalNucleusWindow
+import dev.nucleusframework.store.mac.PurchaseResult
+
+@Composable
+fun BuyButton() {
+    val window = LocalNucleusWindow.current.unsafe.taoWindow?.nativeHandle
+    val scope = rememberCoroutineScope()
+    Button(onClick = {
+        scope.launch {
+            when (val result = MacAppStore.purchases.purchase("pro") { this.window = window }) {
+                is PurchaseResult.Success -> unlockPro()
+                PurchaseResult.Pending -> showAwaitingApproval() // Ask to Buy
+                PurchaseResult.Cancelled -> Unit
+                is PurchaseResult.Failed -> showError(result.error)
+            }
+        }
+    }) { Text("Buy Pro") }
+}
+```
+
+- The purchase sheet attaches to `window`, else to the app's key window. The module brings the app
+  forward first: a purchase started from the background (a menu bar item, a deep link) otherwise
+  gets an Apple Account sign-in instead of the sheet.
+- After the purchase, macOS shows its own "You're all set" confirmation, and `purchase()` returns
+  once the customer closes it.
+- `quantity` buys several units of a consumable; `appAccountToken` (a `UUID`) ties the purchase
+  to your own user account, and comes back in `Purchase.appAccountToken`.
+
+<Callout type="warn" title="Cancelling purchase() leaves the sheet open">
+StoreKit has no way to close its purchase sheet, and closing it from the app leaves StoreKit
+stuck. Cancelling the coroutine returns at once, but the sheet stays the customer's: a purchase
+made there is recorded, and arrives as a `PurchaseUpdate`.
+</Callout>
+
+## Gate features on entitlements
+
+```kotlin
+if (MacAppStore.purchases.entitlement("pro").isActive) unlockPro()
+```
+
+Call it at launch rather than storing the purchase: it follows refunds, expiries and billing
+problems.
+
+| `EntitlementState` | Meaning | `isActive` |
+| --- | --- | --- |
+| `Active` | Owned, or subscribed | Yes |
+| `InGracePeriod` | A renewal failed, and Apple keeps the subscription running while it retries | Yes |
+| `InBillingRetry` | A renewal failed, and the subscription is suspended while Apple retries | No |
+| `Expired` | The subscription ran out | No |
+| `Revoked` | Refunded | No |
+| `NotOwned` | Never bought | No |
+
+`EntitlementStatus` also carries `expirationTime`, `willAutoRenew` and the `purchase` behind it.
+
+## Consume consumables
+
+A consumable stays in `list()` until you consume it. Grant first, consume second, so a crash in
+between loses nothing:
+
+```kotlin
+import dev.nucleusframework.store.mac.ProductType
+
+MacAppStore.purchases.list()
+    .filter { it.productType == ProductType.Consumable }
+    .forEach {
+        grantCoins(it.quantity)
+        MacAppStore.purchases.consume(it)
+    }
+```
+
+## Follow updates
+
+Collect `purchaseUpdates` for the life of the app, from launch:
+
+```kotlin
+import dev.nucleusframework.store.mac.PurchaseUpdate
+
+scope.launch {
+    MacAppStore.purchases.purchaseUpdates.collect { update ->
+        when (update) {
+            is PurchaseUpdate.Purchased -> grant(update.purchase)
+            is PurchaseUpdate.Revoked -> revoke(update.purchase)
+        }
+    }
+}
+```
+
+- Renewals, refunds, purchases made on another Mac or in the App Store app, approved Ask to Buy,
+  and purchases completed after their `purchase()` call was cancelled.
+- When collection starts, every unfinished transaction is replayed first: a consumable not yet
+  consumed, a purchase the app died before delivering. Each transaction comes once per process;
+  its refund still comes through.
+- What `purchase()` returns is not repeated. A subscription that simply runs out sends no update:
+  read `entitlement()` again.
+
+## Purchases
+
+| `Purchase` | Meaning |
+| --- | --- |
+| `productId`, `productType`, `quantity` | What was bought |
+| `transactionId`, `originalTransactionId` | The transaction, and the first one of a subscription's chain |
+| `purchaseTime`, `expirationTime`, `revocationTime` | When it was bought, when a subscription period ends, when it was refunded |
+| `environment` | `Production`, `Sandbox`, `Xcode` (StoreKit Testing) |
+| `appAccountToken` | The token passed to `purchase()` |
+| `signedTransaction` | The JWS, to verify on a server with the App Store Server API |
+
+## Open the store page
+
+```kotlin
+MacAppStore.openStorePage(appId = 1234567890) // the app's Apple ID in App Store Connect
+```
+
+Without `appId`, the module reads it from the app's `AppTransaction`, which StoreKit Testing does
+not have.

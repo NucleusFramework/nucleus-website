@@ -1,0 +1,162 @@
+---
+title: Vendre sur le Mac App Store
+description: Configurez App Store Connect pour une application Nucleus, signez et construisez le PKG Mac App Store en JVM ou en image native GraalVM, et testez les achats dans la Sandbox d'Apple.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+Une application du Mac App Store est un PKG App Store : l'application tourne dans l'App Sandbox,
+elle est signée avec vos certificats Mac App Store et embarque un profil de provisionnement. Les
+achats intégrés demandent en plus des produits dans App Store Connect et un contrat Applications
+payantes actif.
+
+## Configurer le compte développeur
+
+Il vous faut une adhésion à l'[Apple Developer Program](https://developer.apple.com/programs/).
+
+<Steps>
+<Step>
+
+**Enregistrez un App ID.** Dans *Certificates, Identifiers & Profiles › Identifiers*, enregistrez
+un App ID explicite dont le bundle id est votre `macOS { bundleID }`. L'achat intégré est toujours
+activé sur un App ID explicite.
+
+</Step>
+<Step>
+
+**Créez les deux certificats.** *Mac App Distribution* signe l'application, *Mac Installer
+Distribution* signe le PKG. Créez chacun à partir d'une demande de signature de certificat, puis
+installez-le dans le trousseau de session avec sa clé privée. `security find-identity -v` affiche
+alors `3rd Party Mac Developer Application: <nom> (<TEAMID>)`, et
+`security find-identity -v -p basic` celui de l'installeur.
+
+</Step>
+<Step>
+
+**Créez le profil de provisionnement.** Dans *Profiles*, un profil *Mac App Store Connect* pour
+l'App ID, avec le certificat Mac App Distribution. Téléchargez-le et pointez
+`macOS { provisioningProfile }` dessus.
+
+</Step>
+<Step>
+
+**Créez l'application dans App Store Connect.** *Apps › Nouvelle app*, plateforme macOS, avec le
+bundle id de votre App ID.
+
+</Step>
+<Step>
+
+**Signez les contrats.** Dans *Business*, mettez à jour l'entité juridique, puis acceptez le
+contrat Applications payantes et renseignez le compte bancaire et les formulaires fiscaux. Les
+applications payantes et les achats intégrés exigent qu'il soit *Actif*.
+
+</Step>
+</Steps>
+
+## Créer les produits
+
+Dans App Store Connect, *Monétisation › Achats intégrés* et *Abonnements*. Pour chaque produit :
+
+- **Identifiant de produit** : celui que votre code passe à `products()` et `purchase()`.
+- **Prix** et **Disponibilité** (les pays).
+- **Nom d'affichage et description**, dans au moins une langue.
+- **Capture d'écran de vérification**, sous *Informations destinées à l'équipe de vérification*.
+
+<Callout type="warn" title="Aucun produit tant qu'un champ manque">
+StoreKit renvoie une liste de produits vide, même dans la Sandbox, tant que chaque produit n'a pas
+ses métadonnées, un prix, sa disponibilité et une capture d'écran de vérification, et tant que le
+contrat Applications payantes n'est pas actif. Comptez jusqu'à une heure après la dernière
+modification avant que la Sandbox ne serve les produits.
+</Callout>
+
+Un abonnement appartient à un groupe d'abonnements ; donnez aussi un nom d'affichage au groupe.
+Une offre de lancement (une semaine gratuite, un premier mois réduit) se règle par abonnement sous
+*Prix de l'abonnement › Offres d'introduction*.
+
+## Construire le PKG App Store
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.Pkg) // pkg { appStore = true }, le défaut
+        macOS {
+            bundleID = "com.example.myapp"
+            provisioningProfile.set(file("packaging/MyApp_AppStore.provisionprofile"))
+            runtimeProvisioningProfile.set(file("packaging/MyApp_Runtime.provisionprofile")) // JVM uniquement
+            signing {
+                sign.set(true)
+                identity.set("My Name (TEAMID)")
+            }
+        }
+    }
+}
+```
+
+À partir de cette identité, le plugin choisit les certificats *3rd Party Mac Developer* pour le PKG
+App Store. Voir [Signature du code](/docs/packaging/code-signing) et
+[Sandboxing](/docs/packaging/sandboxing) pour les entitlements.
+
+| Application | Tâche | Remarques |
+| --- | --- | --- |
+| JVM | `./gradlew packagePkg` | Le pipeline JVM sandboxé |
+| Image native GraalVM | `./gradlew packageGraalvmPkg` | Une image native sandboxée, construite à côté de l'image normale (voir [Images natives GraalVM](/docs/packaging/sandboxing#images-natives-graalvm)) |
+
+Envoyez le PKG avec Transporter ou `xcrun altool` ; voir
+[Publication](/docs/packaging/publishing).
+
+## Tester dans la Sandbox
+
+La Sandbox est l'environnement de test du store d'Apple : les vrais produits d'App Store Connect,
+achetés avec un compte de test, jamais facturés.
+
+<Steps>
+<Step>
+
+**Créez un testeur Sandbox** dans App Store Connect, *Utilisateurs et accès › Sandbox*. N'importe
+quelle adresse convient, sans boîte mail réelle (un alias Gmail `+alias` suffit) ; notez le mot de
+passe choisi.
+
+</Step>
+<Step>
+
+**Signez l'application pour le développement.** macOS refuse de lancer hors de l'App Store une
+application signée pour la distribution. Enregistrez votre Mac (*Devices*, avec l'*UDID de
+provisionnement* indiqué dans Informations système), créez un certificat *Apple Development* et un
+profil *macOS App Development* pour l'App ID incluant ce Mac, puis re-signez l'application extraite
+du PKG :
+
+```bash
+pkgutil --expand-full MyApp.pkg /tmp/myapp   # le PKG App Store construit
+APP="/tmp/myapp/com.example.myapp.pkg/Payload/My App.app"
+ID="Apple Development: My Name (XXXXXXXXXX)"
+codesign -d --entitlements - --xml "$APP" > /tmp/entitlements.plist
+cp MyApp_Development.provisionprofile "$APP/Contents/embedded.provisionprofile"
+find "$APP/Contents" -name '*.dylib' -o -name '*.jnilib' | while read f; do
+  codesign --force --sign "$ID" "$f"
+done
+codesign --force --options runtime --entitlements /tmp/entitlements.plist --sign "$ID" "$APP"
+```
+
+</Step>
+<Step>
+
+**Lancez-la et achetez.** La feuille d'achat demande un compte : connectez-vous avec le testeur
+Sandbox. `Purchase.environment` et `appTransaction().environment` valent `Sandbox`.
+
+</Step>
+</Steps>
+
+<Callout title="Les produits viennent encore d'un fichier .storekit ?">
+Après `runStoreKit`, macOS conserve la configuration StoreKit Testing du bundle id, et chaque
+lancement suivant de ce bundle id obtient l'environnement `Xcode`. Le module la supprime au premier
+appel au store d'un build de développement lancé sans fichier `.storekit`. Un build qui ne le peut
+pas (sans `get-task-allow`) affiche un avertissement à la place. Voir
+[StoreKit Testing](/docs/mac-app-store/storekit-testing#sortir-de-storekit-testing).
+</Callout>
+
+<Callout type="warn" title="Proxys HTTPS">
+StoreKit rejette un proxy réseau qui re-signe le trafic HTTPS (proxy d'entreprise ou de filtrage) :
+les demandes de produits échouent alors avec `StoreErrorCode.Network`. Excluez `*.itunes.apple.com`
+et `*.apple.com` de son inspection TLS.
+</Callout>

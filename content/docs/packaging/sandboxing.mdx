@@ -47,6 +47,38 @@ nativeDistributions {
 On the Mac App Store, that load can still fail library validation. Prefer a library option that
 takes an external library path when one exists.
 
+## GraalVM native images
+
+A GraalVM app gets its Mac App Store PKG from a second, sandboxed native image, built next to the
+regular one only when `targetFormats` holds an App Store PKG. DMG, ZIP and Developer ID PKG keep
+the regular image, unchanged.
+
+```bash
+./gradlew packageGraalvmPkg                              # the App Store PKG, from the sandboxed image
+./gradlew runSandboxedGraalvmNativeDistributable          # run the sandboxed app on this Mac
+```
+
+The sandboxed image differs from the regular one in three ways, all handled by the plugin and by
+`GraalVmInitializer`:
+
+- **Native libraries** that dependency JARs extract at run time (JNA, zstd-kmp, a WebView, a tray)
+  are extracted at build time, signed into `Contents/Frameworks/`, and loaded from there, as in
+  the sandboxed JVM pipeline.
+- **`user.home`** points at the app's container (`~/Library/Containers/<bundle id>/Data`), as on
+  the JVM, instead of the account's home.
+- **Signal handling**: the image runs without Substrate's signal handling, whose named semaphore
+  the App Sandbox denies. SIGINT, SIGTERM and SIGHUP still run the shutdown hooks and exit with
+  `128 + signal`, like the JVM. What does not work is your own `sun.misc.Signal.handle` for other
+  signals (SIGUSR1, ...).
+
+`sandboxing { keepNativeLibsInJars(...) }` does not apply to the native image, which is compiled
+from a single JAR; every native library is redirected to `Contents/Frameworks/`.
+
+<Callout title="Launch it from its bundle">
+A sandboxed app must run from its `.app`, as Finder, `open` and the Dock launch it. Started through
+a symlink to its binary, AppKit stops it at launch.
+</Callout>
+
 ## Configure macOS entitlements
 
 | Default entitlement | DMG, ZIP, Developer ID PKG | App Store PKG |
@@ -109,6 +141,10 @@ full-trust Win32 process. Check `ExecutableRuntime.isAppX()` for the latter.
 - It sets `java.library.path`, `jna.library.path`, `jna.boot.library.path`, `jna.nounpack=true`
   and `jna.nosys=true`. The image lands in `app-sandboxed/` next to `app/`.
 - On macOS, `isSandboxed()` reads `APP_SANDBOX_CONTAINER_ID`.
+- A sandboxed GraalVM image is recognized at run time by `Contents/Resources/nucleus-sandbox-manifest.properties`;
+  its tasks are `stripGraalvmNativeLibsForSandboxing`, `extractGraalvmNativeLibsForSandboxing`,
+  `nativeImageCompileSandboxed` and `createSandboxedGraalvmNativeDistributable`, which lands in
+  `graalvm-app-sandboxed/`.
 
 </Accordion>
 </Accordions>
