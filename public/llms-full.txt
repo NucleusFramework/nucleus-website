@@ -11441,6 +11441,36 @@ nativeDistributions {
 On the Mac App Store, that load can still fail library validation. Prefer a library option that
 takes an external library path when one exists.
 
+## GraalVM native images
+
+A GraalVM app gets its Mac App Store PKG from a second, sandboxed native image, built next to the
+regular one only when `targetFormats` holds an App Store PKG. DMG, ZIP and Developer ID PKG keep
+the regular image, unchanged.
+
+```bash
+./gradlew packageGraalvmPkg                              # the App Store PKG, from the sandboxed image
+./gradlew runSandboxedGraalvmNativeDistributable          # run the sandboxed app on this Mac
+```
+
+The sandboxed image differs from the regular one in three ways, all handled by the plugin and by
+`GraalVmInitializer`:
+
+- **Native libraries** that dependency JARs extract at run time (JNA, zstd-kmp, a WebView, a tray)
+  are extracted at build time, signed into `Contents/Frameworks/`, and loaded from there, as in
+  the sandboxed JVM pipeline.
+- **`user.home`** points at the app's container (`~/Library/Containers/<bundle id>/Data`), as on
+  the JVM, instead of the account's home.
+- **Signal handling**: the image runs without Substrate's signal handling, whose named semaphore
+  the App Sandbox denies. SIGINT, SIGTERM and SIGHUP still run the shutdown hooks and exit with
+  `128 + signal`, like the JVM. What does not work is your own `sun.misc.Signal.handle` for other
+  signals (SIGUSR1, ...).
+
+`sandboxing { keepNativeLibsInJars(...) }` does not apply to the native image, which is compiled
+from a single JAR; every native library is redirected to `Contents/Frameworks/`.
+
+A sandboxed app must run from its `.app`, as Finder, `open` and the Dock launch it. Started through
+a symlink to its binary, AppKit stops it at launch.
+
 ## Configure macOS entitlements
 
 | Default entitlement | DMG, ZIP, Developer ID PKG | App Store PKG |
@@ -11503,6 +11533,10 @@ full-trust Win32 process. Check `ExecutableRuntime.isAppX()` for the latter.
 - It sets `java.library.path`, `jna.library.path`, `jna.boot.library.path`, `jna.nounpack=true`
   and `jna.nosys=true`. The image lands in `app-sandboxed/` next to `app/`.
 - On macOS, `isSandboxed()` reads `APP_SANDBOX_CONTAINER_ID`.
+- A sandboxed GraalVM image is recognized at run time by `Contents/Resources/nucleus-sandbox-manifest.properties`;
+  its tasks are `stripGraalvmNativeLibsForSandboxing`, `extractGraalvmNativeLibsForSandboxing`,
+  `nativeImageCompileSandboxed` and `createSandboxedGraalvmNativeDistributable`, which lands in
+  `graalvm-app-sandboxed/`.
 
 </Accordion>
 </Accordions>
@@ -12310,8 +12344,8 @@ it covers. Raise that logger's level to see them, or set `allowNucleusRuntimeLog
 (`dev.nucleusframework.core.runtime.tools`).
 
 `microsoft-store` covers the Microsoft Store only, and `MicrosoftStore` reports `Unsupported` on
-macOS and Linux. Flathub has its own section, [Flathub](/docs/flathub); the Mac App Store has no
-module yet.
+macOS and Linux. Flathub and the Mac App Store have their own sections, [Flathub](/docs/flathub) and
+[Mac App Store](/docs/mac-app-store).
 
 ---
 
@@ -12955,6 +12989,603 @@ architectures, merge them into one `.msixbundle` first (the
 [`build-windows-appxbundle`](/docs/packaging/ci-cd#bundle-windows-for-the-microsoft-store)
 action), then submit the bundle inside an `.msixupload`. Nucleus has only verified
 single-architecture submissions so far; ARM64 PCs run the x64 package under emulation meanwhile.
+
+---
+
+# Mac App Store
+
+URL: https://nucleusframework.dev/en/docs/mac-app-store
+
+Sell a Nucleus app on the Mac App Store, from Kotlin: in-app purchases and subscriptions over StoreKit 2, the app's licence, and development without an Apple account.
+
+The `mac-app-store` module talks to the Mac App Store through StoreKit 2 from the app it sold.
+One object, `MacAppStore`, covers what you sell and the proof that the customer bought the app:
+
+| Entry point | What it does |
+| --- | --- |
+| `MacAppStore.purchases` | In-app products (non-consumables, consumables, subscriptions): buy them, what the customer owns, and the changes the App Store sends |
+| `MacAppStore.appLicense()` | Whether this copy of a paid app was bought, on this Mac |
+| `MacAppStore.appTransaction()` | The App Store's signed record of the customer getting the app itself |
+| `MacAppStore.openStorePage()` | The app's page in the App Store app |
+| `MacAppStore.testing` | The App Store's side of StoreKit Testing: refunds, renewals, Ask to Buy, during development |
+
+The Lab, Nucleus's test bench, sells three products through this module: a non-consumable, a
+consumable and a monthly subscription with a free week. Its probe `system.macAppStore` calls every
+function on this page.
+
+| Page | Covers |
+| --- | --- |
+| [Sell on the Mac App Store](/docs/mac-app-store/selling) | App Store Connect, certificates and profiles, the App Store PKG (JVM or GraalVM), testing with a Sandbox account |
+| [App licence](/docs/mac-app-store/app-license) | Check that a paid app was bought, on this Mac |
+| [In-app purchases](/docs/mac-app-store/purchases) | Products, purchases, consumables, subscriptions and the updates the App Store sends |
+| [StoreKit Testing](/docs/mac-app-store/storekit-testing) | Develop and test purchases with a `.storekit` file, no Apple account, no Xcode run |
+
+## Add the dependency
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("dev.nucleusframework:nucleus.mac-app-store:<version>")
+}
+```
+
+## Where it works
+
+StoreKit only answers an app bundle. Build the Mac App Store PKG (see
+[Sell on the Mac App Store](/docs/mac-app-store/selling)), or run a development bundle with
+`./gradlew runStoreKit` (see [StoreKit Testing](/docs/mac-app-store/storekit-testing)).
+
+| Where the app runs | `availability()` | Store calls |
+| --- | --- | --- |
+| An app bundle on macOS 12+ (App Store, TestFlight, a development build, `runStoreKit`) | `Available` | Work |
+| The same, with purchases blocked by parental controls or a device profile | `PaymentsRestricted` | Read calls work; `purchase()` fails |
+| `./gradlew run`, a bare `java` launch | `NotBundled` | Fail with `StoreErrorCode.NotBundled` |
+| Windows, Linux | `Unsupported` | Fail with `StoreErrorCode.Unsupported` |
+
+```kotlin
+import dev.nucleusframework.store.mac.MacAppStore
+import dev.nucleusframework.store.mac.StoreAvailability
+
+when (MacAppStore.availability()) {
+    StoreAvailability.Available -> showStore()
+    StoreAvailability.PaymentsRestricted -> hideBuyButtons()
+    StoreAvailability.NotBundled, StoreAvailability.Unsupported -> Unit
+}
+```
+
+`MacAppStore.isSupported` is `true` on macOS when the native bridge loaded. `appTransaction()` and
+`appLicense()` need macOS 13.
+
+## Calls, threads and cancellation
+
+- Every call suspends without blocking a thread, and you may call it from any thread, the UI
+  thread included.
+- Cancelling the coroutine cancels the StoreKit operation behind it, except the purchase sheet,
+  which stays the customer's (see [Buy a product](/docs/mac-app-store/purchases#buy-a-product)).
+- Store failures throw `StoreException`, except `purchase()`, which returns them as
+  `PurchaseResult.Failed`, and `appLicense()`, which never throws.
+- Only transactions StoreKit verified reach your code.
+
+## Errors
+
+`StoreException.code` tells you what failed; `platformCode` carries StoreKit's code when there is
+one.
+
+| `StoreErrorCode` | Meaning |
+| --- | --- |
+| `Unsupported` | Not macOS, or the native bridge failed to load |
+| `NotBundled` | The process is not an app bundle (`run`, a bare `java` launch) |
+| `ProductNotFound` | The App Store sells no product with that id to this app |
+| `NotAvailableInStorefront` | The product is not sold in the customer's storefront |
+| `PurchaseNotAllowed` | This customer may not buy: parental controls, a device profile |
+| `VerificationFailed` | StoreKit could not verify a signature; grant nothing |
+| `Network` | The App Store could not be reached |
+| `InvalidArgument` | A malformed call, or a `.storekit` file that could not be read |
+| `Platform` | Any other StoreKit error; see `platformCode` |
+| `Internal` | A bug in the module or its native bridge |
+
+## Logging
+
+The module logs through `java.util.logging` under `dev.nucleusframework.store.mac`. Raise that
+logger's level, or set `allowNucleusRuntimeLogging = true`
+(`dev.nucleusframework.core.runtime.tools`).
+
+`mac-app-store` covers the Mac App Store only and reports `Unsupported` on Windows and Linux. The
+Microsoft Store has its own module, [Microsoft Store](/docs/microsoft-store), with the same shape;
+the two do not share code.
+
+---
+
+# Sell on the Mac App Store
+
+URL: https://nucleusframework.dev/en/docs/mac-app-store/selling
+
+Set up App Store Connect for a Nucleus app, sign and build the Mac App Store PKG as a JVM app or a GraalVM native image, and test purchases against Apple's Sandbox.
+
+A Mac App Store app is an App Store PKG: the app runs in the App Sandbox, is signed with your
+Mac App Store certificates and carries a provisioning profile. In-app purchases additionally need
+products in App Store Connect and an active Paid Applications agreement.
+
+## Set up the developer account
+
+You need a membership in the [Apple Developer Program](https://developer.apple.com/programs/).
+
+<Steps>
+<Step>
+
+**Register an App ID.** In *Certificates, Identifiers & Profiles › Identifiers*, register an
+explicit App ID whose bundle id is your `macOS { bundleID }`. In-App Purchase is always enabled on
+an explicit App ID.
+
+</Step>
+<Step>
+
+**Create the two certificates.** *Mac App Distribution* signs the app, *Mac Installer
+Distribution* signs the PKG. Create each from a certificate signing request, then install it in
+the login keychain with its private key. `security find-identity -v` then lists
+`3rd Party Mac Developer Application: <name> (<TEAMID>)`, and `security find-identity -v -p basic`
+the installer one.
+
+</Step>
+<Step>
+
+**Create the provisioning profile.** In *Profiles*, a *Mac App Store Connect* profile for the App
+ID, with the Mac App Distribution certificate. Download it and point
+`macOS { provisioningProfile }` at it.
+
+</Step>
+<Step>
+
+**Create the app in App Store Connect.** *Apps › New App*, platform macOS, the bundle id of your
+App ID.
+
+</Step>
+<Step>
+
+**Sign the agreements.** In *Business*, update the legal entity, then accept the Paid Applications
+agreement and fill in the bank account and tax forms. Paid apps and in-app purchases need it to be
+*Active*.
+
+</Step>
+</Steps>
+
+## Create the products
+
+In App Store Connect, *Monetization › In-App Purchases* and *Subscriptions*. For each product:
+
+- **Product ID**: the id your code passes to `products()` and `purchase()`.
+- **Price** and **Availability** (the countries).
+- **Display name and description**, in at least one language.
+- **Review screenshot**, under *Review Information*.
+
+StoreKit returns an empty product list, even in the Sandbox, until each product has its metadata,
+a price, its availability and a review screenshot, and until the Paid Applications agreement is
+active. Allow up to an hour after the last change before the Sandbox serves the products.
+
+A subscription lives in a subscription group; give the group a display name too. An introductory
+offer (a free week, a reduced first month) is set per subscription under *Subscription Prices ›
+Introductory Offers*.
+
+## Build the App Store PKG
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        targetFormats(TargetFormat.Pkg) // pkg { appStore = true }, the default
+        macOS {
+            bundleID = "com.example.myapp"
+            provisioningProfile.set(file("packaging/MyApp_AppStore.provisionprofile"))
+            runtimeProvisioningProfile.set(file("packaging/MyApp_Runtime.provisionprofile")) // JVM only
+            signing {
+                sign.set(true)
+                identity.set("My Name (TEAMID)")
+            }
+        }
+    }
+}
+```
+
+The plugin picks the *3rd Party Mac Developer* certificates for the App Store PKG from that
+identity. See [Code signing](/docs/packaging/code-signing) and
+[Sandboxing](/docs/packaging/sandboxing) for the entitlements.
+
+| App | Task | Notes |
+| --- | --- | --- |
+| JVM | `./gradlew packagePkg` | The sandboxed JVM pipeline |
+| GraalVM native image | `./gradlew packageGraalvmPkg` | A sandboxed native image, built next to the regular one (see [GraalVM in the App Sandbox](/docs/packaging/sandboxing#graalvm-native-images)) |
+
+Upload the PKG with Transporter or `xcrun altool`; see
+[Publishing](/docs/packaging/publishing).
+
+## Test against the Sandbox
+
+The Sandbox is Apple's store environment for testing: real products from App Store Connect,
+bought with a test account, never charged.
+
+<Steps>
+<Step>
+
+**Create a Sandbox tester** in App Store Connect, *Users and Access › Sandbox*. Any address works,
+it needs no mailbox (a Gmail `+alias` is fine); note the password you set.
+
+</Step>
+<Step>
+
+**Sign the app for development.** macOS refuses to launch an app signed for distribution outside
+the App Store. Register your Mac (*Devices*, its *Provisioning UDID* from System Information), create an
+*Apple Development* certificate and a *macOS App Development* profile for the App ID listing that
+Mac, then re-sign the app taken from the PKG:
+
+```bash
+pkgutil --expand-full MyApp.pkg /tmp/myapp   # the App Store PKG you built
+APP="/tmp/myapp/com.example.myapp.pkg/Payload/My App.app"
+ID="Apple Development: My Name (XXXXXXXXXX)"
+codesign -d --entitlements - --xml "$APP" > /tmp/entitlements.plist
+cp MyApp_Development.provisionprofile "$APP/Contents/embedded.provisionprofile"
+find "$APP/Contents" -name '*.dylib' -o -name '*.jnilib' | while read f; do
+  codesign --force --sign "$ID" "$f"
+done
+codesign --force --options runtime --entitlements /tmp/entitlements.plist --sign "$ID" "$APP"
+```
+
+</Step>
+<Step>
+
+**Launch it and buy.** The purchase sheet asks for an account: sign in with the Sandbox tester.
+`Purchase.environment` and `appTransaction().environment` read `Sandbox`.
+
+</Step>
+</Steps>
+
+After `runStoreKit`, macOS keeps the StoreKit Testing configuration for the bundle id, and every
+later launch of that bundle id gets the `Xcode` environment. The module removes it on the first
+store call of a development build without a `.storekit` file. A build that cannot (no
+`get-task-allow`) logs a warning instead. See
+[StoreKit Testing](/docs/mac-app-store/storekit-testing#leaving-storekit-testing).
+
+StoreKit rejects a network proxy that re-signs HTTPS traffic (a corporate or filtering proxy):
+product requests then fail with `StoreErrorCode.Network`. Exclude `*.itunes.apple.com` and
+`*.apple.com` from its TLS inspection.
+
+---
+
+# App licence
+
+URL: https://nucleusframework.dev/en/docs/mac-app-store/app-license
+
+Check that a paid Nucleus app on the Mac App Store was bought by this customer, on this Mac, and decide what to do offline.
+
+The Mac App Store neither encrypts apps nor issues a licence: a copied `.app` bundle runs on any
+Mac. What it gives the app is a proof of purchase, the `AppTransaction`, signed by Apple.
+`appLicense()` checks it, so a paid app can tell a bought copy from a copied one.
+
+## Check the licence at launch
+
+```kotlin
+import dev.nucleusframework.store.mac.AppLicenseStatus
+import dev.nucleusframework.store.mac.MacAppStore
+
+when (MacAppStore.appLicense().status) {
+    AppLicenseStatus.Valid -> rememberLicensed()                       // keep the date
+    AppLicenseStatus.Unavailable -> if (!licensedRecently()) showOfflineNotice()
+    AppLicenseStatus.Revoked, AppLicenseStatus.Invalid -> showBuyPrompt()
+}
+```
+
+`appLicense()` needs macOS 13. It shows no UI and never throws: anything that prevents the check
+comes back as `Unavailable`.
+
+| `AppLicenseStatus` | Meaning |
+| --- | --- |
+| `Valid` | Signed by the App Store for this app, on this Mac, and not refunded |
+| `Revoked` | Apple refunded or revoked the app |
+| `Invalid` | A proof exists but fails a check: its signature, made for another app, or made for another Mac. Treat the copy as not bought |
+| `Unavailable` | No proof can be checked now: the first launch offline, no App Store account, macOS 12, outside an app bundle |
+
+`AppLicense.reason` says why the status is not `Valid`, for your logs. `AppLicense.appTransaction`
+is the proof itself when StoreKit returned one.
+
+## What is checked
+
+Every check runs on the device, the ones Apple documents for an `AppTransaction`:
+
+1. **The signature.** StoreKit verifies that Apple signed the proof.
+2. **The app.** The proof's bundle id must be the running app's.
+3. **The Mac.** The proof carries a hash of this Mac's identifier for the vendor
+   (`AppStore.deviceVerificationID`). A proof copied from another Mac, with the app's container,
+   does not match it.
+4. **The refund.** A refunded app carries a revocation date.
+
+For a stronger check, send `appTransaction.signedAppTransaction` (a JWS) to your server and verify
+it there with the [App Store Server API](https://developer.apple.com/documentation/appstoreserverapi).
+
+## Offline
+
+StoreKit caches the proof after the first launch, so a Mac that was online once keeps answering
+`Valid` offline. A first launch with no network has no proof yet: `Unavailable`.
+
+`Unavailable` is not evidence of a copy. Store the date of the last `Valid` and choose how long it
+holds, rather than locking out a customer who is offline.
+
+## Read the app's own purchase
+
+`appTransaction()` returns the proof without judging it, and throws when there is none:
+
+```kotlin
+val app = MacAppStore.appTransaction()
+if (app.originalAppVersion.toInt() < FREEMIUM_BUILD) unlockEverything() // bought before the app went free
+```
+
+| `AppTransactionInfo` | Meaning |
+| --- | --- |
+| `bundleId` | The app the proof was made for |
+| `appId` | The app's Apple ID in App Store Connect; `null` in StoreKit Testing |
+| `appVersion`, `originalAppVersion` | The `CFBundleVersion` running now, and the one the customer first got |
+| `originalPurchaseTime`, `preorderTime` | When the customer first got the app, and preordered it |
+| `revocationTime` | When Apple refunded or revoked it |
+| `environment` | `Production`, `Sandbox`, `Xcode` (StoreKit Testing) |
+| `signedAppTransaction` | The JWS, for a server-side check |
+
+`originalAppVersion` is how an app that moved from paid to free with in-app purchases keeps
+everything unlocked for the customers who paid for it.
+
+## Test it
+
+Against the Sandbox, a development-signed build of the app gets `Valid` once the Sandbox tester has
+signed in (see [Test against the Sandbox](/docs/mac-app-store/selling#test-against-the-sandbox)).
+The Lab's `system.macAppStore` probe has an *App license* button that shows the status and its
+reason.
+
+---
+
+# In-app purchases
+
+URL: https://nucleusframework.dev/en/docs/mac-app-store/purchases
+
+Load Mac App Store products, buy them from a Nucleus app, gate features on entitlements, consume consumables and follow renewals and refunds with StoreKit 2.
+
+`MacAppStore.purchases` sells the products you created in App Store Connect (see
+[Create the products](/docs/mac-app-store/selling#create-the-products)): non-consumables,
+consumables, and auto-renewable subscriptions.
+
+## Load products
+
+```kotlin
+import dev.nucleusframework.store.mac.MacAppStore
+
+val products = MacAppStore.purchases.products("pro", "coins", "premium.monthly")
+val pro = MacAppStore.purchases.product("pro") ?: return // null: not sold to this app
+showBuyButton(pro.title, pro.displayPrice)
+```
+
+`products()` keeps the order asked for and leaves out ids the App Store does not sell.
+
+| `StoreProduct` | Meaning |
+| --- | --- |
+| `id`, `type` | The product id; `NonConsumable`, `Consumable`, `AutoRenewableSubscription`, `NonRenewingSubscription` |
+| `title`, `description` | The display name and description, localized for the customer |
+| `displayPrice` | The price as the store formats it (`$4.99`, `4,99 €`). Show this one |
+| `price`, `currencyCode` | The price as a `BigDecimal`, for arithmetic |
+| `subscription` | For a subscription: `groupId`, `period`, and `introductoryOffer` |
+
+`subscription.introductoryOffer` is set only while this customer can still redeem it (a free week
+they have not used):
+
+```kotlin
+MacAppStore.purchases.product("premium.monthly")?.subscription?.introductoryOffer?.let { offer ->
+    showTrial("${offer.periodCount} × ${offer.period.value} ${offer.period.unit}", offer.paymentMode)
+}
+```
+
+## Buy a product
+
+```kotlin
+import dev.nucleusframework.application.LocalNucleusWindow
+import dev.nucleusframework.store.mac.PurchaseResult
+
+@Composable
+fun BuyButton() {
+    val window = LocalNucleusWindow.current.unsafe.taoWindow?.nativeHandle
+    val scope = rememberCoroutineScope()
+    Button(onClick = {
+        scope.launch {
+            when (val result = MacAppStore.purchases.purchase("pro") { this.window = window }) {
+                is PurchaseResult.Success -> unlockPro()
+                PurchaseResult.Pending -> showAwaitingApproval() // Ask to Buy
+                PurchaseResult.Cancelled -> Unit
+                is PurchaseResult.Failed -> showError(result.error)
+            }
+        }
+    }) { Text("Buy Pro") }
+}
+```
+
+- The purchase sheet attaches to `window`, else to the app's key window. The module brings the app
+  forward first: a purchase started from the background (a menu bar item, a deep link) otherwise
+  gets an Apple Account sign-in instead of the sheet.
+- After the purchase, macOS shows its own "You're all set" confirmation, and `purchase()` returns
+  once the customer closes it.
+- `quantity` buys several units of a consumable; `appAccountToken` (a `UUID`) ties the purchase
+  to your own user account, and comes back in `Purchase.appAccountToken`.
+
+StoreKit has no way to close its purchase sheet, and closing it from the app leaves StoreKit
+stuck. Cancelling the coroutine returns at once, but the sheet stays the customer's: a purchase
+made there is recorded, and arrives as a `PurchaseUpdate`.
+
+## Gate features on entitlements
+
+```kotlin
+if (MacAppStore.purchases.entitlement("pro").isActive) unlockPro()
+```
+
+Call it at launch rather than storing the purchase: it follows refunds, expiries and billing
+problems.
+
+| `EntitlementState` | Meaning | `isActive` |
+| --- | --- | --- |
+| `Active` | Owned, or subscribed | Yes |
+| `InGracePeriod` | A renewal failed, and Apple keeps the subscription running while it retries | Yes |
+| `InBillingRetry` | A renewal failed, and the subscription is suspended while Apple retries | No |
+| `Expired` | The subscription ran out | No |
+| `Revoked` | Refunded | No |
+| `NotOwned` | Never bought | No |
+
+`EntitlementStatus` also carries `expirationTime`, `willAutoRenew` and the `purchase` behind it.
+
+## Consume consumables
+
+A consumable stays in `list()` until you consume it. Grant first, consume second, so a crash in
+between loses nothing:
+
+```kotlin
+import dev.nucleusframework.store.mac.ProductType
+
+MacAppStore.purchases.list()
+    .filter { it.productType == ProductType.Consumable }
+    .forEach {
+        grantCoins(it.quantity)
+        MacAppStore.purchases.consume(it)
+    }
+```
+
+## Follow updates
+
+Collect `purchaseUpdates` for the life of the app, from launch:
+
+```kotlin
+import dev.nucleusframework.store.mac.PurchaseUpdate
+
+scope.launch {
+    MacAppStore.purchases.purchaseUpdates.collect { update ->
+        when (update) {
+            is PurchaseUpdate.Purchased -> grant(update.purchase)
+            is PurchaseUpdate.Revoked -> revoke(update.purchase)
+        }
+    }
+}
+```
+
+- Renewals, refunds, purchases made on another Mac or in the App Store app, approved Ask to Buy,
+  and purchases completed after their `purchase()` call was cancelled.
+- When collection starts, every unfinished transaction is replayed first: a consumable not yet
+  consumed, a purchase the app died before delivering. Each transaction comes once per process;
+  its refund still comes through.
+- What `purchase()` returns is not repeated. A subscription that simply runs out sends no update:
+  read `entitlement()` again.
+
+## Purchases
+
+| `Purchase` | Meaning |
+| --- | --- |
+| `productId`, `productType`, `quantity` | What was bought |
+| `transactionId`, `originalTransactionId` | The transaction, and the first one of a subscription's chain |
+| `purchaseTime`, `expirationTime`, `revocationTime` | When it was bought, when a subscription period ends, when it was refunded |
+| `environment` | `Production`, `Sandbox`, `Xcode` (StoreKit Testing) |
+| `appAccountToken` | The token passed to `purchase()` |
+| `signedTransaction` | The JWS, to verify on a server with the App Store Server API |
+
+## Open the store page
+
+```kotlin
+MacAppStore.openStorePage(appId = 1234567890) // the app's Apple ID in App Store Connect
+```
+
+Without `appId`, the module reads it from the app's `AppTransaction`, which StoreKit Testing does
+not have.
+
+---
+
+# StoreKit Testing
+
+URL: https://nucleusframework.dev/en/docs/mac-app-store/storekit-testing
+
+Develop Mac App Store purchases in a Nucleus app with a .storekit file and ./gradlew runStoreKit, with no Apple account and no Xcode run, and play the App Store's side from the app.
+
+StoreKit Testing serves the products of a `.storekit` file inside your app's process: purchases,
+renewals, refunds and Ask to Buy, with no Apple account, no certificate and no App Store Connect
+setup. Nucleus runs it outside Xcode.
+
+## Run the app against a .storekit file
+
+Create the file in Xcode (*File › New › File › StoreKit Configuration File*), add your products
+with the ids your code uses, then declare it:
+
+```kotlin title="build.gradle.kts"
+nucleus.application {
+    nativeDistributions {
+        macOS {
+            bundleID = "com.example.myapp"
+            storeKitConfiguration.set(file("packaging/macos/Products.storekit"))
+        }
+    }
+}
+```
+
+```bash
+./gradlew runStoreKit
+```
+
+`runStoreKit` replaces `run`. Its first run builds a development `.app` under
+`build/nucleus/storekit-app` (a jpackage shell with the JDK, a dozen seconds); every later run only
+points it at the current classpath and JVM arguments, re-signs it and starts it, so a code change
+never repackages. Xcode must be installed: StoreKitTest ships with it.
+
+`MacAppStore.testing.isActive` is `true`, and every `Purchase.environment` reads `Xcode`.
+
+Launch any app bundle with
+`-Dnucleus.macAppStore.storeKitConfiguration=/path/to/Products.storekit`. StoreKit Testing only
+serves a bundle installed for development: signed with the `com.apple.security.get-task-allow`
+entitlement (an ad hoc signature is enough), known to LaunchServices (opened once, or
+`lsregister -f`), on a Mac with Xcode. `runStoreKit` takes care of the three.
+
+## Play the App Store's side
+
+`MacAppStore.testing` drives the session from the app, from a debug menu or an automated test:
+
+```kotlin
+import dev.nucleusframework.store.mac.RenewalRate
+
+val testing = MacAppStore.testing
+if (testing.isActive) {
+    testing.setPurchaseSheetsEnabled(false)    // purchases complete at once
+    testing.refund("pro")                      // → PurchaseUpdate.Revoked
+    testing.forceRenewal("premium.monthly")    // → PurchaseUpdate.Purchased
+    testing.setBillingRetryOnRenewal(true)     // the next renewal fails: InBillingRetry
+    testing.setBillingGracePeriod(true)        // ... or InGracePeriod
+    testing.setAskToBuyEnabled(true)           // purchase() → Pending
+    testing.approveAskToBuy("coins")           // → PurchaseUpdate.Purchased
+    testing.buyOutsideApp("coins")             // as if bought on another Mac
+    testing.setRenewalRate(RenewalRate.OneRenewalEveryTenSeconds)
+}
+```
+
+| Function | What it does |
+| --- | --- |
+| `setPurchaseSheetsEnabled` | Shows or skips the purchase sheet |
+| `setAskToBuyEnabled`, `approveAskToBuy` | Ask to Buy: purchases wait, then a parent approves |
+| `setBillingRetryOnRenewal`, `setBillingGracePeriod`, `resolveBillingIssue` | Failed renewals, with or without a grace period |
+| `setInterruptedPurchasesEnabled` | Purchases that need an extra step from the customer |
+| `setRenewalRate` | How fast subscriptions renew, from real time to every two seconds |
+| `setStorefront` | The customer's country, as a three-letter code (`FRA`) |
+| `refund`, `forceRenewal`, `expireSubscription`, `setAutoRenew` | Store-side events on a product |
+| `buyOutsideApp` | A purchase made outside the app |
+| `clearTransactions` | Erases the purchase history |
+| `settings()` | Reads the current settings back |
+
+- The settings outlive the app: StoreKit keeps them per bundle id. Read them with `settings()`
+  rather than assume the defaults.
+- An expiry reaches `entitlement()` some 15 seconds later.
+- There is no `declineAskToBuy`: StoreKit Testing reports a declined Ask to Buy as a completed
+  purchase.
+
+Outside a StoreKit Testing session, every function fails with `StoreErrorCode.InvalidArgument`.
+
+## Leaving StoreKit Testing
+
+macOS keeps the configuration for the bundle id after the app quits, so a later launch of the
+same bundle id, even a build meant for the Sandbox, would still get the `.storekit` products. The
+module removes it, as Xcode does, on the first store call of a development build (one with
+`get-task-allow`) that runs without a `.storekit` file. A build that cannot remove it logs a
+warning when a transaction still comes from the `Xcode` environment.
 
 ---
 
@@ -14233,6 +14864,7 @@ The GraalVM tasks mirror the JVM pipeline, plus one packaging task per installer
 |------|-------------|
 | `packageGraalvm<Format>` | One installer per format in `nativeDistributions.targetFormats`, named after the enum constant: `TargetFormat.Deb` gives `packageGraalvmDeb`. |
 | `runWithNativeAgent` | Runs the app under the tracing agent to record metadata. See [Automatic metadata](/docs/performance/graalvm/automatic-metadata#fill-gaps-with-the-tracing-agent). |
+| `createSandboxedGraalvmNativeDistributable`, `runSandboxedGraalvmNativeDistributable` | Build and run the sandboxed app the Mac App Store PKG is made from. Registered on macOS when `targetFormats` holds an App Store PKG. See [GraalVM native images](/docs/packaging/sandboxing#graalvm-native-images). |
 | `cleanupGraalvmMetadata` | Removes manual entries the generated metadata already covers. |
 | `runWithPgoInstrument` | Records a PGO profile. Oracle GraalVM only. |
 
@@ -15274,6 +15906,7 @@ jpackage builds `RawAppImage`, the bare app image. electron-builder builds every
 | `setDockNameSameAsPackageName` | `Boolean` | Default `true` |
 | `entitlementsFile`, `runtimeEntitlementsFile` | `RegularFileProperty` | App and JVM runtime entitlements |
 | `provisioningProfile`, `runtimeProvisioningProfile` | `RegularFileProperty` | |
+| `storeKitConfiguration` | `RegularFileProperty` | A `.storekit` file served to the app by `runStoreKit`. See [StoreKit Testing](/docs/mac-app-store/storekit-testing) |
 | `macOsSdkVersion` | `String?` | Default `"26.0"`. `vtool` writes it into the launcher's `LC_BUILD_VERSION`, which gates Liquid Glass |
 | `fileAssociation(mimeType, extension, description, iconFile?, role?, rank?)` | | `role`: `MacOSDocumentRole` (default `Editor`), `rank`: `MacOSHandlerRank` (default `Default`). See [Declare document types](/docs/packaging/macos#declare-document-types) |
 | `signing { }`, `notarization { }`, `dmg { }` | | See below |
@@ -16427,7 +17060,6 @@ No commitment and no date. Open an issue if you need one of these:
 | `clipboard` | HTML and RTF clipboard flavors and a change watcher. Text, images and file lists already work, see [Linux and Wayland](/docs/windows/linux-wayland). |
 | Screen recording | Video capture of a display or a window. Still images already work, see [Screen capture](/docs/os/screen-capture). |
 | Volume events | Volume UUIDs, internal, external and network classification, and mount, unmount and eject events in `system-info` |
-| In-app purchases on macOS | StoreKit 2 purchases. The Microsoft Store already works, see [Microsoft Store](/docs/microsoft-store). |
 
 ## Influence the order
 
