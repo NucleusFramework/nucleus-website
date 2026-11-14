@@ -5939,7 +5939,11 @@ Listener callbacks ran on the AWT event dispatch thread in 2.x. See
   tell you which server runs and what it supports.
 - Most servers show `Urgency.CRITICAL` notifications through Do Not Disturb and never expire them.
 - Under Xvfb or on a headless CI runner, `notify` returns without error but nothing shows.
-- In a Flatpak build, the manifest must grant access to `org.freedesktop.Notifications`.
+- In a Flatpak, Nucleus sends the notifications through the notification portal: the manifest
+  needs no permission, and Flathub refuses `--talk-name=org.freedesktop.Notifications`. The portal
+  has no close event (the listener's `onClosed` and `onDismissed` never fire), no expiry timeout,
+  no sound and no raw `imageData`; `hints.imagePath` still works. Actions and the click on the
+  notification arrive as usual.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -5948,6 +5952,10 @@ Listener callbacks ran on the AWT event dispatch thread in 2.x. See
   service through a GDBus bridge, with no JNA or Java D-Bus library.
 - Actions and close events arrive as D-Bus signals. Monitoring starts with the first listener and
   stops when you remove the last one.
+- Inside a Flatpak (`/.flatpak-info`), `Notify` becomes the portal's `AddNotification` and
+  `closeNotification` its `RemoveNotification`. Actions come back through the portal's
+  `ActionInvoked` signal. The portal forgets every notification of an app when any process of that
+  app quits, so a helper process that exits cuts the actions of the notifications already shown.
 
 </Accordion>
 </Accordions>
@@ -13652,6 +13660,23 @@ sandbox's `FLATPAK_ID` (`null` outside one). Neither says whether the portal can
 [Nucleus updater](/docs/packaging/auto-update) stays out of the way there: `isUpdateSupported()`
 is `false`.
 
+## Inside the sandbox
+
+A Flatpak hides the user's home and system from the app. Nucleus adapts on its own, with nothing
+to configure:
+
+| What | Inside a Flatpak |
+| --- | --- |
+| Preferences (`java.util.prefs`, multiplatform-settings' `Settings()`) | Kept in `~/.var/app/<app id>/config`, which Flatpak persists, instead of a temporary home |
+| HTTPS with [`native-ssl`](/docs/performance/native-ssl) | Trusts the CAs installed on the user's system (company proxy, filter), read through p11-kit |
+| [Linux notifications](/docs/os/notifications/linux) | Go through the notification portal, with no manifest permission |
+| Wayland `app_id` | The Flatpak app id, so desktops pair the window with its entry |
+| Title bar buttons | Follow the desktop's `button-layout`, read through the Settings portal |
+
+The app's own files land under `~/.var/app/<app id>/`: FileKit's and the XDG directories point
+there. Uninstalling the app keeps that folder unless the user runs
+`flatpak uninstall --delete-data`.
+
 ## Calls, threads and cancellation
 
 - Every call suspends or returns a `Flow`, and you may call it from any thread, the UI thread
@@ -13752,6 +13777,10 @@ runner builds its own architecture: build on an x64 and an ARM64 Linux runner (`
 `ubuntu-24.04-arm`) and attach both archives to the release. Flathub builds both architectures by
 default; to ship x64 only, set `arches = setOf(FlathubArch.X86_64)` below.
 
+Once `flathub { }` is set (next section), the archive also carries the app's Flathub metadata
+under `share/`: the desktop entry, the AppStream metainfo, the icon and the MIME types. Flathub
+wants them from upstream, not in its own repository; the manifest installs them from the archive.
+
 ## Describe the app
 
 ```kotlin title="build.gradle.kts"
@@ -13788,7 +13817,9 @@ nucleus.application {
   at a release tag, as above, keeps each version's screenshots.
 - **`finishArgs`**: the sandbox permissions. The default gives a Tao window what it needs
   (`ipc`, `wayland`, `fallback-x11`, `dri`). Add what your app uses, such as `--share=network`,
-  and nothing more: reviewers ask about every permission.
+  and nothing more: reviewers ask about every permission. Notifications need none: inside a
+  Flatpak, Nucleus sends them through the notification portal, and reviewers refuse
+  `--talk-name=org.freedesktop.Notifications`.
 - **`runtime`**: keep `org.gnome.Platform`. Tao links GTK 3, which only the GNOME runtime carries.
 
 The rest comes from the DSL you already have: the name, the description
@@ -13807,14 +13838,17 @@ writes `build/flathub/<appId>/`, the content of the app's future Flathub reposit
 | File | Content |
 | --- | --- |
 | `<appId>.yml` | The manifest: the runtime, the permissions, the archives and their SHA-256 |
-| `<appId>.metainfo.xml` | The store listing: summary, description, screenshots, release, branding |
-| `<appId>.desktop`, `<appId>.png` | The desktop entry and the icon |
-| `<appId>.mime.xml` | The file types, when the app declares `fileAssociation()` |
 | `flathub.json` | The architectures, when the app ships only some |
 
+Flathub's review accepts nothing else there. The store listing (summary, description,
+screenshots, release, branding), the desktop entry, the icon and the file types come from the
+archive's `share/`, which `packageTar` / `packageGraalvmTar` filled. The task checks each archive
+for them: an archive packaged without `flathub { }`, or by an older plugin, fails it.
+
 Before writing, the task checks what Flathub would refuse (an app id that is not reverse DNS, a
-summary too long, a missing license or screenshot, a malformed branding color, a small icon) and
-fails with every problem at once.
+summary too long, a missing license or screenshot, a malformed branding color) and fails with
+every problem at once. The packaging task runs the same checks, the icon included, before it
+builds the archive.
 
 | Property | Effect |
 | --- | --- |
@@ -13932,8 +13966,8 @@ Once the submission is merged, Flathub creates `github.com/flathub/<appId>` with
 gives you write access; the app appears on Flathub after its first build there. For each version:
 
 1. Publish the new release with its archives.
-2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs, their hashes and
-   the metainfo release:
+2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs and their hashes
+   (the metainfo release travels inside the archives):
 
    ```shell
    ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
@@ -13954,6 +13988,7 @@ install the update itself with [`Flatpak.updates`](/docs/flathub/updates).
 | `appstream-screenshots-not-mirrored-in-ostree` | The repository was built with plain `flatpak-builder`. Lint a `flathub-build` repository |
 | The lint fails on TLS behind a corporate proxy | The builder's sandbox does not see the host's certificates. Add `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
 | `flathub-build` fails on `rofiles-fuse` | FUSE does not work inside the sandbox on this machine. Add `--disable-rofiles-fuse` |
+| `… lacks share/metainfo/<appId>.metainfo.xml` | The release's archive was packaged without `flathub { }`, or by a plugin older than `3.0.0`. Package and publish it again |
 | The window has no minimize or maximize button | Nucleus older than `3.0.0`: GSettings inside a Flatpak does not see the host's `button-layout`. Update Nucleus |
 
 ---
@@ -15406,6 +15441,9 @@ logger. Set that logger to `FINE`, or set `allowNucleusRuntimeLogging = true`
 - **Linux:** every readable PEM bundle or directory from the list Go's `crypto/x509` uses, such as
   `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu), `/etc/pki/tls/certs/ca-bundle.crt`
   (Fedora) and `/etc/ssl/cert.pem` (Alpine), deduplicated by DER content. No native library.
+  Inside a Flatpak those files belong to the runtime, not the user's system: the CAs the user
+  installed (a company proxy, a filter) only reach the sandbox through p11-kit, so `native-ssl`
+  also adds the output of `trust extract`.
 
 </Accordion>
 </Accordions>
@@ -17217,10 +17255,10 @@ The major version marks the API breaks: read the
   app, sells the full version and add-ons (durables, consumables, subscriptions) from inside the
   app, follows renewals and refunds, and installs Store updates from the app. See
   [Microsoft Store](/docs/microsoft-store).
-- **Flathub from the released `tar.gz`** (#900, #898). `linux { flathub { } }` and
-  `generateFlathubRepository` write an app's Flathub repository (manifest, AppStream metainfo,
-  desktop entry, icon, MIME types) around its released archive, so a closed-source app ships on
-  Flathub without a source build. The new `flatpak` module follows the app's remote, installs
+- **Flathub from the released `tar.gz`** (#900, #898, #918). With `linux { flathub { } }`, the
+  released archive carries the app's AppStream metainfo, desktop entry, icon and MIME types under
+  `share/`, and `generateFlathubRepository` writes the Flathub manifest that repackages it, so a
+  closed-source app ships on Flathub without a source build. The new `flatpak` module follows the app's remote, installs
   updates from inside the app and restarts into them. See [Flathub](/docs/flathub).
 - **Widgets** (#911, #927), experimental. Write a widget once in Kotlin, Glance style (`widget-runtime`),
   and show it on the Windows 11 widgets board (`widget-windows`, AppX / MSIX), the macOS desktop
@@ -17398,6 +17436,15 @@ The major version marks the API breaks: read the
 - **A Nucleus app inside a Flatpak behaves as one** (#897). `ExecutableRuntime.type()` reports
   `FLATPAK` for a repackaged archive, the Wayland `app_id` is the Flatpak app id, and the title bar
   keeps the desktop's minimize and maximize buttons. See [Flathub](/docs/flathub#where-it-works).
+- **Preferences survive a restart inside a Flatpak** (#908). `java.util.prefs`, behind
+  multiplatform-settings' `Settings()`, wrote to a temporary home; it now writes to the app's
+  persisted `~/.var/app/<app id>/config`. See [Flathub](/docs/flathub#inside-the-sandbox).
+- **HTTPS trusts the user's CAs inside a Flatpak** (#907). `native-ssl` reads the CAs installed on
+  the host (a company proxy, a filter) through p11-kit, where the sandbox only had the runtime's.
+  See [native-ssl](/docs/performance/native-ssl).
+- **Linux notifications go through the portal inside a Flatpak** (#918). No manifest permission is
+  needed, as Flathub requires. See [Linux notifications](/docs/os/notifications/linux#notes).
+- **A Flathub icon larger than 512 px no longer fails the Flatpak build** (#909).
 - **Wrap-content windows show at their measured size** (#868, #532) instead of flashing at the
   fallback size. See [Size a window to its
   content](/docs/windows/window-state#size-a-window-to-its-content).
