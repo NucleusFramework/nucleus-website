@@ -1,0 +1,325 @@
+---
+title: Exemples
+description: Trois widgets complets (une liste de tâches, un tableau de bord CI et une météo), avec leur code et leur rendu sur chaque plateforme.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Trois widgets qui vont plus loin que le compteur : lignes cliquables, filtre, colonnes pondérées,
+tuiles colorées, images de l'app et mise en page qui change avec la taille. Le même Kotlin
+s'affiche sur toutes les plateformes ; enregistrez-les comme indiqué sur la page de chaque
+plateforme ([Windows](/docs/os/widgets/windows), [macOS](/docs/os/widgets/macos),
+[iOS](/docs/os/widgets/ios), [Android](/docs/os/widgets/android)).
+
+<Callout title="Code complet">
+Ces exemples viennent de `examples/widget-ios-demo` dans le dépôt Nucleus, allégés pour la lecture.
+Les imports viennent de `dev.nucleusframework.widget`, plus `androidx.compose.runtime.Composable`.
+</Callout>
+
+## Liste de tâches
+
+Une liste de tâches gardée dans l'état du widget. Un clic sur une ligne la coche ou la décoche
+via un `ActionCallback` qui reçoit l'index de la ligne ; la taille Large ajoute un filtre et une
+action « Clear completed ».
+
+- `actionRunCallback` avec `actionParametersOf` transmet l'index de la ligne cliquée.
+- `ChoiceField(defaultValue = "all")` affiche « All » comme choisi tant que l'utilisateur n'a rien sélectionné.
+- Un badge est une `Column` avec un fond sémantique, à côté d'un `Text` en `weight(1)`.
+- `LocalSize` décide du nombre de lignes et de l'affichage du filtre.
+
+```kotlin
+private val Tasks = stringStateKey("tasks") // "1Ship the widgets|0Review the PR", 1 = done
+private val Filter = stringStateKey("filter")
+
+private const val DefaultTasks = "1Ship the widgets|1Write the docs|0Review the PR|0Test on a device|0Publish 3.0"
+
+private data class Task(val title: String, val done: Boolean)
+
+private fun parse(raw: String?): List<Task> =
+    (raw ?: DefaultTasks).split('|').filter { it.length > 1 }.map { Task(it.substring(1), it[0] == '1') }
+
+private fun List<Task>.encode() = joinToString("|") { (if (it.done) "1" else "0") + it.title }
+
+/** Flips the task at [Index], on the state of the widget that was clicked. */
+object ToggleTask : ActionCallback {
+    val Index = ActionParameters.Key<Int>("index")
+
+    override suspend fun onAction(id: WidgetId, parameters: ActionParameters) {
+        val index = parameters[Index] ?: return
+        updateWidgetState(id) { state ->
+            val tasks = parse(state[Tasks]).toMutableList()
+            if (index in tasks.indices) tasks[index] = tasks[index].copy(done = !tasks[index].done)
+            state[Tasks] = tasks.encode()
+        }
+    }
+}
+
+class TasksWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        provideContent {
+            val state = currentWidgetState()
+            val tasks = parse(state[Tasks])
+            val large = LocalSize.current == WidgetSize.Large
+            val limit = if (large) 8 else 3
+            val left = tasks.count { !it.done }
+            val shown = tasks.withIndex().filter { (_, task) ->
+                when (state[Filter]) {
+                    "todo" -> !task.done
+                    "done" -> task.done
+                    else -> true
+                }
+            }
+
+            Column(modifier = WidgetModifier.fillMaxSize(), spacing = Spacing.Small) {
+                Row(
+                    modifier = WidgetModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically,
+                ) {
+                    Text(
+                        "Tasks",
+                        modifier = WidgetModifier.weight(1),
+                        style = TextStyle(fontSize = TextSize.Medium, fontWeight = FontWeight.Bold),
+                    )
+                    val badge = if (left == 0) WidgetBackground.Good else WidgetBackground.Accent
+                    Column(modifier = WidgetModifier.background(badge)) {
+                        Text(
+                            if (left == 0) "All done" else "$left left",
+                            style = TextStyle(fontSize = TextSize.Small, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+                if (large) {
+                    ChoiceField(
+                        Filter,
+                        listOf(Choice("All", "all"), Choice("To do", "todo"), Choice("Done", "done")),
+                        defaultValue = "all",
+                    )
+                }
+                for ((index, task) in shown.take(limit)) {
+                    Row(
+                        modifier = WidgetModifier
+                            .fillMaxWidth()
+                            .clickable(actionRunCallback(ToggleTask, actionParametersOf(ToggleTask.Index to index))),
+                        spacing = Spacing.Small,
+                        verticalAlignment = Alignment.Vertical.CenterVertically,
+                    ) {
+                        Image(
+                            ImageProvider.appResource(if (task.done) "widget/task-done.png" else "widget/task-open.png"),
+                            contentDescription = if (task.done) "Done" else "To do",
+                            size = ImageSize.Icon,
+                        )
+                        Text(
+                            task.title,
+                            modifier = WidgetModifier.weight(1),
+                            style = TextStyle(color = if (task.done) WidgetColor.Subtle else WidgetColor.Default),
+                            maxLines = 1,
+                        )
+                    }
+                }
+                if (shown.size > limit) {
+                    Text(
+                        "+ ${shown.size - limit} more",
+                        style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle),
+                    )
+                }
+                Spacer(WidgetModifier.fillMaxHeight())
+                if (large && tasks.any { it.done }) {
+                    // A lambda click runs in place: no ActionCallback needed.
+                    Row(modifier = WidgetModifier.clickable { state.update { it[Tasks] = tasks.filterNot(Task::done).encode() } }) {
+                        Text("Clear completed", style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Accent))
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+<Tabs items={['iOS']}>
+  <Tab value="iOS">
+
+![Le widget liste de tâches, taille Large, sur l'écran d'accueil iOS](/assets/docs/os/widgets/tasks-large-ios.png)
+
+![Le widget liste de tâches, taille Medium, sur l'écran d'accueil iOS](/assets/docs/os/widgets/tasks-medium-ios.png)
+
+  </Tab>
+</Tabs>
+
+## Tableau de bord CI
+
+Trois tuiles qui se partagent la largeur à parts égales, chacune sur un fond qui suit sa valeur,
+un bouton Refresh et, en taille Large, les derniers runs.
+
+- Des voisins en `weight(1)` se partagent la ligne ; un `Text` sans poids garde sa largeur naturelle.
+- `WidgetBackground` et `WidgetColor` sont sémantiques : chaque hôte les traduit dans sa propre
+  palette et en mode sombre.
+- `Button(onClick = { … })` et `actionOpenUrl` couvrent les mises à jour sur place et les liens.
+
+```kotlin
+private val Refreshes = intStateKey("refreshes")
+
+class DashboardWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        // Load real data here, before provideContent: the content itself is not suspending.
+        provideContent {
+            val state = currentWidgetState()
+            val refreshes = state[Refreshes] ?: 0
+            val builds = 128 + refreshes * 3
+            val failing = (refreshes * 7) % 5
+            val latency = 42 + (refreshes * 13) % 60
+
+            Column(modifier = WidgetModifier.fillMaxSize(), spacing = Spacing.Small) {
+                Row(
+                    modifier = WidgetModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically,
+                ) {
+                    Image(ImageProvider.appResource("widget/logo.png"), contentDescription = "Logo", size = ImageSize.Icon)
+                    Text("CI dashboard", modifier = WidgetModifier.weight(1), style = TextStyle(fontWeight = FontWeight.Bold))
+                    Button("Refresh", onClick = { state.update { it[Refreshes] = refreshes + 1 } })
+                }
+                Row(modifier = WidgetModifier.fillMaxWidth(), spacing = Spacing.Small) {
+                    Tile("Builds", "$builds", WidgetBackground.Good)
+                    Tile("Failing", "$failing", if (failing == 0) WidgetBackground.Good else WidgetBackground.Attention)
+                    Tile("p95 ms", "$latency", if (latency > 80) WidgetBackground.Warning else WidgetBackground.Emphasis)
+                }
+                if (LocalSize.current == WidgetSize.Large) {
+                    Text("Recent runs", style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle))
+                    for (run in 0 until 4) {
+                        val ok = (refreshes + run) % 4 != 0
+                        Row(modifier = WidgetModifier.fillMaxWidth(), spacing = Spacing.Small) {
+                            Text("●", style = TextStyle(color = if (ok) WidgetColor.Good else WidgetColor.Attention))
+                            Text("preMerge #${builds - run}", modifier = WidgetModifier.weight(1), maxLines = 1)
+                            Text("${3 + run}m", style = TextStyle(color = WidgetColor.Subtle))
+                        }
+                    }
+                }
+                Spacer(WidgetModifier.fillMaxHeight())
+                Row(modifier = WidgetModifier.clickable(actionOpenUrl("https://github.com/NucleusFramework/Nucleus/actions"))) {
+                    Text(
+                        "Refreshed $refreshes times · open in GitHub",
+                        style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Accent),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Tile(label: String, value: String, background: WidgetBackground) {
+    Column(
+        modifier = WidgetModifier.weight(1).background(background),
+        spacing = Spacing.None,
+        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+    ) {
+        Text(value, style = TextStyle(fontSize = TextSize.Large, fontWeight = FontWeight.Bold))
+        Text(label, style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle), maxLines = 1)
+    }
+}
+```
+
+<Tabs items={['iOS']}>
+  <Tab value="iOS">
+
+![Le widget tableau de bord CI, taille Large, après un refresh, sur l'écran d'accueil iOS](/assets/docs/os/widgets/dashboard-large-ios.png)
+
+![Le widget tableau de bord CI, taille Medium, sur l'écran d'accueil iOS](/assets/docs/os/widgets/dashboard-medium-ios.png)
+
+  </Tab>
+</Tabs>
+
+## Météo
+
+Un widget, trois mises en page : centrée en Small, des prévisions sur cinq jours en Medium, et un
+choix de ville en Large.
+
+- Les prévisions sont une `Row` de cinq `Column` en `weight(1)`, sur un fond `Emphasis`.
+- La couleur de chaque jour suit sa température (`Warning` quand il fait chaud, `Accent` sous zéro).
+- La ville est un `ChoiceField` : un choix écrit la clé d'état et le widget est redessiné.
+
+```kotlin
+private val City = stringStateKey("city")
+
+private class Forecast(val temp: Int, val condition: String, val days: List<Pair<String, Int>>)
+
+private val Cities = mapOf(
+    "paris" to Forecast(14, "Cloudy", listOf("Mon" to 15, "Tue" to 12, "Wed" to 17, "Thu" to 18, "Fri" to 13)),
+    "jerusalem" to Forecast(22, "Sunny", listOf("Mon" to 24, "Tue" to 25, "Wed" to 23, "Thu" to 21, "Fri" to 22)),
+    "oslo" to Forecast(3, "Snow", listOf("Mon" to 1, "Tue" to -2, "Wed" to 0, "Thu" to 4, "Fri" to 2)),
+)
+
+class WeatherWidget : NucleusWidget() {
+    override suspend fun provideWidget(id: WidgetId) {
+        provideContent {
+            val state = currentWidgetState()
+            val city = state[City] ?: "paris"
+            val forecast = Cities.getValue(city)
+            val size = LocalSize.current
+            val small = size == WidgetSize.Small
+
+            Column(
+                modifier = WidgetModifier.fillMaxSize(),
+                spacing = Spacing.Small,
+                horizontalAlignment = if (small) Alignment.Horizontal.CenterHorizontally else Alignment.Horizontal.Start,
+            ) {
+                Text(city.replaceFirstChar { it.uppercase() }, style = TextStyle(fontWeight = FontWeight.Bold))
+                Row(spacing = Spacing.Medium, verticalAlignment = Alignment.Vertical.CenterVertically) {
+                    Text("${forecast.temp}°", style = TextStyle(fontSize = TextSize.ExtraLarge, fontWeight = FontWeight.Light))
+                    if (!small) {
+                        Column(spacing = Spacing.None) {
+                            Text(forecast.condition, style = TextStyle(fontSize = TextSize.Medium))
+                            Text(
+                                "H ${forecast.days.maxOf { it.second }}°  L ${forecast.days.minOf { it.second }}°",
+                                style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle),
+                            )
+                        }
+                    }
+                }
+                if (small) {
+                    Text(forecast.condition, style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle))
+                } else {
+                    Spacer(WidgetModifier.fillMaxHeight())
+                    Row(modifier = WidgetModifier.fillMaxWidth().background(WidgetBackground.Emphasis)) {
+                        for ((day, temp) in forecast.days) {
+                            Column(
+                                modifier = WidgetModifier.weight(1),
+                                spacing = Spacing.None,
+                                horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+                            ) {
+                                Text(day, style = TextStyle(fontSize = TextSize.Small, color = WidgetColor.Subtle))
+                                val color = when {
+                                    temp >= 24 -> WidgetColor.Warning
+                                    temp <= 0 -> WidgetColor.Accent
+                                    else -> WidgetColor.Default
+                                }
+                                Text("$temp°", style = TextStyle(fontWeight = FontWeight.Bold, color = color))
+                            }
+                        }
+                    }
+                }
+                if (size == WidgetSize.Large) {
+                    ChoiceField(
+                        City,
+                        listOf(Choice("Paris", "paris"), Choice("Jerusalem", "jerusalem"), Choice("Oslo", "oslo")),
+                        label = "City",
+                        defaultValue = "paris",
+                    )
+                }
+            }
+        }
+    }
+}
+```
+
+<Tabs items={['iOS']}>
+  <Tab value="iOS">
+
+![Le widget météo, taille Small, sur l'écran d'accueil iOS](/assets/docs/os/widgets/weather-small-ios.png)
+
+![Le widget météo, taille Medium, sur l'écran d'accueil iOS](/assets/docs/os/widgets/weather-medium-ios.png)
+
+![Le widget météo, taille Large, Jérusalem choisie, sur l'écran d'accueil iOS](/assets/docs/os/widgets/weather-large-ios.png)
+
+  </Tab>
+</Tabs>
