@@ -62,6 +62,23 @@ sandbox's `FLATPAK_ID` (`null` outside one). Neither says whether the portal can
 [Nucleus updater](/docs/packaging/auto-update) stays out of the way there: `isUpdateSupported()`
 is `false`.
 
+## Inside the sandbox
+
+A Flatpak hides the user's home and system from the app. Nucleus adapts on its own, with nothing
+to configure:
+
+| What | Inside a Flatpak |
+| --- | --- |
+| Preferences (`java.util.prefs`, multiplatform-settings' `Settings()`) | Kept in `~/.var/app/<app id>/config`, which Flatpak persists, instead of a temporary home |
+| HTTPS with [`native-ssl`](/docs/performance/native-ssl) | Trusts the CAs installed on the user's system (company proxy, filter), read through p11-kit |
+| [Linux notifications](/docs/os/notifications/linux) | Go through the notification portal, with no manifest permission |
+| Wayland `app_id` | The Flatpak app id, so desktops pair the window with its entry |
+| Title bar buttons | Follow the desktop's `button-layout`, read through the Settings portal |
+
+The app's own files land under `~/.var/app/<app id>/`: FileKit's and the XDG directories point
+there. Uninstalling the app keeps that folder unless the user runs
+`flatpak uninstall --delete-data`.
+
 ## Calls, threads and cancellation
 
 - Every call suspends or returns a `Flow`, and you may call it from any thread, the UI thread

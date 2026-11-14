@@ -63,7 +63,11 @@ Listener callbacks ran on the AWT event dispatch thread in 2.x. See
   tell you which server runs and what it supports.
 - Most servers show `Urgency.CRITICAL` notifications through Do Not Disturb and never expire them.
 - Under Xvfb or on a headless CI runner, `notify` returns without error but nothing shows.
-- In a Flatpak build, the manifest must grant access to `org.freedesktop.Notifications`.
+- In a Flatpak, Nucleus sends the notifications through the notification portal: the manifest
+  needs no permission, and Flathub refuses `--talk-name=org.freedesktop.Notifications`. The portal
+  has no close event (the listener's `onClosed` and `onDismissed` never fire), no expiry timeout,
+  no sound and no raw `imageData`; `hints.imagePath` still works. Actions and the click on the
+  notification arrive as usual.
 
 <Accordions>
 <Accordion title="Under the hood">
@@ -72,6 +76,10 @@ Listener callbacks ran on the AWT event dispatch thread in 2.x. See
   service through a GDBus bridge, with no JNA or Java D-Bus library.
 - Actions and close events arrive as D-Bus signals. Monitoring starts with the first listener and
   stops when you remove the last one.
+- Inside a Flatpak (`/.flatpak-info`), `Notify` becomes the portal's `AddNotification` and
+  `closeNotification` its `RemoveNotification`. Actions come back through the portal's
+  `ActionInvoked` signal. The portal forgets every notification of an app when any process of that
+  app quits, so a helper process that exits cuts the actions of the notifications already shown.
 
 </Accordion>
 </Accordions>

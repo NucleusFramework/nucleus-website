@@ -49,6 +49,10 @@ runner builds its own architecture: build on an x64 and an ARM64 Linux runner (`
 `ubuntu-24.04-arm`) and attach both archives to the release. Flathub builds both architectures by
 default; to ship x64 only, set `arches = setOf(FlathubArch.X86_64)` below.
 
+Once `flathub { }` is set (next section), the archive also carries the app's Flathub metadata
+under `share/`: the desktop entry, the AppStream metainfo, the icon and the MIME types. Flathub
+wants them from upstream, not in its own repository; the manifest installs them from the archive.
+
 ## Describe the app
 
 ```kotlin title="build.gradle.kts"
@@ -85,7 +89,9 @@ nucleus.application {
   at a release tag, as above, keeps each version's screenshots.
 - **`finishArgs`**: the sandbox permissions. The default gives a Tao window what it needs
   (`ipc`, `wayland`, `fallback-x11`, `dri`). Add what your app uses, such as `--share=network`,
-  and nothing more: reviewers ask about every permission.
+  and nothing more: reviewers ask about every permission. Notifications need none: inside a
+  Flatpak, Nucleus sends them through the notification portal, and reviewers refuse
+  `--talk-name=org.freedesktop.Notifications`.
 - **`runtime`**: keep `org.gnome.Platform`. Tao links GTK 3, which only the GNOME runtime carries.
 
 The rest comes from the DSL you already have: the name, the description
@@ -104,14 +110,17 @@ writes `build/flathub/<appId>/`, the content of the app's future Flathub reposit
 | File | Content |
 | --- | --- |
 | `<appId>.yml` | The manifest: the runtime, the permissions, the archives and their SHA-256 |
-| `<appId>.metainfo.xml` | The store listing: summary, description, screenshots, release, branding |
-| `<appId>.desktop`, `<appId>.png` | The desktop entry and the icon |
-| `<appId>.mime.xml` | The file types, when the app declares `fileAssociation()` |
 | `flathub.json` | The architectures, when the app ships only some |
 
+Flathub's review accepts nothing else there. The store listing (summary, description,
+screenshots, release, branding), the desktop entry, the icon and the file types come from the
+archive's `share/`, which `packageTar` / `packageGraalvmTar` filled. The task checks each archive
+for them: an archive packaged without `flathub { }`, or by an older plugin, fails it.
+
 Before writing, the task checks what Flathub would refuse (an app id that is not reverse DNS, a
-summary too long, a missing license or screenshot, a malformed branding color, a small icon) and
-fails with every problem at once.
+summary too long, a missing license or screenshot, a malformed branding color) and fails with
+every problem at once. The packaging task runs the same checks, the icon included, before it
+builds the archive.
 
 | Property | Effect |
 | --- | --- |
@@ -233,8 +242,8 @@ Once the submission is merged, Flathub creates `github.com/flathub/<appId>` with
 gives you write access; the app appears on Flathub after its first build there. For each version:
 
 1. Publish the new release with its archives.
-2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs, their hashes and
-   the metainfo release:
+2. Clone `flathub/<appId>` and generate into it, which updates the archive URLs and their hashes
+   (the metainfo release travels inside the archives):
 
    ```shell
    ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
@@ -255,4 +264,5 @@ install the update itself with [`Flatpak.updates`](/docs/flathub/updates).
 | `appstream-screenshots-not-mirrored-in-ostree` | The repository was built with plain `flatpak-builder`. Lint a `flathub-build` repository |
 | The lint fails on TLS behind a corporate proxy | The builder's sandbox does not see the host's certificates. Add `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
 | `flathub-build` fails on `rofiles-fuse` | FUSE does not work inside the sandbox on this machine. Add `--disable-rofiles-fuse` |
+| `… lacks share/metainfo/<appId>.metainfo.xml` | The release's archive was packaged without `flathub { }`, or by a plugin older than `3.0.0`. Package and publish it again |
 | The window has no minimize or maximize button | Nucleus older than `3.0.0`: GSettings inside a Flatpak does not see the host's `button-layout`. Update Nucleus |

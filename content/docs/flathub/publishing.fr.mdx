@@ -50,6 +50,11 @@ runner construit sa propre architecture : construisez sur un runner Linux x64 et
 les deux architectures par défaut ; pour ne livrer que x64, réglez
 `arches = setOf(FlathubArch.X86_64)` ci-dessous.
 
+Dès que `flathub { }` est configuré (section suivante), l'archive porte aussi les métadonnées
+Flathub de l'application sous `share/` : l'entrée de bureau, la metainfo AppStream, l'icône et les
+types MIME. Flathub les veut en amont, pas dans son propre dépôt ; le manifeste les installe depuis
+l'archive.
+
 ## Décrire l'application
 
 ```kotlin title="build.gradle.kts"
@@ -90,7 +95,8 @@ nucleus.application {
 - **`finishArgs`** : les permissions du bac à sable. Le défaut donne à une fenêtre Tao ce dont
   elle a besoin (`ipc`, `wayland`, `fallback-x11`, `dri`). Ajoutez ce que votre application
   utilise, comme `--share=network`, et rien de plus : les relecteurs interrogent chaque
-  permission.
+  permission. Les notifications n'en demandent aucune : dans un Flatpak, Nucleus les envoie par le
+  portail des notifications, et les relecteurs refusent `--talk-name=org.freedesktop.Notifications`.
 - **`runtime`** : gardez `org.gnome.Platform`. Tao lie GTK 3, que seul le runtime GNOME embarque.
 
 Le reste vient du DSL que vous avez déjà : le nom, la description
@@ -110,14 +116,18 @@ publiée. Elle écrit `build/flathub/<appId>/`, le contenu du futur dépôt Flat
 | Fichier | Contenu |
 | --- | --- |
 | `<appId>.yml` | Le manifeste : le runtime, les permissions, les archives et leur SHA-256 |
-| `<appId>.metainfo.xml` | La fiche du store : résumé, description, captures, release, couleurs |
-| `<appId>.desktop`, `<appId>.png` | L'entrée de bureau et l'icône |
-| `<appId>.mime.xml` | Les types de fichiers, quand l'application déclare `fileAssociation()` |
 | `flathub.json` | Les architectures, quand l'application n'en livre qu'une partie |
 
+La relecture de Flathub n'accepte rien d'autre à cet endroit. La fiche du store (résumé,
+description, captures, release, couleurs), l'entrée de bureau, l'icône et les types de fichiers
+viennent du `share/` de l'archive, que `packageTar` / `packageGraalvmTar` ont rempli. La tâche
+vérifie chaque archive : une archive empaquetée sans `flathub { }`, ou par un plugin plus ancien, la
+fait échouer.
+
 Avant d'écrire, la tâche vérifie ce que Flathub refuserait (un id qui n'est pas un DNS inversé, un
-résumé trop long, une licence ou une capture manquante, une couleur mal formée, une icône trop
-petite) et échoue avec tous les problèmes d'un coup.
+résumé trop long, une licence ou une capture manquante, une couleur mal formée) et échoue avec
+tous les problèmes d'un coup. La tâche d'empaquetage fait les mêmes vérifications, icône comprise,
+avant de construire l'archive.
 
 | Propriété | Effet |
 | --- | --- |
@@ -241,8 +251,8 @@ vous y donne l'accès en écriture ; l'application apparaît sur Flathub après 
 Pour chaque version :
 
 1. Publiez la nouvelle release avec ses archives.
-2. Clonez `flathub/<appId>` et générez dedans, ce qui met à jour les URL des archives, leurs hachés
-   et la release de la metainfo :
+2. Clonez `flathub/<appId>` et générez dedans, ce qui met à jour les URL des archives et leurs
+   hachés (la release de la metainfo voyage dans les archives) :
 
    ```shell
    ./gradlew :app:generateFlathubRepository -Pnucleus.flathub.outputDir=<clone>
@@ -264,4 +274,5 @@ Votre application peut aussi installer la mise à jour elle-même avec
 | `appstream-screenshots-not-mirrored-in-ostree` | Le dépôt a été construit avec `flatpak-builder` seul. Vérifiez un dépôt `flathub-build` |
 | Le lint échoue en TLS derrière un proxy d'entreprise | Le bac à sable du builder ne voit pas les certificats de la machine. Ajoutez `--filesystem=host-etc --env=REQUESTS_CA_BUNDLE=/run/host/etc/ssl/certs/ca-certificates.crt` |
 | `flathub-build` échoue sur `rofiles-fuse` | FUSE ne marche pas dans le bac à sable sur cette machine. Ajoutez `--disable-rofiles-fuse` |
+| `… lacks share/metainfo/<appId>.metainfo.xml` | L'archive de la release a été empaquetée sans `flathub { }`, ou par un plugin antérieur à `3.0.0`. Empaquetez-la et publiez-la à nouveau |
 | La fenêtre n'a pas de bouton réduire ni agrandir | Nucleus antérieur à `3.0.0` : GSettings dans un Flatpak ne voit pas le `button-layout` de la machine. Mettez Nucleus à jour |

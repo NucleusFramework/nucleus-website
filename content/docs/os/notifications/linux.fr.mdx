@@ -66,7 +66,12 @@ En 2.x, les callbacks des listeners s'exécutaient sur l'event dispatch thread A
 - La plupart des serveurs affichent les notifications `Urgency.CRITICAL` malgré le mode Ne pas
   déranger et ne les font jamais expirer.
 - Sous Xvfb ou sur un runner CI sans affichage, `notify` réussit mais rien ne s'affiche.
-- Dans un build Flatpak, le manifeste doit autoriser l'accès à `org.freedesktop.Notifications`.
+- Dans un Flatpak, Nucleus envoie les notifications par le portail des notifications : le
+  manifeste n'a besoin d'aucune permission, et Flathub refuse
+  `--talk-name=org.freedesktop.Notifications`. Le portail n'a pas d'événement de fermeture
+  (`onClosed` et `onDismissed` ne se déclenchent jamais), pas de délai d'expiration, pas de son et
+  pas d'`imageData` brute ; `hints.imagePath` fonctionne toujours. Les actions et le clic sur la
+  notification arrivent comme d'habitude.
 
 <Accordions>
 <Accordion title="En coulisses">
@@ -75,6 +80,11 @@ En 2.x, les callbacks des listeners s'exécutaient sur l'event dispatch thread A
   `org.freedesktop.Notifications` via un pont GDBus, sans JNA ni bibliothèque D-Bus Java.
 - Les actions et les fermetures arrivent sous forme de signaux D-Bus. La surveillance démarre avec
   le premier listener et s'arrête quand vous retirez le dernier.
+- Dans un Flatpak (`/.flatpak-info`), `Notify` devient l'`AddNotification` du portail et
+  `closeNotification` son `RemoveNotification`. Les actions reviennent par le signal
+  `ActionInvoked` du portail. Le portail oublie toutes les notifications d'une application dès
+  qu'un de ses processus se termine : un processus auxiliaire qui quitte coupe les actions des
+  notifications déjà affichées.
 
 </Accordion>
 </Accordions>

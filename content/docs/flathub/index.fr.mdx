@@ -63,6 +63,23 @@ vous servir : vérifiez `availability()` avant d'afficher une interface de mise 
 L'[updater Nucleus](/docs/packaging/auto-update) se tient à l'écart : `isUpdateSupported()` vaut
 `false`.
 
+## Dans le bac à sable
+
+Un Flatpak cache à l'application le dossier personnel et le système de l'utilisateur. Nucleus
+s'adapte tout seul, sans rien à configurer :
+
+| Quoi | Dans un Flatpak |
+| --- | --- |
+| Préférences (`java.util.prefs`, le `Settings()` de multiplatform-settings) | Gardées dans `~/.var/app/<app id>/config`, que Flatpak conserve, au lieu d'un home temporaire |
+| HTTPS avec [`native-ssl`](/docs/performance/native-ssl) | Fait confiance aux AC installées sur le système de l'utilisateur (proxy d'entreprise, filtre), lues par p11-kit |
+| [Notifications Linux](/docs/os/notifications/linux) | Passent par le portail des notifications, sans permission dans le manifeste |
+| `app_id` Wayland | L'id Flatpak de l'application, pour que les bureaux associent la fenêtre à son entrée |
+| Boutons de la barre de titre | Suivent le `button-layout` du bureau, lu par le portail Settings |
+
+Les fichiers de l'application vont sous `~/.var/app/<app id>/` : les dossiers de FileKit et les
+dossiers XDG pointent là. Désinstaller l'application garde ce dossier, sauf si l'utilisateur lance
+`flatpak uninstall --delete-data`.
+
 ## Appels, threads et annulation
 
 - Chaque appel suspend ou renvoie un `Flow`, et vous pouvez l'appeler depuis n'importe quel
